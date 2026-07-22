@@ -1,0 +1,99 @@
+plugins {
+    id 'java'
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(java_version)
+    withSourcesJar()
+    withJavadocJar()
+}
+
+javadoc {
+    options.addStringOption('Xdoclint:-missing', '-quiet')
+}
+
+group = project.group
+version = project.version
+
+repositories {
+    mavenCentral()
+}
+
+// Compile against the SAME jar the server runs (path in gradle.properties).
+def hytaleServerJar = new File("${hytaleHome}/${patchline}/package/game/${game_build}/Server/HytaleServer.jar")
+// The shared primitive lib (sibling submodule), local jar until a remote gitlink exists
+// (the mmo-mob-scaling sibling-relative pattern). NEVER bundled (double-loading
+// engine-touching classes under two classloaders breaks identity, per common's rules).
+def ziggfreedCommonJar = new File("${rootDir}/../ziggfreed-common/build/libs/ZiggfreedCommon-${ziggfreedCommonVersion}.jar")
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    // Gradle 9 requires the JUnit Platform launcher on the test runtime classpath.
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // jsr305 for @Nonnull/@Nullable. NOT compileOnly: these classes ship in the jar
+    // and consumers compileOnly against it, so the annotations must resolve there too.
+    implementation 'com.google.code.findbugs:jsr305:3.0.2'
+
+    // The Hytale server jar is provided at runtime (the server loads it first), so we
+    // NEVER bundle it - bundling would double-load engine classes under two classloaders.
+    compileOnly(files(hytaleServerJar))
+
+    // ziggfreed-common is a HARD runtime dependency (manifest Dependencies, loads
+    // first): compileOnly so com.ziggfreed.common.* compiles. NEVER bundled.
+    compileOnly(files(ziggfreedCommonJar))
+
+    // The api module: BUNDLED into the runtime jar (see the jar{} block below), and
+    // it also builds standalone as rpg-stations-api-<api_version>.jar for compile-time
+    // consumers (the kweebec-nightmare api-bundling mechanic).
+    implementation project(':api')
+
+    // Tests compile + run the pure engine paths, which need the server jar's shaded
+    // Gson + codec classes plus ziggfreed-common on the TEST classpath too.
+    testImplementation(files(hytaleServerJar))
+    testImplementation(files(ziggfreedCommonJar))
+}
+
+// Bundle the :api module classes into the plugin jar (excluding service files so the
+// engine does not double-register), mirroring kweebec-nightmare's build.gradle. The
+// :api module also produces its own standalone jar (api/build.gradle) for anyone
+// compiling against RpgStations without pulling in the whole runtime jar.
+configurations {
+    apiBundle
+}
+
+dependencies {
+    apiBundle project(':api')
+}
+
+jar {
+    dependsOn ':api:jar'
+
+    from({
+        configurations.apiBundle.collect { zipTree(it) }
+    }) {
+        exclude 'META-INF/services/**'
+        exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+    }
+}
+
+test {
+    useJUnitPlatform()
+}
+
+processResources {
+    var expandProps = [
+            'name'           : project.name,
+            'version'        : project.version,
+            'group'          : project.group,
+            'mod_description': project.findProperty('mod_description') ?: '',
+            'website'        : project.findProperty('website') ?: '',
+            'entry_point'    : project.findProperty('entry_point') ?: ''
+    ]
+
+    filesMatching(['manifest.json']) {
+        expand expandProps
+    }
+    inputs.properties(expandProps)
+}

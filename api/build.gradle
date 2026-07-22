@@ -1,0 +1,34 @@
+plugins {
+    id 'java-library'
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(java_version)
+    withSourcesJar()
+    withJavadocJar()
+}
+
+javadoc {
+    options.addStringOption('Xdoclint:-missing', '-quiet')
+}
+
+group = 'Ziggfreed'
+version = api_version
+
+base {
+    archivesName = 'rpg-stations-api'
+}
+
+repositories {
+    mavenCentral()
+}
+
+def hytaleServerJar = new File("${hytaleHome}/${patchline}/package/game/${game_build}/Server/HytaleServer.jar")
+def ziggfreedCommonJar = new File("${rootDir}/../ziggfreed-common/build/libs/ZiggfreedCommon-${ziggfreedCommonVersion}.jar")
+
+dependencies {
+    api 'com.google.code.findbugs:jsr305:3.0.2'
+
+    compileOnly(files(hytaleServerJar))
+    compileOnly(files(ziggfreedCommonJar))
+}
