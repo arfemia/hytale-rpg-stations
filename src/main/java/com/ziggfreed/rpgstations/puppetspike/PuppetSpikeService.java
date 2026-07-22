@@ -4,6 +4,9 @@ import java.awt.Color;
 import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -26,6 +29,7 @@ import com.hypixel.hytale.server.core.entity.UUIDComponent;
 import com.hypixel.hytale.server.core.inventory.InventoryComponent;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.inventory.container.SimpleItemContainer;
+import com.hypixel.hytale.server.core.modules.entity.component.ActiveAnimationComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.EntityScaleComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
 import com.hypixel.hytale.server.core.modules.entity.component.ModelComponent;
@@ -74,6 +78,36 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@code station.StationEntityMountController} onto a {@code CommandBuffer}. This mirrors the
  * exact context {@code NPCSpawnCommand} itself calls {@code store.addEntity} from
  * ({@code NPCPlugin.spawnEntity}), not a new assumption.
+ *
+ * <p><b>Round-4 harness-bug fix wave (2026-07-22):</b> three maintainer in-game findings fixed
+ * in place (spike verdict + round-4 queue, {@code
+ * .claude/plans/work-stations-mod-extraction-prompt.md}). (1) CRITICAL: {@code /rpgstations
+ * puppet off} teleported the caller. Root-cause: the strongest available evidence ties this to
+ * the {@code "hidden"} route's {@link #applyHidden}/{@link #undoHide} self-hide-from-self call
+ * (this class's OWN pre-existing javadoc on {@link #applyHidden} already flagged it
+ * "untested-but-technically-possible... against engine intent"), corroborated by the maintainer's
+ * independent round-4 verdict ("hidden route retired... buggy in their test", puppet design doc
+ * section 1's "THE crux") and by the evidence log's timeline (the observed teleport's {@code off}
+ * call reverted exactly this route). {@link com.hypixel.hytale.server.core.entity.entities.player.HiddenPlayersManager}
+ * itself is a pure {@code Set<UUID>} (verified via the shared source - no positional side
+ * effect), so the actual corruption happens in a downstream client/self-view resync system this
+ * class cannot reach or prove from server source alone. Fix: {@link #revertFor} now wraps every
+ * revert in a defensive position snapshot/restore guard ({@link #snapshotPosition}/{@link
+ * #restorePositionIfDrifted}, decision core {@link #positionDrifted}) - this converts "silently
+ * teleports" into "cannot move the caller, logged for further diagnosis" regardless of the exact
+ * downstream mechanism, and despawns the puppet BEFORE the hide-undo runs (the safe operation
+ * first). (2) {@code off} left the puppet alive (only a later {@code show}/route-switch actually
+ * despawned it): {@link #revertFor} and {@link #show} now report an ACCURATE
+ * {@code puppetDespawned} flag (the old {@code show} log unconditionally claimed "puppet
+ * despawned" even when nothing was tracked to despawn), and {@link #despawnPuppetRef}'s failure
+ * log was raised from {@code fine} (invisible at normal log levels) to {@code warn} so a future
+ * despawn failure is no longer silent. (3) The swing clip fired ONCE, synchronously, in the same
+ * world-thread hop that just called {@code store.addEntity} - before the entity's tracker
+ * registration could mark it visible to any viewer, so {@code
+ * AnimationUtils.playAnimation}'s {@code PlayerUtil.forEachPlayerThatCanSeeEntity} filter
+ * (hytale-shared-source {@code AnimationUtils.java:80-84}) found zero qualifying viewers and
+ * silently dropped the packet. Fixed by {@link #startAnimationBeat} - see its own javadoc for
+ * the render-guaranteed {@link ActiveAnimationComponent} route this also pre-seeds.
  */
 public final class PuppetSpikeService {
 
@@ -98,6 +132,34 @@ public final class PuppetSpikeService {
      * a temporary spike).
      */
     private static final String PUPPET_CLIP_ID = "Chop";
+
+    /**
+     * The swing re-fire cadence (round-4 harness-bug fix 3) - matches the station engine's own
+     * per-swing timer convention, e.g. the shipped {@code Sawmill.json}'s {@code
+     * Animation.Swing.IntervalMs: 933}.
+     */
+    private static final long ANIMATION_BEAT_MS = 933L;
+
+    /**
+     * The CRITICAL revert-teleport guard's tolerance (round-4 harness-bug fix 1): a legitimate
+     * settle (gravity, a component-driven micro-nudge) stays well under half a block; a "random
+     * coordinates" teleport does not.
+     */
+    private static final double TELEPORT_GUARD_EPSILON_METERS = 0.5;
+
+    /**
+     * One shared daemon scheduler backing every puppet's swing-beat re-fire ({@link
+     * #startAnimationBeat}) - mirrors {@code ziggfreed-common}'s own {@code
+     * lobby.DelayScheduler} production shape (a single daemon {@code ScheduledExecutorService},
+     * each beat hopping onto the world thread via {@code World#execute} before touching the
+     * store). A temporary-spike-scoped instance, not a lift candidate on its own.
+     */
+    private static final ScheduledExecutorService ANIMATION_BEAT_SCHEDULER =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "PuppetSpike-AnimationBeat");
+                t.setDaemon(true);
+                return t;
+            });
 
     /**
      * Candidate empty/no-geometry {@link com.hypixel.hytale.server.core.asset.type.model.config.ModelAsset}
@@ -134,7 +196,15 @@ public final class PuppetSpikeService {
         });
     }
 
-    /** Despawns the puppet only; the self-hide stays active (isolates observations). */
+    /**
+     * Despawns the puppet only; the self-hide stays active (isolates observations).
+     *
+     * <p><b>Round-4 fix 2</b>: the log line now reports an ACCURATE {@code puppetDespawned} flag
+     * instead of unconditionally claiming "puppet despawned" - the old wording printed
+     * regardless of whether {@code s} (and therefore a live puppet) was even found, which is how
+     * a prior {@code off} call's despawn got misattributed to a LATER {@code show} call in the
+     * maintainer's evidence log (see {@link #revertFor}'s own javadoc for the fuller trail).
+     */
     public void show(@Nonnull PlayerRef playerRef) {
         UUID uuid = playerRef.getUuid();
         if (uuid == null) {
@@ -145,12 +215,14 @@ public final class PuppetSpikeService {
             try {
                 PuppetSpikeState s = byPlayer.get(uuid);
                 String hideRoute = s != null ? s.hideRoute : null;
+                boolean puppetWasPresent = s != null && s.puppetRef != null && s.puppetRef.isValid();
                 if (s != null) {
+                    cancelAnimationBeat(s);
                     despawnPuppetRef(s.puppetRef, s.callerStore);
                     s.puppetRef = null;
                 }
                 playerRef.sendMessage(RpgMsg.tr("command.puppet.shown").color(Color.GREEN));
-                Log.info("[PUPPETSPIKE] route=show puppet despawned, hide kept uuid=" + uuid
+                Log.info("[PUPPETSPIKE] route=show puppetDespawned=" + puppetWasPresent + " uuid=" + uuid
                         + " hideRoute=" + hideRoute);
             } catch (Throwable t) {
                 Log.warn("[PUPPETSPIKE] show failed: " + t.getMessage(), t);
@@ -189,11 +261,25 @@ public final class PuppetSpikeService {
     public void revertFor(@Nonnull UUID uuid) {
         PuppetSpikeState s = byPlayer.remove(uuid);
         if (s == null) {
+            Log.info("[PUPPETSPIKE] revertFor no-op uuid=" + uuid + " (nothing tracked)");
             return;
         }
-        undoHide(s);
+        cancelAnimationBeat(s);
+
+        // Round-4 fix 1 (CRITICAL teleport bug): despawn the puppet FIRST - a well-proven, safe
+        // operation - so it is unconditionally gone before the riskier hide-undo runs, then wrap
+        // the hide-undo in a defensive position snapshot/restore guard. See this class's own
+        // header javadoc for the full root-cause trail.
+        boolean puppetWasPresent = s.puppetRef != null && s.puppetRef.isValid();
         despawnPuppetRef(s.puppetRef, s.callerStore);
-        Log.info("[PUPPETSPIKE] reverted uuid=" + uuid + " hideRoute=" + s.hideRoute);
+        s.puppetRef = null;
+
+        double[] preRevertPos = snapshotPosition(s);
+        undoHide(s);
+        restorePositionIfDrifted(s, preRevertPos);
+
+        Log.info("[PUPPETSPIKE] reverted uuid=" + uuid + " hideRoute=" + s.hideRoute
+                + " puppetDespawned=" + puppetWasPresent);
     }
 
     /**
@@ -224,6 +310,7 @@ public final class PuppetSpikeService {
         }
         PuppetSpikeState stray = byPlayer.remove(uuid);
         if (stray != null) {
+            cancelAnimationBeat(stray);
             despawnPuppetRef(stray.puppetRef, stray.callerStore);
             Log.info("[PUPPETSPIKE] ready-safety-net cleared stray state uuid=" + uuid);
         }
@@ -279,7 +366,7 @@ public final class PuppetSpikeService {
         revertFor(uuid);
 
         PuppetSpikeState s = new PuppetSpikeState(playerRef, ref, store);
-        s.puppetRef = spawnPuppet(store, ref);
+        s.puppetRef = spawnPuppet(s, store, ref);
 
         switch (route) {
             case "scale" -> applyScale(s, store, ref);
@@ -304,7 +391,8 @@ public final class PuppetSpikeService {
      * puppet that run).
      */
     @Nullable
-    private Ref<EntityStore> spawnPuppet(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> callerRef) {
+    private Ref<EntityStore> spawnPuppet(@Nonnull PuppetSpikeState s, @Nonnull Store<EntityStore> store,
+            @Nonnull Ref<EntityStore> callerRef) {
         try {
             TransformComponent callerTransform = store.getComponent(callerRef, TransformComponent.getComponentType());
             PlayerSkinComponent callerSkin = store.getComponent(callerRef, PlayerSkinComponent.getComponentType());
@@ -342,6 +430,19 @@ public final class PuppetSpikeService {
                         new InventoryComponent.Hotbar(container, (byte) 0));
             }
 
+            String itemAnimationsId = resolveItemAnimationsId(heldByCaller);
+            if (itemAnimationsId != null) {
+                // Pre-seed the tracked clip state (round-4 fix 3): ModelSystems
+                // .AnimationEntityTrackerUpdate (Query.and(Visible, ActiveAnimationComponent))
+                // auto-catches-up ANY viewer whose tracker marks this entity newlyVisible on a
+                // later tick, REGARDLESS of when the direct packet in #startAnimationBeat lands -
+                // the render-guaranteed route the puppet design doc's P3 scout identified. See
+                // #startAnimationBeat's own javadoc for the full source trail.
+                ActiveAnimationComponent activeAnim = new ActiveAnimationComponent();
+                activeAnim.setPlayingAnimation(AnimationSlot.Action, PUPPET_CLIP_ID);
+                holder.addComponent(ActiveAnimationComponent.getComponentType(), activeAnim);
+            }
+
             holder.ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType());
 
             Ref<EntityStore> puppetRef = store.addEntity(holder, AddReason.SPAWN);
@@ -350,10 +451,10 @@ public final class PuppetSpikeService {
                 return null;
             }
 
-            playPuppetSwingClip(store, puppetRef, heldByCaller);
-
             Log.info("[PUPPETSPIKE] puppet spawned ref=" + puppetRef + " pos=" + puppetPos
                     + " heldItem=" + (heldByCaller != null ? heldByCaller.getItemId() : "none"));
+
+            startAnimationBeat(s, store, puppetRef, itemAnimationsId);
             return puppetRef;
         } catch (Throwable t) {
             Log.warn("[PUPPETSPIKE] puppet spawn failed: " + t.getMessage(), t);
@@ -362,28 +463,102 @@ public final class PuppetSpikeService {
     }
 
     /**
-     * One-shot swing clip on the {@code Action} slot, mirroring {@code
-     * StationHoldController#playActionSwing}'s exact resolution: the clip only plays when the
-     * mirrored held item resolves a Hatchet-family {@code PlayerAnimationsId} (skipped, not
-     * failed, otherwise - logged so the maintainer knows to hold a Hatchet-family tool).
+     * Resolves the held item's {@code PlayerAnimationsId} for the swing clip, mirroring {@code
+     * StationHoldController#playActionSwing}'s exact resolution: {@code null} when the mirrored
+     * held item has none (logged, not failed - the maintainer just needs to hold a Hatchet-family
+     * tool to see the swing clip).
      */
-    private void playPuppetSwingClip(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> puppetRef,
-            @Nullable ItemStack heldByCaller) {
-        try {
-            Item item = heldByCaller != null ? heldByCaller.getItem() : null;
-            String itemAnimationsId = item != null ? item.getPlayerAnimationsId() : null;
-            if (itemAnimationsId == null || itemAnimationsId.isBlank()) {
-                Log.info("[PUPPETSPIKE] puppet animation skipped: held item '"
-                        + (item != null ? item.getId() : "none")
-                        + "' has no PlayerAnimationsId (hold a Hatchet-family tool to see the swing clip)");
-                return;
-            }
-            AnimationUtils.playAnimation(puppetRef, AnimationSlot.Action, itemAnimationsId, PUPPET_CLIP_ID, true, store);
-            Log.info("[PUPPETSPIKE] puppet animation played clip=" + PUPPET_CLIP_ID
-                    + " itemAnimationsId=" + itemAnimationsId);
-        } catch (Throwable t) {
-            Log.warn("[PUPPETSPIKE] puppet animation failed: " + t.getMessage(), t);
+    @Nullable
+    private String resolveItemAnimationsId(@Nullable ItemStack heldByCaller) {
+        Item item = heldByCaller != null ? heldByCaller.getItem() : null;
+        String itemAnimationsId = item != null ? item.getPlayerAnimationsId() : null;
+        if (itemAnimationsId == null || itemAnimationsId.isBlank()) {
+            Log.info("[PUPPETSPIKE] puppet animation skipped: held item '"
+                    + (item != null ? item.getId() : "none")
+                    + "' has no PlayerAnimationsId (hold a Hatchet-family tool to see the swing clip)");
+            return null;
         }
+        return itemAnimationsId;
+    }
+
+    /**
+     * Round-4 harness-bug fix 3: schedules the swing clip on a repeating {@link
+     * #ANIMATION_BEAT_MS} beat instead of firing it once, synchronously, inside the same
+     * world-thread hop that just spawned the puppet.
+     *
+     * <p><b>Root cause (source-confirmed):</b> {@code AnimationUtils.playAnimation} routes every
+     * packet through {@code PlayerUtil.forEachPlayerThatCanSeeEntity} (hytale-shared-source
+     * {@code AnimationUtils.java:80-84}) - "can see" meaning "the entity's tracker has already
+     * registered this viewer", a registration that happens on a LATER tracker tick, not
+     * synchronously inside {@code store.addEntity}. Firing immediately after spawn therefore
+     * found zero qualifying viewers and silently dropped the packet for everyone - exactly what
+     * the evidence log showed ("puppet animation played" logged BEFORE "puppet spawned" in
+     * program order is misleading; the real defect is WHICH tick the packet went out on, not the
+     * log-line ordering). Deferring every fire by at least one beat lets tracking catch up first.
+     *
+     * <p><b>Belt-and-suspenders, not a guess:</b> {@link #spawnPuppet} ALSO pre-seeds {@link
+     * ActiveAnimationComponent} on the holder (design doc section 1's render-guaranteed NPC
+     * route - {@code ModelSystems.AnimationEntityTrackerUpdate} pushes the CURRENT tracked clip
+     * to any viewer the moment their tracker marks the puppet {@code newlyVisible}, a mechanism
+     * that is correct regardless of this timer's own cadence). This beat loop is the "keeps
+     * swinging" cue for already-tracking viewers, mirroring the station engine's own per-swing
+     * timer ({@code StationService}'s {@code Animation.Swing.IntervalMs} convention, `933` here
+     * too) - a single static clip would not read as a repeating work animation.
+     *
+     * <p><b>Leg-D pathfinding note:</b> a BARE entity (this harness's spawn route, not an
+     * {@code NPCPlugin.spawnEntity} + Role) gets NO free {@code NPCEntity.playAnimation}
+     * convenience wrapper - the real puppet-presentation system (design legs P1-P6) must either
+     * (a) spawn via an NPC Role to get that wrapper for free, or (b) do exactly what this method
+     * does: manually pre-seed {@code ActiveAnimationComponent} AND keep calling {@code
+     * AnimationUtils.playAnimation} directly, since {@code ActiveAnimationComponent} alone never
+     * re-pushes an UNCHANGED clip to an ALREADY-tracking viewer (its own {@code
+     * isNetworkOutdated} write is a commented-out TODO in the shared source - the "newly visible"
+     * path is the only live trigger).
+     */
+    private void startAnimationBeat(@Nonnull PuppetSpikeState s, @Nonnull Store<EntityStore> store,
+            @Nonnull Ref<EntityStore> puppetRef, @Nullable String itemAnimationsId) {
+        if (itemAnimationsId == null) {
+            return;
+        }
+        World world = store.getExternalData().getWorld();
+        Runnable beat = () -> {
+            try {
+                world.execute(() -> {
+                    try {
+                        if (!puppetRef.isValid()) {
+                            cancelAnimationBeat(s);
+                            return;
+                        }
+                        AnimationUtils.playAnimation(puppetRef, AnimationSlot.Action, itemAnimationsId,
+                                PUPPET_CLIP_ID, true, store);
+                        Log.info("[PUPPETSPIKE] puppet animation beat clip=" + PUPPET_CLIP_ID);
+                    } catch (Throwable t) {
+                        Log.warn("[PUPPETSPIKE] puppet animation beat failed (world thread): " + t.getMessage(), t);
+                    }
+                });
+            } catch (Throwable t) {
+                Log.fine("[PUPPETSPIKE] puppet animation beat scheduling failed: " + t.getMessage());
+                cancelAnimationBeat(s);
+            }
+        };
+        s.animationBeatTask = ANIMATION_BEAT_SCHEDULER.scheduleAtFixedRate(
+                beat, ANIMATION_BEAT_MS, ANIMATION_BEAT_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /** Cancels {@code s}'s repeating swing-beat task, if any. Idempotent, never throws. */
+    private void cancelAnimationBeat(@Nonnull PuppetSpikeState s) {
+        if (s.animationBeatTask != null) {
+            s.animationBeatTask.cancel(false);
+            s.animationBeatTask = null;
+        }
+    }
+
+    /**
+     * Stops the shared animation-beat scheduler's daemon thread (best-effort - the thread is
+     * already daemon, so JVM exit does not hang on it regardless). Call from plugin shutdown.
+     */
+    public void shutdownAnimationScheduler() {
+        ANIMATION_BEAT_SCHEDULER.shutdownNow();
     }
 
     private void applyScale(@Nonnull PuppetSpikeState s, @Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref) {
@@ -443,6 +618,9 @@ public final class PuppetSpikeService {
             return;
         }
         try {
+            // Ref#getStore is @Nonnull (always returns the store the ref was constructed
+            // against - see hytale-shared-source Ref.java), so fallbackStore never actually
+            // substitutes; kept as an explicit param for callers that resolve one anyway.
             Store<EntityStore> store = puppetRef.getStore();
             if (store == null) {
                 store = fallbackStore;
@@ -451,8 +629,77 @@ public final class PuppetSpikeService {
                 store.removeEntity(puppetRef, RemoveReason.REMOVE);
             }
         } catch (Throwable t) {
-            Log.fine("[PUPPETSPIKE] puppet despawn failed: " + t.getMessage());
+            // Round-4 fix 2: raised from `fine` (invisible at normal log levels) to `warn` -
+            // a swallowed-silent despawn failure here is exactly what made "off doesn't
+            // despawn" undiagnosable from the evidence log alone.
+            Log.warn("[PUPPETSPIKE] puppet despawn failed: " + t.getMessage(), t);
         }
+    }
+
+    /** Pure: the caller's current position as {@code [x, y, z]}, or {@code null} when unreadable. */
+    @Nullable
+    private double[] snapshotPosition(@Nonnull PuppetSpikeState s) {
+        try {
+            if (!s.callerRef.isValid()) {
+                return null;
+            }
+            TransformComponent transform = s.callerStore.getComponent(s.callerRef, TransformComponent.getComponentType());
+            if (transform == null) {
+                return null;
+            }
+            Vector3d pos = transform.getPosition();
+            return new double[] {pos.x, pos.y, pos.z};
+        } catch (Throwable t) {
+            Log.fine("[PUPPETSPIKE] position snapshot failed: " + t.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * The CRITICAL revert-teleport guard (round-4 harness-bug fix 1): restores the caller's
+     * pre-revert position (leaving rotation untouched) if it drifted by more than {@link
+     * #TELEPORT_GUARD_EPSILON_METERS} across {@link #undoHide}, logging a WARN with the observed
+     * delta either way this fires - evidence for whoever investigates the underlying downstream
+     * mechanism next. See this class's own header javadoc for the full root-cause trail.
+     */
+    private void restorePositionIfDrifted(@Nonnull PuppetSpikeState s, @Nullable double[] preRevertPos) {
+        if (preRevertPos == null) {
+            return;
+        }
+        try {
+            if (!s.callerRef.isValid()) {
+                return;
+            }
+            TransformComponent transform = s.callerStore.getComponent(s.callerRef, TransformComponent.getComponentType());
+            if (transform == null) {
+                return;
+            }
+            Vector3d pos = transform.getPosition();
+            if (!positionDrifted(preRevertPos[0], preRevertPos[1], preRevertPos[2], pos.x, pos.y, pos.z,
+                    TELEPORT_GUARD_EPSILON_METERS)) {
+                return;
+            }
+            Log.warn("[PUPPETSPIKE] revert drift guard fired route=" + s.hideRoute
+                    + " from=(" + preRevertPos[0] + "," + preRevertPos[1] + "," + preRevertPos[2] + ")"
+                    + " to=(" + pos.x + "," + pos.y + "," + pos.z + ") - restoring pre-revert position");
+            transform.setPosition(new Vector3d(preRevertPos[0], preRevertPos[1], preRevertPos[2]));
+        } catch (Throwable t) {
+            Log.warn("[PUPPETSPIKE] revert drift guard failed: " + t.getMessage(), t);
+        }
+    }
+
+    /**
+     * Pure: whether {@code (x2,y2,z2)} differs from {@code (x1,y1,z1)} by more than {@code
+     * epsilonMeters} of Euclidean distance - the revert-teleport guard's decision core,
+     * unit-tested without a live server.
+     */
+    static boolean positionDrifted(double x1, double y1, double z1, double x2, double y2, double z2,
+            double epsilonMeters) {
+        double dx = x2 - x1;
+        double dy = y2 - y1;
+        double dz = z2 - z1;
+        double distanceSquared = dx * dx + dy * dy + dz * dz;
+        return distanceSquared > epsilonMeters * epsilonMeters;
     }
 
     @Nullable

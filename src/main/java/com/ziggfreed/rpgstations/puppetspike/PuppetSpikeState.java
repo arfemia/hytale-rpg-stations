@@ -1,5 +1,7 @@
 package com.ziggfreed.rpgstations.puppetspike;
 
+import java.util.concurrent.ScheduledFuture;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -49,6 +51,17 @@ final class PuppetSpikeState {
      */
     @Nullable
     Float savedScale;
+
+    /**
+     * The repeating swing-clip re-fire task (round-4 harness-bug fix: the clip used to fire
+     * ONCE, synchronously, inside the same world-thread hop that just spawned the puppet -
+     * before the entity's tracker registration could mark it visible to any viewer, so the
+     * packet was silently dropped; see {@link PuppetSpikeService#startAnimationBeat}'s own
+     * javadoc for the full source trail). Cancelled wherever the puppet is despawned so a stray
+     * beat never targets a dead/reused ref.
+     */
+    @Nullable
+    ScheduledFuture<?> animationBeatTask;
 
     PuppetSpikeState(@Nonnull PlayerRef playerRef, @Nonnull Ref<EntityStore> callerRef,
             @Nonnull Store<EntityStore> callerStore) {

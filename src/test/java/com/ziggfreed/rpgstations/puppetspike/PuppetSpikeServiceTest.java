@@ -1,15 +1,18 @@
 package com.ziggfreed.rpgstations.puppetspike;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 /**
- * Pure tests for {@link PuppetSpikeService}'s ONLY unit-JVM-safe logic - the puppet spawn
- * geometry ({@link PuppetSpikeService#computeForwardOffsetXZ}/{@link
- * PuppetSpikeService#computeFacingYaw}). Every other method in that class touches live Hytale
+ * Pure tests for {@link PuppetSpikeService}'s unit-JVM-safe logic: the puppet spawn geometry
+ * ({@link PuppetSpikeService#computeForwardOffsetXZ}/{@link PuppetSpikeService#computeFacingYaw})
+ * PLUS (round-4 harness-bug fix 1) the CRITICAL revert-teleport guard's decision core, {@link
+ * PuppetSpikeService#positionDrifted}. Every other method in that class touches live Hytale
  * ECS/component/asset-registry types (Store/Holder/CosmeticsModule/ModelAsset/
- * HiddenPlayersManager) and has NO unit coverage, matching {@code
+ * HiddenPlayersManager/ScheduledExecutorService) and has NO unit coverage, matching {@code
  * StationEntityMountControllerTest}'s own precedent (pure-core only, everything else is a
  * live-server-only glue method). Invariant-style assertions per the repo's own "no exact numbers
  * from balance data" spirit - these are geometry conventions, not tunable content, so the exact
@@ -48,5 +51,32 @@ class PuppetSpikeServiceTest {
         float callerYaw = 0.6f;
         float facingYaw = PuppetSpikeService.computeFacingYaw(callerYaw);
         assertEquals(callerYaw - (float) Math.PI, facingYaw, 1e-6f);
+    }
+
+    @Test
+    void positionDrifted_identicalPoint_isFalse() {
+        assertFalse(PuppetSpikeService.positionDrifted(10, 64, -3, 10, 64, -3, 0.5));
+    }
+
+    @Test
+    void positionDrifted_belowEpsilon_isFalse() {
+        // A physically-plausible settle (well under half a block) must never false-positive.
+        assertFalse(PuppetSpikeService.positionDrifted(10, 64, -3, 10.1, 64.05, -3.05, 0.5));
+    }
+
+    @Test
+    void positionDrifted_atExactlyEpsilon_isFalse() {
+        assertFalse(PuppetSpikeService.positionDrifted(0, 0, 0, 0.5, 0, 0, 0.5));
+    }
+
+    @Test
+    void positionDrifted_beyondEpsilon_isTrue() {
+        // A "random coordinates" teleport is many blocks, not a fraction of one.
+        assertTrue(PuppetSpikeService.positionDrifted(10, 64, -3, 500, 12, 900, 0.5));
+    }
+
+    @Test
+    void positionDrifted_singleAxisBeyondEpsilon_isTrue() {
+        assertTrue(PuppetSpikeService.positionDrifted(0, 0, 0, 0, 5, 0, 0.5));
     }
 }

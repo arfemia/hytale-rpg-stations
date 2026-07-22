@@ -484,6 +484,7 @@ public class RpgStationsPlugin extends JavaPlugin {
     @Override
     protected void shutdown() {
         StationService.getInstance().stopAll(StationService.StopReason.SERVER_STOP);
+        PuppetSpikeService.getInstance().shutdownAnimationScheduler();
         Log.info("RpgStations shutdown complete.");
     }
 }
