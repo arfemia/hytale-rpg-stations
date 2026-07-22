@@ -43,6 +43,7 @@ import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.entity.PlayerModelService;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
+import com.ziggfreed.rpgstations.station.StationService;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -291,6 +292,16 @@ public final class PuppetSpikeService {
      * deliberately NOT gated on {@link #byPlayer} still holding an entry, because a full server
      * restart wipes that in-memory map while a persisted broken scale/model on the player's own
      * entity would survive it. Also despawns + clears any stray tracked puppet for this uuid.
+     *
+     * <p><b>Generalized, not duplicated (round-4 puppet-engine leg):</b> the scale-clear +
+     * model-restore half of this net is now the SAME production primitive the real
+     * {@code station.StationSession}-based engine uses ({@code station.StationService
+     * #reassertPuppetOnReady}, delegating to {@code station.StationPuppetController
+     * #reassertOnReady}) - this spike harness calls into it rather than keeping its own copy, per
+     * this class's own "DELETE this whole puppetspike package once ... legs P1-P6 supersede it"
+     * directive: the shared logic already lives on the side that survives. The self-hide-from-self
+     * ({@code HiddenPlayersManager}) un-hide below stays HERE only, since the production {@code
+     * Hide.Route} union no longer includes that retired route at all.
      */
     public void safetyNetOnReady(@Nonnull PlayerRef playerRef, @Nonnull Ref<EntityStore> ref,
             @Nonnull Store<EntityStore> store) {
@@ -298,12 +309,7 @@ public final class PuppetSpikeService {
         if (uuid == null) {
             return;
         }
-        try {
-            store.removeComponentIfExists(ref, EntityScaleComponent.getComponentType());
-        } catch (Throwable t) {
-            Log.fine("[PUPPETSPIKE] ready safety-net scale-clear failed: " + t.getMessage());
-        }
-        PlayerModelService.restore(ref, store);
+        StationService.getInstance().reassertPuppetOnReady(ref, store);
         try {
             playerRef.getHiddenPlayersManager().showPlayer(uuid);
         } catch (Throwable t) {

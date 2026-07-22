@@ -594,3 +594,47 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   engine-only fix, and the fallback's original "zero duplicated id to drift" intent now genuinely
   holds. See `content-packs/skill-stations-pack/CLAUDE.md`'s own R7 correction for the pack-side
   narrative fix.
+- **The puppet presentation engine (round-4 design, `.claude/research/raw/rpg-stations-puppet-presentation-design-2026-07-22.md`
+  section 4, legs P3+P4+P5, LANDED)**: [`StationPuppetController`](StationPuppetController.java) is
+  the policy-thin glue over `ziggfreed-common`'s `entity.PlayerPuppetService`/`PlayerModelService`
+  for "mount the player, hide their player model, and spawn/display a visual of their character
+  model performing the steps" - sibling to `StationEntityMountController`/`StationHoldController`,
+  never duplicating the generic spawn/hide-by-scale primitives the common lift already owns
+  (leg B). **Spawn + hide, at engage** (`spawnAndHide`, called from `StationService#toggle` AFTER
+  the mount-attach block - the puppet layers on WHATEVER hold/mount the real player already has,
+  never replacing it): resolves `Puppet.Offset`/`Yaw` off the station's block-top anchor, the
+  initial `Puppet.Prop` (mirror-held/forced-id/none), and spawns via `PlayerPuppetService.spawn`;
+  a null spawn is non-fatal (`StationSession.puppetActive` stays false, the session continues
+  in-body, matching `StationEntityMountController`'s own graceful-degradation contract). **Hide
+  route, this leg**: `Hide.Route` is a three-arm union - only `"Scale"` actually hides
+  (`hideByScale`/`revealByScale`, the in-game-crowned mechanism), `"Effect"` is schema-reserved
+  future work (the shadowstep/`Portal_Teleport` pointer) and `"None"` is the deliberate degraded
+  fallback - both apply NO hide this leg, the puppet just spawns alongside a still-visible real
+  player (validator `PUPPET_WITHOUT_HIDE` warns, never blocks). The design doc's `"ModelSwap"`/
+  `"HiddenManager"` routes were already RETIRED before the schema shipped (leg C) - this
+  controller never touches `HiddenPlayersManager` at all. **Reveal + despawn, in the ONE
+  idempotent `stop()` funnel** (`revealAndDespawn`, called right after `returnCustody` - the SAME
+  unconditional-on-every-exit-path posture, resolving its OWN store off `s.ref.getStore()` (falling
+  back to `s.puppetRef.getStore()`) rather than trusting the possibly-null `store` parameter, so a
+  disconnect/shutdown stop still reveals + despawns cleanly). **Animation routing** (design 4.3):
+  a puppet-active session's engage-time loop (`playLoop`) and per-swing beat (`playSwing`, called
+  from `StationService#runSwing`'s new `s.puppetActive` branch) BOTH fire on the puppet's `Emote`
+  slot, SUPERSEDING `useActionSlotForSwing`/`playActionSwing` entirely for that session - a puppet
+  has no sit pose to fight, so it needs none of the seat-mode Action-slot held-item workaround
+  (sidesteps the whole S5/R2 seated-swing-render defect class by construction). The per-step
+  `StationStep.Puppet` override (`Clip`/`Prop`) is read off the SESSION's already-tracked
+  step-resume state (`programSuspended`/`activeProgramSteps`/`programIndex`) on the SAME swing-beat
+  cadence, so a ritual's distinct beats get their own puppet clip/prop for as long as that step
+  stays suspended - no new step-dispatch hookup needed (`resolveEffectiveClip`/
+  `resolveEffectivePropItemId` are the pure decision cores, unit-tested). **Safety net** (design
+  4.4/leg P5): `reassertOnReady` unconditionally clears any lingering `EntityScaleComponent` and
+  restores the correct cosmetic model on a FRESH `PlayerReadyEvent` ref/store - NOT gated on any
+  remembered session (a restart wipes every in-memory `StationSession` by construction), wired via
+  a new public `StationService#reassertPuppetOnReady` and a new `RpgStationsPlugin
+  #registerPuppetSafetyNet` registration, independent of the temporary `puppetspike/` harness's own
+  net (which now DELEGATES its scale-clear/model-restore half to this same production method rather
+  than duplicating it, keeping only its own still-live `HiddenPlayersManager` un-hide call - see
+  `puppetspike.PuppetSpikeService#safetyNetOnReady`'s own javadoc). No new player-facing strings
+  (the group adds no UI text, per the design doc's own P6 note). The `puppetspike/` harness itself
+  is UNTOUCHED beyond that one delegation - still the maintainer's live diagnostic tool, still
+  scheduled for deletion once content authoring (P6) and smoke (P7) supersede it.

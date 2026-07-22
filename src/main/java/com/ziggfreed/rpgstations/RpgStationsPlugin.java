@@ -111,6 +111,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerTeardownHooks();
         registerPostLoadAudit();
         registerSummaryHudInstall();
+        registerPuppetSafetyNet();
         registerPuppetSpikeSafetyNet();
         getCommandRegistry().registerCommand(new RpgStationsCommand());
         Log.info("RpgStations setup complete (leg 4 - the api artifact is live: events fire, "
@@ -432,6 +433,39 @@ public class RpgStationsPlugin extends JavaPlugin {
                 });
             } catch (Throwable t) {
                 Log.warn("Station summary HUD install (outer) failed: " + t.getMessage());
+            }
+        });
+    }
+
+    /**
+     * The PRODUCTION puppet-presentation route's {@code PlayerReadyEvent} safety net (design
+     * section 4.4, leg P5): an unconditional (not gated on any remembered session - a restart
+     * wipes every in-memory {@code StationSession} by construction) re-assert of the real
+     * player's correct scale/model on the FRESH ready ref/store, mirroring {@link
+     * #registerSummaryHudInstall}'s exact world.execute-hop shape. Independent of the TEMPORARY
+     * {@code puppetspike/} harness's own net below - the production engine must keep working once
+     * that spike package is eventually deleted (its own net now delegates the shared scale-clear/
+     * model-restore half to {@link StationService#reassertPuppetOnReady} rather than duplicating
+     * it, see {@link PuppetSpikeService#safetyNetOnReady}'s own javadoc).
+     */
+    private void registerPuppetSafetyNet() {
+        getEventRegistry().registerGlobal(PlayerReadyEvent.class, event -> {
+            try {
+                Player player = event.getPlayer();
+                World world = player.getWorld();
+                world.execute(() -> {
+                    try {
+                        Ref<EntityStore> ref = player.getReference();
+                        if (ref == null || !ref.isValid()) {
+                            return;
+                        }
+                        StationService.getInstance().reassertPuppetOnReady(ref, ref.getStore());
+                    } catch (Throwable t) {
+                        Log.warn("Puppet ready safety-net failed: " + t.getMessage());
+                    }
+                });
+            } catch (Throwable t) {
+                Log.warn("Puppet ready safety-net (outer) failed: " + t.getMessage());
             }
         });
     }

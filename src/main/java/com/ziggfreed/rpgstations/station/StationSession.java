@@ -13,6 +13,7 @@ import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.asset.Presentation;
+import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
@@ -174,6 +175,37 @@ final class StationSession {
     @Nullable List<StationStep> activeProgramSteps;
     @Nullable ItemStack activeProgramCycleOutput;
     int activeProgramCycleIndex;
+
+    // Puppet presentation (round-4 design, doc section 4 - "mount the player, hide their player
+    // model, and spawn/display a visual of their character model performing the steps"): a
+    // session-scoped spawned entity that performs the visual work instead of the real player, who
+    // is optionally hidden. Resolved ONCE at engage from the resolved action's Puppet group
+    // (StationPuppetController#spawnAndHide); Enabled==false or an absent group leaves every field
+    // below at its default false/null - the classic in-body worker, byte-identical to a station
+    // that never authors Puppet at all.
+    boolean puppetActive;
+    /** The spawned puppet entity, or null when {@link #puppetActive} is false. */
+    @Nullable Ref<EntityStore> puppetRef;
+    /**
+     * The resolved {@code Puppet.Hide.Route} ("Scale"/"Effect"/"None") applied at engage - drives
+     * which revert {@code StationPuppetController#revealAndDespawn} runs in the {@code stop()}
+     * funnel. Null when {@link #puppetActive} is false.
+     */
+    @Nullable String puppetHideRoute;
+    /**
+     * The {@code "Scale"} route's revert payload: the real player's prior
+     * {@code EntityScaleComponent} scale BEFORE the hide was applied ({@code null} = no such
+     * component existed - revert REMOVES the component rather than resetting to {@code 1.0}, per
+     * {@code ziggfreed-common}'s {@code PlayerPuppetService#hideByScale}/{@code #revealByScale}
+     * contract). Meaningless for any other {@link #puppetHideRoute}.
+     */
+    @Nullable Float puppetSavedScale;
+    /**
+     * The resolved action's default {@code Puppet.Prop} group, snapshotted at engage so the
+     * per-swing prop sync ({@code StationPuppetController#playSwing}) reads it without
+     * re-resolving the station catalog every beat. Null when {@link #puppetActive} is false.
+     */
+    @Nullable Puppet.Prop puppetDefaultProp;
 
     // Item ledger (for the future standalone summary HUD, leg 3): consumedItems covers both
     // the exact-ItemId route AND the ResourceTypeId ("any log" family) route (tallying the

@@ -462,6 +462,12 @@ public final class StationService {
         s.movementLock = (!effectivelyMounted && (hold == null || hold.getMovementLock() == null || hold.getMovementLock()))
                 || (s.entityMountMode && !s.entitySteerable);
 
+        // Puppet presentation (round-4 design, doc section 4.2): spawn + hide AFTER the mount
+        // attach above - the puppet layers on WHATEVER hold/mount the real player already has
+        // (seat, standing mount, or effect-mode movement lock), never replacing it. Non-fatal on
+        // failure: s.puppetActive stays false and the session continues in-body.
+        StationPuppetController.spawnAndHide(s, commandBuffer, store, action.getPuppet(), player);
+
         StationAsset.Camera camera = action.getCamera();
         String cameraMode = camera != null && camera.getMode() != null ? camera.getMode() : "ThirdPerson";
         boolean mountDefaultNoCamera = mounted && camera == null;
@@ -511,6 +517,7 @@ public final class StationService {
         // resolution mismatch vs the pack asset).
         Log.info("[SMOKEDIAG] engage-armed station=" + s.stationId + " action=" + s.actionId
                 + " seatMode=" + s.seatMode + " entityMountMode=" + s.entityMountMode
+                + " puppetActive=" + s.puppetActive
                 + " swingIntervalMs=" + s.swingIntervalMs + " actionClip=" + s.actionClip);
 
         byPlayer.put(playerUuid, s);
@@ -521,7 +528,12 @@ public final class StationService {
 
         StationHoldController.applyHold(s, store);
         StationHoldController.applyCamera(s);
-        if (!s.seatMode) {
+        // Puppet presentation (design 4.3): supersedes the seatMode-gated real-player emote
+        // entirely - the puppet has no sit pose to fight, so it always plays its own loop clip
+        // regardless of which mount/hold the (now possibly hidden) real player has.
+        if (s.puppetActive) {
+            StationPuppetController.playLoop(s, store);
+        } else if (!s.seatMode) {
             StationHoldController.playEmote(s, store);
         }
 
@@ -1345,15 +1357,24 @@ public final class StationService {
             return;
         }
         Player swingPlayer = store.getComponent(s.ref, Player.getComponentType());
-        boolean useActionSlotSmokediag = useActionSlotForSwing(s.seatMode);
-        // [SMOKEDIAG] R2 seated-swing diagnosis: confirms the seat route is taken. If it shows
-        // playEmote for a seated session, seatMode is false at runtime - re-examine Mount parse.
-        Log.info("[SMOKEDIAG] route-chosen seatMode=" + s.seatMode + " -> "
-                + (useActionSlotSmokediag ? "playActionSwing" : "playEmote"));
-        if (useActionSlotSmokediag) {
-            StationHoldController.playActionSwing(s, swingPlayer, store);
+        if (s.puppetActive) {
+            // Puppet presentation (design 4.3): supersedes useActionSlotForSwing entirely - the
+            // puppet has no sit pose to fight, so it always plays its natural Emote-slot clip
+            // (its own default, or the currently-suspended step's Puppet.Clip override) and syncs
+            // its held prop, instead of routing anything onto the (now possibly hidden) real
+            // player.
+            StationPuppetController.playSwing(s, store, swingPlayer);
         } else {
-            StationHoldController.playEmote(s, store);
+            boolean useActionSlotSmokediag = useActionSlotForSwing(s.seatMode);
+            // [SMOKEDIAG] R2 seated-swing diagnosis: confirms the seat route is taken. If it shows
+            // playEmote for a seated session, seatMode is false at runtime - re-examine Mount parse.
+            Log.info("[SMOKEDIAG] route-chosen seatMode=" + s.seatMode + " -> "
+                    + (useActionSlotSmokediag ? "playActionSwing" : "playEmote"));
+            if (useActionSlotSmokediag) {
+                StationHoldController.playActionSwing(s, swingPlayer, store);
+            } else {
+                StationHoldController.playEmote(s, store);
+            }
         }
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
         emitMoment(store, s, StationFlairs.MOMENT_SWING, s.swingPresentation, blockPos);
@@ -1501,6 +1522,13 @@ public final class StationService {
         Custody stopCustody = stopAsset != null ? ActionResolver.resolve(stopAsset, stopActionId).getCustody() : null;
         returnCustody(s, stopCustody, commandBuffer);
 
+        // Puppet reveal + despawn (round-4 design, doc section 4.4): the SAME unconditional-on-
+        // every-exit-path posture as returnCustody above, resolving its OWN store off
+        // s.ref.getStore() (never the possibly-null store parameter) so a disconnect/shutdown
+        // stop still reveals the real player and despawns the puppet cleanly - see
+        // StationPuppetController#revealAndDespawn for the full store-fallback chain.
+        StationPuppetController.revealAndDespawn(s);
+
         boolean entityAlive = store != null && s.ref != null && s.ref.isValid() && s.ref.getStore() == store;
         boolean silent = reason == StopReason.DISCONNECTED || reason == StopReason.SERVER_STOP
                 || reason == StopReason.DIED || reason == StopReason.WORLD_CHANGED;
@@ -1605,6 +1633,16 @@ public final class StationService {
         for (StationSession s : new ArrayList<>(byPlayer.values())) {
             stop(s, reason, null, null);
         }
+    }
+
+    /**
+     * The puppet presentation route's {@code PlayerReadyEvent} safety net (design section 4.4,
+     * leg P5): see {@link StationPuppetController#reassertOnReady} for the full contract.
+     * Deliberately NOT gated on any remembered session - a restart wipes every in-memory {@link
+     * StationSession} by construction, so this runs unconditionally on every ready.
+     */
+    public void reassertPuppetOnReady(@Nonnull Ref<EntityStore> ref, @Nonnull Store<EntityStore> store) {
+        StationPuppetController.reassertOnReady(ref, store);
     }
 
     // ==================== Convert transaction core ====================
