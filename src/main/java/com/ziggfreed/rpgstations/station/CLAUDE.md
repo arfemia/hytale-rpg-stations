@@ -77,12 +77,16 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   transaction with output-room PRE-check before consume - zero item loss; then loot rolls via
   `loot/LootEngine`; then `StationEvents.fireCycleCompleted`; then the cycle `Presentation` at the
   block via `emitMoment`).
-- **THE `emitMoment` choke point, and its 4-second particle cap**: `emitMoment(store, s, slot,
+- **THE `emitMoment` choke point, and its 4-second particle cap**: `emitMoment(store, s, momentId,
   presentation, targetPos)` in `StationService` is the ONE presentation-playback funnel every
-  station moment goes through (`Slot.CYCLE` for the real/idle cycle, `Slot.SWING` for the
-  per-swing cue and its delayed impact, `Slot.RARE_FIND` for a loot-tier flourish, `Slot.COMPLETION`
-  for session-end) - it is ALSO the flair-resolution choke point (`StationFlairs.resolve`, the
-  per-player unlock overlay). `targetPos` is a plain per-call-site argument, never a fork:
+  station moment goes through (`StationFlairs.MOMENT_CYCLE` for the real/idle cycle,
+  `MOMENT_SWING` for the per-swing cue, `MOMENT_IMPACT` for its delayed impact - a SEPARATE moment
+  id since design 9.6/phase 2 leg F, previously fused onto `MOMENT_SWING` - `MOMENT_RARE_FIND` for
+  a loot-tier flourish, `MOMENT_COMPLETION` for session-end, plus a per-step
+  `StationFlairs.stepMomentId(actionId, stepId)` id for a `Present` step) - it is ALSO the
+  flair-resolution choke point (`StationFlairs.effective` against `FlairCatalog
+  .effectiveFlairsFor`'s merged map, the per-player unlock overlay). `targetPos` is a plain
+  per-call-site argument, never a fork:
   cycle/swing/impact/rare-find pass the block center, `COMPLETION` passes the player's own
   position (a rare-find/completion moment celebrating the player, not the furniture). **Every
   particle spawned here is capped to `MOMENT_PARTICLE_MAX_DURATION_SECONDS` (4.0f) via
@@ -103,9 +107,10 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   pairing (the shipped Sawmill's `933ms` is 4x its emote clip's `233ms`). `runSwing` picks the
   animation ROUTE via the pure `useActionSlotForSwing(seatMode)` decision - see the seat/swing
   routing bullet below. `scheduleImpactAt`/`impactDue` schedule an optional DELAYED impact cue
-  (`Swing.Impact.{DelayMs, Presentation}`) that fires through the SAME `emitMoment`/`Slot.SWING`
-  choke point on a later frame - a flair overlay of the swing moment overlays the delayed impact
-  too, no third slot invented.
+  (`Swing.Impact.{DelayMs, Presentation}`) that fires through the SAME `emitMoment` choke point on
+  a later frame, on its OWN `StationFlairs.MOMENT_IMPACT` moment id (design 9.6, phase 2 leg F -
+  previously fused onto the swing cue's moment id; a flair author can now target either
+  independently).
 - **THE camera packet shapes - written in blood, do not improvise a fourth combination**
   ([`StationHoldController`](StationHoldController.java)`.applyCamera`): the working camera is
   sent in the FIRST-PARTY packet shape ONLY - engage = `ClientCameraView.Custom` + a
