@@ -34,6 +34,7 @@ import com.ziggfreed.rpgstations.command.RpgStationsCommand;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
+import com.ziggfreed.rpgstations.puppetspike.PuppetSpikeService;
 import com.ziggfreed.rpgstations.station.FlairCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.station.StationCatalog;
@@ -108,6 +109,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerTeardownHooks();
         registerPostLoadAudit();
         registerSummaryHudInstall();
+        registerPuppetSpikeSafetyNet();
         getCommandRegistry().registerCommand(new RpgStationsCommand());
         Log.info("RpgStations setup complete (leg 4 - the api artifact is live: events fire, "
                 + "the factor/flair-unlock/summary-enricher registries are wired into the engine).");
@@ -181,9 +183,23 @@ public class RpgStationsPlugin extends JavaPlugin {
                         } catch (Throwable t) {
                             Log.warn("Station disconnect teardown failed (world thread): " + t.getMessage());
                         }
+                        try {
+                            // TEMPORARY P0 spike harness (puppetspike/) - despawn any puppet +
+                            // undo any self-hide route so a disconnecting spike test never
+                            // leaves the player's OWN entity data with a shrunk/model-swapped
+                            // persisted state. See PuppetSpikeService's own javadoc.
+                            PuppetSpikeService.getInstance().revertFor(uuid);
+                        } catch (Throwable t) {
+                            Log.warn("Puppet spike disconnect revert failed (world thread): " + t.getMessage());
+                        }
                     });
                 } else {
                     StationService.getInstance().stopFor(uuid, StationService.StopReason.DISCONNECTED);
+                    try {
+                        PuppetSpikeService.getInstance().revertFor(uuid);
+                    } catch (Throwable t) {
+                        Log.warn("Puppet spike disconnect revert failed: " + t.getMessage());
+                    }
                 }
             } catch (Throwable t) {
                 Log.warn("Station disconnect teardown failed: " + t.getMessage());
@@ -395,6 +411,39 @@ public class RpgStationsPlugin extends JavaPlugin {
                 });
             } catch (Throwable t) {
                 Log.warn("Station summary HUD install (outer) failed: " + t.getMessage());
+            }
+        });
+    }
+
+    /**
+     * <b>TEMPORARY P0 spike harness</b> ({@code puppetspike/}, see {@link
+     * PuppetSpikeService}'s own javadoc): wires the {@code PlayerReadyEvent} "belt-and-suspenders"
+     * safety net (design section 4.4's leg-P5 net, in miniature) minimally into the existing
+     * ready-event plumbing, mirroring {@link #registerSummaryHudInstall}'s exact world.execute-hop
+     * shape. Fires on EVERY ready (not gated to first-ever), unconditionally - a spike must never
+     * strand an invisible/shrunk player after a reconnect.
+     */
+    private void registerPuppetSpikeSafetyNet() {
+        getEventRegistry().registerGlobal(PlayerReadyEvent.class, event -> {
+            try {
+                Player player = event.getPlayer();
+                World world = player.getWorld();
+                world.execute(() -> {
+                    try {
+                        Ref<EntityStore> ref = player.getReference();
+                        if (ref == null || !ref.isValid()) {
+                            return;
+                        }
+                        PlayerRef playerRef = ref.getStore().getComponent(ref, PlayerRef.getComponentType());
+                        if (playerRef != null) {
+                            PuppetSpikeService.getInstance().safetyNetOnReady(playerRef, ref, ref.getStore());
+                        }
+                    } catch (Throwable t) {
+                        Log.warn("Puppet spike ready safety-net failed: " + t.getMessage());
+                    }
+                });
+            } catch (Throwable t) {
+                Log.warn("Puppet spike ready safety-net (outer) failed: " + t.getMessage());
             }
         });
     }

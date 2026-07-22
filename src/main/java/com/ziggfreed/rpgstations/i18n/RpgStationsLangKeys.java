@@ -20,6 +20,9 @@ import javax.annotation.Nonnull;
  * Phase-2 leg C adds the {@code ui.station.custody.*} placed-input toast keys (design 9.4).
  * Phase-2 leg D adds {@code ui.station.mount_unavailable} (design 9.2's Mount knob family - the
  * Entity surface's engage-denial toast; {@code seat_unavailable} stays the Block surface's own).
+ * The puppet-presentation P0 spike harness ({@code puppetspike/}, TEMPORARY) adds the
+ * {@code command.puppet.*} keys backing {@code /rpgstations puppet <scale|modelswap|hidden|
+ * show|off>} - delete these along with the rest of that package once the spike verdict lands.
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -66,7 +69,13 @@ public final class RpgStationsLangKeys {
             "rpgstations.command.camera.unknown_preset",
             "rpgstations.command.camera.set",
             "rpgstations.command.camera.list",
-            "rpgstations.command.validate.header");
+            "rpgstations.command.validate.header",
+            "rpgstations.command.puppet.usage",
+            "rpgstations.command.puppet.applied",
+            "rpgstations.command.puppet.unavailable",
+            "rpgstations.command.puppet.shown",
+            "rpgstations.command.puppet.reverted",
+            "rpgstations.command.puppet.not_in_world");
 
     private RpgStationsLangKeys() {
     }

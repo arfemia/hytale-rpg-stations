@@ -15,6 +15,7 @@ import com.hypixel.hytale.server.core.command.system.basecommands.CommandBase;
 import com.hypixel.hytale.server.core.permissions.provider.HytalePermissionsProvider;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
+import com.ziggfreed.rpgstations.puppetspike.PuppetSpikeService;
 import com.ziggfreed.rpgstations.station.StationCameraPreset;
 import com.ziggfreed.rpgstations.station.StationCameraPrefs;
 import com.ziggfreed.rpgstations.station.StationValidator;
@@ -43,6 +44,11 @@ import com.ziggfreed.rpgstations.validation.Finding;
  *       already prints via {@link StationValidator#runAndLog()} (also called here so the log
  *       carries an identical run, mirroring the MMO's own {@code /mmoconfig validate} dual-call
  *       shape: chat a live run, then log a matching one).</li>
+ *   <li>{@code puppet <scale|modelswap|hidden|show|off>} - <b>TEMPORARY P0 SPIKE HARNESS</b>
+ *       (puppet-presentation route design doc section 5 leg P0, decision log item 11; see
+ *       {@link PuppetSpikeService}'s own javadoc). Delegates entirely to {@link
+ *       PuppetSpikeService}; deleted along with the rest of the {@code puppetspike} package once
+ *       the spike verdict lands.</li>
  * </ul>
  */
 public final class RpgStationsCommand extends CommandBase {
@@ -65,6 +71,7 @@ public final class RpgStationsCommand extends CommandBase {
         switch (sub) {
             case "camera" -> camera(ctx);
             case "validate" -> validate(ctx);
+            case "puppet" -> puppet(ctx);
             default -> ctx.sendMessage(RpgMsg.tr("command.usage").color(Color.YELLOW));
         }
     }
@@ -131,5 +138,26 @@ public final class RpgStationsCommand extends CommandBase {
             ctx.sendMessage(Message.raw("[" + f.code() + "] " + f.message()).color(color));
         }
         StationValidator.runAndLog();
+    }
+
+    /**
+     * {@code puppet <scale|modelswap|hidden|show|off>} - the TEMPORARY P0 spike harness, CALLING
+     * player only (no {@code --player} target, same rationale as {@link #camera}: a console
+     * sender has no body to spawn a puppet in front of or a self-hide route to test). All the
+     * actual work lives in {@link PuppetSpikeService}; this method only parses the route arg.
+     */
+    private void puppet(@Nonnull CommandContext ctx) {
+        if (!(ctx.sender() instanceof PlayerRef player)) {
+            ctx.sendMessage(RpgMsg.tr("command.camera.players_only").color(Color.RED));
+            return;
+        }
+        String action = ctx.provided(actionArg) ? actionArg.get(ctx) : null;
+        String route = action == null ? "" : action.trim().toLowerCase(Locale.ROOT);
+        switch (route) {
+            case "scale", "modelswap", "hidden" -> PuppetSpikeService.getInstance().applyRoute(player, route);
+            case "show" -> PuppetSpikeService.getInstance().show(player);
+            case "off" -> PuppetSpikeService.getInstance().off(player);
+            default -> ctx.sendMessage(RpgMsg.tr("command.puppet.usage").color(Color.YELLOW));
+        }
     }
 }
