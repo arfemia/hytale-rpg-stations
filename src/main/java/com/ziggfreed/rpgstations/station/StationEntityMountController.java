@@ -19,6 +19,7 @@ import com.hypixel.hytale.protocol.MountController;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.Interactable;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
+import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
 import com.hypixel.hytale.server.core.modules.interaction.Interactions;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.asset.StationAsset;
@@ -69,12 +70,34 @@ import com.ziggfreed.rpgstations.util.Log;
  * presence): {@code TransformComponent} (position/rotation) + {@code UUIDComponent} (parity with
  * every spawned entity) + {@code Interactable}/{@code Interactions} (an empty map - kept only
  * because the minecart precedent carries them; harmless if the anchor is never itself
- * interacted-with, and cheap to drop later if it proves unnecessary). Iteration knobs for the
- * maintainer's in-game spike: whether a {@code BoundingBox} is needed for the anchor to register
- * as a valid network-tracked mount target at all (untested - if the standing pose fails to
- * render, this is the first thing to add back), whether {@code Interactable}/{@code Interactions}
- * are load-bearing or dead weight, and whether the anchor needs a {@code Visible}-family
- * component for {@code TrackerUpdate} to pick it up promptly.
+ * interacted-with, and cheap to drop later if it proves unnecessary) + {@code NetworkId} (see the
+ * ROOT-CAUSE FIX bullet below). Iteration knob still open for the maintainer's in-game spike:
+ * whether a {@code BoundingBox} is needed for the anchor to register as a valid network-tracked
+ * mount target at all (untested - if the standing pose fails to render, this is the first thing
+ * to add back).
+ *
+ * <p><b>ROOT-CAUSE FIX (source-confirmed, not just a spike guess): the anchor needs a
+ * {@code NetworkId}, {@code Visible} does not.</b> {@code SpawnMinecartInteraction}'s own anchor
+ * never authors {@code NetworkId} explicitly either - it relies on {@code MountSystems
+ * .EnsureMinecartComponents}, a {@code MinecartComponent}-keyed {@code HolderSystem} that
+ * auto-ensures one on entity-add. This anchor deliberately carries no {@code MinecartComponent}
+ * (a cart leaf, excluded per the class header above), so nothing ever ensured it a
+ * {@code NetworkId} - and {@code MountSystems.PlayerMount#onComponentAdded} /
+ * {@code MountSystems.TrackerUpdate#queueUpdatesFor} BOTH do a plain
+ * {@code commandBuffer.getComponent(mountedToEntity/mountRef, NetworkId.getComponentType())} and
+ * silently {@code return} when it is {@code null} - meaning a {@code MountedComponent} attach
+ * against a {@code NetworkId}-less anchor NEVER throws (matching {@link #attach}'s own
+ * try/catch-guarded contract) but ALSO never sets the mounting player's own
+ * {@code PlayerInput#mountId} (self-view) and never broadcasts a {@code MountedUpdate} to other
+ * viewers (third-party view) - a fully successful, fully invisible mount. Fixed by having
+ * {@link #spawnAnchor} add {@code NetworkId} explicitly, mirroring
+ * {@code StationCustodyDisplay#spawnItemEntity}'s own item-prop route (the ONE other place in
+ * this package that needed to add it by hand for the same reason - no {@code BlockEntity}/
+ * {@code MinecartComponent}-keyed auto-ensure system covers it). {@code Visible}, the OTHER
+ * iteration knob this class used to leave open, does NOT need adding: {@code MountSystems
+ * .TrackerUpdate}'s query ({@code Query.and(visibleComponentType, mountedComponentType)}) runs
+ * over the entity that HAS {@code MountedComponent} - the PLAYER, who already carries
+ * {@code Visible} as any tracked player does - never the anchor itself.
  *
  * <p><b>FIX ROUND (session-scoped, not persisted):</b> {@link #spawnAnchor} also marks the
  * holder {@code NonSerialized} - the same {@code EntityStore.REGISTRY.getNonSerializedComponentType()}
@@ -83,6 +106,27 @@ import com.ziggfreed.rpgstations.util.Log;
  * chunk autosave then a crash) to the next restart as an orphaned, invisible, model-less entity
  * at the station block with no reconcile path (only the clean-shutdown {@code stopAll -> stop ->
  * despawn} funnel ever removes it).
+ *
+ * <p><b>TICK-SAFETY FIX (R4-pattern):</b> {@link #despawn} takes a {@code CommandBuffer} instead
+ * of a raw {@code Store} - the exact class of bug the R4 wave already fixed for {@link
+ * StationCustodyDisplay}: a direct {@code store.removeEntity} throws
+ * {@code IllegalStateException("Store is currently processing!")} when called from inside an
+ * interaction-handler/tick context (every real call site here), which the caller's own
+ * {@code catch (Throwable)} silently swallowed into a WARN - so the anchor never actually
+ * despawned on any exit path that ran from such a context, leaking a {@code NonSerialized}
+ * (restart-cleared, but not tick-cleared) orphan entity at the block. When
+ * {@code commandBuffer} is {@code null} (the shutdown/disconnect/damage/death sweeps), the
+ * anchor is left behind - harmless, {@code NonSerialized} so it cannot survive a restart
+ * regardless, the SAME documented tradeoff {@code StationCustodyDisplay#despawn} already accepts.
+ *
+ * <p><b>GRACEFUL DEGRADATION (engaged in {@code StationService#toggle}, not this class):</b> a
+ * failed {@link #spawnAnchor}/{@link #attach} no longer denies the whole work loop with a toast -
+ * the caller despawns whatever {@link #spawnAnchor} already queued (closing the orphan-anchor
+ * leak a failed press used to cause, since {@link #spawnAnchor} queues the entity BEFORE
+ * {@link #attach} can fail) and falls back to effect-mode (movement lock + hold effect), the same
+ * posture a station with no {@code Mount} group authored at all gets. This class's own contract
+ * is unchanged ({@link #spawnAnchor}/{@link #attach} still return {@code null}/{@code false} on
+ * failure, never throw) - the degradation is entirely {@code StationService}'s policy.
  */
 final class StationEntityMountController {
 
@@ -105,6 +149,11 @@ final class StationEntityMountController {
             holder.ensureComponent(UUIDComponent.getComponentType());
             holder.ensureComponent(Interactable.getComponentType());
             holder.addComponent(Interactions.getComponentType(), new Interactions(Collections.emptyMap()));
+            // ROOT-CAUSE FIX (see this class's header javadoc): no MinecartComponent-keyed
+            // auto-ensure system covers this anchor, so it needs an explicit NetworkId or the
+            // native mount broadcast/self-view systems silently no-op against it.
+            holder.addComponent(NetworkId.getComponentType(),
+                    new NetworkId(commandBuffer.getExternalData().takeNextNetworkId()));
             holder.ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType());
             return commandBuffer.addEntity(holder, AddReason.SPAWN);
         } catch (Throwable t) {
@@ -180,14 +229,19 @@ final class StationEntityMountController {
     /**
      * Despawn the anchor (session-scoped lifecycle - the ONE idempotent {@code stop()} funnel
      * calls this on every exit path, {@code stopAll}'s shutdown sweep included). No-op (never
-     * throws) when already gone or {@code store} could not be resolved.
+     * throws) when already gone or {@code commandBuffer} could not be resolved.
+     *
+     * <p><b>TICK-SAFETY FIX</b>: takes a {@code commandBuffer} instead of the raw {@code store} -
+     * see this class's header javadoc for why. When {@code commandBuffer} is {@code null} (the
+     * shutdown/disconnect/damage/death sweeps), the anchor is left behind - harmless, it is
+     * {@code NonSerialized} so it cannot survive a restart regardless.
      */
-    static void despawn(@Nullable Ref<EntityStore> anchorRef, @Nullable Store<EntityStore> store) {
-        if (anchorRef == null || !anchorRef.isValid() || store == null) {
+    static void despawn(@Nullable Ref<EntityStore> anchorRef, @Nullable CommandBuffer<EntityStore> commandBuffer) {
+        if (anchorRef == null || !anchorRef.isValid() || commandBuffer == null) {
             return;
         }
         try {
-            store.removeEntity(anchorRef, RemoveReason.REMOVE);
+            commandBuffer.removeEntity(anchorRef, RemoveReason.REMOVE);
         } catch (Throwable t) {
             Log.fine("STATION entity-mount anchor despawn failed: " + t.getMessage());
         }

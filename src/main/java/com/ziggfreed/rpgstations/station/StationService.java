@@ -3,6 +3,7 @@ package com.ziggfreed.rpgstations.station;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,7 @@ import com.hypixel.hytale.server.core.inventory.container.ItemContainer;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransaction;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
+import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
@@ -436,18 +438,28 @@ public final class StationService {
             // the native WASD-steers-the-anchor behavior (design 9.2); Steerable true skips both,
             // reserved for a future vehicle-like station.
             Ref<EntityStore> anchorRef = StationEntityMountController.spawnAnchor(commandBuffer, blockX, blockY, blockZ);
-            // attach() failing AFTER a successful spawn is an accepted, extremely-low-probability
-            // edge case (both calls are simple queued commandBuffer ops, effectively non-throwing
-            // under normal operation) - a stray unmounted anchor from that narrow window is a
-            // phase-2 spike-item cleanup, not solved here (the commandBuffer's own pending-ref
-            // semantics make an immediate same-tick despawn unverified, so it is not attempted).
-            if (anchorRef == null || !StationEntityMountController.attach(ref, anchorRef, commandBuffer, entityGroup)) {
-                toast(playerRef, RpgMsg.tr("ui.station.mount_unavailable"));
-                return;
+            boolean attached = anchorRef != null
+                    && StationEntityMountController.attach(ref, anchorRef, commandBuffer, entityGroup);
+            if (attached) {
+                s.mountAnchorRef = anchorRef;
+            } else {
+                // Graceful degradation (fix round): the Entity-surface mount is a phase-2 spike
+                // never verified in-game - a failure here must not brick the whole work loop.
+                // Despawn whatever spawnAnchor already queued (it queues the entity BEFORE attach
+                // can fail, so every failed press used to leak an orphan anchor) and fall back to
+                // effect-mode (movement lock + hold effect - see the entityMountMode-now-false
+                // read below), the same posture a station with no Mount group authored at all
+                // gets, instead of denying the whole engage with a toast.
+                if (anchorRef != null) {
+                    StationEntityMountController.despawn(anchorRef, commandBuffer);
+                }
+                Log.warn("STATION entity mount unavailable for station '" + asset.getId() + "' action '"
+                        + action.getActionId() + "' - falling back to effect-mode hold");
+                s.entityMountMode = false;
             }
-            s.mountAnchorRef = anchorRef;
         }
-        s.movementLock = (!mounted && (hold == null || hold.getMovementLock() == null || hold.getMovementLock()))
+        boolean effectivelyMounted = s.seatMode || s.entityMountMode;
+        s.movementLock = (!effectivelyMounted && (hold == null || hold.getMovementLock() == null || hold.getMovementLock()))
                 || (s.entityMountMode && !s.entitySteerable);
 
         StationAsset.Camera camera = action.getCamera();
@@ -1508,19 +1520,14 @@ public final class StationService {
             StationMountController.dismount(s.ref, store);
         }
         if (s.entityMountMode) {
-            // The anchor's own store/ref is independent of the player's (entityAlive above answers
-            // "is the PLAYER still here", not "is the anchor's world/store still resolvable") - fall
-            // back to the anchor ref's own store so a WORLD_CHANGED/DISCONNECTED stop (store param
-            // null) still despawns it, same reasoning as returnCustody's ownerStore resolution.
-            Store<EntityStore> anchorStore = store;
-            if (anchorStore == null && s.mountAnchorRef != null && s.mountAnchorRef.isValid()) {
-                try {
-                    anchorStore = s.mountAnchorRef.getStore();
-                } catch (Throwable ignored) {
-                    anchorStore = null;
-                }
-            }
-            StationEntityMountController.despawn(s.mountAnchorRef, anchorStore);
+            // TICK-SAFETY FIX (R4-pattern, see StationEntityMountController's header javadoc): a
+            // direct store.removeEntity throws "Store is currently processing!" from inside an
+            // interaction-handler/tick context (every real call site here) - despawn takes the
+            // tick-safe commandBuffer instead. When commandBuffer is null (the shutdown/
+            // disconnect/damage/death sweeps), the anchor is left behind - harmless, it is
+            // NonSerialized so it cannot survive a restart regardless, the SAME documented
+            // tradeoff returnCustody's own display-prop despawn already accepts.
+            StationEntityMountController.despawn(s.mountAnchorRef, commandBuffer);
         }
         if (!silent && s.playerRef != null) {
             try {
@@ -1879,7 +1886,7 @@ public final class StationService {
             return 0;
         }
         if (claim == null) {
-            claim = new StationCustodyClaim(playerUuid, stationId, actionId);
+            claim = new StationCustodyClaim(playerUuid, stationId, actionId, blockX, blockY, blockZ);
             custodyByBlock.put(blockKey, claim);
         }
         claim.add(itemId, moveCount);
@@ -1941,43 +1948,7 @@ public final class StationService {
             }
         }
         StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
-        if (!claim.isEmpty()) {
-            List<ItemStack> stacks = claim.toItemStacks();
-            // Try-guarded (SMOKE-FIX S3 hardening): this is the FIRST point custody-return
-            // mutates anything, but the claim was already popped off custodyByBlock above - an
-            // unguarded throw here would escape returnCustody entirely (never reaching the
-            // drop-at-block fallback below, and short-circuiting stop()'s own remaining teardown
-            // + its unconditional StationSessionCompletedEvent fire), silently losing the items.
-            // Degrading to "no player found" (same as an unresolved store) routes it through the
-            // SAME drop-at-block fallback every other unreachable-owner case already uses.
-            Player player;
-            try {
-                player = ownerStore != null ? ownerStore.getComponent(s.ref, Player.getComponentType()) : null;
-            } catch (Throwable t) {
-                Log.warn("STATION custody return player lookup failed: " + t.getMessage());
-                player = null;
-            }
-            boolean hasRoom = player != null;
-            if (hasRoom) {
-                try {
-                    hasRoom = InventoryAccess.storageOf(player).canAddItemStacks(stacks);
-                } catch (Throwable t) {
-                    hasRoom = false;
-                }
-            }
-            if (StationCustody.shouldReturnToInventory(player != null, hasRoom)) {
-                try {
-                    for (ItemStack stack : stacks) {
-                        InventoryAccess.storageOf(player).addItemStack(stack);
-                    }
-                } catch (Throwable t) {
-                    Log.warn("STATION custody return to inventory failed: " + t.getMessage());
-                    dropCustodyAtBlock(ownerStore, s.blockX, s.blockY, s.blockZ, stacks);
-                }
-            } else {
-                dropCustodyAtBlock(ownerStore, s.blockX, s.blockY, s.blockZ, stacks);
-            }
-        }
+        giveClaimToOwner(ownerStore, s.ref, claim, s.blockX, s.blockY, s.blockZ);
         if (custody != null) {
             World world = null;
             if (s.ref != null && s.ref.isValid()) {
@@ -1991,6 +1962,140 @@ public final class StationService {
                 flipCustodyState(world, s.blockX, s.blockY, s.blockZ, custody, false);
             }
         }
+    }
+
+    /**
+     * Hands {@code claim}'s contents to {@code ownerRef}'s owner - inventory-first (reachable and
+     * there is room), else dropped at the block once (never partial). Extracted (DRY) so both
+     * {@link #returnCustody} (every session-stop exit) and {@link #retrieveCustody} (the press-F
+     * retrieval feature - design's S3 inventory-first/drop-at-block directive, reused verbatim)
+     * share ONE give-back engine. No-op when {@code claim} is empty. Never throws.
+     */
+    private static void giveClaimToOwner(@Nullable Store<EntityStore> ownerStore, @Nullable Ref<EntityStore> ownerRef,
+            @Nonnull StationCustodyClaim claim, int blockX, int blockY, int blockZ) {
+        if (claim.isEmpty()) {
+            return;
+        }
+        List<ItemStack> stacks = claim.toItemStacks();
+        // Try-guarded (SMOKE-FIX S3 hardening): this is the FIRST point a give-back mutates
+        // anything, but the claim was already popped off custodyByBlock by the caller - an
+        // unguarded throw here would escape entirely (never reaching the drop-at-block fallback
+        // below), silently losing the items. Degrading to "no player found" (same as an
+        // unresolved store) routes it through the SAME drop-at-block fallback every other
+        // unreachable-owner case already uses.
+        Player player;
+        try {
+            player = ownerStore != null && ownerRef != null && ownerRef.isValid()
+                    ? ownerStore.getComponent(ownerRef, Player.getComponentType()) : null;
+        } catch (Throwable t) {
+            Log.warn("STATION custody give player lookup failed: " + t.getMessage());
+            player = null;
+        }
+        boolean hasRoom = player != null;
+        if (hasRoom) {
+            try {
+                hasRoom = InventoryAccess.storageOf(player).canAddItemStacks(stacks);
+            } catch (Throwable t) {
+                hasRoom = false;
+            }
+        }
+        if (StationCustody.shouldReturnToInventory(player != null, hasRoom)) {
+            try {
+                for (ItemStack stack : stacks) {
+                    InventoryAccess.storageOf(player).addItemStack(stack);
+                }
+            } catch (Throwable t) {
+                Log.warn("STATION custody give to inventory failed: " + t.getMessage());
+                dropCustodyAtBlock(ownerStore, blockX, blockY, blockZ, stacks);
+            }
+        } else {
+            dropCustodyAtBlock(ownerStore, blockX, blockY, blockZ, stacks);
+        }
+    }
+
+    // ==================== Press-F custody retrieval (new feature) ====================
+
+    /**
+     * Press-F custody retrieval: the target is the PLACED-AS-ENTITY display entity itself (design
+     * section 9's visual, phase 2 leg G), pressed via its own registered {@code Interactions}
+     * entry ({@code interaction.StationRetrieveInteraction}, set at spawn by {@link
+     * StationCustodyDisplay}). Resolves the clicked entity back to its owning block key by
+     * NETWORK ID (comparing {@code NetworkId} values rather than {@code Ref} identity keeps the
+     * matching decision core engine-free and unit-testable - see {@link StationCustodyRetrieval}),
+     * then routes the eligibility decision through {@link StationCustodyRetrieval#decide}:
+     * owner-only (the SAME ownership gate {@link #toggle}'s custody-placement branch already
+     * enforces), and a NO-OP keyed toast while a session is ACTIVELY working that station - the
+     * session owns its own input for the whole duration of a program run; yanking materials out
+     * from under a running Consume step would either silently short a cycle or race the session's
+     * own auto-return on its next stop. On success: gives the claim's contents back to the presser
+     * via {@link #giveClaimToOwner} (the SAME inventory-first/drop-at-block engine {@link
+     * #returnCustody} uses), despawns the display, flips the block back to its Empty custody
+     * state, and removes the claim. Never throws.
+     */
+    public void retrieveCustody(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
+            @Nonnull PlayerRef playerRef, @Nonnull CommandBuffer<EntityStore> commandBuffer,
+            @Nonnull Ref<EntityStore> targetEntity) {
+        try {
+            UUID playerUuid = playerRef.getUuid();
+            if (playerUuid == null) {
+                return;
+            }
+            NetworkId targetNetworkId = store.getComponent(targetEntity, NetworkId.getComponentType());
+            if (targetNetworkId == null) {
+                return;
+            }
+            Map<String, Integer> snapshot = new HashMap<>();
+            for (Map.Entry<String, StationCustodyClaim> e : custodyByBlock.entrySet()) {
+                Ref<EntityStore> displayRef = e.getValue().displayRef();
+                if (displayRef == null || !displayRef.isValid()) {
+                    continue;
+                }
+                NetworkId id = store.getComponent(displayRef, NetworkId.getComponentType());
+                if (id != null) {
+                    snapshot.put(e.getKey(), id.getId());
+                }
+            }
+            String blockKey = StationCustodyRetrieval.findOwningBlockKey(snapshot, targetNetworkId.getId());
+            StationCustodyClaim claim = blockKey != null ? custodyByBlock.get(blockKey) : null;
+            boolean hasActiveSession = blockKey != null && byBlock.containsKey(blockKey);
+            boolean isOwner = claim != null && claim.ownerId.equals(playerUuid);
+            boolean claimNonEmpty = claim != null && !claim.isEmpty();
+            StationCustodyRetrieval.Outcome outcome =
+                    StationCustodyRetrieval.decide(claim != null, hasActiveSession, isOwner, claimNonEmpty);
+            if (outcome == StationCustodyRetrieval.Outcome.RETRIEVE) {
+                custodyByBlock.remove(blockKey, claim);
+                StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
+                giveClaimToOwner(store, ref, claim, claim.blockX, claim.blockY, claim.blockZ);
+                StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
+                Custody custody = asset != null
+                        ? ActionResolver.resolve(asset, claim.actionId).getCustody() : null;
+                if (custody != null) {
+                    try {
+                        World world = WorldEvictors.worldOf(ref);
+                        flipCustodyState(world, claim.blockX, claim.blockY, claim.blockZ, custody, false);
+                    } catch (Throwable t) {
+                        Log.fine("STATION retrieve block-state flip failed: " + t.getMessage());
+                    }
+                }
+            }
+            String key = retrieveOutcomeKey(outcome);
+            if (key != null) {
+                toast(playerRef, RpgMsg.tr(key));
+            }
+        } catch (Throwable t) {
+            Log.warn("STATION custody retrieve failed: " + t.getMessage(), t);
+        }
+    }
+
+    /** The retrieve-toast key for an {@link StationCustodyRetrieval.Outcome}, or null for outcomes that toast nothing (silent). */
+    @Nullable
+    private static String retrieveOutcomeKey(@Nonnull StationCustodyRetrieval.Outcome outcome) {
+        return switch (outcome) {
+            case BUSY -> "ui.station.retrieve.busy";
+            case NOT_OWNER -> "ui.station.occupied";
+            case RETRIEVE -> "ui.station.retrieve.done";
+            case UNKNOWN_TARGET, NOTHING_TO_RETRIEVE -> null;
+        };
     }
 
     /**

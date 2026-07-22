@@ -1,8 +1,8 @@
 {
+  "$Comment": "Icon intentionally omitted (aligned with the skill-stations-pack tuning leg, 2026-07-22): StationService#blockItemIdAt already falls back to the anchor block's own BlockType id at engage time when Identity.Icon is absent/blank, and this jar's own default Sawmill block shares the SAME id (RPG_Station_Sawmill, filename = item id) - so the summary-HUD crest already shows the station's own block icon with zero duplicated id to drift, the same reasoning the pack's own Sawmill.json/Anvil.json now use.",
   "Identity": {
     "NameKey": "rpgstations.station.sawmill.name",
-    "DescKey": "rpgstations.station.sawmill.desc",
-    "Icon": "Wood_Hardwood_Planks"
+    "DescKey": "rpgstations.station.sawmill.desc"
   },
   "Work": {
     "CycleMs": 4665,

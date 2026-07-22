@@ -58,7 +58,7 @@ class StationCustodyTest {
 
     @Test
     void available_exactItemId_sumsAcrossMultipleEntries() {
-        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work");
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
         claim.add("Wood_Oak_Log", 5);
         claim.add("Wood_Pine_Log", 3);
         assertEquals(5, StationCustody.available(claim, "Wood_Oak_Log", null, families(Map.of())));
@@ -66,7 +66,7 @@ class StationCustodyTest {
 
     @Test
     void available_resourceTypeFamily_sumsEveryMatchingItemId() {
-        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work");
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
         claim.add("Wood_Oak_Log", 5);
         claim.add("Wood_Pine_Log", 3);
         claim.add("Stone_Cobble", 10);
@@ -84,7 +84,7 @@ class StationCustodyTest {
 
     @Test
     void drain_exactItemId_removesAndZeroesEntryOut() {
-        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work");
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
         claim.add("Wood_Oak_Log", 5);
         Map<String, Integer> drainedOut = new LinkedHashMap<>();
         int drained = StationCustody.drain(claim, "Wood_Oak_Log", null, 5, families(Map.of()), drainedOut);
@@ -95,7 +95,7 @@ class StationCustodyTest {
 
     @Test
     void drain_familyMatch_oldestPlacedFirst_partialThenNextEntry() {
-        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work");
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
         claim.add("Wood_Oak_Log", 3);
         claim.add("Wood_Pine_Log", 4);
         Function<String, String[]> resolver = families(Map.of(
@@ -113,7 +113,7 @@ class StationCustodyTest {
 
     @Test
     void drain_insufficientClaim_returnsShortAmount_leavesWhatItCouldNotDrain() {
-        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work");
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
         claim.add("Wood_Oak_Log", 2);
         Map<String, Integer> drainedOut = new LinkedHashMap<>();
         int drained = StationCustody.drain(claim, "Wood_Oak_Log", null, 5, families(Map.of()), drainedOut);
@@ -136,7 +136,7 @@ class StationCustodyTest {
 
     @Test
     void claim_add_tallyIsPerItemIdAndTotalsAcrossEntries() {
-        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work");
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
         claim.add("Wood_Oak_Log", 5);
         claim.add("Wood_Oak_Log", 2);
         claim.add("Wood_Pine_Log", 3);
@@ -148,7 +148,7 @@ class StationCustodyTest {
 
     @Test
     void claim_add_nonPositiveQuantity_isNoOp() {
-        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work");
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
         claim.add("Wood_Oak_Log", 0);
         claim.add("Wood_Oak_Log", -3);
         assertTrue(claim.isEmpty());
@@ -159,7 +159,7 @@ class StationCustodyTest {
         // design section 9, phase 2 leg G: the PLACED-AS-ENTITY visual's ref lives on the claim
         // itself, null until StationCustodyDisplay#spawn succeeds (never constructed here - a
         // live Ref<EntityStore> needs a running server; this only exercises the plain getter/setter).
-        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work");
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
         assertNull(claim.displayRef());
         claim.setDisplayRef(null);
         assertNull(claim.displayRef());

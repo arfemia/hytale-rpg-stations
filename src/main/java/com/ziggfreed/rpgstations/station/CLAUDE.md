@@ -501,3 +501,65 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
     block back to Empty), so the player is unstuck on the very next press and denies with the
     truthful `ui.station.no_materials` (claim genuinely lost) instead of the dead-end
     `ui.station.no_action`.
+- **Second fresh-boot smoke fix round (R6, LANDED this leg, 2026-07-22)**: the anvil's work-start
+  deny (`ui.station.mount_unavailable` firing even though the tool gate and custody viability had
+  already passed) plus a NEW press-F custody retrieval feature.
+  - **R6 diagnosis**: the anvil's Entity-surface mount (`Hold.Mount.Surface:"Entity"`, design 9.2,
+    a phase-2 spike never verified in-game) engaged successfully (`spawnAnchor`/`attach` never
+    throw) but was completely INVISIBLE - `StationEntityMountController#spawnAnchor`'s anchor
+    carried no `NetworkId` component (it deliberately excludes `MinecartComponent`, the ONE
+    component a native `MountSystems.EnsureMinecartComponents` auto-ensures a `NetworkId` for), so
+    `MountSystems.PlayerMount#onComponentAdded` (the player's own self-view `mountId`) and
+    `MountSystems.TrackerUpdate#queueUpdatesFor` (the third-party `MountedUpdate` broadcast) BOTH
+    silently `return` on a null `NetworkId` lookup - a fully "successful", fully invisible mount.
+    Source-confirmed fix: `spawnAnchor` now adds `NetworkId` explicitly (mirroring
+    `StationCustodyDisplay#spawnItemEntity`'s own item-prop route, the one other anchor-adjacent
+    entity in this package that needed to add it by hand for the identical reason); `Visible` -
+    the OTHER iteration knob the class javadoc used to leave open - does NOT need adding
+    (`TrackerUpdate`'s query runs over the entity that HAS `MountedComponent`, the PLAYER, who
+    already carries `Visible`). See `StationEntityMountController`'s header javadoc for the full
+    source trail.
+  - **R6 graceful degradation + orphan-anchor leak + teardown tick-safety (engine hardening,
+    regardless of which mount surface a station picks)**: `StationService#toggle`'s entity-mount
+    engage no longer denies the whole work loop with a toast on a spawn/attach failure - it
+    despawns whatever `spawnAnchor` already queued (closing the leak: `spawnAnchor` queues the
+    entity BEFORE `attach` can fail, so every failed press used to leak a `NonSerialized` orphan)
+    and falls back to effect-mode (movement lock + hold effect), the same posture a station with
+    no `Mount` group authored at all gets. `StationEntityMountController#despawn` was ALSO the
+    exact `store.removeEntity`-from-an-interaction-handler class of bug the R4 wave already fixed
+    for `StationCustodyDisplay` (`IllegalStateException("Store is currently processing!")`,
+    silently swallowed into a WARN) - fixed the identical way, threading a `CommandBuffer` through
+    instead of a raw `Store`.
+  - **R6 anvil authoring fix (pack, `content-packs/skill-stations-pack`)**: `Anvil.json`'s `Hold`
+    moved OFF `Mount.Surface:"Entity"` onto the proven effect-mode default (`MovementLock`/
+    `EffectId:"RPG_Station_Hold"`/`InterruptOnDamage`) - the maintainer-recommended swap to the
+    phase-1 proven hold while the Entity mount stays an unverified spike, not a permanent design
+    reversal (the engine-side NetworkId fix above makes the Entity mount genuinely usable again
+    for a future pack revision that wants the standing-worker pose).
+  - **Press-F custody RETRIEVAL (NEW FEATURE, R6)**: the placed-input display entity itself
+    (design section 9's visual, phase 2 leg G) is now press-F interactable -
+    `StationCustodyDisplay#addRetrieveInteraction` adds `Interactable` (the marker; tells the
+    CLIENT this entity can be F-interacted) + an `Interactions` entry (`InteractionType.Use` ->
+    the jar-shipped generic `RPG_Station_Retrieve` RootInteraction asset, plus a lang-keyed hint)
+    to BOTH spawn routes - the exact component pair NPCs/minecarts use for a non-block Use target,
+    zero NPC/minecart dependency (confirmed via the shared-source `UseEntityInteraction` node: it
+    stamps `Interaction.TARGET_ENTITY` on the SAME interaction context before pushing the
+    registered RootInteraction, so `interaction.StationRetrieveInteraction` recovers the exact
+    clicked ref via `ctx.getTargetEntity()`). `StationService#retrieveCustody` resolves that ref
+    back to its owning block key by comparing `NetworkId` VALUES (not `Ref` identity - keeps the
+    matching decision engine-free/unit-testable; see `StationCustodyRetrieval#findOwningBlockKey`)
+    against a live snapshot built from every claim's `displayRef()`, then routes the eligibility
+    decision through the PURE `StationCustodyRetrieval#decide` (precedence: `UNKNOWN_TARGET` ->
+    `BUSY` -> `NOT_OWNER` -> `NOTHING_TO_RETRIEVE` -> `RETRIEVE`) - **`BUSY` is the maintainer's
+    explicit no-op case: a session ACTIVELY working the target block always wins over
+    ownership/claim-contents checks**, because yanking materials out from under a running Consume
+    step would either silently short a cycle or race the session's own auto-return on its next
+    stop. On `RETRIEVE`: hands the claim back via a NEW shared `giveClaimToOwner` helper (extracted
+    DRY from `returnCustody`'s own inventory-first/drop-at-block logic - both now call the ONE
+    give-back engine), despawns the display, flips the block back to Empty, removes the claim.
+    `StationCustodyClaim` gained `blockX`/`blockY`/`blockZ` fields (stashed at construction rather
+    than re-parsed out of the block-key string) since the retrieval entry point has no
+    block-coordinate packet field to read, unlike every other custody call site. Unit-tested via
+    `StationCustodyRetrievalTest` (the network-id lookup + every `decide` precedence branch,
+    including the BUSY-outranks-everything case). See `interaction/CLAUDE.md`'s
+    `StationRetrieveInteraction` bullet for the interaction-handler half.

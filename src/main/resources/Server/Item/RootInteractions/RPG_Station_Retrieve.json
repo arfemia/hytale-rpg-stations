@@ -1,0 +1,11 @@
+{
+  "$Comment": "Generic, parameterless RootInteraction (new feature: press-F custody retrieval) - ONE shared jar asset every custody display entity in every installed pack references from its own Interactions component (station.StationCustodyDisplay#addRetrieveInteraction), never authored per-station like RPG_Station_Sawmill_Use.json. No per-station param: the clicked entity ref alone identifies its owning claim (see interaction.StationRetrieveInteraction).",
+  "Cooldown": {
+    "Id": "BlockInteraction",
+    "Cooldown": 0.278,
+    "ClickBypass": true
+  },
+  "Interactions": [
+    { "Type": "rpg_station_retrieve" }
+  ]
+}

@@ -29,6 +29,18 @@ final class StationCustodyClaim {
     @Nonnull final String stationId;
     @Nonnull final String actionId;
 
+    /**
+     * The block this claim lives at (the SAME coordinates its {@code custodyByBlock} key encodes,
+     * stashed directly rather than re-parsed out of the block-key string) - needed by the press-F
+     * RETRIEVAL path ({@code StationService#retrieveCustody}), which is entered from the display
+     * ENTITY's own interaction (no block-coordinate packet field to read, unlike every other
+     * custody call site which already has {@code blockX}/{@code blockY}/{@code blockZ} in hand
+     * from the interaction that triggered it).
+     */
+    final int blockX;
+    final int blockY;
+    final int blockZ;
+
     /** {@code itemId -> quantity}, insertion order = placement order (oldest first). */
     private final Map<String, Integer> items = new LinkedHashMap<>();
 
@@ -55,10 +67,14 @@ final class StationCustodyClaim {
      */
     @Nullable private Ref<EntityStore> displayRef;
 
-    StationCustodyClaim(@Nonnull UUID ownerId, @Nonnull String stationId, @Nonnull String actionId) {
+    StationCustodyClaim(@Nonnull UUID ownerId, @Nonnull String stationId, @Nonnull String actionId,
+            int blockX, int blockY, int blockZ) {
         this.ownerId = ownerId;
         this.stationId = stationId;
         this.actionId = actionId;
+        this.blockX = blockX;
+        this.blockY = blockY;
+        this.blockZ = blockZ;
     }
 
     /** The live, mutable tally - {@link StationCustody}'s drain/available cores iterate + mutate this directly. */

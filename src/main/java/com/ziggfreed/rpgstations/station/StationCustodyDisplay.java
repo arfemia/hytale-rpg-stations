@@ -5,24 +5,29 @@ import javax.annotation.Nullable;
 
 import org.joml.Vector3d;
 
+import java.util.Map;
+
 import com.hypixel.hytale.component.AddReason;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
 import com.hypixel.hytale.math.vector.Rotation3f;
+import com.hypixel.hytale.protocol.InteractionType;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
 import com.hypixel.hytale.server.core.entity.entities.BlockEntity;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.entity.component.EntityScaleComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
+import com.hypixel.hytale.server.core.modules.entity.component.Interactable;
 import com.hypixel.hytale.server.core.modules.entity.component.PropComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.item.ItemComponent;
 import com.hypixel.hytale.server.core.modules.entity.item.PreventItemMerging;
 import com.hypixel.hytale.server.core.modules.entity.item.PreventPickup;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
+import com.hypixel.hytale.server.core.modules.interaction.Interactions;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.util.Log;
@@ -75,6 +80,16 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@link #resolveYawRadians}/{@link #resolveScale} take/return only doubles/floats, never touch
  * {@link Vector3d}/{@link Rotation3f}) so it stays unit-testable without a running Hytale server -
  * the same discipline {@code StationEntityMountController#resolveAttachmentOffset} established.
+ *
+ * <p><b>Press-F RETRIEVAL (new feature, this fix round)</b>: both spawn routes now ALSO mark the
+ * display entity press-F interactable ({@link Interactable} + a {@link Interactions} entry on
+ * {@code InteractionType.Use} pointing at the jar-shipped generic {@code RPG_Station_Retrieve}
+ * RootInteraction asset, plus a lang-keyed hint) via {@link #addRetrieveInteraction} - the SAME
+ * two-component pair NPCs and minecarts use for their own non-block Use target (a plugin-addable
+ * marker + interaction-id table, ZERO NPC/minecart dependency). Firing it resolves the clicked
+ * entity ref back to its owning claim by {@code NetworkId} and hands the placed contents back to
+ * the presser; see {@code interaction.StationRetrieveInteraction} and
+ * {@code StationService#retrieveCustody}/{@link StationCustodyRetrieval}.
  */
 final class StationCustodyDisplay {
 
@@ -84,7 +99,34 @@ final class StationCustodyDisplay {
      */
     private static final float BLOCK_ENTITY_BASE_SCALE = 2f;
 
+    /**
+     * The RootInteraction ASSET id (jar-shipped, {@code Server/Item/RootInteractions/
+     * RPG_Station_Retrieve.json}) every display entity's {@code Interactions} entry points at for
+     * press-F retrieval - a DIFFERENT string from {@code interaction.StationRetrieveInteraction
+     * .TYPE_NAME} (the registered Java interaction TYPE that asset's own body references): an
+     * entity's {@code Interactions} component stores a RootInteraction asset reference
+     * (mirroring {@code SpawnMinecartInteraction}'s {@code CartInteractions} codec field, decoded
+     * through {@code RootInteraction.CHILD_ASSET_CODEC}), not a raw registered type name. Generic
+     * (no per-station param needed - the clicked entity ref alone identifies its owning claim),
+     * so ONE shared jar asset backs every custody display in every installed pack.
+     */
+    private static final String RETRIEVE_ROOT_INTERACTION_ID = "RPG_Station_Retrieve";
+
     private StationCustodyDisplay() {
+    }
+
+    /**
+     * Marks {@code holder} press-F interactable for retrieval (new feature): the two components
+     * {@code UseEntityInteraction} needs together - {@link Interactable} (a pure marker; its
+     * presence is what tells the CLIENT this entity can be F-interacted) and {@link Interactions}
+     * (the per-type interaction-id table; {@code InteractionType.Use} points at {@link
+     * #RETRIEVE_ROOT_INTERACTION_ID}) - plus a lang-keyed hint. Shared by both spawn routes.
+     */
+    private static void addRetrieveInteraction(@Nonnull Holder<EntityStore> holder) {
+        holder.ensureComponent(Interactable.getComponentType());
+        Interactions interactions = new Interactions(Map.of(InteractionType.Use, RETRIEVE_ROOT_INTERACTION_ID));
+        interactions.setInteractionHint("rpgstations.ui.station.retrieve.hint");
+        holder.addComponent(Interactions.getComponentType(), interactions);
     }
 
     /**
@@ -152,6 +194,7 @@ final class StationCustodyDisplay {
         holder.addComponent(PropComponent.getComponentType(), PropComponent.get());
         holder.ensureComponent(UUIDComponent.getComponentType());
         holder.ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType());
+        addRetrieveInteraction(holder);
         return commandBuffer.addEntity(holder, AddReason.SPAWN);
     }
 
@@ -173,6 +216,7 @@ final class StationCustodyDisplay {
         holder.addComponent(PropComponent.getComponentType(), PropComponent.get());
         holder.ensureComponent(UUIDComponent.getComponentType());
         holder.ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType());
+        addRetrieveInteraction(holder);
         return commandBuffer.addEntity(holder, AddReason.SPAWN);
     }
 

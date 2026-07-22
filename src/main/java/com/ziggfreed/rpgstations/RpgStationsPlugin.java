@@ -31,6 +31,7 @@ import com.ziggfreed.rpgstations.asset.RollPool;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.command.RpgStationsCommand;
+import com.ziggfreed.rpgstations.interaction.StationRetrieveInteraction;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
@@ -105,6 +106,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerFlairAssetStore();
         registerSettingsAssetStore();
         registerStationInteraction();
+        registerStationRetrieveInteraction();
         registerStationSystems();
         registerTeardownHooks();
         registerPostLoadAudit();
@@ -371,6 +373,25 @@ public class RpgStationsPlugin extends JavaPlugin {
             Log.info("Registered interaction: " + StationUseInteraction.TYPE_NAME);
         } catch (Exception e) {
             Log.severe("Failed to register StationUse interaction: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Registers {@code "rpg_station_retrieve"} (new feature: press-F custody retrieval) - the
+     * generic, parameterless interaction the jar-shipped {@code RPG_Station_Retrieve}
+     * RootInteraction asset references. Every custody display entity in every installed pack
+     * points at that ONE shared asset ({@code station.StationCustodyDisplay#addRetrieveInteraction}),
+     * so this registration (unlike {@link #registerStationInteraction}) needs no per-station Java.
+     */
+    private void registerStationRetrieveInteraction() {
+        try {
+            getCodecRegistry(Interaction.CODEC).register(
+                    StationRetrieveInteraction.TYPE_NAME,
+                    StationRetrieveInteraction.class,
+                    StationRetrieveInteraction.CODEC);
+            Log.info("Registered interaction: " + StationRetrieveInteraction.TYPE_NAME);
+        } catch (Exception e) {
+            Log.severe("Failed to register StationRetrieve interaction: " + e.getMessage());
         }
     }
 

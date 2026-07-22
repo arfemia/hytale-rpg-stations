@@ -1,6 +1,7 @@
-# interaction/ - the station block interaction handler
+# interaction/ - the station block + custody-display interaction handlers
 
-Router for `interaction/`. One registered type backs every station block in every installed pack.
+Router for `interaction/`. Two registered types: one backs every station block in every installed
+pack, the other backs every placed-input display entity's own press-F retrieval.
 
 - **[`StationUseInteraction`](StationUseInteraction.java)** - `extends SimpleInstantInteraction`,
   registered type name **`rpg_station_use`** (the MMO's pre-extraction copy was `mmo_station_use`;
@@ -12,7 +13,19 @@ Router for `interaction/`. One registered type backs every station block in ever
   token-shop object-form-param pattern). Pressing F calls `station.StationService#toggle`: starts a
   session (every denial a localized toast) or stops the player's running one. Every exit path sets
   `ctx.getState().state`; a user-initiated denial is `Finished`, never `Failed`.
+- **[`StationRetrieveInteraction`](StationRetrieveInteraction.java)** (new feature, 2026-07-22 fix
+  round) - `extends SimpleInstantInteraction`, registered type name **`rpg_station_retrieve`**.
+  Unlike `StationUseInteraction`, NOT referenced from any block JSON - `station
+  .StationCustodyDisplay#addRetrieveInteraction` sets it PROGRAMMATICALLY on every placed-input
+  display entity's own `Interactions` component (`InteractionType.Use` -> the jar-shipped generic
+  `RPG_Station_Retrieve` RootInteraction asset, `Server/Item/RootInteractions/
+  RPG_Station_Retrieve.json`, no per-station param). Pressing F on the display entity reads
+  `ctx.getTargetEntity()` (populated by the native `UseEntityInteraction` node before this class's
+  `firstRun` even runs - see `StationRetrieveInteraction`'s own class javadoc for the exact
+  shared-source chain) and calls `station.StationService#retrieveCustody`: owner-only, a no-op
+  keyed toast while a session is actively working that station, otherwise hands the placed
+  contents back and despawns the display. See `station/CLAUDE.md`'s retrieval bullet for the
+  engine-side detail (`StationCustodyRetrieval`'s pure eligibility decision).
 
-Registered once in `RpgStationsPlugin#registerStationInteraction` via
-`getCodecRegistry(Interaction.CODEC).register(TYPE_NAME, StationUseInteraction.class,
-StationUseInteraction.CODEC)`.
+Both registered once each in `RpgStationsPlugin` (`#registerStationInteraction` /
+`#registerStationRetrieveInteraction`) via `getCodecRegistry(Interaction.CODEC).register(...)`.

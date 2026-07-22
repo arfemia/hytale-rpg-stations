@@ -23,6 +23,10 @@ import javax.annotation.Nonnull;
  * The puppet-presentation P0 spike harness ({@code puppetspike/}, TEMPORARY) adds the
  * {@code command.puppet.*} keys backing {@code /rpgstations puppet <scale|modelswap|hidden|
  * show|off>} - delete these along with the rest of that package once the spike verdict lands.
+ * The press-F custody RETRIEVAL fix round (2026-07-22) adds {@code ui.station.retrieve.busy}/
+ * {@code .done} (the toast keys, {@code StationService#retrieveCustody}) and
+ * {@code ui.station.retrieve.hint} (the display entity's own {@code Interactions} hint,
+ * {@code StationCustodyDisplay#addRetrieveInteraction}).
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -35,6 +39,9 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.no_materials",
             "rpgstations.ui.station.custody.placed",
             "rpgstations.ui.station.custody.topped_up",
+            "rpgstations.ui.station.retrieve.busy",
+            "rpgstations.ui.station.retrieve.done",
+            "rpgstations.ui.station.retrieve.hint",
             "rpgstations.ui.station.inventory_full",
             "rpgstations.ui.station.wrong_tool",
             "rpgstations.ui.station.seat_unavailable",
