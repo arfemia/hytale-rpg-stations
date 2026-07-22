@@ -2333,14 +2333,37 @@ public final class StationService {
     }
 
     /**
-     * The BlockType id string of the block at (x,y,z) - the fallback summary-crest icon when a
-     * station authors no {@code Identity.Icon}. Captured at ENGAGE only.
+     * The station's own ITEM id for the block at (x,y,z) - the fallback summary-crest icon when
+     * a station authors no {@code Identity.Icon}. Captured at ENGAGE only.
+     *
+     * <p><b>R7 fix</b>: resolves through {@link BlockType#getItem()} (the block's containing Item
+     * asset), NOT the raw {@link BlockType#getId()}. A custody-governed station (design 9.4) ONLY
+     * engages after its materials are placed, which has already flipped the block to its
+     * {@code Loaded}/{@code BarsPlaced}/{@code WeaponPlaced} state via
+     * {@code setBlockInteractionState} - a state variant is a DISTINCT, generated-key
+     * {@code BlockType} asset ({@code StateData#generateBlockKey}: {@code GENERATED_ID_PREFIX +
+     * parentKey + "_" + stateName}, {@code GENERATED_ID_PREFIX = "*"}), so at engage the OLD
+     * {@code blockType.getId()} returned e.g. {@code "*RPG_Station_Sawmill_Loaded"} - not a real
+     * item id, so the crest's {@code new ItemStack(id, 1)} resolved the UNKNOWN placeholder
+     * instead of the station's own icon. {@code getItem()} instead walks the asset's
+     * container-key chain (confirmed against the shared source: a state variant decodes via
+     * {@code ContainedAssetCodec.Mode.INJECT_PARENT}, so its {@code Data.containerData} is the
+     * PARENT block's own {@code Data} - itself linked to the owning {@code Item} via the native
+     * {@code Item.BlockType} field's {@code INHERIT_ID_AND_PARENT} containment, and
+     * {@code Data#getContainerKey} recurses up that chain) and resolves the SAME base item id
+     * regardless of which state variant is live. Falls back to the raw {@code blockType.getId()}
+     * only when the block has no containing Item at all (a non-item-backed native block, the
+     * pre-fix behavior for that edge case).
      */
     @Nullable
     private static String blockItemIdAt(@Nonnull World world, int x, int y, int z) {
         try {
             var blockType = world.getBlockType(x, y, z);
-            String id = blockType != null ? blockType.getId() : null;
+            if (blockType == null) {
+                return null;
+            }
+            Item item = blockType.getItem();
+            String id = item != null ? item.getId() : blockType.getId();
             return id != null && !id.isBlank() && !"Empty".equals(id) ? id : null;
         } catch (Throwable t) {
             return null;

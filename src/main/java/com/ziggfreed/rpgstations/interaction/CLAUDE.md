@@ -20,9 +20,11 @@ pack, the other backs every placed-input display entity's own press-F retrieval.
   display entity's own `Interactions` component (`InteractionType.Use` -> the jar-shipped generic
   `RPG_Station_Retrieve` RootInteraction asset, `Server/Item/RootInteractions/
   RPG_Station_Retrieve.json`, no per-station param). Pressing F on the display entity reads
-  `ctx.getTargetEntity()` (populated by the native `UseEntityInteraction` node before this class's
-  `firstRun` even runs - see `StationRetrieveInteraction`'s own class javadoc for the exact
-  shared-source chain) and calls `station.StationService#retrieveCustody`: owner-only, a no-op
+  `ctx.getTargetEntity()` (populated by `InteractionManager` off the incoming packet's `entityId`
+  before this class's `firstRun` even runs, and surviving into it because `UseEntityInteraction`
+  pushes the registered RootInteraction onto the SAME context - see `StationRetrieveInteraction`'s
+  own class javadoc for the exact shared-source chain) and calls
+  `station.StationService#retrieveCustody`: owner-only, a no-op
   keyed toast while a session is actively working that station, otherwise hands the placed
   contents back and despawns the display. See `station/CLAUDE.md`'s retrieval bullet for the
   engine-side detail (`StationCustodyRetrieval`'s pure eligibility decision).

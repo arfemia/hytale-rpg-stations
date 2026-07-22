@@ -504,15 +504,19 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
 - **Second fresh-boot smoke fix round (R6, LANDED this leg, 2026-07-22)**: the anvil's work-start
   deny (`ui.station.mount_unavailable` firing even though the tool gate and custody viability had
   already passed) plus a NEW press-F custody retrieval feature.
-  - **R6 diagnosis**: the anvil's Entity-surface mount (`Hold.Mount.Surface:"Entity"`, design 9.2,
-    a phase-2 spike never verified in-game) engaged successfully (`spawnAnchor`/`attach` never
-    throw) but was completely INVISIBLE - `StationEntityMountController#spawnAnchor`'s anchor
+  - **R6 diagnosis**: the maintainer's fourth smoke boot found the anvil denying EVERY work-start
+    attempt with `ui.station.mount_unavailable` (holding the correct hammer, tool gate and custody
+    viability already passed) - `StationService#toggle`'s Entity-mount engage path sends that exact
+    toast whenever `spawnAnchor`/`attach` returns null/false. Source reading of the anvil's
+    `Hold.Mount.Surface:"Entity"` mechanism (design 9.2, a phase-2 spike never verified in-game)
+    surfaced a SEPARATE, confirmed defect in the same code path, independent of whichever condition
+    actually triggered the observed deny: `StationEntityMountController#spawnAnchor`'s anchor
     carried no `NetworkId` component (it deliberately excludes `MinecartComponent`, the ONE
     component a native `MountSystems.EnsureMinecartComponents` auto-ensures a `NetworkId` for), so
     `MountSystems.PlayerMount#onComponentAdded` (the player's own self-view `mountId`) and
     `MountSystems.TrackerUpdate#queueUpdatesFor` (the third-party `MountedUpdate` broadcast) BOTH
-    silently `return` on a null `NetworkId` lookup - a fully "successful", fully invisible mount.
-    Source-confirmed fix: `spawnAnchor` now adds `NetworkId` explicitly (mirroring
+    silently `return` on a null `NetworkId` lookup - even a mount that DID succeed would have
+    rendered invisibly. Source-confirmed fix: `spawnAnchor` now adds `NetworkId` explicitly (mirroring
     `StationCustodyDisplay#spawnItemEntity`'s own item-prop route, the one other anchor-adjacent
     entity in this package that needed to add it by hand for the identical reason); `Visible` -
     the OTHER iteration knob the class javadoc used to leave open - does NOT need adding
@@ -542,10 +546,14 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
     CLIENT this entity can be F-interacted) + an `Interactions` entry (`InteractionType.Use` ->
     the jar-shipped generic `RPG_Station_Retrieve` RootInteraction asset, plus a lang-keyed hint)
     to BOTH spawn routes - the exact component pair NPCs/minecarts use for a non-block Use target,
-    zero NPC/minecart dependency (confirmed via the shared-source `UseEntityInteraction` node: it
-    stamps `Interaction.TARGET_ENTITY` on the SAME interaction context before pushing the
-    registered RootInteraction, so `interaction.StationRetrieveInteraction` recovers the exact
-    clicked ref via `ctx.getTargetEntity()`). `StationService#retrieveCustody` resolves that ref
+    zero NPC/minecart dependency (confirmed via the shared source: `InteractionManager` stamps
+    `Interaction.TARGET_ENTITY` into the chain's meta store from the incoming packet's `entityId`
+    BEFORE any interaction node runs; `UseEntityInteraction` does its OWN independent target
+    lookup off `getClientState().entityId` to validate reach and read `Interactions`, then pushes
+    the registered RootInteraction onto the SAME context via `context.execute(...)` - it never
+    touches `TARGET_ENTITY` itself, but because the context is unchanged, the value
+    `InteractionManager` stamped earlier survives, so `interaction.StationRetrieveInteraction`
+    recovers the exact clicked ref via `ctx.getTargetEntity()`). `StationService#retrieveCustody` resolves that ref
     back to its owning block key by comparing `NetworkId` VALUES (not `Ref` identity - keeps the
     matching decision engine-free/unit-testable; see `StationCustodyRetrieval#findOwningBlockKey`)
     against a live snapshot built from every claim's `displayRef()`, then routes the eligibility
@@ -563,3 +571,26 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
     `StationCustodyRetrievalTest` (the network-id lookup + every `decide` precedence branch,
     including the BUSY-outranks-everything case). See `interaction/CLAUDE.md`'s
     `StationRetrieveInteraction` bullet for the interaction-handler half.
+- **Third fresh-boot smoke fix round (R7, LANDED this leg, 2026-07-22)**: the pack's R5 icon-tuning
+  leg removed `Identity.Icon` from `Sawmill.json`/`Anvil.json` on the claim that
+  `StationService#blockItemIdAt`'s no-icon-authored fallback (the anchor block's own `BlockType`
+  id at ENGAGE time) already equals the station's own item id - a claim that is FALSE for any
+  CUSTODY station (design 9.4), because custody engagement only happens AFTER materials are
+  placed, which has already flipped the block to its `Loaded`/`BarsPlaced`/`WeaponPlaced` state.
+  A state variant is a DISTINCT, generated-key `BlockType` asset (`StateData#generateBlockKey`:
+  `GENERATED_ID_PREFIX + parentKey + "_" + stateName`, `GENERATED_ID_PREFIX = "*"`), so the old
+  fallback's raw `blockType.getId()` returned e.g. `*RPG_Station_Sawmill_Loaded` at engage - not a
+  real item id - and the summary-crest's `new ItemStack(id, 1)` silently resolved the UNKNOWN
+  placeholder icon instead of the station's own, a regression from the R4-era (valid-if-wrong)
+  raw-material icon. `blockItemIdAt` now resolves via `BlockType#getItem()` (the block's
+  containing Item asset) instead of the raw `BlockType#getId()`, falling back to `getId()` only
+  when the block has no containing Item at all (the pre-fix behavior for that edge case). Verified
+  against the shared source: a state variant decodes through `ContainedAssetCodec
+  .Mode.INJECT_PARENT`, so its `Data.containerData` is the PARENT block's own `Data` - itself
+  linked to the owning `Item` via the native `Item.BlockType` field's `INHERIT_ID_AND_PARENT`
+  containment - and `AssetExtraInfo.Data#getContainerKey` recurses up that chain regardless of
+  nesting depth, so `getItem()` resolves the SAME base item id whether the block is in its
+  `Default` state or any generated state variant. No pack authoring change needed - this is an
+  engine-only fix, and the fallback's original "zero duplicated id to drift" intent now genuinely
+  holds. See `content-packs/skill-stations-pack/CLAUDE.md`'s own R7 correction for the pack-side
+  narrative fix.

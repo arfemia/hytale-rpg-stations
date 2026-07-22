@@ -29,10 +29,14 @@ import com.ziggfreed.rpgstations.util.Log;
  * ({@code station.StationCustodyDisplay#addRetrieveInteraction}) via
  * {@code Interactions.setInteractionId(InteractionType.Use, "RPG_Station_Retrieve")} - the SAME
  * {@code Interactable}/{@code Interactions} mechanism NPCs and minecarts use for a non-block Use
- * target, ZERO NPC/minecart dependency (confirmed via the shared-source native
- * {@code UseEntityInteraction} node: it validates reach, reads {@code Interactions} off the
- * clicked entity, looks up the registered id for {@code InteractionType.Use}, and pushes THIS
- * class's {@code RootInteraction} onto the SAME interaction chain/context - so
+ * target, ZERO NPC/minecart dependency (confirmed via the shared source: {@code
+ * InteractionManager} stamps {@code Interaction.TARGET_ENTITY} into the chain's meta store from
+ * the incoming packet's {@code entityId} BEFORE any interaction node runs; {@code
+ * UseEntityInteraction} does its OWN independent target lookup (off {@code
+ * getClientState().entityId}) to validate reach and read {@code Interactions} off the clicked
+ * entity, then pushes THIS class's {@code RootInteraction} onto the SAME context via {@code
+ * context.execute(...)} - it never touches {@code TARGET_ENTITY} itself, but because the context
+ * is unchanged, the value {@code InteractionManager} stamped earlier survives, so
  * {@link InteractionContext#getTargetEntity()} recovers the exact clicked entity ref here).
  * {@code RPG_Station_Retrieve} (the RootInteraction ASSET, {@code Server/Item/RootInteractions/
  * RPG_Station_Retrieve.json}) wraps THIS class's registered TYPE_NAME - two different ids, see
