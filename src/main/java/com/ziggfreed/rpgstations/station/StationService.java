@@ -656,7 +656,7 @@ public final class StationService {
                 toast(s.playerRef, RpgMsg.tr("ui.station.practice"));
             }
             s.nextCycleAtMs = System.currentTimeMillis() + s.idleCycleMs;
-            return runIdleCycle(s, store, commandBuffer, asset);
+            return runIdleCycle(s, store, commandBuffer, action);
         } else if (check.state == ConversionState.NO_INPUTS) {
             stop(s, StopReason.OUT_OF_INPUTS, store);
             return false;
@@ -772,7 +772,7 @@ public final class StationService {
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
             @Nullable ItemStack cycleOutput, int attemptCycleIndex, int startIndex) {
-        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, asset, attemptCycleIndex));
+        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, action, attemptCycleIndex));
         StationStepContext ctx = new StationStepContext(s, store, commandBuffer, player, asset, action, snapshot,
                 steps, attemptCycleIndex, cycleOutput);
 
@@ -801,8 +801,13 @@ public final class StationService {
         if (s.durabilityPerCycle > 0) {
             drainHeldToolDurability(store, s.ref, player, s.durabilityPerCycle);
         }
-        double xpMult = resolveXpMultiplier(player, asset);
-        onCycleCompleted(s, store, commandBuffer, asset, xpMult, false, s.cyclesDone);
+        // FIX ROUND: both reads below now resolve off the RESOLVED action, not the station-level
+        // asset - mirroring the action.getWork().effectiveRepeat() read two lines down. Before this
+        // fix a multi-action station whose Work groups live entirely under Actions.* (the anvil's
+        // convert/enhance) forwarded ZERO xp asks: asset.getWork() was null, so xpAsks() returned
+        // List.of() and StationCycleCompletedEvent.xpAsks() was empty for every real cycle.
+        double xpMult = resolveXpMultiplier(player, action.getTool());
+        onCycleCompleted(s, store, commandBuffer, action, xpMult, false, s.cyclesDone);
 
         StationAsset.Work work = action.getWork();
         if (work != null && !work.effectiveRepeat()) {
@@ -868,14 +873,18 @@ public final class StationService {
 
     /**
      * Opt-in idle practice cycle: NO conversion, NO loot roll, NO progress fire - just the
-     * cycle presentation + the (idle-scaled) XP-ask forwarding.
+     * cycle presentation + the (idle-scaled) XP-ask forwarding. Threads the RESOLVED action
+     * (FIX ROUND, the same correction as the real-cycle path in {@link #dispatchProgram}) so a
+     * multi-action station's idle practice reads ITS running action's {@code Work}/
+     * {@code Presentation}, not the station-level default.
      */
     private boolean runIdleCycle(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
-                                 @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset) {
-        onCycleCompleted(s, store, commandBuffer, asset, 1.0, true, s.cyclesDone);
+                                 @Nonnull CommandBuffer<EntityStore> commandBuffer,
+                                 @Nonnull ActionResolver.ResolvedAction action) {
+        onCycleCompleted(s, store, commandBuffer, action, 1.0, true, s.cyclesDone);
 
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
-        emitMoment(store, s, StationFlairs.MOMENT_CYCLE, asset.getPresentation(), blockPos);
+        emitMoment(store, s, StationFlairs.MOMENT_CYCLE, action.getPresentation(), blockPos);
         s.cyclesDone++;
         return true;
     }
@@ -884,8 +893,19 @@ public final class StationService {
      * Fires {@code StationCycleCompletedEvent} (design section 3.1/7.2): forwards this cycle's
      * {@code Work.Xp} asks (idle-scaled by {@code Work.Idle.XpFraction} when {@code idle}) plus
      * the resolved tool multiplier (forced {@code 1.0} for an idle cycle). A listening
-     * progression mod (the MMO bridge) reads {@code asset.getWork().getXp()} semantics off the
+     * progression mod (the MMO bridge) reads {@code action.getWork().getXp()} semantics off the
      * event's {@code XpAsk} list to know what an ask means; this engine never interprets it.
+     *
+     * <p><b>FIX ROUND:</b> takes the RESOLVED {@code action}, not the station-level
+     * {@code StationAsset} - a multi-action station whose {@code Work} groups live entirely under
+     * {@code Actions.*} (the anvil's {@code convert}/{@code enhance}, both authoring {@code Xp}
+     * with NO station-level {@code Work} group at all) forwarded ZERO xp asks before this fix
+     * ({@code asset.getWork()} resolved {@code null}, so {@link #xpAsks} always returned
+     * {@code List.of()}) and the event always carried {@code actionId="work"} regardless of which
+     * action actually ran. {@code action.getActionId()}/{@code action.getWork()} carry the fix -
+     * see {@link ActionResolver#resolve} for why this is safe for every single-action station too
+     * (a station with no {@code Actions} map resolves {@code action}'s groups to the station-level
+     * ones verbatim, byte-identical to before).
      *
      * <p>{@code commandBuffer} is GUARANTEED non-null here: both call sites (the real-cycle path
      * in {@link #runRealCycle} and the idle-cycle path in {@link #runIdleCycle}) run inside the
@@ -893,24 +913,26 @@ public final class StationService {
      * CommandBuffer} for the current tick (critique fix, binding - see the event's own javadoc).
      */
     private static void onCycleCompleted(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
-            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull ActionResolver.ResolvedAction action,
             double toolMultiplier, boolean idle, int cycleIndex) {
-        List<XpAsk> asks = xpAsks(asset, idle, s.idleXpFraction);
+        List<XpAsk> asks = xpAsks(action.getWork(), idle, s.idleXpFraction);
         StationEvents.fireCycleCompleted(store, commandBuffer, s.playerRef, s.playerUuid, s.sessionId,
-                s.stationId, ACTION_WORK, cycleIndex, idle, asks, toolMultiplier);
+                s.stationId, action.getActionId(), cycleIndex, idle, asks, toolMultiplier);
     }
 
     /**
-     * The station's forwarded {@code Work.Xp} asks for one cycle-completed event (design section
-     * 4.4.1): a real cycle forwards the RAW authored {@code PerCycle} (the listener multiplies
-     * by {@link StationCycleCompletedEvent#toolMultiplier()}); an idle cycle pre-scales each ask
+     * The forwarded {@code Work.Xp} asks for one cycle-completed event (design section 4.4.1):
+     * a real cycle forwards the RAW authored {@code PerCycle} (the listener multiplies by
+     * {@link StationCycleCompletedEvent#toolMultiplier()}); an idle cycle pre-scales each ask
      * by {@code idleXpFraction} and the caller forces {@code toolMultiplier} to {@code 1.0}
      * (matching today's idle semantics: fractional XP, no progress). A blank/missing skill id
      * entry is skipped (the validator's {@code MISSING_XP_SKILL} catches the authoring mistake).
+     * {@code work} MUST be the resolved action's own {@code Work} group (FIX ROUND) - the
+     * station-level {@code StationAsset.getWork()} is null for a station like the anvil whose
+     * every {@code Work} group lives under {@code Actions.*}.
      */
     @Nonnull
-    private static List<XpAsk> xpAsks(@Nonnull StationAsset asset, boolean idle, double idleXpFraction) {
-        StationAsset.Work work = asset.getWork();
+    private static List<XpAsk> xpAsks(@Nullable StationAsset.Work work, boolean idle, double idleXpFraction) {
         StationAsset.WorkXp[] xp = work != null ? work.getXp() : null;
         if (xp == null || xp.length == 0) {
             return List.of();
@@ -926,10 +948,26 @@ public final class StationService {
         return out;
     }
 
-    /** The station's authored {@code Work.Xp} skill ids, in authoring order (for {@link FactorContext#progressionSkills()}). */
+    /**
+     * Station-level {@code Work.Xp} skill ids, in authoring order (for {@link
+     * FactorContext#progressionSkills()}) - used only by {@link #checkRequires} (pre-session, no
+     * resolved action exists yet) and {@link #rollCompletionLoot} (post-session, station-level
+     * {@code Loot}, not per-action). Delegates to the {@link #progressionSkills(StationAsset.Work)}
+     * overload every per-cycle/action-aware caller uses instead (FIX ROUND).
+     */
     @Nonnull
     private static List<String> progressionSkills(@Nonnull StationAsset asset) {
-        StationAsset.Work work = asset.getWork();
+        return progressionSkills(asset.getWork());
+    }
+
+    /**
+     * {@code Work}-overriding form (FIX ROUND): {@link #buildFactorContext}'s action-aware
+     * overload passes the RESOLVED action's own {@code Work} group here - a multi-action
+     * station's per-cycle factor context must see the ACTUAL running action's {@code Xp} skills,
+     * not the (possibly {@code Work}-less) station-level default the anvil authors.
+     */
+    @Nonnull
+    private static List<String> progressionSkills(@Nullable StationAsset.Work work) {
         StationAsset.WorkXp[] xp = work != null ? work.getXp() : null;
         if (xp == null || xp.length == 0) {
             return List.of();
@@ -1007,7 +1045,10 @@ public final class StationService {
      * api.impl.FactorRegistryImpl#registerBuiltins}) plus every other registered provider:
      * session seconds elapsed, the CURRENT (already-incremented) cycle index, and the
      * currently-held item's tool power / durability percent - read fresh, mirroring {@link
-     * #resolveXpMultiplier}'s no-snapshot convention.
+     * #resolveXpMultiplier}'s no-snapshot convention. Station-level (no resolved action) - used
+     * only by {@link #rollCompletionLoot} (post-session, station-level {@code Loot}, not
+     * per-action; every real/idle cycle instead uses the {@link #buildFactorContext(StationSession,
+     * Store, Player, ActionResolver.ResolvedAction, int)} action-aware overload, FIX ROUND).
      */
     @Nonnull
     private static FactorContext buildFactorContext(@Nonnull StationSession s, @Nullable Store<EntityStore> store,
@@ -1016,10 +1057,8 @@ public final class StationService {
     }
 
     /**
-     * {@code cycleIndex}-overriding form: {@link #dispatchProgram} passes the ATTEMPT index
-     * (design section 9.3 - {@code s.cyclesDone + 1}, computed before {@code s.cyclesDone} itself
-     * advances) so a Roll step's factor context sees the cycle it is actually running, not the
-     * last COMPLETED one.
+     * {@code cycleIndex}-overriding, station-level form (no resolved action) - {@link
+     * #buildFactorContext(StationSession, Store, Player, StationAsset)} delegates here.
      */
     private static FactorContext buildFactorContext(@Nonnull StationSession s, @Nullable Store<EntityStore> store,
             @Nonnull Player player, @Nonnull StationAsset asset, int cycleIndex) {
@@ -1035,6 +1074,36 @@ public final class StationService {
                 .toolPower(resolveHeldToolPower(player, asset.getTool()))
                 .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
                 .progressionSkills(progressionSkills(asset))
+                .build();
+    }
+
+    /**
+     * ACTION-AWARE form (FIX ROUND): {@link #dispatchProgram} passes the RESOLVED action here
+     * instead of the station-level {@code asset} - a Roll/Stamp step's factor context must report
+     * the ACTUAL running action id and its OWN {@code Work.Xp} skills (mirroring {@link #xpAsks}'
+     * same correction), not the station-level default. The anvil's {@code convert}/{@code enhance}
+     * author NO station-level {@code Work} at all, so {@code progressionSkills(asset)} always
+     * resolved empty here and every step saw {@code actionId="work"} instead of {@code "convert"}/
+     * {@code "enhance"} before this fix. {@code cycleIndex} is the ATTEMPT index (design section
+     * 9.3 - {@code s.cyclesDone + 1}, computed before {@code s.cyclesDone} itself advances) so a
+     * Roll step's factor context sees the cycle it is actually running, not the last COMPLETED
+     * one.
+     */
+    @Nonnull
+    private static FactorContext buildFactorContext(@Nonnull StationSession s, @Nullable Store<EntityStore> store,
+            @Nonnull Player player, @Nonnull ActionResolver.ResolvedAction action, int cycleIndex) {
+        long sessionSeconds = Math.max(0L, (System.currentTimeMillis() - s.startedAtMs) / 1000L);
+        return FactorContext.builder()
+                .store(store)
+                .playerRef(s.playerRef)
+                .playerId(s.playerUuid)
+                .stationId(s.stationId)
+                .actionId(action.getActionId())
+                .sessionSeconds(sessionSeconds)
+                .cycleIndex(cycleIndex)
+                .toolPower(resolveHeldToolPower(player, action.getTool()))
+                .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
+                .progressionSkills(progressionSkills(action.getWork()))
                 .build();
     }
 
@@ -1260,13 +1329,20 @@ public final class StationService {
     }
 
     /**
-     * The tool-power multiplier for THIS cycle: resolves the station's EFFECTIVE gather type,
+     * The tool-power multiplier for THIS cycle: resolves {@code tool}'s EFFECTIVE gather type,
      * reads the held item's max matching {@code ItemToolSpec} power, and delegates the clamp
-     * formula to {@link StationToolScaling}. Returns 1.0 when the station authors no
+     * formula to {@link StationToolScaling}. Returns 1.0 when {@code tool} authors no
      * {@code Tool.XpScale}, or when neither gather type resolves.
+     *
+     * <p><b>FIX ROUND:</b> {@code tool} is the RESOLVED action's own {@code Tool} group ({@code
+     * action.getTool()}), not the station-level {@code asset.getTool()} - the same
+     * station-vs-action smell {@link #onCycleCompleted}/{@link #buildFactorContext} had. Harmless
+     * for every shipped station today (none override {@code Tool} per-action - the anvil's
+     * {@code convert}/{@code enhance} both inherit the station-level {@code Tool.Ids} gate, and
+     * neither authors an {@code XpScale}), but a future multi-action station with a per-action
+     * {@code Tool.XpScale} would silently read the wrong one without this fix.
      */
-    private static double resolveXpMultiplier(@Nonnull Player player, @Nonnull StationAsset asset) {
-        StationAsset.Tool tool = asset.getTool();
+    private static double resolveXpMultiplier(@Nonnull Player player, @Nullable StationAsset.Tool tool) {
         StationAsset.Tool.XpScale scale = tool != null ? tool.getXpScale() : null;
         if (scale == null) {
             return 1.0;

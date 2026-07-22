@@ -75,6 +75,14 @@ import com.ziggfreed.rpgstations.util.Log;
  * render, this is the first thing to add back), whether {@code Interactable}/{@code Interactions}
  * are load-bearing or dead weight, and whether the anchor needs a {@code Visible}-family
  * component for {@code TrackerUpdate} to pick it up promptly.
+ *
+ * <p><b>FIX ROUND (session-scoped, not persisted):</b> {@link #spawnAnchor} also marks the
+ * holder {@code NonSerialized} - the same {@code EntityStore.REGISTRY.getNonSerializedComponentType()}
+ * marker {@link StationCustodyDisplay} uses for its own transient prop entity. Without it the
+ * anchor is a plain serializable entity and survives an unclean exit (crash mid-session, or a
+ * chunk autosave then a crash) to the next restart as an orphaned, invisible, model-less entity
+ * at the station block with no reconcile path (only the clean-shutdown {@code stopAll -> stop ->
+ * despawn} funnel ever removes it).
  */
 final class StationEntityMountController {
 
@@ -97,6 +105,7 @@ final class StationEntityMountController {
             holder.ensureComponent(UUIDComponent.getComponentType());
             holder.ensureComponent(Interactable.getComponentType());
             holder.addComponent(Interactions.getComponentType(), new Interactions(Collections.emptyMap()));
+            holder.ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType());
             return commandBuffer.addEntity(holder, AddReason.SPAWN);
         } catch (Throwable t) {
             Log.warn("STATION entity-mount anchor spawn failed: " + t.getMessage(), t);
