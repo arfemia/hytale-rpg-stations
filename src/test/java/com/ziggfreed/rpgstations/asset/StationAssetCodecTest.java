@@ -465,4 +465,160 @@ public class StationAssetCodecTest {
         StationStep.OnConditionFail omitted = StationStep.OnConditionFail.of(null, null);
         assertEquals(StationStep.OnConditionFail.RESULT_FAIL, omitted.effectiveResult());
     }
+
+    // ==================== Puppet (round-4 puppet-presentation design, leg C schema) ====================
+
+    @Test
+    void puppet_decodesFullShape() throws Exception {
+        StationAsset a = decodeAsset("{ \"Puppet\": {"
+                + " \"Enabled\": true,"
+                + " \"Hide\": { \"Route\": \"Scale\" },"
+                + " \"Look\": { \"Source\": \"PlayerClone\" },"
+                + " \"Offset\": { \"X\": 0.1, \"Y\": 0.2, \"Z\": 0.3 },"
+                + " \"Yaw\": 90.0,"
+                + " \"Prop\": { \"Source\": \"MirrorHeld\", \"Slot\": \"Hotbar\" } } }");
+        Puppet p = a.getPuppet();
+        assertNotNull(p);
+        assertTrue(p.effectiveEnabled());
+        assertEquals(Puppet.HIDE_ROUTE_SCALE, p.getHide().effectiveRoute());
+        assertEquals(Puppet.LOOK_SOURCE_PLAYER_CLONE, p.getLook().effectiveSource());
+        assertEquals(0.1, p.getOffset().getX());
+        assertEquals(0.2, p.getOffset().getY());
+        assertEquals(0.3, p.getOffset().getZ());
+        assertEquals(90.0, p.effectiveYawDegrees());
+        assertEquals(Puppet.PROP_SOURCE_MIRROR_HELD, p.getProp().effectiveSource());
+        assertEquals(Puppet.PROP_SLOT_HOTBAR, p.getProp().effectiveSlot());
+    }
+
+    @Test
+    void puppet_omitted_decodesNull() throws Exception {
+        StationAsset a = decodeAsset("{ \"Identity\": { \"NameKey\": \"rpgstations.station.x.name\" } }");
+        assertNull(a.getPuppet());
+    }
+
+    @Test
+    void puppet_defaults_enabledTrueHideScaleLookPlayerClonePropMirrorHeldSlotHotbarYawZero() {
+        Puppet p = Puppet.of(null, null, null, null, null, null);
+        assertTrue(p.effectiveEnabled(), "Enabled defaults true when the group is present");
+        assertEquals(0.0, p.effectiveYawDegrees());
+        assertNull(p.getHide());
+        assertNull(p.getLook());
+        assertNull(p.getProp());
+    }
+
+    @Test
+    void puppetHide_unknownRoute_fallsBackToScale() {
+        Puppet.Hide hide = Puppet.Hide.of("Invisible", null);
+        assertEquals(Puppet.HIDE_ROUTE_SCALE, hide.effectiveRoute());
+    }
+
+    @Test
+    void puppetHide_effectRoute_decodesEffectId() {
+        Puppet.Hide hide = Puppet.Hide.of("Effect", "Portal_Teleport");
+        assertEquals(Puppet.HIDE_ROUTE_EFFECT, hide.effectiveRoute());
+        assertEquals("Portal_Teleport", hide.getEffectId());
+    }
+
+    @Test
+    void puppetLook_unknownSource_fallsBackToPlayerClone() {
+        Puppet.Look look = Puppet.Look.of("Golem", null, null);
+        assertEquals(Puppet.LOOK_SOURCE_PLAYER_CLONE, look.effectiveSource());
+    }
+
+    @Test
+    void puppetLook_modelSource_decodesModelIdAndFallback() {
+        Puppet.Look look = Puppet.Look.of("Model", "NPC_Golem", "NPC_Generic_Worker");
+        assertEquals(Puppet.LOOK_SOURCE_MODEL, look.effectiveSource());
+        assertEquals("NPC_Golem", look.getModelId());
+        assertEquals("NPC_Generic_Worker", look.getFallbackModelId());
+    }
+
+    @Test
+    void puppetProp_defaultsAndUnknownFallbacks() {
+        Puppet.Prop unset = Puppet.Prop.of(null, null, null);
+        assertEquals(Puppet.PROP_SOURCE_MIRROR_HELD, unset.effectiveSource());
+        assertEquals(Puppet.PROP_SLOT_HOTBAR, unset.effectiveSlot());
+
+        Puppet.Prop unknown = Puppet.Prop.of("Wardrobe", null, "OffHand");
+        assertEquals(Puppet.PROP_SOURCE_MIRROR_HELD, unknown.effectiveSource(), "unknown Source falls back to MirrorHeld");
+        assertEquals(Puppet.PROP_SLOT_HOTBAR, unknown.effectiveSlot(), "unknown Slot falls back to Hotbar");
+
+        Puppet.Prop itemId = Puppet.Prop.of("ItemId", "Tool_Hammer_Iron", "Utility");
+        assertEquals(Puppet.PROP_SOURCE_ITEM_ID, itemId.effectiveSource());
+        assertEquals("Tool_Hammer_Iron", itemId.getItemId());
+        assertEquals(Puppet.PROP_SLOT_UTILITY, itemId.effectiveSlot());
+    }
+
+    @Test
+    void puppet_parentInheritsWholesaleOnOmit_ownFieldWins_siblingLeafInherit() throws Exception {
+        String parentJson = "{ \"Puppet\": { \"Enabled\": true, \"Hide\": { \"Route\": \"Scale\" },"
+                + " \"Look\": { \"Source\": \"PlayerClone\" } } }";
+        StationAsset parent = decodeWithParent(parentJson, null, "puppet_parent", null);
+        assertTrue(parent.getPuppet().effectiveEnabled());
+
+        StationAsset childOmitting = decodeWithParent("{}", parent, "puppet_child_omit", "puppet_parent");
+        assertNotNull(childOmitting.getPuppet(), "Puppet inherits wholesale on omit");
+        assertEquals(Puppet.HIDE_ROUTE_SCALE, childOmitting.getPuppet().getHide().effectiveRoute());
+
+        // Every leaf, at every nesting depth, is appendInherited (same mechanism the Hold.Mount
+        // sibling-leaf tests above exercise): a child authoring ONLY Puppet.Enabled still inherits
+        // the parent's Hide/Look sibling leaves wholesale, since the child's own Puppet JSON never
+        // names them.
+        StationAsset childDisabling = decodeWithParent("{ \"Puppet\": { \"Enabled\": false } }",
+                parent, "puppet_child_disable", "puppet_parent");
+        assertFalse(childDisabling.getPuppet().effectiveEnabled(), "own leaf wins");
+        assertNotNull(childDisabling.getPuppet().getHide(), "sibling leaf (Hide) inherits from parent");
+        assertEquals(Puppet.HIDE_ROUTE_SCALE, childDisabling.getPuppet().getHide().effectiveRoute(),
+                "sibling leaf inherits");
+    }
+
+    @Test
+    void puppetHide_siblingLeafInherit() throws Exception {
+        StationAsset parent = decodeWithParent(
+                "{ \"Puppet\": { \"Hide\": { \"Route\": \"Effect\", \"EffectId\": \"Portal_Teleport\" } } }",
+                null, "puppethide_parent", null);
+        StationAsset child = decodeWithParent("{ \"Puppet\": { \"Hide\": { \"Route\": \"Scale\" } } }",
+                parent, "puppethide_child", "puppethide_parent");
+        assertEquals(Puppet.HIDE_ROUTE_SCALE, child.getPuppet().getHide().effectiveRoute(), "own leaf wins");
+        assertEquals("Portal_Teleport", child.getPuppet().getHide().getEffectId(), "sibling leaf inherits");
+    }
+
+    // ==================== Actions.Puppet (whole-group override) ====================
+
+    @Test
+    void actionsPuppet_decodesPerActionOverride() throws Exception {
+        StationAsset a = decodeAsset("{ \"Puppet\": { \"Enabled\": true, \"Hide\": { \"Route\": \"Scale\" } },"
+                + " \"Actions\": { \"enhance\": { \"Puppet\": { \"Enabled\": true,"
+                + "   \"Look\": { \"Source\": \"Model\", \"ModelId\": \"NPC_Blacksmith\" } } } } }");
+        assertEquals(Puppet.HIDE_ROUTE_SCALE, a.getPuppet().getHide().effectiveRoute());
+        ActionDef enhance = a.getActions().get("enhance");
+        assertNotNull(enhance.getPuppet());
+        assertEquals("NPC_Blacksmith", enhance.getPuppet().getLook().getModelId());
+        // ActionResolver.resolve is the RUNTIME whole-group-override choke point (a non-null
+        // ActionDef.Puppet replaces the station-level group wholesale there) - see
+        // station.ActionResolverTest for that resolution behavior; this test only exercises decode.
+    }
+
+    // ==================== StationStep.Puppet (per-step small override) ====================
+
+    @Test
+    void stationStepPuppet_decodesClipAndProp() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": { \"ritual\": { \"Steps\": ["
+                + " { \"Id\": \"strike\", \"Type\": \"Wait\", \"Wait\": { \"DurationMs\": 400 },"
+                + "   \"Puppet\": { \"Clip\": \"Hammer_Strike\","
+                + "     \"Prop\": { \"Source\": \"ItemId\", \"ItemId\": \"Tool_Hammer_Iron\" } } } ] } } }");
+        StationStep step = a.getActions().get("ritual").getSteps()[0];
+        StationStep.PuppetOverride override = step.getPuppet();
+        assertNotNull(override);
+        assertEquals("Hammer_Strike", override.getClip());
+        assertEquals(Puppet.PROP_SOURCE_ITEM_ID, override.getProp().effectiveSource());
+        assertEquals("Tool_Hammer_Iron", override.getProp().getItemId());
+    }
+
+    @Test
+    void stationStepPuppet_omitted_decodesNull() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": { \"ritual\": { \"Steps\": ["
+                + " { \"Id\": \"strike\", \"Type\": \"Wait\", \"Wait\": { \"DurationMs\": 400 } } ] } } }");
+        assertNull(a.getActions().get("ritual").getSteps()[0].getPuppet());
+    }
 }

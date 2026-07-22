@@ -32,6 +32,7 @@ public final class ActionDef {
     @Nullable protected String label;
     @Nullable protected ActionInput input;
     @Nullable protected Custody custody;
+    @Nullable protected Puppet puppet;
     @Nullable protected StationAsset.Work work;
     @Nullable protected StationAsset.Recipe recipe;
     @Nullable protected StationAsset.Tool tool;
@@ -51,6 +52,8 @@ public final class ActionDef {
                     (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input).add()
             .appendInherited(new KeyedCodec<>("Custody", Custody.CODEC, false),
                     (o, v) -> o.custody = v, o -> o.custody, (o, p) -> o.custody = p.custody).add()
+            .appendInherited(new KeyedCodec<>("Puppet", Puppet.CODEC, false),
+                    (o, v) -> o.puppet = v, o -> o.puppet, (o, p) -> o.puppet = p.puppet).add()
             .appendInherited(new KeyedCodec<>("Work", StationAsset.Work.CODEC, false),
                     (o, v) -> o.work = v, o -> o.work, (o, p) -> o.work = p.work).add()
             .appendInherited(new KeyedCodec<>("Recipe", StationAsset.Recipe.CODEC, false),
@@ -114,6 +117,13 @@ public final class ActionDef {
         return this;
     }
 
+    /** Java-side test/fixture helper; not part of any codec fold. */
+    @Nonnull
+    public ActionDef withPuppet(@Nullable Puppet puppet) {
+        this.puppet = puppet;
+        return this;
+    }
+
     @Nullable
     public String getLabel() {
         return label;
@@ -127,6 +137,12 @@ public final class ActionDef {
     @Nullable
     public Custody getCustody() {
         return custody;
+    }
+
+    /** The puppet presentation route override (round-4 design); null = inherits the station's own group wholesale. */
+    @Nullable
+    public Puppet getPuppet() {
+        return puppet;
     }
 
     @Nullable

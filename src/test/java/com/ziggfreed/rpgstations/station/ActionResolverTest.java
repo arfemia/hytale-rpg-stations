@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
@@ -100,6 +101,37 @@ public class ActionResolverTest {
         ActionResolver.ResolvedAction resolved = ActionResolver.resolve(a, "does-not-exist");
         assertSame(stationWork, resolved.getWork());
         assertEquals("does-not-exist", resolved.getActionId());
+    }
+
+    // ==================== resolve (Puppet, round-4 whole-group override) ====================
+
+    @Test
+    void resolve_actionOverridesPuppet_ownGroupWinsWholesale() {
+        Puppet stationPuppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        Puppet actionPuppet = Puppet.of(false, null, null, null, null, null);
+        ActionDef def = new ActionDef().withPuppet(actionPuppet);
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("enhance", def);
+        StationAsset a = new StationAsset().withPuppet(stationPuppet);
+        a.withActions(actions);
+
+        ActionResolver.ResolvedAction resolved = ActionResolver.resolve(a, "enhance");
+        assertSame(actionPuppet, resolved.getPuppet(), "the action's own Puppet REPLACES the station-level default wholesale");
+    }
+
+    @Test
+    void resolve_actionOmitsPuppet_inheritsTheStationDefault() {
+        Puppet stationPuppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        // "enhance" authors ONLY an Input matcher - Puppet must fall through to the station.
+        ActionDef def = ActionDef.of(null, ActionInput.of(null, null, null, "Weapon"),
+                null, null, null, null, null, null, null, null, null, null, null);
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("enhance", def);
+        StationAsset a = new StationAsset().withPuppet(stationPuppet);
+        a.withActions(actions);
+
+        ActionResolver.ResolvedAction resolved = ActionResolver.resolve(a, "enhance");
+        assertSame(stationPuppet, resolved.getPuppet(), "Puppet omitted on the action - falls back to the station's own");
     }
 
     // ==================== selectAction (diegetic, first match wins) ====================

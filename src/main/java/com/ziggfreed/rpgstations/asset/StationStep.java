@@ -17,9 +17,12 @@ import com.hypixel.hytale.codec.codecs.map.MapCodec;
  * mirroring the MMO's {@code AbilityAsset.EffectStep}: a {@link #type} discriminator plus, per
  * type, ONE nested group carrying that step's own fields (orthogonal groups, never a flat
  * prefixed-key soup). Every base field ({@link #id}/{@link #type}/{@link #conditions}/
- * {@link #onConditionFail}/{@link #presentation}) applies to EVERY step type; {@link #id} is
- * unique WITHIN one action's {@code Steps} array (the {@code station.step} engine's resume/jump
- * bookkeeping keys off it - {@code StationValidator} flags a duplicate).
+ * {@link #onConditionFail}/{@link #presentation}/{@link #puppet}) applies to EVERY step type;
+ * {@link #id} is unique WITHIN one action's {@code Steps} array (the {@code station.step}
+ * engine's resume/jump bookkeeping keys off it - {@code StationValidator} flags a duplicate).
+ * {@link #puppet} (round-4 puppet-presentation design, {@link PuppetOverride}) is the ONE base
+ * field NOT tied to {@link #type} the same way {@link #consume}/{@link #produce}/etc. are - it is
+ * itself already a small, type-independent override group.
  *
  * <p><b>Branch is NOT a step type</b> (design 9.3): a step authors {@link OnConditionFail#getGoto()}
  * to jump, via the reshaped {@code cast.step} kernel's {@code StepSemantics#nextIndex} hook - no
@@ -58,6 +61,7 @@ public final class StationStep {
     @Nullable protected RollGroup roll;
     @Nullable protected CommandGroup command;
     @Nullable protected Stamp stamp;
+    @Nullable protected PuppetOverride puppet;
 
     public static final BuilderCodec<StationStep> CODEC = BuilderCodec.builder(StationStep.class, StationStep::new)
             .appendInherited(new KeyedCodec<>("Id", Codec.STRING, false),
@@ -83,6 +87,8 @@ public final class StationStep {
                     (o, v) -> o.command = v, o -> o.command, (o, p) -> o.command = p.command).add()
             .appendInherited(new KeyedCodec<>("Stamp", Stamp.CODEC, false),
                     (o, v) -> o.stamp = v, o -> o.stamp, (o, p) -> o.stamp = p.stamp).add()
+            .appendInherited(new KeyedCodec<>("Puppet", PuppetOverride.CODEC, false),
+                    (o, v) -> o.puppet = v, o -> o.puppet, (o, p) -> o.puppet = p.puppet).add()
             .build();
 
     public StationStep() {
@@ -191,6 +197,27 @@ public final class StationStep {
     @Nonnull
     public StationStep withStamp(@Nonnull Stamp v) {
         this.stamp = v;
+        return this;
+    }
+
+    /**
+     * The per-step puppet override (round-4 design, section 3.1 - "the new per step / station
+     * knob"): a SMALL group, {@code {Clip?, Prop?}}, NOT tied to {@link #type} - it applies to
+     * ANY step (a ritual's distinct beats each want their own puppet pose/prop), unlike every
+     * other nested group here which is exclusive to its own {@link #type}. Null = the step
+     * inherits the resolved action's default clip ({@link StationAsset.Animation}) and prop
+     * ({@link Puppet#getProp()}). Meaningless (never played) when the resolved action's own
+     * {@link Puppet} is not active - {@code station.StationValidator}'s
+     * {@code PUPPET_STEP_OVERRIDE_WITHOUT_PUPPET} flags that authoring mistake.
+     */
+    @Nullable
+    public PuppetOverride getPuppet() {
+        return puppet;
+    }
+
+    @Nonnull
+    public StationStep withPuppet(@Nonnull PuppetOverride v) {
+        this.puppet = v;
         return this;
     }
 
@@ -860,6 +887,46 @@ public final class StationStep {
                     return repeatCostMultiplier;
                 }
             }
+        }
+    }
+
+    /**
+     * The per-step puppet override (round-4 puppet-presentation design, section 3.1/3.6): a
+     * SMALL group tweaking only the moment-to-moment {@link #clip} + {@link #prop} for THIS step -
+     * never the session-scoped hide/look/spawn knobs, which live on the station/action-level
+     * {@link Puppet} group and are set once at engage. {@link #prop} reuses {@link Puppet.Prop}'s
+     * EXACT codec (DRY - one prop shape, whether authored at the action level or per step).
+     */
+    public static final class PuppetOverride {
+        @Nullable protected String clip;
+        @Nullable protected Puppet.Prop prop;
+
+        public static final BuilderCodec<PuppetOverride> CODEC =
+                BuilderCodec.builder(PuppetOverride.class, PuppetOverride::new)
+                        .appendInherited(new KeyedCodec<>("Clip", Codec.STRING, false),
+                                (o, v) -> o.clip = v, o -> o.clip, (o, p) -> o.clip = p.clip).add()
+                        .appendInherited(new KeyedCodec<>("Prop", Puppet.Prop.CODEC, false),
+                                (o, v) -> o.prop = v, o -> o.prop, (o, p) -> o.prop = p.prop).add()
+                        .build();
+
+        @Nonnull
+        public static PuppetOverride of(@Nullable String clip, @Nullable Puppet.Prop prop) {
+            PuppetOverride o = new PuppetOverride();
+            o.clip = clip;
+            o.prop = prop;
+            return o;
+        }
+
+        /** The puppet clip id for this beat (e.g. a ritual's strike/quench/stamp poses); null = inherit the action's default clip. */
+        @Nullable
+        public String getClip() {
+            return clip;
+        }
+
+        /** The puppet's held prop for this beat; null = inherit the action's default {@link Puppet#getProp()}. */
+        @Nullable
+        public Puppet.Prop getProp() {
+            return prop;
         }
     }
 }

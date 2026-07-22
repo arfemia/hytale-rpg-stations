@@ -21,6 +21,7 @@ import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
+import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
@@ -71,7 +72,8 @@ public final class StationValidator {
                     StationValidator::dropListKnownLive,
                     FactorRegistryImpl.getInstance()::isKnown,
                     id -> LootableCatalog.getInstance().get(id) != null,
-                    id -> RollPoolCatalog.getInstance().get(id) != null));
+                    id -> RollPoolCatalog.getInstance().get(id) != null,
+                    StationValidator::modelKnownLive));
             out.addAll(validateLootables(LootableCatalog.getInstance().all().values(),
                     StationValidator::dropListKnownLive, FactorRegistryImpl.getInstance()::isKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(),
@@ -101,7 +103,8 @@ public final class StationValidator {
     public static List<Finding> validateStructural() {
         try {
             List<Finding> out = new ArrayList<>(validate(StationCatalog.getInstance().all().values(),
-                    ALWAYS_KNOWN, ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown, ALWAYS_KNOWN, ALWAYS_KNOWN));
+                    ALWAYS_KNOWN, ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown, ALWAYS_KNOWN, ALWAYS_KNOWN,
+                    ALWAYS_KNOWN));
             out.addAll(validateLootables(LootableCatalog.getInstance().all().values(),
                     ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), ALWAYS_KNOWN));
@@ -119,6 +122,20 @@ public final class StationValidator {
     private static boolean dropListKnownLive(@Nonnull String dropListId) {
         try {
             return ItemDropList.getAssetMap().getAsset(dropListId) != null;
+        } catch (Throwable t) {
+            return true; // a lookup failure is not evidence the id is wrong - don't flag it
+        }
+    }
+
+    /**
+     * Live {@code ModelAsset} existence check (round-4 puppet design's {@code Puppet.Look.ModelId}
+     * reference), over {@code ziggfreed-common}'s {@code entity.PlayerModelService#modelExists}
+     * (the same live asset-map lookup {@code Hide.Route: "ModelSwap"}'s predecessor design used -
+     * never throws, fails OPEN here to match {@link #dropListKnownLive}'s stance).
+     */
+    private static boolean modelKnownLive(@Nonnull String modelId) {
+        try {
+            return com.ziggfreed.common.entity.PlayerModelService.modelExists(modelId);
         } catch (Throwable t) {
             return true; // a lookup failure is not evidence the id is wrong - don't flag it
         }
@@ -161,14 +178,14 @@ public final class StationValidator {
                                          @Nonnull Predicate<String> langKeyKnown,
                                          @Nonnull Predicate<String> dropListKnown,
                                          @Nonnull Predicate<String> factorKnown) {
-        return validate(stations, langKeyKnown, dropListKnown, factorKnown, id -> true, id -> true);
+        return validate(stations, langKeyKnown, dropListKnown, factorKnown, id -> true, id -> true, id -> true);
     }
 
     /**
-     * Singleton-free core, full form - {@code lootableKnown} answers "does this LootableAsset id
-     * exist"; {@code rollPoolKnown} (phase 2 leg E) answers "does this RollPool id exist" - a
-     * caller that does not care about {@code Stamp.Stats.Pool} reference checks defaults it to
-     * always-known via the 4-arg convenience overload above.
+     * Singleton-free core, 6-arg convenience - {@code lootableKnown} answers "does this
+     * LootableAsset id exist"; {@code rollPoolKnown} (phase 2 leg E) answers "does this RollPool
+     * id exist"; {@code modelKnown} (round-4 puppet design) defaults to always-known here, for a
+     * caller that does not care about {@code Puppet.Look.ModelId} reference checks.
      */
     @Nonnull
     public static List<Finding> validate(@Nonnull Collection<StationAsset> stations,
@@ -177,6 +194,22 @@ public final class StationValidator {
                                          @Nonnull Predicate<String> factorKnown,
                                          @Nonnull Predicate<String> lootableKnown,
                                          @Nonnull Predicate<String> rollPoolKnown) {
+        return validate(stations, langKeyKnown, dropListKnown, factorKnown, lootableKnown, rollPoolKnown, id -> true);
+    }
+
+    /**
+     * Singleton-free core, full form - {@code modelKnown} (round-4 puppet-presentation design)
+     * answers "does this ModelAsset id exist" for a {@code Puppet.Look.Source: "Model"}'s
+     * {@code ModelId} reference (warn-not-error, same stance as every other reference check here).
+     */
+    @Nonnull
+    public static List<Finding> validate(@Nonnull Collection<StationAsset> stations,
+                                         @Nonnull Predicate<String> langKeyKnown,
+                                         @Nonnull Predicate<String> dropListKnown,
+                                         @Nonnull Predicate<String> factorKnown,
+                                         @Nonnull Predicate<String> lootableKnown,
+                                         @Nonnull Predicate<String> rollPoolKnown,
+                                         @Nonnull Predicate<String> modelKnown) {
         List<Finding> out = new ArrayList<>();
         for (StationAsset a : stations) {
             if (a == null) {
@@ -198,7 +231,8 @@ public final class StationValidator {
             checkCompletion(a, id, label, out);
             checkFlairs(a, id, label, out);
             checkCustody(a.getCustody(), a.getRecipe(), label, id, out);
-            checkActions(a, id, label, dropListKnown, factorKnown, lootableKnown, rollPoolKnown, out);
+            checkPuppet(a.getPuppet(), a.getHold(), label, id, modelKnown, out);
+            checkActions(a, id, label, dropListKnown, factorKnown, lootableKnown, rollPoolKnown, modelKnown, out);
         }
         return out;
     }
@@ -230,6 +264,125 @@ public final class StationValidator {
             out.add(Finding.warning(DOMAIN, "CUSTODY_DISPLAY_NON_POSITIVE_SCALE",
                     label + " Custody.Display.Scale is non-positive (" + display.getScale() + ") - falls back to "
                             + "the 1.0 default", id));
+        }
+    }
+
+    /**
+     * The round-4 puppet-presentation route (design {@code rpg-stations-puppet-presentation
+     * -design-2026-07-22.md} section 3.7): every finding here is a WARNING or INFO (advisory),
+     * never an ERROR, per the maintainer's "validator warns on odd combinations, never blocks."
+     * {@code hold} is the RESOLVED {@code Hold} group for the same scope {@code puppet} resolves
+     * at (the station's own {@code Hold} at station scope, or the action's own/inherited
+     * {@code Hold} when called from {@code checkActions}).
+     */
+    private static void checkPuppet(@Nullable Puppet puppet, @Nullable StationAsset.Hold hold,
+            @Nonnull String label, @Nonnull String id, @Nonnull Predicate<String> modelKnown,
+            @Nonnull List<Finding> out) {
+        if (puppet == null) {
+            return;
+        }
+        boolean enabled = puppet.effectiveEnabled();
+
+        Puppet.Hide hide = puppet.getHide();
+        String effectiveRoute = hide != null ? hide.effectiveRoute() : Puppet.HIDE_ROUTE_SCALE;
+        if (hide != null) {
+            String rawRoute = hide.getRoute();
+            if (rawRoute != null && !rawRoute.isBlank() && !Puppet.HIDE_ROUTE_SCALE.equalsIgnoreCase(rawRoute)
+                    && !Puppet.HIDE_ROUTE_EFFECT.equalsIgnoreCase(rawRoute)
+                    && !Puppet.HIDE_ROUTE_NONE.equalsIgnoreCase(rawRoute)) {
+                out.add(Finding.warning(DOMAIN, "UNKNOWN_PUPPET_HIDE_ROUTE",
+                        label + " Puppet.Hide.Route '" + rawRoute
+                                + "' is not one of Scale/Effect/None - falls back to Scale at runtime", id));
+            }
+            if (Puppet.HIDE_ROUTE_EFFECT.equalsIgnoreCase(effectiveRoute)
+                    && (hide.getEffectId() == null || hide.getEffectId().isBlank())) {
+                out.add(Finding.warning(DOMAIN, "PUPPET_HIDE_EFFECT_MISSING_ID",
+                        label + " Puppet.Hide.Route is \"Effect\" but EffectId is blank - the route is inert"
+                                + " (Effect is schema-reserved, unimplemented this leg)", id));
+            }
+        }
+        if (enabled && Puppet.HIDE_ROUTE_NONE.equalsIgnoreCase(effectiveRoute)) {
+            out.add(Finding.warning(DOMAIN, "PUPPET_WITHOUT_HIDE",
+                    label + " authors an active Puppet with Hide.Route \"None\" - the real player AND the"
+                            + " puppet both render (a deliberate two-worker look, or an authoring oversight)", id));
+        }
+        if (!enabled && hide != null && !Puppet.HIDE_ROUTE_NONE.equalsIgnoreCase(effectiveRoute)) {
+            out.add(Finding.warning(DOMAIN, "HIDE_WITHOUT_PUPPET",
+                    label + " authors Puppet.Hide.Route \"" + effectiveRoute + "\" but Puppet.Enabled is false -"
+                            + " the hide route never applies (Enabled gates the whole group)", id));
+        }
+
+        Puppet.Look look = puppet.getLook();
+        if (look != null) {
+            String rawSource = look.getSource();
+            if (rawSource != null && !rawSource.isBlank() && !Puppet.LOOK_SOURCE_PLAYER_CLONE.equalsIgnoreCase(rawSource)
+                    && !Puppet.LOOK_SOURCE_MODEL.equalsIgnoreCase(rawSource)) {
+                out.add(Finding.warning(DOMAIN, "UNKNOWN_PUPPET_LOOK_SOURCE",
+                        label + " Puppet.Look.Source '" + rawSource
+                                + "' is not one of PlayerClone/Model - falls back to PlayerClone at runtime", id));
+            }
+            if (Puppet.LOOK_SOURCE_MODEL.equalsIgnoreCase(look.effectiveSource())) {
+                String modelId = look.getModelId();
+                boolean modelIdBlank = modelId == null || modelId.isBlank();
+                String fallback = look.getFallbackModelId();
+                boolean fallbackAuthored = fallback != null && !fallback.isBlank();
+                if (!fallbackAuthored && (modelIdBlank || !modelKnown.test(modelId))) {
+                    out.add(Finding.warning(DOMAIN, "PUPPET_LOOK_MODEL_UNKNOWN",
+                            label + " Puppet.Look.Source is \"Model\" but ModelId "
+                                    + (modelIdBlank ? "is blank" : "'" + modelId + "' is not a known ModelAsset")
+                                    + " and no FallbackModelId is authored - falls back to the default rig at runtime",
+                            id));
+                }
+            }
+        }
+
+        checkPuppetProp(puppet.getProp(), label + " Puppet", id, out);
+
+        if (enabled) {
+            StationAsset.Hold.Mount mount = hold != null ? hold.getMount() : null;
+            boolean effectiveMovementLock = hold == null || hold.getMovementLock() == null || hold.getMovementLock();
+            if (mount == null && !effectiveMovementLock) {
+                out.add(Finding.warning(DOMAIN, "PUPPET_WITHOUT_HOLD",
+                        label + " authors an active Puppet but the resolved Hold has neither a Mount nor an"
+                                + " effective MovementLock - the player could walk away from their own puppet", id));
+            }
+            if (mount != null && !mount.isEntitySurface()) {
+                out.add(Finding.info(DOMAIN, "PUPPET_SEAT_MOUNT_ADVISORY",
+                        label + " layers an active Puppet on a Block (seat) mount - the puppet supersedes the"
+                                + " seat's Action-slot swing routing entirely (design section 2), a genuine"
+                                + " simplification, not a conflict", id));
+            }
+        }
+    }
+
+    /**
+     * The shared {@link Puppet.Prop}/{@code StationStep.PuppetOverride.Prop} core (DRY - one prop
+     * shape, one check, whether authored at the group level or per step).
+     */
+    private static void checkPuppetProp(@Nullable Puppet.Prop prop, @Nonnull String label, @Nonnull String id,
+            @Nonnull List<Finding> out) {
+        if (prop == null) {
+            return;
+        }
+        String rawSource = prop.getSource();
+        if (rawSource != null && !rawSource.isBlank() && !Puppet.PROP_SOURCE_MIRROR_HELD.equalsIgnoreCase(rawSource)
+                && !Puppet.PROP_SOURCE_ITEM_ID.equalsIgnoreCase(rawSource)
+                && !Puppet.PROP_SOURCE_NONE.equalsIgnoreCase(rawSource)) {
+            out.add(Finding.warning(DOMAIN, "UNKNOWN_PUPPET_PROP_SOURCE",
+                    label + ".Prop.Source '" + rawSource
+                            + "' is not one of MirrorHeld/ItemId/None - falls back to MirrorHeld at runtime", id));
+        }
+        if (Puppet.PROP_SOURCE_ITEM_ID.equalsIgnoreCase(prop.effectiveSource())
+                && (prop.getItemId() == null || prop.getItemId().isBlank())) {
+            out.add(Finding.warning(DOMAIN, "PUPPET_PROP_ITEM_ID_MISSING",
+                    label + ".Prop.Source is \"ItemId\" but Prop.ItemId is blank - the puppet holds nothing", id));
+        }
+        String rawSlot = prop.getSlot();
+        if (rawSlot != null && !rawSlot.isBlank() && !Puppet.PROP_SLOT_HOTBAR.equalsIgnoreCase(rawSlot)
+                && !Puppet.PROP_SLOT_UTILITY.equalsIgnoreCase(rawSlot)) {
+            out.add(Finding.warning(DOMAIN, "UNKNOWN_PUPPET_PROP_SLOT",
+                    label + ".Prop.Slot '" + rawSlot
+                            + "' is not one of Hotbar/Utility - falls back to Hotbar at runtime", id));
         }
     }
 
@@ -946,7 +1099,7 @@ public final class StationValidator {
     private static void checkActions(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
             @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
             @Nonnull Predicate<String> lootableKnown, @Nonnull Predicate<String> rollPoolKnown,
-            @Nonnull List<Finding> out) {
+            @Nonnull Predicate<String> modelKnown, @Nonnull List<Finding> out) {
         Map<String, ActionDef> actions = a.getActions();
         if (actions == null || actions.isEmpty()) {
             return;
@@ -1008,9 +1161,16 @@ public final class StationValidator {
                 StationAsset.Recipe effectiveRecipe = def.getRecipe() != null ? def.getRecipe() : a.getRecipe();
                 checkCustody(def.getCustody(), effectiveRecipe, actionLabel, id, out);
             }
+            Puppet resolvedPuppet = def.getPuppet() != null ? def.getPuppet() : a.getPuppet();
+            if (def.getPuppet() != null) {
+                StationAsset.Hold effectiveHold = def.getHold() != null ? def.getHold() : a.getHold();
+                checkPuppet(def.getPuppet(), effectiveHold, actionLabel, id, modelKnown, out);
+            }
             StationStep[] steps = def.getSteps();
             if (steps != null && steps.length > 0) {
-                checkSteps(steps, actionLabel, id, dropListKnown, factorKnown, lootableKnown, rollPoolKnown, out);
+                boolean puppetActive = resolvedPuppet != null && resolvedPuppet.effectiveEnabled();
+                checkSteps(steps, actionLabel, id, dropListKnown, factorKnown, lootableKnown, rollPoolKnown,
+                        puppetActive, out);
             }
         }
     }
@@ -1027,12 +1187,15 @@ public final class StationValidator {
      * authoring only the unimplemented {@code Beats} one), an {@code OnConditionFail.Goto}
      * referencing an unknown sibling step id, a {@code Roll} step's inline {@link Roll}s through
      * the SAME shared {@link #checkRoll} core every other Roll site uses, and (phase 2 leg E) a
-     * {@code Stamp} step's own coverage - see the {@code Stamp}-specific checks below.
+     * {@code Stamp} step's own coverage - see the {@code Stamp}-specific checks below. Also (round-4
+     * puppet design) a per-step {@code Puppet} override (unplayed-leaf coverage) - {@code
+     * puppetActive} is the resolved action's OWN {@link Puppet#effectiveEnabled()}, computed once
+     * by the caller ({@link #checkActions}) rather than re-derived per step.
      */
     private static void checkSteps(@Nonnull StationStep[] steps,
             @Nonnull String actionLabel, @Nonnull String id, @Nonnull Predicate<String> dropListKnown,
             @Nonnull Predicate<String> factorKnown, @Nonnull Predicate<String> lootableKnown,
-            @Nonnull Predicate<String> rollPoolKnown, @Nonnull List<Finding> out) {
+            @Nonnull Predicate<String> rollPoolKnown, boolean puppetActive, @Nonnull List<Finding> out) {
         Set<String> seenIds = new HashSet<>();
         Set<String> knownIds = new HashSet<>();
         for (StationStep s : steps) {
@@ -1066,6 +1229,15 @@ public final class StationValidator {
             if (gotoId != null && !gotoId.isBlank() && !knownIds.contains(gotoId.toLowerCase(Locale.ROOT))) {
                 out.add(Finding.warning(DOMAIN, "UNKNOWN_GOTO_TARGET",
                         stepLabel + ".OnConditionFail.Goto references unknown step id '" + gotoId + "'", id));
+            }
+            StationStep.PuppetOverride puppetOverride = step.getPuppet();
+            if (puppetOverride != null) {
+                if (!puppetActive) {
+                    out.add(Finding.warning(DOMAIN, "PUPPET_STEP_OVERRIDE_WITHOUT_PUPPET",
+                            stepLabel + " authors a Puppet override (Clip/Prop) but the resolved action's"
+                                    + " Puppet group is not active - this override never plays", id));
+                }
+                checkPuppetProp(puppetOverride.getProp(), stepLabel + ".Puppet", id, out);
             }
             if (StationStep.TYPE_CONSUME.equalsIgnoreCase(step.getType())) {
                 StationStep.Consume consume = step.getConsume();

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -12,10 +13,12 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
+import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Presentation;
+import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
@@ -39,6 +42,8 @@ public class StationValidatorTest {
     private static final Predicate<String> ANY_DROP = id -> true;
     private static final Predicate<String> ANY_FACTOR = id -> true;
     private static final Predicate<String> NO_FACTOR = id -> false;
+    private static final Predicate<String> ANY_MODEL = id -> true;
+    private static final Predicate<String> NO_MODEL = id -> false;
 
     private static Set<String> codes(List<Finding> findings) {
         return findings.stream().map(Finding::code).collect(Collectors.toSet());
@@ -670,6 +675,191 @@ public class StationValidatorTest {
                 StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Entity", entity)),
                 null, null, null, null, null);
         assertFalse(codes(validate(a)).contains("MOUNT_STEERABLE_UNTESTED"));
+    }
+
+    // ==================== Puppet (round-4 puppet-presentation design) ====================
+
+    private static StationAsset puppetStation(String id, Puppet puppet, StationAsset.Hold hold) {
+        return StationAsset.of(id,
+                StationAsset.Identity.of("rpgstations.station." + id + ".name", null, null),
+                null, oakRecipe(), hold, null, null, null, null, null)
+                .withPuppet(puppet);
+    }
+
+    @Test
+    void validPuppet_producesNoFindings() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null),
+                Puppet.Look.of(Puppet.LOOK_SOURCE_PLAYER_CLONE, null, null), null, null,
+                Puppet.Prop.of(Puppet.PROP_SOURCE_MIRROR_HELD, null, null));
+        StationAsset a = puppetStation("validpuppet", puppet,
+                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Entity", null)));
+        assertTrue(validate(a).isEmpty(), "a fully valid active puppet is clean, got: " + codes(validate(a)));
+    }
+
+    @Test
+    void puppetWithoutHide_flagged() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_NONE, null), null, null, null, null);
+        StationAsset a = puppetStation("puppetnohide", puppet,
+                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Entity", null)));
+        assertTrue(codes(validate(a)).contains("PUPPET_WITHOUT_HIDE"));
+    }
+
+    @Test
+    void hideWithoutPuppet_flagged() {
+        Puppet puppet = Puppet.of(false, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        StationAsset a = puppetStation("hidenopuppet", puppet, null);
+        assertTrue(codes(validate(a)).contains("HIDE_WITHOUT_PUPPET"));
+    }
+
+    @Test
+    void puppetWithoutHold_flagged() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        StationAsset a = puppetStation("puppetnohold", puppet, StationAsset.Hold.of(false, null, null, null));
+        assertTrue(codes(validate(a)).contains("PUPPET_WITHOUT_HOLD"));
+    }
+
+    @Test
+    void puppetWithHold_movementLockDefaultsTrueWhenHoldOmitted_noFinding() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        // Hold omitted entirely - StationService's own reader default still resolves MovementLock
+        // true, so the player is never left un-held.
+        StationAsset a = puppetStation("puppetdefaulthold", puppet, null);
+        assertFalse(codes(validate(a)).contains("PUPPET_WITHOUT_HOLD"));
+    }
+
+    @Test
+    void unknownPuppetHideRoute_flagged() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of("Invisible", null), null, null, null, null);
+        StationAsset a = puppetStation("unknownhideroute", puppet, null);
+        assertTrue(codes(validate(a)).contains("UNKNOWN_PUPPET_HIDE_ROUTE"));
+    }
+
+    @Test
+    void puppetHideEffectMissingId_flagged() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_EFFECT, null), null, null, null, null);
+        StationAsset a = puppetStation("hideeffectnoid", puppet, null);
+        assertTrue(codes(validate(a)).contains("PUPPET_HIDE_EFFECT_MISSING_ID"));
+    }
+
+    @Test
+    void puppetHideEffect_withId_noFinding() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_EFFECT, "Portal_Teleport"), null, null, null, null);
+        StationAsset a = puppetStation("hideeffectwithid", puppet, null);
+        assertFalse(codes(validate(a)).contains("PUPPET_HIDE_EFFECT_MISSING_ID"));
+    }
+
+    @Test
+    void unknownPuppetLookSource_flagged() {
+        Puppet puppet = Puppet.of(true, null, Puppet.Look.of("Golem", null, null), null, null, null);
+        StationAsset a = puppetStation("unknownlooksource", puppet, null);
+        assertTrue(codes(validate(a)).contains("UNKNOWN_PUPPET_LOOK_SOURCE"));
+    }
+
+    @Test
+    void puppetLookModelUnknown_flagged() {
+        Puppet puppet = Puppet.of(true, null, Puppet.Look.of(Puppet.LOOK_SOURCE_MODEL, "NPC_Ghost", null),
+                null, null, null);
+        List<Finding> findings = StationValidator.validate(List.of(puppetStation("looksmodelunknown", puppet, null)),
+                ANY_LANG, ANY_DROP, ANY_FACTOR, id -> true, id -> true, NO_MODEL);
+        assertTrue(codes(findings).contains("PUPPET_LOOK_MODEL_UNKNOWN"));
+    }
+
+    @Test
+    void puppetLookModelKnown_noFinding() {
+        Puppet puppet = Puppet.of(true, null, Puppet.Look.of(Puppet.LOOK_SOURCE_MODEL, "NPC_Ghost", null),
+                null, null, null);
+        List<Finding> findings = StationValidator.validate(List.of(puppetStation("looksmodelknown", puppet, null)),
+                ANY_LANG, ANY_DROP, ANY_FACTOR, id -> true, id -> true, ANY_MODEL);
+        assertFalse(codes(findings).contains("PUPPET_LOOK_MODEL_UNKNOWN"));
+    }
+
+    @Test
+    void puppetLookModelUnknown_withFallback_noFinding() {
+        Puppet puppet = Puppet.of(true, null,
+                Puppet.Look.of(Puppet.LOOK_SOURCE_MODEL, "NPC_Ghost", "NPC_Generic_Worker"), null, null, null);
+        List<Finding> findings = StationValidator.validate(List.of(puppetStation("looksmodelfallback", puppet, null)),
+                ANY_LANG, ANY_DROP, ANY_FACTOR, id -> true, id -> true, NO_MODEL);
+        assertFalse(codes(findings).contains("PUPPET_LOOK_MODEL_UNKNOWN"),
+                "a FallbackModelId covers an unknown primary ModelId");
+    }
+
+    @Test
+    void unknownPuppetPropSource_flagged() {
+        Puppet puppet = Puppet.of(true, null, null, null, null, Puppet.Prop.of("Wardrobe", null, null));
+        StationAsset a = puppetStation("unknownpropsource", puppet, null);
+        assertTrue(codes(validate(a)).contains("UNKNOWN_PUPPET_PROP_SOURCE"));
+    }
+
+    @Test
+    void puppetPropItemIdMissing_flagged() {
+        Puppet puppet = Puppet.of(true, null, null, null, null, Puppet.Prop.of(Puppet.PROP_SOURCE_ITEM_ID, null, null));
+        StationAsset a = puppetStation("propitemmissing", puppet, null);
+        assertTrue(codes(validate(a)).contains("PUPPET_PROP_ITEM_ID_MISSING"));
+    }
+
+    @Test
+    void unknownPuppetPropSlot_flagged() {
+        Puppet puppet = Puppet.of(true, null, null, null, null, Puppet.Prop.of(null, null, "OffHand"));
+        StationAsset a = puppetStation("unknownpropslot", puppet, null);
+        assertTrue(codes(validate(a)).contains("UNKNOWN_PUPPET_PROP_SLOT"));
+    }
+
+    @Test
+    void puppetSeatMountAdvisory_flagged() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        StationAsset a = puppetStation("puppetseatadvisory", puppet,
+                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Block", null)));
+        assertTrue(codes(validate(a)).contains("PUPPET_SEAT_MOUNT_ADVISORY"));
+    }
+
+    @Test
+    void puppetEntityMount_noSeatAdvisory() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        StationAsset a = puppetStation("puppetentitymount", puppet,
+                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Entity", null)));
+        assertFalse(codes(validate(a)).contains("PUPPET_SEAT_MOUNT_ADVISORY"));
+    }
+
+    @Test
+    void puppetDisabled_producesNoFindings() {
+        Puppet puppet = Puppet.of(false, null, null, null, null, null);
+        StationAsset a = puppetStation("puppetdisabled", puppet, null);
+        assertTrue(validate(a).isEmpty(),
+                "a disabled Puppet with no other leaves authored is clean, got: " + codes(validate(a)));
+    }
+
+    // ==================== StationStep.Puppet (per-step override, round-4 design) ====================
+
+    private static StationAsset stepPuppetStation(String id, ActionDef ritualAction) {
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", ritualAction);
+        StationAsset a = StationAsset.of(id,
+                StationAsset.Identity.of("rpgstations.station." + id + ".name", null, null),
+                null, null, null, null, null, null, null, null);
+        a.withActions(actions);
+        return a;
+    }
+
+    private static ActionDef ritualActionWithPuppetStep() {
+        StationStep step = StationStep.of("strike", StationStep.TYPE_WAIT)
+                .withWait(StationStep.Wait.ofDurationMs(400L))
+                .withPuppet(StationStep.PuppetOverride.of("Hammer_Strike", null));
+        return ActionDef.of(null, null, null, null, null, null, null, null, null, null, null, null,
+                new StationStep[]{step});
+    }
+
+    @Test
+    void puppetStepOverrideWithoutPuppet_flagged() {
+        StationAsset a = stepPuppetStation("nopuppetsteps", ritualActionWithPuppetStep());
+        assertTrue(codes(validate(a)).contains("PUPPET_STEP_OVERRIDE_WITHOUT_PUPPET"));
+    }
+
+    @Test
+    void puppetStepOverride_withActivePuppet_noFinding() {
+        Puppet actionPuppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        ActionDef ritual = ritualActionWithPuppetStep().withPuppet(actionPuppet);
+        StationAsset a = stepPuppetStation("activepuppetsteps", ritual);
+        assertFalse(codes(validate(a)).contains("PUPPET_STEP_OVERRIDE_WITHOUT_PUPPET"));
     }
 
     // ==================== Completion / Flairs (unchanged) ====================

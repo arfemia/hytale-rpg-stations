@@ -60,6 +60,12 @@ public final class StationAsset
      * the state-dependent F interaction in - see {@code station.StationService#toggle}.
      */
     @Nullable private Custody custody;
+    /**
+     * The puppet presentation route (round-4 design): mount the player, hide their body, and
+     * spawn a skinned visual performing the work instead - see {@link Puppet}'s own javadoc for
+     * the full knob family. Null = the classic in-body worker (this leg's default; opt-in).
+     */
+    @Nullable private Puppet puppet;
     /** Named cosmetic flair overrides, keyed by flair id. */
     @Nullable private Map<String, Flair> flairs;
     /**
@@ -121,6 +127,9 @@ public final class StationAsset
             .add()
             .appendInherited(new KeyedCodec<>("Custody", Custody.CODEC, false),
                     (a, v) -> a.custody = v, a -> a.custody, (a, parent) -> a.custody = parent.custody)
+            .add()
+            .appendInherited(new KeyedCodec<>("Puppet", Puppet.CODEC, false),
+                    (a, v) -> a.puppet = v, a -> a.puppet, (a, parent) -> a.puppet = parent.puppet)
             .add()
             .appendInherited(new KeyedCodec<>("Flairs",
                             new MapCodec<>(Flair.CODEC, LinkedHashMap::new), false),
@@ -281,6 +290,12 @@ public final class StationAsset
         return custody;
     }
 
+    /** The puppet presentation route (round-4 design); null = the classic in-body worker. */
+    @Nullable
+    public Puppet getPuppet() {
+        return puppet;
+    }
+
     /** Named cosmetic flair overrides, keyed by flair id; null = none authored. */
     @Nullable
     public Map<String, Flair> getFlairs() {
@@ -307,6 +322,13 @@ public final class StationAsset
     @Nonnull
     public StationAsset withCustody(@Nullable Custody custody) {
         this.custody = custody;
+        return this;
+    }
+
+    /** Java-side test/fixture helper; not part of any codec fold. */
+    @Nonnull
+    public StationAsset withPuppet(@Nullable Puppet puppet) {
+        this.puppet = puppet;
         return this;
     }
 

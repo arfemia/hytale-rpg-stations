@@ -76,4 +76,20 @@ public class AssetCodecInitTest {
         assertDoesNotThrow(() -> assertNotNull(StationStep.RollGroup.CODEC));
         assertDoesNotThrow(() -> assertNotNull(StationStep.CommandGroup.CODEC));
     }
+
+    /**
+     * The round-4 puppet-presentation route (design {@code rpg-stations-puppet-presentation
+     * -design-2026-07-22.md} section 3): the top-level {@link Puppet} group, its per-action
+     * whole-group override on {@link ActionDef}, and the per-step small override on
+     * {@link StationStep.PuppetOverride} (which reuses {@link Puppet.Prop}'s codec verbatim).
+     */
+    @Test
+    void puppetCodecAndNestedGroups_initializeWithoutThrowing() {
+        assertDoesNotThrow(() -> assertNotNull(Puppet.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(Puppet.Hide.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(Puppet.Look.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(Puppet.Offset.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(Puppet.Prop.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.PuppetOverride.CODEC));
+    }
 }
