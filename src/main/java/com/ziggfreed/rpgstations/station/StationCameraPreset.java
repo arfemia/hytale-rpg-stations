@@ -81,16 +81,17 @@ public enum StationCameraPreset {
      * The ONE precedence choke point for which preset a {@code FaceBlock}-enabled session
      * actually uses: the player's EXPLICIT camera-preference override wins when present
      * ({@code explicitOverride} non-null); otherwise the station asset's own
-     * {@code Camera.FaceBlockMode} leaf, parsed via {@link #fromId}; otherwise
-     * {@link #LOOK_ROT} when the asset leaf is absent, blank, or fails to parse.
+     * {@code Camera.Recipe} leaf (design 9.7's rename of {@code FaceBlockMode}), parsed via
+     * {@link #fromId}; otherwise {@link #LOOK_ROT} when the asset leaf is absent, blank, or fails
+     * to parse.
      */
     @Nonnull
     public static StationCameraPreset resolve(@Nullable StationCameraPreset explicitOverride,
-            @Nullable String assetFaceBlockModeId) {
+            @Nullable String assetRecipeId) {
         if (explicitOverride != null) {
             return explicitOverride;
         }
-        StationCameraPreset assetPreset = fromId(assetFaceBlockModeId);
+        StationCameraPreset assetPreset = fromId(assetRecipeId);
         return assetPreset != null ? assetPreset : LOOK_ROT;
     }
 }

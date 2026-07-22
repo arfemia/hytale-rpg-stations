@@ -30,7 +30,7 @@ import com.ziggfreed.rpgstations.validation.Finding;
  * <ul>
  *   <li>{@code camera <preset>} - set the CALLING player's own {@link StationCameraPreset}
  *       tuning override for their next station session (transient, {@link StationCameraPrefs},
- *       never persisted; overrides a station asset's own {@code Camera.FaceBlockMode} default).
+ *       never persisted; overrides a station asset's own {@code Camera.Recipe} default).
  *       Ported verbatim (shape) from the MMO's deleted {@code MmoStationCommand} camera
  *       subgroup, moved onto this mod's own {@link StationCameraPrefs}/{@link
  *       StationCameraPreset}.</li>

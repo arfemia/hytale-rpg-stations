@@ -14,12 +14,15 @@ import javax.annotation.Nullable;
 
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemDropList;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
+import com.ziggfreed.rpgstations.asset.ActionDef;
+import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.i18n.RpgStationsLangKeys;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.util.Log;
@@ -124,6 +127,7 @@ public final class StationValidator {
             checkCamera(a, id, label, out);
             checkCompletion(a, id, label, out);
             checkFlairs(a, id, label, out);
+            checkActions(a, id, label, dropListKnown, factorKnown, lootableKnown, out);
         }
         return out;
     }
@@ -649,11 +653,11 @@ public final class StationValidator {
             out.add(Finding.warning(DOMAIN, "FACE_BLOCK_WITHOUT_CAMERA",
                     label + " authors Camera.FaceBlock true with Camera.Mode \"None\" - the leaf can never take effect", id));
         }
-        String faceBlockMode = camera.getFaceBlockMode();
-        if (faceBlockMode != null && !faceBlockMode.isBlank()
-                && StationCameraPreset.fromId(faceBlockMode) == null) {
-            out.add(Finding.warning(DOMAIN, "UNKNOWN_FACE_BLOCK_MODE",
-                    label + " authors Camera.FaceBlockMode '" + faceBlockMode
+        String recipe = camera.getRecipe();
+        if (recipe != null && !recipe.isBlank()
+                && StationCameraPreset.fromId(recipe) == null) {
+            out.add(Finding.warning(DOMAIN, "UNKNOWN_CAMERA_RECIPE",
+                    label + " authors Camera.Recipe '" + recipe
                             + "' which is not a known StationCameraPreset id - falls back to 'look_rot' at runtime", id));
         }
         StationAsset.Hold hold = a.getHold();
@@ -704,6 +708,179 @@ public final class StationValidator {
                     "FLAIR_UNPLAYED_LEAVES", out);
             warnUnplayedPresentationLeaves(flair.getCompletion(), flairLabel + ".Completion", id,
                     "FLAIR_UNPLAYED_LEAVES", out);
+        }
+    }
+
+    /**
+     * Multi-action station coverage (design section 9.1, this leg): per-action override
+     * structure - "warn on odd combos, never block" (every finding here is WARNING/INFO, never
+     * ERROR, matching the design's binding note). A station with no {@code Actions} map is a
+     * no-op call (nothing to iterate) - the implicit single-{@code "work"}-action path is
+     * validated entirely by the existing station-level checks above it.
+     */
+    private static void checkActions(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
+            @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
+            @Nonnull Predicate<String> lootableKnown, @Nonnull List<Finding> out) {
+        Map<String, ActionDef> actions = a.getActions();
+        if (actions == null || actions.isEmpty()) {
+            return;
+        }
+        boolean sawCatchAll = false;
+        Set<String> seenItemIds = new HashSet<>();
+        Set<String> seenResourceTypeIds = new HashSet<>();
+        for (Map.Entry<String, ActionDef> entry : actions.entrySet()) {
+            String actionId = entry.getKey() == null || entry.getKey().isBlank() ? "(unnamed)" : entry.getKey();
+            ActionDef def = entry.getValue();
+            String actionLabel = label + " Actions['" + actionId + "']";
+            if (def == null) {
+                out.add(Finding.warning(DOMAIN, "EMPTY_ACTION_ENTRY", actionLabel + " has no body", id));
+                continue;
+            }
+            ActionInput input = def.getInput();
+            boolean catchAll = input == null || input.isCatchAll();
+            if (catchAll) {
+                if (sawCatchAll) {
+                    out.add(Finding.warning(DOMAIN, "UNREACHABLE_ACTION",
+                            actionLabel + " authors no Input matcher (or an all-blank one) AFTER an earlier"
+                                    + " catch-all action - selection resolves 'first match wins', so this"
+                                    + " action can never be reached", id));
+                }
+                sawCatchAll = true;
+            } else {
+                // AMBIGUOUS_ACTION_INPUT (design 9.1): an exact ItemId/ResourceTypeId collision
+                // with an EARLIER action - "first match wins" means this action's matching route
+                // is unreachable via that exact id (a Tags/Function overlap is not flagged - too
+                // fuzzy to call an authoring mistake outright, so this stays a targeted check).
+                String itemId = input.getItemId();
+                if (itemId != null && !itemId.isBlank() && !seenItemIds.add(itemId.toLowerCase(Locale.ROOT))) {
+                    out.add(Finding.warning(DOMAIN, "AMBIGUOUS_ACTION_INPUT",
+                            actionLabel + " Input.ItemId '" + itemId + "' repeats an earlier action's exact"
+                                    + " ItemId - 'first match wins' makes this route unreachable via that id", id));
+                }
+                String resourceTypeId = input.getResourceTypeId();
+                if (resourceTypeId != null && !resourceTypeId.isBlank()
+                        && !seenResourceTypeIds.add(resourceTypeId.toLowerCase(Locale.ROOT))) {
+                    out.add(Finding.warning(DOMAIN, "AMBIGUOUS_ACTION_INPUT",
+                            actionLabel + " Input.ResourceTypeId '" + resourceTypeId + "' repeats an earlier"
+                                    + " action's exact ResourceTypeId - 'first match wins' makes this route"
+                                    + " unreachable via that id", id));
+                }
+            }
+            String function = input != null ? input.getFunction() : null;
+            if (function != null && !function.isBlank() && !isKnownFunction(function)) {
+                out.add(Finding.warning(DOMAIN, "UNKNOWN_ACTION_FUNCTION",
+                        actionLabel + " Input.Function '" + function
+                                + "' is not one of Weapon/Armor/Tool", id));
+            }
+            boolean hasBody = def.getRecipe() != null || (def.getSteps() != null && def.getSteps().length > 0);
+            if (!hasBody) {
+                out.add(Finding.warning(DOMAIN, "ACTION_NO_BODY",
+                        actionLabel + " authors neither Recipe (for the implicit convert-loop program) nor"
+                                + " Steps - this action can never run a cycle", id));
+            }
+            StationStep[] steps = def.getSteps();
+            if (steps != null && steps.length > 0) {
+                checkSteps(steps, actionLabel, id, dropListKnown, factorKnown, lootableKnown, out);
+            }
+        }
+    }
+
+    private static boolean isKnownFunction(@Nonnull String function) {
+        return "Weapon".equalsIgnoreCase(function) || "Armor".equalsIgnoreCase(function)
+                || "Tool".equalsIgnoreCase(function);
+    }
+
+    /**
+     * The authored step-program coverage (design 9.3): duplicate {@code Id}s, the two
+     * schema-reserved-unimplemented types ({@code Stamp}/{@code Mount}), an unimplemented
+     * {@code Consume.From}/{@code Produce.To} route, a {@code Wait} step missing BOTH routes (or
+     * authoring only the unimplemented {@code Beats} one), an {@code OnConditionFail.Goto}
+     * referencing an unknown sibling step id, and a {@code Roll} step's inline {@link Roll}s
+     * through the SAME shared {@link #checkRoll} core every other Roll site uses.
+     */
+    private static void checkSteps(@Nonnull StationStep[] steps,
+            @Nonnull String actionLabel, @Nonnull String id, @Nonnull Predicate<String> dropListKnown,
+            @Nonnull Predicate<String> factorKnown, @Nonnull Predicate<String> lootableKnown,
+            @Nonnull List<Finding> out) {
+        Set<String> seenIds = new HashSet<>();
+        Set<String> knownIds = new HashSet<>();
+        for (StationStep s : steps) {
+            if (s != null && s.getId() != null && !s.getId().isBlank()) {
+                knownIds.add(s.getId().toLowerCase(Locale.ROOT));
+            }
+        }
+        for (int i = 0; i < steps.length; i++) {
+            StationStep step = steps[i];
+            String stepLabel = actionLabel + ".Steps[" + i + "]";
+            if (step == null) {
+                out.add(Finding.warning(DOMAIN, "EMPTY_STEP", stepLabel + " is empty", id));
+                continue;
+            }
+            if (step.getId() == null || step.getId().isBlank()) {
+                out.add(Finding.warning(DOMAIN, "MISSING_STEP_ID", stepLabel + " has no Id", id));
+            } else if (!seenIds.add(step.getId().toLowerCase(Locale.ROOT))) {
+                out.add(Finding.warning(DOMAIN, "DUPLICATE_STEP_ID",
+                        stepLabel + " repeats Id '" + step.getId() + "'", id));
+            }
+            if (step.getType() == null || step.getType().isBlank()) {
+                out.add(Finding.warning(DOMAIN, "MISSING_STEP_TYPE", stepLabel + " has no Type", id));
+            } else if (step.isReservedUnimplemented()) {
+                out.add(Finding.warning(DOMAIN, "UNIMPLEMENTED_STEP_TYPE",
+                        stepLabel + " authors Type '" + step.getType()
+                                + "' which is schema-reserved but has no handler yet", id));
+            }
+            checkConditionFactors(step.getConditions(), stepLabel + ".Conditions", id, factorKnown, out);
+            StationStep.OnConditionFail onFail = step.getOnConditionFail();
+            String gotoId = onFail != null ? onFail.getGoto() : null;
+            if (gotoId != null && !gotoId.isBlank() && !knownIds.contains(gotoId.toLowerCase(Locale.ROOT))) {
+                out.add(Finding.warning(DOMAIN, "UNKNOWN_GOTO_TARGET",
+                        stepLabel + ".OnConditionFail.Goto references unknown step id '" + gotoId + "'", id));
+            }
+            if (StationStep.TYPE_CONSUME.equalsIgnoreCase(step.getType())) {
+                StationStep.Consume consume = step.getConsume();
+                if (consume == null) {
+                    out.add(Finding.warning(DOMAIN, "CONSUME_STEP_EMPTY", stepLabel + " has no Consume group", id));
+                } else if (!StationStep.Consume.FROM_INVENTORY.equalsIgnoreCase(consume.effectiveFrom())) {
+                    out.add(Finding.warning(DOMAIN, "UNIMPLEMENTED_CONSUME_SOURCE",
+                            stepLabel + " authors From '" + consume.effectiveFrom()
+                                    + "' which has no handler yet (only 'Inventory' is implemented)", id));
+                }
+            } else if (StationStep.TYPE_PRODUCE.equalsIgnoreCase(step.getType())) {
+                StationStep.Produce produce = step.getProduce();
+                if (produce == null) {
+                    out.add(Finding.warning(DOMAIN, "PRODUCE_STEP_EMPTY", stepLabel + " has no Produce group", id));
+                } else if (!StationStep.Produce.TO_INVENTORY.equalsIgnoreCase(produce.effectiveTo())) {
+                    out.add(Finding.warning(DOMAIN, "UNIMPLEMENTED_PRODUCE_DEST",
+                            stepLabel + " authors To '" + produce.effectiveTo()
+                                    + "' which has no handler yet (only 'Inventory' is implemented)", id));
+                }
+            } else if (StationStep.TYPE_WAIT.equalsIgnoreCase(step.getType())) {
+                StationStep.Wait wait = step.getWait();
+                boolean hasDuration = wait != null && wait.getDurationMs() != null && wait.getDurationMs() > 0;
+                boolean hasBeats = wait != null && wait.getBeats() != null && wait.getBeats() > 0;
+                if (!hasDuration && hasBeats) {
+                    out.add(Finding.warning(DOMAIN, "UNIMPLEMENTED_WAIT_BEATS",
+                            stepLabel + " authors only Wait.Beats, which has no handler yet"
+                                    + " (author DurationMs, or both, until Beats lands)", id));
+                } else if (!hasDuration) {
+                    out.add(Finding.warning(DOMAIN, "WAIT_MISSING_DURATION",
+                            stepLabel + " has no positive Wait.DurationMs - the step can never proceed", id));
+                }
+            } else if (StationStep.TYPE_ROLL.equalsIgnoreCase(step.getType())) {
+                StationStep.RollGroup group = step.getRoll();
+                String lootableId = group != null ? group.getLootable() : null;
+                if (lootableId != null && !lootableId.isBlank()
+                        && !lootableKnown.test(lootableId.toLowerCase(Locale.ROOT))) {
+                    out.add(Finding.warning(DOMAIN, "LOOT_UNKNOWN_TABLE",
+                            stepLabel + ".Lootable references unknown lootable '" + lootableId + "'", id));
+                }
+                Roll[] inlineRolls = group != null ? group.getRolls() : null;
+                if (inlineRolls != null) {
+                    for (int r = 0; r < inlineRolls.length; r++) {
+                        checkRoll(inlineRolls[r], stepLabel + ".Rolls[" + r + "]", id, dropListKnown, factorKnown, out);
+                    }
+                }
+            }
         }
     }
 

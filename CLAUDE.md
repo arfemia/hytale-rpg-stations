@@ -10,7 +10,9 @@ command rewards) with zero progression. Package root `com.ziggfreed.rpgstations`
 phase 1 (extraction) legs 0-6 landed** (scaffold, common lift, engine move, lootables, api
 artifact, MMO bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
 camera <preset>|list` + `/rpgstations validate`, the design 4.1 scope the phase-1 legs had left
-unimplemented); phase 2 (multi-action stations, the anvil arc) is design-only, not started. Design
+unimplemented); **phase 2 leg A (common kernel reshape) and leg B (multi-action schema + step
+engine) are LANDED** - see the "Phase 2" section below; legs C-H (custody/block-states, the Mount
+knob family, the anvil, open flair vocabulary, art, smoke) remain design-only. Design
 authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
 (grounded by the decision log `../../.claude/research/rpg-stations-extraction-design.md` and the
 adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-2026-07-21.md`, ALL
@@ -134,12 +136,38 @@ extensible numeric vocabulary conditional lootables/`Requires` gates evaluate ov
 See `api/CLAUDE.md` for the full type-by-type reference and `api/impl/CLAUDE.md` for the concrete
 implementation this mod installs at `setup()`.
 
-## Phase 2 (not started)
+## Phase 2 (legs A-B landed; C-H design-only)
 
-Multi-action stations (per-action orthogonal knob overrides of station-level defaults), the
-`Hold.Mount` knob family (`Surface: Block|Entity` - a standing work mount via a spawned anchor
-entity), step-sequence actions over a reshaped `ziggfreed-common` `cast.step` kernel, session-scoped
-placed-input custody with block-state visuals, the anvil (Convert + Enhance, the flagship
-step-sequence exemplar), and the open flair/moment vocabulary. Full spec: design doc sections 9 +
-10 (leg sequence A-H) + 12 (risks) + 13 (decision points). Do not start phase 2 work before the
-phase 1 parity gate (design section 11) passes.
+Full spec: design doc sections 9 + 10 (leg sequence A-H) + 12 (risks) + 13 (decision points).
+Phase 2 work started ahead of the maintainer's in-game phase-1 parity gate smoke (design section
+11, still batched/pending) - a deliberate call since every phase-2 leg lands on top of the SAME
+engine files the parity smoke will exercise; each leg stays cleanly committed so a smoke-driven
+fix layers on cleanly.
+
+- **Leg A (LANDED, `ziggfreed-common`)**: the `cast.step` kernel reshape for resumable walks -
+  `CastKernel.runResumable`/`Walk` (Completed/Suspended/Failed), `StepSemantics.isSuspend`/
+  `nextIndex` (both optional, default to the pre-reshape `run()` behavior byte-parity). See
+  `ziggfreed-common`'s `cast/CLAUDE.md`.
+- **Leg B (LANDED, this mod)**: multi-action stations (design 9.1) - a new `StationAsset.Actions`
+  map (`asset.ActionDef`, whole-GROUP override of the station's own groups, native `Parent`
+  inherits the WHOLE map, same as `Flairs`), diegetic input-matched action selection
+  (`asset.ActionInput`, `station.ActionResolver.selectAction`), and actions as STEP PROGRAMS
+  (`asset.StationStep` - a `Type`-discriminated union: `Consume`/`Produce`/`Wait`/`Roll`/`Command`
+  executable this leg, `Stamp`/`Mount` schema-reserved unimplemented) run through
+  `station.StationStepKernel` (the one production `CastKernel` instance every program - implicit
+  or authored - walks). The classic convert loop is now the IMPLICIT four-step program
+  (`station.ImplicitProgram`: `[Consume, Produce, Roll, Present]`) a station with no `Actions` map
+  (or an action with no `Steps`) gets for free - **the shipped sawmill authors NOTHING new and its
+  JSON is byte-identical**; `StationService.runRealCycle`/`resumeCycleProgram`/`dispatchProgram`
+  now dispatch every real cycle through this ONE engine ("no dual path"), with session-scoped
+  suspend/resume plumbing (`StationSession.programSuspended`/`programIndex`/`stepDeadlineMs`/
+  `activeProgram*`) ready for a future `Wait`-bearing authored program (unreached by the sawmill,
+  which has no `Wait` step). `Camera.FaceBlockMode` is RENAMED `Camera.Recipe` (design 9.7, no
+  alias - unreleased, no shipped JSON used the old key). `station.StationValidator.checkActions`
+  covers per-action structure (warn-only, never blocks) - see `station/CLAUDE.md` for the full
+  file-by-file detail (`ActionResolver`, `StationStepContext`/`Result`/`Semantics`/`Registry`/
+  `Handlers`/`Decisions`, `ImplicitProgram`, `StationStepKernel`).
+- **Legs C-H (design-only)**: session-scoped placed-input custody + block-state visuals, the
+  `Hold.Mount` knob family (`Surface: Block|Entity` - a standing work mount via a spawned anchor
+  entity), the anvil (Convert + Enhance, the flagship step-sequence exemplar with the `Stamp`
+  step), the open flair/moment vocabulary, the art leg, and the phase-2 smoke round.

@@ -1,15 +1,20 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import javax.annotation.Nullable;
+
 import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**
  * One player's live, in-memory work session at a station block. Player-anchored: transient,
@@ -71,7 +76,7 @@ final class StationSession {
     boolean cameraApplied;
     boolean cameraLocked;
     boolean faceBlock;
-    String faceBlockMode;
+    String cameraRecipe;
     String emoteId;
     /** The seated-worker swing fix's optional {@code Animation.ActionClip} override. */
     String actionClip;
@@ -115,6 +120,28 @@ final class StationSession {
 
     /** Cycles completed this session (real + idle). */
     int cyclesDone;
+
+    // Step-program resume state (design section 9.3): survives ACROSS ticks, unlike
+    // StationStepContext (rebuilt fresh every drain). programSuspended false + programIndex 0 is
+    // the steady "no program in flight" state between cycle ticks - the phase-1 implicit program
+    // (Consume/Produce/Roll/Present, no Wait step) always completes synchronously within ONE
+    // runRealCycle call, so these never actually flip for the shipped sawmill; they exist so a
+    // FUTURE authored program (a Wait step) can suspend a cycle across frames without new session
+    // plumbing. stepDeadlineMs is the currently-suspending Wait step's OWN committed deadline
+    // (written once by the handler, read - never re-derived - on every re-entry per the kernel's
+    // binding resume contract); 0 = no deadline currently held.
+    boolean programSuspended;
+    int programIndex;
+    long stepDeadlineMs;
+
+    // The IN-FLIGHT program's rebuild-avoiding snapshot, set only while programSuspended (design
+    // 9.3): a resume must NOT re-derive which conversion is running (the live inventory may have
+    // changed since the program started), so the fresh-start path snapshots its built steps /
+    // cycle output / attempt index here, and the resume path reads them back verbatim. Cleared
+    // (nulled) the instant the program stops being suspended (Completed or Failed).
+    @Nullable List<StationStep> activeProgramSteps;
+    @Nullable ItemStack activeProgramCycleOutput;
+    int activeProgramCycleIndex;
 
     // Item ledger (for the future standalone summary HUD, leg 3): consumedItems covers both
     // the exact-ItemId route AND the ResourceTypeId ("any log" family) route (tallying the

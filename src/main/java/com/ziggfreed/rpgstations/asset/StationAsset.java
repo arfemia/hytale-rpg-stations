@@ -56,6 +56,14 @@ public final class StationAsset
     @Nullable private Requires requires;
     /** Named cosmetic flair overrides, keyed by flair id. */
     @Nullable private Map<String, Flair> flairs;
+    /**
+     * Multi-action stations (design section 9.1): named, ordered whole-group overrides of this
+     * asset's own groups. {@code null}/empty means the phase-1 single implicit {@code "work"}
+     * action built from THIS asset's own groups - see {@code station.ActionResolver}. Native
+     * {@code Parent} inheritance composes at this WHOLE-MAP level (inherit-on-omit, own-wins-on-
+     * author), same as {@link #flairs}.
+     */
+    @Nullable private Map<String, ActionDef> actions;
 
     public static final AssetBuilderCodec<String, StationAsset> CODEC = AssetBuilderCodec.builder(
                     StationAsset.class,
@@ -108,6 +116,10 @@ public final class StationAsset
             .appendInherited(new KeyedCodec<>("Flairs",
                             new MapCodec<>(Flair.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.flairs = v, a -> a.flairs, (a, parent) -> a.flairs = parent.flairs)
+            .add()
+            .appendInherited(new KeyedCodec<>("Actions",
+                            new MapCodec<>(ActionDef.CODEC, LinkedHashMap::new), false),
+                    (a, v) -> a.actions = v, a -> a.actions, (a, parent) -> a.actions = parent.actions)
             .add()
             .build();
 
@@ -260,6 +272,22 @@ public final class StationAsset
         return flairs;
     }
 
+    /**
+     * Named, authored-order action overrides (design section 9.1); {@code null}/empty means the
+     * single implicit {@code "work"} action - see {@code station.ActionResolver#actionIds}.
+     */
+    @Nullable
+    public Map<String, ActionDef> getActions() {
+        return actions;
+    }
+
+    /** Java-side test/fixture helper; not part of any codec fold. */
+    @Nonnull
+    public StationAsset withActions(@Nullable Map<String, ActionDef> actions) {
+        this.actions = actions;
+        return this;
+    }
+
     // ==================== Nested groups (nullable leaves) ====================
 
     /** Display keys and icon (an item id, per the ability-icon convention). */
@@ -314,6 +342,7 @@ public final class StationAsset
         @Nullable protected Boolean exclusive;
         @Nullable protected WorkXp[] xp;
         @Nullable protected Idle idle;
+        @Nullable protected Boolean repeat;
 
         public static final BuilderCodec<Work> CODEC = BuilderCodec.builder(Work.class, Work::new)
                 .appendInherited(new KeyedCodec<>("CycleMs", Codec.LONG, false),
@@ -330,6 +359,8 @@ public final class StationAsset
                         (o, v) -> o.xp = v, o -> o.xp, (o, p) -> o.xp = p.xp).add()
                 .appendInherited(new KeyedCodec<>("Idle", Idle.CODEC, false),
                         (o, v) -> o.idle = v, o -> o.idle, (o, p) -> o.idle = p.idle).add()
+                .appendInherited(new KeyedCodec<>("Repeat", Codec.BOOLEAN, false),
+                        (o, v) -> o.repeat = v, o -> o.repeat, (o, p) -> o.repeat = p.repeat).add()
                 .build();
 
         @Nonnull
@@ -380,6 +411,24 @@ public final class StationAsset
         @Nullable
         public Idle getIdle() {
             return idle;
+        }
+
+        /**
+         * Whether the program (implicit or authored {@code Steps}) re-runs per {@link #cycleMs}
+         * cadence (design section 9.3 - {@code true}, the default when null, is "the classic
+         * loop"), or a single completed program run completes the whole SESSION ({@code false} -
+         * the ritual shape, e.g. the anvil's Enhance action). Read by
+         * {@code station.step.StationStepKernel}'s program-completion handling, never by the pure
+         * step engine itself.
+         */
+        @Nullable
+        public Boolean getRepeat() {
+            return repeat;
+        }
+
+        /** {@link #repeat}, reader-defaulted to {@code true} (the classic loop) when null. */
+        public boolean effectiveRepeat() {
+            return repeat == null || repeat;
         }
 
         /**
@@ -970,12 +1019,17 @@ public final class StationAsset
         }
     }
 
-    /** Camera pull while working. See {@code station/CLAUDE.md} for the FaceBlock hunt history. */
+    /**
+     * Camera pull while working. See {@code station/CLAUDE.md} for the FaceBlock hunt history.
+     * {@code FaceBlockMode} is RENAMED {@code Recipe} this leg (design section 9.7; unreleased,
+     * free rename per the design's own binding note - NO deprecated alias, straight rename, no
+     * shipped JSON asset authors this key).
+     */
     public static final class Camera {
         @Nullable protected String mode;
         @Nullable protected Boolean locked;
         @Nullable protected Boolean faceBlock;
-        @Nullable protected String faceBlockMode;
+        @Nullable protected String recipe;
 
         public static final BuilderCodec<Camera> CODEC = BuilderCodec.builder(Camera.class, Camera::new)
                 .appendInherited(new KeyedCodec<>("Mode", Codec.STRING, false),
@@ -984,9 +1038,9 @@ public final class StationAsset
                         (o, v) -> o.locked = v, o -> o.locked, (o, p) -> o.locked = p.locked).add()
                 .appendInherited(new KeyedCodec<>("FaceBlock", Codec.BOOLEAN, false),
                         (o, v) -> o.faceBlock = v, o -> o.faceBlock, (o, p) -> o.faceBlock = p.faceBlock).add()
-                .appendInherited(new KeyedCodec<>("FaceBlockMode", Codec.STRING, false),
-                        (o, v) -> o.faceBlockMode = v, o -> o.faceBlockMode,
-                        (o, p) -> o.faceBlockMode = p.faceBlockMode).add()
+                .appendInherited(new KeyedCodec<>("Recipe", Codec.STRING, false),
+                        (o, v) -> o.recipe = v, o -> o.recipe,
+                        (o, p) -> o.recipe = p.recipe).add()
                 .build();
 
         @Nonnull
@@ -1001,12 +1055,12 @@ public final class StationAsset
 
         @Nonnull
         public static Camera of(@Nullable String mode, @Nullable Boolean locked, @Nullable Boolean faceBlock,
-                @Nullable String faceBlockMode) {
+                @Nullable String recipe) {
             Camera c = new Camera();
             c.mode = mode;
             c.locked = locked;
             c.faceBlock = faceBlock;
-            c.faceBlockMode = faceBlockMode;
+            c.recipe = recipe;
             return c;
         }
 
@@ -1025,9 +1079,10 @@ public final class StationAsset
             return faceBlock;
         }
 
+        /** The camera-preset recipe id ({@code StationCameraPreset}), design section 9.7's {@code Camera.Recipe}. */
         @Nullable
-        public String getFaceBlockMode() {
-            return faceBlockMode;
+        public String getRecipe() {
+            return recipe;
         }
     }
 

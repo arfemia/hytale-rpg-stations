@@ -17,6 +17,7 @@ import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.validation.Finding;
 
 /**
@@ -563,7 +564,7 @@ public class StationValidatorTest {
         assertFalse(codes.contains("SWING_UNPLAYED_LEAVES"));
     }
 
-    // ==================== Camera.FaceBlock / FaceBlockMode (unchanged) ====================
+    // ==================== Camera.FaceBlock / Camera.Recipe (design 9.7 rename) ====================
 
     @Test
     void faceBlockWithoutCamera_flagged() {
@@ -577,14 +578,14 @@ public class StationValidatorTest {
     }
 
     @Test
-    void unknownFaceBlockMode_flagged() {
+    void unknownCameraRecipe_flagged() {
         StationAsset a = StationAsset.of("unknownfacemode",
                 StationAsset.Identity.of("rpgstations.station.unknownfacemode.name", null, null),
                 null, oakRecipe(),
                 null, null,
                 StationAsset.Camera.of("ThirdPerson", true, true, "not_a_real_preset"),
                 null, null, null);
-        assertTrue(codes(validate(a)).contains("UNKNOWN_FACE_BLOCK_MODE"));
+        assertTrue(codes(validate(a)).contains("UNKNOWN_CAMERA_RECIPE"));
     }
 
     @Test
@@ -618,5 +619,116 @@ public class StationValidatorTest {
                 null, oakRecipe(), null, null, null, null, null, null, null,
                 Map.of("dead_flair", StationAsset.Flair.of(null, null)));
         assertTrue(codes(validate(a)).contains("EMPTY_FLAIR"));
+    }
+
+    // ==================== Actions (design 9.1/9.3, phase 2 leg B - "never block") ====================
+
+    private static StationAsset stationWithActions(Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions) {
+        StationAsset a = StationAsset.of("multiaction",
+                StationAsset.Identity.of("rpgstations.station.multiaction.name", null, null),
+                null, oakRecipe(), null, null, null, null, null, null);
+        a.withActions(actions);
+        return a;
+    }
+
+    @Test
+    void noActionsMap_neverFlagsActionCodes() {
+        // The implicit-single-action path (no Actions authored) must never touch checkActions.
+        StationAsset a = StationAsset.of("bare", null, null, oakRecipe(), null, null, null, null, null, null);
+        assertFalse(codes(validate(a)).stream().anyMatch(c -> c.startsWith("ACTION")
+                || c.contains("STEP") || c.equals("UNREACHABLE_ACTION") || c.equals("AMBIGUOUS_ACTION_INPUT")));
+    }
+
+    @Test
+    void actionWithNoRecipeOrSteps_flaggedNoBody() {
+        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
+        actions.put("dead", com.ziggfreed.rpgstations.asset.ActionDef.of(
+                null, null, null, null, null, null, null, null, null, null, null, null, null));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("ACTION_NO_BODY"));
+    }
+
+    @Test
+    void laterCatchAllAction_flaggedUnreachable() {
+        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
+        actions.put("first", com.ziggfreed.rpgstations.asset.ActionDef.of(
+                null, null, null, oakRecipe(), null, null, null, null, null, null, null, null, null));
+        actions.put("second", com.ziggfreed.rpgstations.asset.ActionDef.of(
+                null, null, null, oakRecipe(), null, null, null, null, null, null, null, null, null));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("UNREACHABLE_ACTION"));
+    }
+
+    @Test
+    void duplicateExactItemIdAcrossActions_flaggedAmbiguous() {
+        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
+        com.ziggfreed.rpgstations.asset.ActionInput sameInput =
+                com.ziggfreed.rpgstations.asset.ActionInput.of("Metal_Ingot", null, null, null);
+        actions.put("convert1", com.ziggfreed.rpgstations.asset.ActionDef.of(
+                null, sameInput, null, oakRecipe(), null, null, null, null, null, null, null, null, null));
+        actions.put("convert2", com.ziggfreed.rpgstations.asset.ActionDef.of(
+                null, sameInput, null, oakRecipe(), null, null, null, null, null, null, null, null, null));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("AMBIGUOUS_ACTION_INPUT"));
+    }
+
+    @Test
+    void reservedStepType_flaggedUnimplemented() {
+        StationStep stamp = StationStep.of("stamp", StationStep.TYPE_STAMP);
+        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
+        actions.put("anvil", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
+                null, null, null, null, null, null, new StationStep[]{stamp}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("UNIMPLEMENTED_STEP_TYPE"));
+    }
+
+    @Test
+    void duplicateStepId_flagged() {
+        StationStep a1 = StationStep.of("dup", StationStep.TYPE_WAIT)
+                .withWait(StationStep.Wait.ofDurationMs(500L));
+        StationStep a2 = StationStep.of("dup", StationStep.TYPE_WAIT)
+                .withWait(StationStep.Wait.ofDurationMs(500L));
+        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
+        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
+                null, null, null, null, null, null, new StationStep[]{a1, a2}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("DUPLICATE_STEP_ID"));
+    }
+
+    @Test
+    void consumeStepUnimplementedSource_flagged() {
+        StationStep consume = StationStep.of("c", StationStep.TYPE_CONSUME)
+                .withConsume(StationStep.Consume.of("X", null, 1, "Custody"));
+        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
+        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
+                null, null, null, null, null, null, new StationStep[]{consume}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("UNIMPLEMENTED_CONSUME_SOURCE"));
+    }
+
+    @Test
+    void waitStepMissingDuration_flagged() {
+        StationStep wait = StationStep.of("w", StationStep.TYPE_WAIT).withWait(StationStep.Wait.ofDurationMs(null));
+        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
+        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
+                null, null, null, null, null, null, new StationStep[]{wait}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("WAIT_MISSING_DURATION"));
+    }
+
+    @Test
+    void unknownGotoTarget_flagged() {
+        StationStep step = StationStep.of("w", StationStep.TYPE_WAIT)
+                .withWait(StationStep.Wait.ofDurationMs(500L))
+                .withOnConditionFail(StationStep.OnConditionFail.of(StationStep.OnConditionFail.RESULT_SKIP, "nope"));
+        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
+        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
+                null, null, null, null, null, null, new StationStep[]{step}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("UNKNOWN_GOTO_TARGET"));
+    }
+
+    @Test
+    void knownGotoTarget_notFlagged() {
+        StationStep target = StationStep.of("present", StationStep.TYPE_PRESENT);
+        StationStep step = StationStep.of("w", StationStep.TYPE_WAIT)
+                .withWait(StationStep.Wait.ofDurationMs(500L))
+                .withOnConditionFail(StationStep.OnConditionFail.of(StationStep.OnConditionFail.RESULT_SKIP, "present"));
+        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
+        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
+                null, null, null, null, null, null, new StationStep[]{step, target}));
+        assertFalse(codes(validate(stationWithActions(actions))).contains("UNKNOWN_GOTO_TARGET"));
     }
 }

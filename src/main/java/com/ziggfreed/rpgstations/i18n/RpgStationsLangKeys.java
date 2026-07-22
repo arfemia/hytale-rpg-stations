@@ -42,6 +42,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.stop.station_gone",
             "rpgstations.ui.station.stop.tool_changed",
             "rpgstations.ui.station.stop.tool_broke",
+            "rpgstations.ui.station.stop.step_failed",
             "rpgstations.ui.station.summary.title",
             "rpgstations.ui.station.summary.cycles",
             "rpgstations.ui.station.summary.item_consumed",

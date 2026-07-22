@@ -41,6 +41,7 @@ import com.ziggfreed.common.camera.CameraShakeService;
 import com.ziggfreed.common.cast.ModelParticleService;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.cast.WorldKeyedQueues;
+import com.ziggfreed.common.cast.step.CastKernel;
 import com.ziggfreed.common.i18n.Msg;
 import com.ziggfreed.common.sound.Sound3D;
 import com.ziggfreed.common.ui.rows.SummaryRow;
@@ -56,6 +57,7 @@ import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.loot.FactorSnapshot;
 import com.ziggfreed.rpgstations.loot.LootEngine;
@@ -81,8 +83,9 @@ import com.ziggfreed.rpgstations.util.Log;
  * (LANDED this leg via {@link StationEvents}: {@link #onCycleCompleted} fires {@code
  * StationCycleCompletedEvent} with the station's forwarded {@code Work.Xp} asks + resolved tool
  * multiplier) and the conditional-lootable engine + the standalone-rich summary panel, landed
- * leg 3 ({@link #rollLootAndBonuses}, {@link #rollCompletionLoot}, {@link #showSessionSummary}
- * over {@code loot.LootEngine} / {@code ui.StationSummaryHud}), now ALSO consulting the api's
+ * leg 3 ({@link #rollCompletionLoot}, {@link #showSessionSummary} over {@code loot.LootEngine} /
+ * {@code ui.StationSummaryHud} - the per-cycle Roll pass moved into {@link StationStepHandlers
+ * .RollHandler} at phase-2 leg B's step-engine refactor), now ALSO consulting the api's
  * {@code SummaryEnricherRegistry} union for extra rows/theming (leg 4). The MMO is NOT touched by
  * this leg; its own copy of this class (registered interaction id {@code mmo_station_use})
  * coexists unchanged until leg 5's bridge.
@@ -97,8 +100,11 @@ public final class StationService {
     private static final double DEFAULT_MAX_MOVE_METERS = 1.5;
     private static final String DEFAULT_HOLD_EFFECT = "RPG_Station_Hold";
 
-    /** The one action id phase 1 ever forwards (design section 3.1); phase 2 adds multi-action ids. */
-    private static final String ACTION_WORK = "work";
+    /**
+     * The implicit single-action id (design section 3.1); phase 2's multi-action stations add
+     * named ids on top - see {@link ActionResolver#ACTION_WORK} (the shared constant).
+     */
+    private static final String ACTION_WORK = ActionResolver.ACTION_WORK;
 
     /**
      * Every station moment fired through {@link #emitMoment} is a ONE-SHOT beat, so its
@@ -112,7 +118,16 @@ public final class StationService {
         PLAYER_EXIT, MOVED, DAMAGED, DIED, DISCONNECTED, WORLD_CHANGED, STATION_GONE,
         OUT_OF_INPUTS, INVENTORY_FULL, SESSION_CAP, FEATURE_DISABLED, SERVER_STOP, TOOL_CHANGED,
         /** The held tool broke from the opt-in durability drain. */
-        TOOL_BROKEN
+        TOOL_BROKEN,
+        /**
+         * A {@code station.step} program step threw, had no registered handler, or otherwise
+         * failed to complete (design section 9.3's M4 fix: a step handler throw is guarded and
+         * mapped HERE rather than propagating out of the per-world frame drain). New this leg -
+         * the phase-1 implicit program never reaches it (its four steps cannot throw in a way the
+         * pre-refactor inline code did not already catch), but any FUTURE authored step program
+         * degrades to a clean session stop instead of a world-drain crash.
+         */
+        STEP_FAILED
     }
 
     private static final StationService INSTANCE = new StationService();
@@ -286,7 +301,7 @@ public final class StationService {
         s.cameraApplied = !seatDefaultNoCamera && !"None".equalsIgnoreCase(cameraMode);
         s.cameraLocked = camera == null || camera.getLocked() == null || camera.getLocked();
         s.faceBlock = s.cameraApplied && camera != null && camera.getFaceBlock() != null && camera.getFaceBlock();
-        s.faceBlockMode = camera != null ? camera.getFaceBlockMode() : null;
+        s.cameraRecipe = camera != null ? camera.getRecipe() : null;
 
         StationAsset.Animation animation = asset.getAnimation();
         s.emoteId = animation != null ? animation.getEmoteId() : null;
@@ -373,7 +388,17 @@ public final class StationService {
                         continue;
                     }
                 }
-                if (now >= s.nextCycleAtMs) {
+                if (s.programSuspended) {
+                    // A step program (design 9.3) is mid-suspension - bypass the normal
+                    // Work.CycleMs cadence gate entirely; resume once its own committed deadline
+                    // passes (never re-derived here, matching the kernel's resume contract). The
+                    // phase-1 implicit program has no Wait step, so this branch is unreached by
+                    // the shipped sawmill; it exists for a future authored Wait-bearing program.
+                    if (now >= s.stepDeadlineMs && !resumeCycleProgram(s, store, commandBuffer)) {
+                        it.remove();
+                        continue;
+                    }
+                } else if (now >= s.nextCycleAtMs) {
                     s.nextCycleAtMs = now + s.cycleMs;
                     if (!runCycle(s, store, commandBuffer)) {
                         it.remove();
@@ -500,52 +525,114 @@ public final class StationService {
     }
 
     /**
-     * The real Convert cycle: transaction (pre-checked output room BEFORE consuming input,
-     * zero loss), tool-power-scaled multiplier resolution, the cycle presentation moment, and
-     * the leg-3/leg-4 seams ({@link #rollLootAndBonuses}, {@link #onCycleCompleted}).
-     * Precondition: {@code check.state == RUNNABLE}.
+     * The real Convert cycle: design 9.3's "one engine, no dual path" - the pre-chosen {@code
+     * check} conversion becomes the IMPLICIT four-step program ({@link ImplicitProgram}), walked
+     * through {@link #dispatchProgram}, the SAME choke point an authored multi-action
+     * {@code Steps} program would use. Precondition: {@code check.state == RUNNABLE}.
+     *
+     * <p>The implicit program has no {@code Wait} step, so it NEVER suspends - this call always
+     * resolves synchronously to {@code Completed} or {@code Failed} within the SAME frame (the
+     * byte-stable regression anchor: today's sawmill schedules exactly as before, every
+     * pre-refactor behavior test stays green). {@link #resumeCycleProgram} exists for a FUTURE
+     * authored non-implicit program's {@code Suspended} case only - never reached by the sawmill.
      */
     private boolean runRealCycle(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
                                  @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
                                  @Nonnull Player player, @Nonnull ConversionCheck check) {
-        try {
-            if (check.inputIsResource) {
-                ResourceQuantity resource = new ResourceQuantity(check.inputRef, check.inputCount);
-                ResourceTransaction tx = player.getInventory().getStorage().canRemoveResource(resource)
-                        ? player.getInventory().getStorage().removeResource(resource)
-                        : player.getInventory().getCombinedBackpackStorageHotbar().removeResource(resource);
-                tallyResourceConsumption(s, tx, check.inputRef);
-            } else {
-                ItemStack input = new ItemStack(check.inputRef, check.inputCount);
-                if (player.getInventory().getStorage().canRemoveItemStack(input)) {
-                    player.getInventory().getStorage().removeItemStack(input);
-                } else {
-                    player.getInventory().getCombinedBackpackStorageHotbar().removeItemStack(input);
-                }
-                s.consumedItems.merge(check.inputRef, check.inputCount, Integer::sum);
-            }
-            player.getInventory().getStorage()
-                    .addItemStack(new ItemStack(check.outputItem, check.outputCount));
-            s.producedItems.merge(check.outputItem, check.outputCount, Integer::sum);
-        } catch (Throwable t) {
-            Log.warn("STATION conversion failed for '" + s.stationId + "': " + t.getMessage());
-            stop(s, StopReason.INVENTORY_FULL, store);
+        ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, ACTION_WORK);
+        int attemptCycleIndex = s.cyclesDone + 1;
+        StationStep.Consume consumeStep = StationStep.Consume.of(
+                check.inputIsResource ? null : check.inputRef,
+                check.inputIsResource ? check.inputRef : null,
+                check.inputCount, StationStep.Consume.FROM_INVENTORY);
+        StationStep.Produce produceStep = StationStep.Produce.of(check.outputItem, check.outputCount,
+                StationStep.Produce.TO_INVENTORY);
+        Roll[] resolvedRolls = LootEngine.resolveRolls(action.getLoot()).toArray(new Roll[0]);
+        List<StationStep> steps = ImplicitProgram.build(consumeStep, produceStep, resolvedRolls,
+                action.getPresentation());
+        ItemStack cycleOutput = new ItemStack(check.outputItem, check.outputCount);
+        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, cycleOutput,
+                attemptCycleIndex, 0);
+    }
+
+    /**
+     * Re-enters a {@code programSuspended} session's in-flight program at
+     * {@code s.programIndex}, called from {@link #tickFrameOnce} once {@code s.stepDeadlineMs}
+     * passes - bypassing the normal {@code Work.CycleMs} cadence gate entirely while suspended.
+     * Rebuilds NOTHING from live inventory state (the whole point of {@link StationSession}'s
+     * {@code activeProgram*} snapshot fields, design 9.3: a resume must never re-derive WHICH
+     * conversion is running, since the live inventory may have changed mid-suspension).
+     */
+    private boolean resumeCycleProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+                                       @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
+        if (asset == null) {
+            stop(s, StopReason.STATION_GONE, store);
             return false;
         }
-        s.cyclesDone++;
+        Player player = store.getComponent(s.ref, Player.getComponentType());
+        if (player == null) {
+            stop(s, StopReason.WORLD_CHANGED, null);
+            return false;
+        }
+        List<StationStep> steps = s.activeProgramSteps;
+        ItemStack cycleOutput = s.activeProgramCycleOutput;
+        if (steps == null || cycleOutput == null) {
+            Log.warn("STATION resume with no active program snapshot for '" + s.stationId + "' - stopping");
+            stop(s, StopReason.STEP_FAILED, store);
+            return false;
+        }
+        ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, ACTION_WORK);
+        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, cycleOutput,
+                s.activeProgramCycleIndex, s.programIndex);
+    }
 
+    /**
+     * The ONE {@link StationStepKernel} dispatch choke point (fresh start AND resume both funnel
+     * here): builds the per-run {@link StationStepContext}, walks {@code steps} from
+     * {@code startIndex}, and applies the THREE possible outcomes. {@code s.cyclesDone}
+     * increments ONLY on {@code Completed} (never on a mid-program failure - the pre-refactor
+     * "only count a real success" invariant); {@code attemptCycleIndex} (the value a Roll/Command
+     * step's placeholder + factor-context substitution sees, and the value the cycle-completed
+     * event fires with below) is {@code s.cyclesDone + 1}, computed ONCE by the caller before the
+     * walk starts so it stays stable across a suspend/resume pair without persisting the counter
+     * early.
+     */
+    private boolean dispatchProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
+            @Nonnull ItemStack cycleOutput, int attemptCycleIndex, int startIndex) {
+        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, asset, attemptCycleIndex));
+        StationStepContext ctx = new StationStepContext(s, store, commandBuffer, player, asset, action, snapshot,
+                steps, attemptCycleIndex, cycleOutput);
+
+        CastKernel.Walk<StationStepResult> walk = StationStepKernel.runResumable(ctx, startIndex);
+        if (walk instanceof CastKernel.Walk.Suspended<StationStepResult> suspended) {
+            s.programSuspended = true;
+            s.programIndex = suspended.resumeIndex();
+            s.activeProgramSteps = steps;
+            s.activeProgramCycleOutput = cycleOutput;
+            s.activeProgramCycleIndex = attemptCycleIndex;
+            return true;
+        }
+        s.programSuspended = false;
+        s.programIndex = 0;
+        s.activeProgramSteps = null;
+        s.activeProgramCycleOutput = null;
+        if (walk instanceof CastKernel.Walk.Failed<StationStepResult> failed) {
+            StationStepResult.Fail fail = (StationStepResult.Fail) failed.result();
+            Log.warn("STATION step program failed for '" + s.stationId + "' at step index "
+                    + failed.atIndex() + ": " + fail.message());
+            stop(s, fail.reason(), store);
+            return false;
+        }
+
+        s.cyclesDone++;
         if (s.durabilityPerCycle > 0) {
             drainHeldToolDurability(store, s.ref, player, s.durabilityPerCycle);
         }
-
         double xpMult = resolveXpMultiplier(player, asset);
-
-        rollLootAndBonuses(s, store, asset, player, check);
-
         onCycleCompleted(s, store, commandBuffer, asset, xpMult, false, s.cyclesDone);
-
-        Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
-        emitMoment(store, s, StationFlairs.Slot.CYCLE, asset.getPresentation(), blockPos);
         return true;
     }
 
@@ -589,7 +676,7 @@ public final class StationService {
      * transactional {@code removeResource} call returns which concrete item id(s) it actually
      * drained via each {@link ResourceSlotTransaction}'s pre-removal stack.
      */
-    private static void tallyResourceConsumption(@Nonnull StationSession s, @Nullable ResourceTransaction tx,
+    static void tallyResourceConsumption(@Nonnull StationSession s, @Nullable ResourceTransaction tx,
                                                  @Nonnull String resourceTypeId) {
         List<ConsumedSlot> slots = new ArrayList<>();
         if (tx != null) {
@@ -681,31 +768,6 @@ public final class StationService {
     }
 
     /**
-     * The conditional-lootable loot engine (design section 4.5): resolves the station's
-     * effective {@code Cycle}-trigger rolls ({@code Loot.Tables} + inline {@code Loot.Rolls},
-     * {@link LootEngine#resolveRolls}), evaluates + applies them against ONE {@link
-     * FactorSnapshot} for this cycle ({@link #buildFactorContext}), and folds the result into
-     * the session's item ledger + notifications ({@link #applyGrantResult}). The MMO-specific
-     * per-skill luck aggregation the original MMO engine inlined here becomes the MMO bridge's
-     * OWN {@code mmoskilltree:station_luck} factor provider (leg 5), consumed generically by
-     * this engine through the SAME factor lookup {@link Requires} already uses - no MMO call
-     * belongs in this file, ever.
-     */
-    private void rollLootAndBonuses(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
-            @Nonnull StationAsset asset, @Nonnull Player player, @Nonnull ConversionCheck check) {
-        List<Roll> rolls = LootEngine.resolveRolls(asset.getLoot());
-        if (rolls.isEmpty()) {
-            return;
-        }
-        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, asset));
-        ItemStack cycleOutput = check.outputItem != null
-                ? new ItemStack(check.outputItem, check.outputCount) : null;
-        LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, snapshot, player,
-                cycleOutput, s.playerRef, s.stationId, ACTION_WORK, s.cyclesDone);
-        applyGrantResult(s, store, result);
-    }
-
-    /**
      * The Completion-trigger loot pass (design section 4.5.1's {@code "Completion"} trigger,
      * non-silent, {@code cyclesDone >= 1}): runs BEFORE {@link #showSessionSummary} in {@link
      * #stop} so any items it grants still appear in the session's item ledger. No live cycle
@@ -739,7 +801,7 @@ public final class StationService {
      * bonus-copy grants -> {@code ui.station.lucky}, droplist grants -> {@code
      * ui.station.rare_find}. Both may fire on the same pass (independent grant kinds).
      */
-    private void applyGrantResult(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+    static void applyGrantResult(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull LootEngine.GrantResult result) {
         if (!result.anyGranted()) {
             return;
@@ -774,6 +836,17 @@ public final class StationService {
     @Nonnull
     private static FactorContext buildFactorContext(@Nonnull StationSession s, @Nullable Store<EntityStore> store,
             @Nonnull Player player, @Nonnull StationAsset asset) {
+        return buildFactorContext(s, store, player, asset, s.cyclesDone);
+    }
+
+    /**
+     * {@code cycleIndex}-overriding form: {@link #dispatchProgram} passes the ATTEMPT index
+     * (design section 9.3 - {@code s.cyclesDone + 1}, computed before {@code s.cyclesDone} itself
+     * advances) so a Roll step's factor context sees the cycle it is actually running, not the
+     * last COMPLETED one.
+     */
+    private static FactorContext buildFactorContext(@Nonnull StationSession s, @Nullable Store<EntityStore> store,
+            @Nonnull Player player, @Nonnull StationAsset asset, int cycleIndex) {
         long sessionSeconds = Math.max(0L, (System.currentTimeMillis() - s.startedAtMs) / 1000L);
         return FactorContext.builder()
                 .store(store)
@@ -782,7 +855,7 @@ public final class StationService {
                 .stationId(s.stationId)
                 .actionId(ACTION_WORK)
                 .sessionSeconds(sessionSeconds)
-                .cycleIndex(s.cyclesDone)
+                .cycleIndex(cycleIndex)
                 .toolPower(resolveHeldToolPower(player, asset.getTool()))
                 .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
                 .progressionSkills(progressionSkills(asset))
@@ -919,7 +992,7 @@ public final class StationService {
      * SPECIFICALLY (not "nearby players" like Sound3D/ModelParticleService), so it reads
      * {@code s.playerRef} rather than {@code targetPos}.
      */
-    private static void emitMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
+    static void emitMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
                                    @Nonnull StationFlairs.Slot slot, @Nullable Presentation base,
                                    @Nonnull Vector3d targetPos) {
         Presentation p = StationFlairs.effective(base, cachedFlairs(s), slot, s.playerUuid, s.stationId);
@@ -1384,6 +1457,7 @@ public final class StationService {
             case TOOL_CHANGED -> "ui.station.stop.tool_changed";
             case TOOL_BROKEN -> "ui.station.stop.tool_broke";
             case FEATURE_DISABLED -> "ui.station.locked";
+            case STEP_FAILED -> "ui.station.stop.step_failed";
             default -> null;
         };
     }

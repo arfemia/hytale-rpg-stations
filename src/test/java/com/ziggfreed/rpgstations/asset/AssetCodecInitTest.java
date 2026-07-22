@@ -51,4 +51,29 @@ public class AssetCodecInitTest {
         assertDoesNotThrow(() -> assertNotNull(SettingsAsset.CODEC));
         assertDoesNotThrow(() -> assertNotNull(SettingsAsset.SummaryHud.CODEC));
     }
+
+    /**
+     * Design section 9.1's multi-action schema (leg B). {@code stationAssetCodec_
+     * initializesWithoutThrowing} already exercises this whole tree TRANSITIVELY
+     * ({@link StationAsset#CODEC}'s {@code Actions} field references {@link ActionDef#CODEC},
+     * which references {@link ActionInput#CODEC} and {@link StationStep#CODEC}, which references
+     * every nested step-group codec) - these explicit assertions are the same PascalCase-key
+     * guard at the SAME granularity every other type in this file gets.
+     */
+    @Test
+    void actionDefAndActionInputCodecs_initializeWithoutThrowing() {
+        assertDoesNotThrow(() -> assertNotNull(ActionDef.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(ActionInput.CODEC));
+    }
+
+    @Test
+    void stationStepCodecAndNestedGroups_initializeWithoutThrowing() {
+        assertDoesNotThrow(() -> assertNotNull(StationStep.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.OnConditionFail.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.Consume.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.Produce.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.Wait.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.RollGroup.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.CommandGroup.CODEC));
+    }
 }

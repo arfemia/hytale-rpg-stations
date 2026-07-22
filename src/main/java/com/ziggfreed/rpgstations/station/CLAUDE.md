@@ -206,5 +206,42 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   `validate(...)` core is unit-tested. [`/rpgstations validate`](../command/CLAUDE.md) (leg P0) runs
   the same live validator and chats the aggregate (summary + every finding), matching what the
   boot-log audit prints.
-- **Not yet landed** (design scope, not started): phase 2's multi-action/step-sequence/
-  Mount-knob-family/custody work (see the mod-root `CLAUDE.md`'s Phase 2 section).
+- **Multi-action stations + the step engine** (design section 9.1/9.3, phase 2 leg B, LANDED):
+  [`ActionResolver`](ActionResolver.java) is the PURE whole-group-override choke point
+  (`resolve(asset, actionId)` - an action's own group REPLACES the station-level default
+  wholesale; omitting inherits it) and the diegetic selection core (`selectAction`, first-match-
+  wins over `asset.ActionInput`). A station's `Actions` map defaults to ONE implicit
+  `ActionResolver.ACTION_WORK` action when absent - `StationService.runRealCycle` always resolves
+  through `ActionResolver.resolve`, so the shipped sawmill (no `Actions` authored) and a future
+  multi-action station run the IDENTICAL code path. [`ImplicitProgram`](ImplicitProgram.java) is
+  the PURE builder for the classic-convert-loop's four-step shape (`[Consume, Produce, Roll,
+  Present]`, `asset.StationStep` instances built from the live `ConversionCheck` pick + the
+  resolved action's `Loot`/`Presentation` groups) - the byte-stable regression anchor made
+  concrete. The `station.step` engine itself (all in THIS package, not a subpackage, so it keeps
+  package-private access to `StationService`'s helpers): [`StationStepContext`](StationStepContext.java)
+  (the per-run bundle, rebuilt fresh every dispatch/resume per the kernel's contract - resume
+  state that must SURVIVE a suspension lives on `StationSession` instead),
+  [`StationStepResult`](StationStepResult.java) (sealed `Success`/`Suspend`/`Skip`/`Fail`),
+  [`StationStepSemantics`](StationStepSemantics.java) (the `StepSemantics` adapter - `isSuspend`/
+  `nextIndex` wire the Goto branch mechanism), [`StationStepRegistry`](StationStepRegistry.java)
+  (registers the six executable handlers, EACH wrapped in a conditions-gate + throw-guard layer -
+  the design 9.3/M4 binding fix: a throwing step degrades to a clean session `stop()`, never
+  crashes the shared per-world frame drain), [`StationStepHandlers`](StationStepHandlers.java)
+  (Consume/Produce/Wait/Roll/Command/Present - `Consume`/`Produce` support ONLY `From`/`To`
+  `"Inventory"` this leg, `"Custody"` decodes but fails cleanly until phase-2 leg C),
+  [`StationStepDecisions`](StationStepDecisions.java) (the PURE decision cores - a Wait step's
+  suspend/resume math, the conditions-gate outcome, Goto target resolution - unit-tested without a
+  live server, mirroring `loot.RollEvaluator`'s role), and
+  [`StationStepKernel`](StationStepKernel.java) (the ONE production `CastKernel` instance every
+  program - implicit or authored - walks). `StationSession` carries the resume-across-ticks state
+  (`programSuspended`/`programIndex`/`stepDeadlineMs`/`activeProgramSteps`/
+  `activeProgramCycleOutput`/`activeProgramCycleIndex`) - unreached by the sawmill (its implicit
+  program has no `Wait` step, so it always completes synchronously within one
+  `tickFrameOnce` drain), exercised by [`StationStepDecisionsTest`](../../../../../test/java/com/ziggfreed/rpgstations/station/StationStepDecisionsTest.java)'s
+  two-tick suspend/resume simulation. `Camera.FaceBlockMode` is RENAMED `Camera.Recipe` this leg
+  (design 9.7) - `StationSession.cameraRecipe` / `StationCameraPreset.resolve`'s
+  `assetRecipeId` param, no deprecated alias (unreleased, no shipped JSON used the old key).
+- **Not yet landed** (design scope, not started): phase 2 legs C-H - placed-input custody +
+  block-state visuals, the `Hold.Mount` knob family, the anvil (Convert + Enhance, the `Stamp`
+  step), the open flair/moment vocabulary, the art leg, and the phase-2 smoke round (see the
+  mod-root `CLAUDE.md`'s Phase 2 section).

@@ -140,12 +140,13 @@ final class StationHoldController {
      * Fills in the {@code FaceBlock} field diff for the resolved {@link StationCameraPreset}
      * ({@link StationCameraPreset#resolve} - the player's explicit override via
      * {@link StationCameraPrefs#getExplicit}, else the station asset's own
-     * {@link StationSession#faceBlockMode}, else {@link StationCameraPreset#LOOK_ROT}).
+     * {@link StationSession#cameraRecipe} (design 9.7's {@code Camera.Recipe}), else
+     * {@link StationCameraPreset#LOOK_ROT}).
      */
     private static void applyFaceBlockPreset(@Nonnull ServerCameraSettings settings, @Nonnull StationSession s) {
         float yaw = StationFacing.yawToward(s.originX, s.originZ, s.blockX + 0.5, s.blockZ + 0.5);
         StationCameraPreset override = StationCameraPrefs.getExplicit(s.playerRef.getUuid());
-        StationCameraPreset preset = StationCameraPreset.resolve(override, s.faceBlockMode);
+        StationCameraPreset preset = StationCameraPreset.resolve(override, s.cameraRecipe);
         switch (preset) {
             case FREE_NULL:
                 settings.movementForceRotationType = MovementForceRotationType.Custom;

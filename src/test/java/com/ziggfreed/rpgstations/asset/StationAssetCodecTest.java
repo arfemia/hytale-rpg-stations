@@ -1,8 +1,10 @@
 package com.ziggfreed.rpgstations.asset;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -257,5 +259,156 @@ public class StationAssetCodecTest {
         assertEquals(0.2, child.getWork().getIdle().getXpFraction(), "own leaf wins");
         assertEquals(Boolean.TRUE, child.getWork().getIdle().getEnabled(), "sibling leaf inherits");
         assertEquals(15000L, child.getWork().getIdle().getCycleMs(), "sibling leaf inherits");
+    }
+
+    // ==================== Camera.Recipe (design 9.7, RENAMES FaceBlockMode this leg) ====================
+
+    @Test
+    void camera_recipeDecodes() throws Exception {
+        StationAsset a = decodeAsset("{ \"Camera\": { \"Mode\": \"ThirdPerson\", \"Locked\": true,"
+                + " \"FaceBlock\": true, \"Recipe\": \"look_rot\" } }");
+        assertEquals("look_rot", a.getCamera().getRecipe());
+    }
+
+    // ==================== Actions (design 9.1, leg B) ====================
+
+    @Test
+    void actions_absent_resolvesEmpty() throws Exception {
+        StationAsset a = decodeAsset("{ \"Identity\": { \"NameKey\": \"rpgstations.station.x.name\" } }");
+        assertNull(a.getActions(), "no Actions map authored - the implicit single-action default");
+    }
+
+    @Test
+    void actions_decodesPerActionWholeGroupOverrides() throws Exception {
+        StationAsset a = decodeAsset("{ \"Work\": { \"CycleMs\": 5000 },"
+                + " \"Actions\": { \"convert\": {"
+                + "   \"Input\": { \"ResourceTypeId\": \"Metal_Ingot\" },"
+                + "   \"Work\": { \"CycleMs\": 3800,"
+                + "     \"Xp\": [ { \"Skill\": \"SMITHING\", \"PerCycle\": 6.0 } ] },"
+                + "   \"Loot\": { \"Tables\": [\"anvil_sparks\"] } },"
+                + " \"enhance\": {"
+                + "   \"Input\": { \"Function\": \"Weapon\" },"
+                + "   \"Work\": { \"Repeat\": false },"
+                + "   \"Steps\": [ { \"Id\": \"strike1\", \"Type\": \"Wait\", \"Wait\": { \"Beats\": 1 } } ] } } }");
+        assertNotNull(a.getActions());
+        assertEquals(2, a.getActions().size());
+        java.util.List<String> orderedIds = new java.util.ArrayList<>(a.getActions().keySet());
+        assertEquals(java.util.List.of("convert", "enhance"), orderedIds, "LinkedHashMap preserves authoring order");
+
+        ActionDef convert = a.getActions().get("convert");
+        assertEquals("Metal_Ingot", convert.getInput().getResourceTypeId());
+        assertEquals(3800L, convert.getWork().getCycleMs());
+        assertEquals("SMITHING", convert.getWork().getXp()[0].getSkill());
+        assertEquals("anvil_sparks", convert.getLoot().getTables()[0]);
+        assertNull(convert.getSteps(), "convert authors no Steps - the implicit program builds from Work/Recipe/Loot");
+
+        ActionDef enhance = a.getActions().get("enhance");
+        assertEquals("Weapon", enhance.getInput().getFunction());
+        assertEquals(Boolean.FALSE, enhance.getWork().getRepeat());
+        assertEquals(1, enhance.getSteps().length);
+        assertEquals("strike1", enhance.getSteps()[0].getId());
+        assertEquals(StationStep.TYPE_WAIT, enhance.getSteps()[0].getType());
+        assertEquals(1, enhance.getSteps()[0].getWait().getBeats());
+    }
+
+    @Test
+    void actions_parentInheritsWholesaleOnOmit_ownReplacesWholesaleOnAuthor() throws Exception {
+        String parentJson = "{ \"Actions\": { \"convert\": { \"Work\": { \"CycleMs\": 3800 } } } }";
+        StationAsset parent = decodeWithParent(parentJson, null, "actions_parent", null);
+        assertEquals(1, parent.getActions().size());
+
+        StationAsset childOmitting = decodeWithParent("{}", parent, "actions_child_omit", "actions_parent");
+        assertNotNull(childOmitting.getActions(), "Actions inherits WHOLESALE on omit, same as Flairs");
+        assertEquals(3800L, childOmitting.getActions().get("convert").getWork().getCycleMs());
+
+        String childJson = "{ \"Actions\": { \"enhance\": { \"Work\": { \"CycleMs\": 9000 } } } }";
+        StationAsset childAuthoring = decodeWithParent(childJson, parent, "actions_child_own", "actions_parent");
+        assertEquals(1, childAuthoring.getActions().size(),
+                "authoring Actions REPLACES the parent's whole map, no per-key merge");
+        assertNull(childAuthoring.getActions().get("convert"), "the parent's 'convert' entry does NOT survive");
+        assertEquals(9000L, childAuthoring.getActions().get("enhance").getWork().getCycleMs());
+    }
+
+    // ==================== ActionInput (design 9.1) ====================
+
+    @Test
+    void actionInput_decodesEveryRoute() throws Exception {
+        ActionInput i = decodeActionInputFixture();
+        assertEquals("Wood_Oak_Log", i.getItemId());
+        assertEquals("Metal_Ingot", i.getResourceTypeId());
+        assertEquals("Weapon", i.getFunction());
+        assertEquals("Hammer", i.getTags().get("Family")[0]);
+        assertFalse(i.isCatchAll());
+    }
+
+    @Test
+    void actionInput_allBlank_isCatchAll() {
+        assertTrue(ActionInput.of(null, null, null, null).isCatchAll());
+    }
+
+    private static ActionInput decodeActionInputFixture() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": { \"any\": { \"Input\": {"
+                + " \"ItemId\": \"Wood_Oak_Log\", \"ResourceTypeId\": \"Metal_Ingot\","
+                + " \"Function\": \"Weapon\", \"Tags\": { \"Family\": [\"Hammer\"] } } } } }");
+        return a.getActions().get("any").getInput();
+    }
+
+    // ==================== StationStep (design 9.3) ====================
+
+    @Test
+    void stationStep_decodesConsumeProduceWaitRollCommandGroups() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": { \"ritual\": { \"Steps\": ["
+                + " { \"Id\": \"c\", \"Type\": \"Consume\","
+                + "   \"Consume\": { \"ItemId\": \"MMO_Sharpened_Bar\", \"Quantity\": 2, \"From\": \"Custody\" } },"
+                + " { \"Id\": \"p\", \"Type\": \"Produce\","
+                + "   \"Produce\": { \"ItemId\": \"MMO_Enhanced_Sword\", \"Quantity\": 1 } },"
+                + " { \"Id\": \"w\", \"Type\": \"Wait\", \"Wait\": { \"DurationMs\": 1200 },"
+                + "   \"OnConditionFail\": { \"Result\": \"Skip\", \"Goto\": \"p\" },"
+                + "   \"Conditions\": [ { \"Factor\": \"mmoskilltree:skill_level\", \"Min\": 10 } ] },"
+                + " { \"Id\": \"r\", \"Type\": \"Roll\","
+                + "   \"Roll\": { \"Lootable\": \"anvil_sparks\", \"Rolls\": [ { \"Trigger\": \"Cycle\" } ] } },"
+                + " { \"Id\": \"cmd\", \"Type\": \"Command\","
+                + "   \"Command\": { \"Commands\": [\"give {player} test 1\"] } } ] } } }");
+        StationStep[] steps = a.getActions().get("ritual").getSteps();
+        assertEquals(5, steps.length);
+
+        assertEquals(StationStep.TYPE_CONSUME, steps[0].getType());
+        assertEquals("MMO_Sharpened_Bar", steps[0].getConsume().getItemId());
+        assertEquals(2, steps[0].getConsume().getQuantity());
+        assertEquals("Custody", steps[0].getConsume().getFrom());
+        assertEquals(StationStep.Consume.FROM_CUSTODY, steps[0].getConsume().effectiveFrom());
+
+        assertEquals(StationStep.TYPE_PRODUCE, steps[1].getType());
+        assertEquals("MMO_Enhanced_Sword", steps[1].getProduce().getItemId());
+        assertEquals(StationStep.Produce.TO_INVENTORY, steps[1].getProduce().effectiveTo(), "To defaults to Inventory");
+
+        assertEquals(StationStep.TYPE_WAIT, steps[2].getType());
+        assertEquals(1200L, steps[2].getWait().getDurationMs());
+        assertEquals(StationStep.OnConditionFail.RESULT_SKIP, steps[2].getOnConditionFail().effectiveResult());
+        assertEquals("p", steps[2].getOnConditionFail().getGoto());
+        assertEquals(1, steps[2].getConditions().length);
+
+        assertEquals(StationStep.TYPE_ROLL, steps[3].getType());
+        assertEquals("anvil_sparks", steps[3].getRoll().getLootable());
+        assertEquals(1, steps[3].getRoll().getRolls().length);
+
+        assertEquals(StationStep.TYPE_COMMAND, steps[4].getType());
+        assertEquals("give {player} test 1", steps[4].getCommand().getCommands()[0]);
+    }
+
+    @Test
+    void stationStep_reservedTypes_decodeAndFlagUnimplemented() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": { \"anvil\": { \"Steps\": ["
+                + " { \"Id\": \"stamp\", \"Type\": \"Stamp\" },"
+                + " { \"Id\": \"mount\", \"Type\": \"Mount\" } ] } } }");
+        StationStep[] steps = a.getActions().get("anvil").getSteps();
+        assertTrue(steps[0].isReservedUnimplemented());
+        assertTrue(steps[1].isReservedUnimplemented());
+    }
+
+    @Test
+    void stationStep_onConditionFail_defaultsToFail() {
+        StationStep.OnConditionFail omitted = StationStep.OnConditionFail.of(null, null);
+        assertEquals(StationStep.OnConditionFail.RESULT_FAIL, omitted.effectiveResult());
     }
 }

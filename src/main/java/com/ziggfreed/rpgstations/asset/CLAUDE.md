@@ -5,20 +5,44 @@ Router for `asset/`. Every custom asset type this mod authors: the codec IS the 
 reuse). `RpgStationsPlugin` registers each as its own `AssetStoreRegistrar` store + folds loaded
 entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent`.
 
-- **[`StationAsset`](StationAsset.java)** (1241 lines) - an interactive work station, loaded from
+- **[`StationAsset`](StationAsset.java)** - an interactive work station, loaded from
   `Server/RpgStations/Stations/*.json`. Ported from the MMO's pre-extraction `asset.type.StationAsset`
-  with two binding schema deltas (design section 4.4): `requires` is this mod's OWN
-  [`Requires`](Requires.java) codec (the MMO's `content.gate.Requirements` dependency severed),
-  and the old `Luck` group is REPLACED by `loot` (`{Tables, Rolls}` over the shared
-  [`Roll`](Roll.java) codec - see `../loot/CLAUDE.md`). Groups: `Identity` (name/desc/icon keys),
-  `Work` (cycle cadence + `Xp[]` progression declarations the engine never interprets, forwarded
-  verbatim on `StationCycleCompletedEvent.xpAsks`; optional `Idle` practice mode), `Recipe`
-  (authored `Conversions` or `FromCrafting` derivation), `Hold` (the movement-lock effect / seat
-  mount), `Tool` (the held-tool gate + `XpScale`), `Loot` (`Tables`/`Rolls`), `Camera` (third-person
-  pull + `FaceBlock`/`FaceBlockMode`), `Animation` (`EmoteId` + `Swing`/`Impact`/`ActionClip`),
-  `Presentation` (per-cycle moment), `Completion` (session-end moment, a second `Presentation`
-  instance), `Requires` (permission + factor-`Condition` gate), `Flairs` (per-flair-id cosmetic
-  overrides). See `../station/CLAUDE.md` for how every group drives the engine.
+  with binding schema deltas: `requires` is this mod's OWN [`Requires`](Requires.java) codec (the
+  MMO's `content.gate.Requirements` dependency severed, design 4.4), the old `Luck` group is
+  REPLACED by `loot` (`{Tables, Rolls}` over the shared [`Roll`](Roll.java) codec - see
+  `../loot/CLAUDE.md`), and (phase 2 leg B) `Camera.FaceBlockMode` is RENAMED `Camera.Recipe`
+  (design 9.7, no alias). Groups: `Identity` (name/desc/icon keys), `Work` (cycle cadence + `Xp[]`
+  progression declarations the engine never interprets, forwarded verbatim on
+  `StationCycleCompletedEvent.xpAsks`; optional `Idle` practice mode; `Repeat` - phase 2 leg B,
+  read only by the `station.step` engine's program-completion handling, unused by any shipped
+  content yet), `Recipe` (authored `Conversions` or `FromCrafting` derivation), `Hold` (the
+  movement-lock effect / seat mount), `Tool` (the held-tool gate + `XpScale`), `Loot`
+  (`Tables`/`Rolls`), `Camera` (third-person pull + `FaceBlock`/`Recipe`), `Animation` (`EmoteId` +
+  `Swing`/`Impact`/`ActionClip`), `Presentation` (per-cycle moment), `Completion` (session-end
+  moment, a second `Presentation` instance), `Requires` (permission + factor-`Condition` gate),
+  `Flairs` (per-flair-id cosmetic overrides), and (phase 2 leg B) `Actions` - a named,
+  authored-order map of [`ActionDef`](ActionDef.java) whole-GROUP overrides (design 9.1; native
+  `Parent` inherits the WHOLE map, same as `Flairs` - no per-key merge), absent/empty meaning the
+  single implicit `"work"` action built from this asset's own groups. See `../station/CLAUDE.md`
+  for how every group drives the engine (`station.ActionResolver` is the resolution choke point).
+- **[`ActionDef`](ActionDef.java)** (design 9.1) - one `Actions` map entry: nullable overrides of
+  every `StationAsset` group (`Input`/`Work`/`Recipe`/`Tool`/`Hold`/`Camera`/`Animation`/
+  `Presentation`/`Completion`/`Loot`/`Requires`) PLUS `Label` (an advisory display key) and
+  `Steps` (an authored [`StationStep`](StationStep.java) program; absent means "build the
+  implicit program" - see `../station/CLAUDE.md`'s `ImplicitProgram`).
+- **[`ActionInput`](ActionInput.java)** (design 9.1) - the diegetic action-selection matcher:
+  `{ItemId?, ResourceTypeId?, Tags?, Function?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, the new
+  functional route; its live resolution against the held item is phase-2 leg E scope, unimplemented
+  this leg). `isCatchAll()` = no route authored (matches anything; `StationValidator` flags an
+  unreachable LATER catch-all).
+- **[`StationStep`](StationStep.java)** (design 9.3) - ONE step of a multi-action station's step
+  PROGRAM: a `Type` discriminator (`Consume`/`Produce`/`Wait`/`Roll`/`Command` - executable this
+  leg via `station.StationStepKernel`; `Stamp`/`Mount` - schema-reserved, decode fine, no handler
+  yet) + base fields every type shares (`Id`, `Conditions`, `OnConditionFail{Result,Goto}` - the
+  "Branch is NOT a step type" branch mechanism, `Presentation`) + ONE per-type nested group.
+  `Consume`/`Produce` support only `From`/`To` `"Inventory"` this leg (`"Custody"` decodes,
+  forward-compat with phase-2 leg C, fails cleanly at runtime until then). `Roll` shares the SAME
+  `Roll`/`LootableAsset` vocabulary a station's own `Loot` group uses (DRY, one roll engine).
 - **[`Presentation`](Presentation.java)** - RpgStations' OWN codec (design section 4.1: a
   deliberate small divergence from the MMO's copy of the same shape, not a `ziggfreed-common`
   lift - the two authoring-side vocabularies diverge, this one drops the MMO's `Feedback` leaf

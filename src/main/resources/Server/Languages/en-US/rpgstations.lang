@@ -18,6 +18,7 @@ ui.station.stop.session_cap = You take a break after a long work session.
 ui.station.stop.station_gone = The station is gone.
 ui.station.stop.tool_changed = You put away your tool and stop working.
 ui.station.stop.tool_broke = Your tool broke! You stop working.
+ui.station.stop.step_failed = Something went wrong and you stop working.
 ui.station.summary.title = Work Complete
 ui.station.summary.cycles = Worked {0} cycles
 ui.station.summary.item_consumed = -{1} {0}
