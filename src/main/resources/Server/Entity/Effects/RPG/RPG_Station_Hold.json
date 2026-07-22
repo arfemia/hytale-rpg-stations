@@ -1,0 +1,14 @@
+{
+  "Duration": 2.5,
+  "OverlapBehavior": "Overwrite",
+  "ApplicationEffects": {
+    "MovementEffects": {
+      "DisableForward": true,
+      "DisableBackward": true,
+      "DisableLeft": true,
+      "DisableRight": true,
+      "DisableSprint": true,
+      "DisableJump": true
+    }
+  }
+}

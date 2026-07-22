@@ -1,0 +1,1303 @@
+package com.ziggfreed.rpgstations.asset;
+
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
+import com.hypixel.hytale.assetstore.AssetExtraInfo;
+import com.hypixel.hytale.assetstore.codec.AssetBuilderCodec;
+import com.hypixel.hytale.assetstore.map.DefaultAssetMap;
+import com.hypixel.hytale.assetstore.map.JsonAssetWithMap;
+import com.hypixel.hytale.codec.Codec;
+import com.hypixel.hytale.codec.KeyedCodec;
+import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
+import com.hypixel.hytale.codec.codecs.map.MapCodec;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * An interactive work station (diegetic work loop), loaded from a pack's
+ * {@code Server/RpgStations/Stations/*.json}. Ported from the MMO Skill Tree's
+ * {@code asset.type.StationAsset} (RPG Stations extraction phase 1, leg 2 - engine move);
+ * see the design doc's section 4.4 for the phase-1 schema deltas from the MMO original
+ * (this class's {@link #requires} is RpgStations' OWN {@link Requires} codec, severing the
+ * MMO's {@code content.gate.Requirements} dependency - the ONE structural change this leg
+ * makes to the schema. {@code Luck} stays UNCHANGED for now; it is replaced by a {@code Loot}
+ * group when the conditional-lootable engine lands in leg 3, per the critical-scope-rule
+ * seam this leg leaves).
+ *
+ * <p><b>Pattern A - full structured asset, the runtime authority.</b> {@link #CODEC} is the
+ * single decode schema for this type; every decoded instance folds into
+ * {@code StationCatalog} (defaults &lt; pack). Every top-level field, and every leaf of every
+ * nested group codec, is registered via {@code appendInherited} (never plain {@code append}),
+ * so native {@code Parent} partial-overlay works.
+ */
+public final class StationAsset
+        implements JsonAssetWithMap<String, DefaultAssetMap<String, StationAsset>> {
+
+    private String id;
+    private AssetExtraInfo.Data data;
+
+    @Nullable private Identity identity;
+    @Nullable private Work work;
+    @Nullable private Recipe recipe;
+    @Nullable private Hold hold;
+    @Nullable private Tool tool;
+    @Nullable private Luck luck;
+    @Nullable private Camera camera;
+    @Nullable private Animation animation;
+    /** The CYCLE-complete presentation moment (sound/particles at the block per finished cycle). */
+    @Nullable private Presentation presentation;
+    /**
+     * The SESSION-COMPLETION presentation moment: the "work complete" beat, played by
+     * {@code StationService#stop} for a NON-SILENT stop with at least one completed cycle.
+     */
+    @Nullable private Presentation completion;
+    @Nullable private Requires requires;
+    /** Named cosmetic flair overrides, keyed by flair id. */
+    @Nullable private Map<String, Flair> flairs;
+
+    public static final AssetBuilderCodec<String, StationAsset> CODEC = AssetBuilderCodec.builder(
+                    StationAsset.class,
+                    StationAsset::new,
+                    Codec.STRING,
+                    // CANONICALIZE the id to lowercase AT DECODE: the engine's asset key is the
+                    // verbatim PascalCase FILENAME, while every consumer (lang keys, the catalog
+                    // map, the interaction's Station param) is authored lowercase.
+                    (a, id) -> a.id = id == null ? null : id.toLowerCase(java.util.Locale.ROOT),
+                    a -> a.id,
+                    (a, extra) -> a.data = extra,
+                    a -> a.data)
+            .append(new KeyedCodec<>("Name", Codec.STRING, false),
+                    (a, name) -> { /* no-op - id already comes from the filename */ },
+                    a -> a.id)
+            .add()
+            .appendInherited(new KeyedCodec<>("Identity", Identity.CODEC, false),
+                    (a, v) -> a.identity = v, a -> a.identity, (a, parent) -> a.identity = parent.identity)
+            .add()
+            .appendInherited(new KeyedCodec<>("Work", Work.CODEC, false),
+                    (a, v) -> a.work = v, a -> a.work, (a, parent) -> a.work = parent.work)
+            .add()
+            .appendInherited(new KeyedCodec<>("Recipe", Recipe.CODEC, false),
+                    (a, v) -> a.recipe = v, a -> a.recipe, (a, parent) -> a.recipe = parent.recipe)
+            .add()
+            .appendInherited(new KeyedCodec<>("Hold", Hold.CODEC, false),
+                    (a, v) -> a.hold = v, a -> a.hold, (a, parent) -> a.hold = parent.hold)
+            .add()
+            .appendInherited(new KeyedCodec<>("Tool", Tool.CODEC, false),
+                    (a, v) -> a.tool = v, a -> a.tool, (a, parent) -> a.tool = parent.tool)
+            .add()
+            .appendInherited(new KeyedCodec<>("Luck", Luck.CODEC, false),
+                    (a, v) -> a.luck = v, a -> a.luck, (a, parent) -> a.luck = parent.luck)
+            .add()
+            .appendInherited(new KeyedCodec<>("Camera", Camera.CODEC, false),
+                    (a, v) -> a.camera = v, a -> a.camera, (a, parent) -> a.camera = parent.camera)
+            .add()
+            .appendInherited(new KeyedCodec<>("Animation", Animation.CODEC, false),
+                    (a, v) -> a.animation = v, a -> a.animation, (a, parent) -> a.animation = parent.animation)
+            .add()
+            .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
+                    (a, v) -> a.presentation = v, a -> a.presentation, (a, parent) -> a.presentation = parent.presentation)
+            .add()
+            .appendInherited(new KeyedCodec<>("Completion", Presentation.CODEC, false),
+                    (a, v) -> a.completion = v, a -> a.completion, (a, parent) -> a.completion = parent.completion)
+            .add()
+            .appendInherited(new KeyedCodec<>("Requires", Requires.CODEC, false),
+                    (a, v) -> a.requires = v, a -> a.requires, (a, parent) -> a.requires = parent.requires)
+            .add()
+            .appendInherited(new KeyedCodec<>("Flairs",
+                            new MapCodec<>(Flair.CODEC, LinkedHashMap::new), false),
+                    (a, v) -> a.flairs = v, a -> a.flairs, (a, parent) -> a.flairs = parent.flairs)
+            .add()
+            .build();
+
+    public StationAsset() {
+    }
+
+    /** Java-side construction path; sets the same fields the codec fills. */
+    @Nonnull
+    public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
+            @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
+            @Nullable Animation animation, @Nullable Presentation presentation, @Nullable Requires requires) {
+        return of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires, null);
+    }
+
+    /** Java-side construction path with the optional {@link Luck} override. */
+    @Nonnull
+    public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
+            @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
+            @Nullable Animation animation, @Nullable Presentation presentation,
+            @Nullable Requires requires, @Nullable Luck luck) {
+        return of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires, luck, null);
+    }
+
+    /** Java-side construction path with the optional {@link Luck} AND {@link Flair} map override. */
+    @Nonnull
+    public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
+            @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
+            @Nullable Animation animation, @Nullable Presentation presentation,
+            @Nullable Requires requires, @Nullable Luck luck, @Nullable Map<String, Flair> flairs) {
+        StationAsset a = new StationAsset();
+        a.id = id;
+        a.identity = identity;
+        a.work = work;
+        a.recipe = recipe;
+        a.hold = hold;
+        a.tool = tool;
+        a.luck = luck;
+        a.camera = camera;
+        a.animation = animation;
+        a.presentation = presentation;
+        a.requires = requires;
+        a.flairs = flairs;
+        return a;
+    }
+
+    /** Java-side construction path with the optional {@link Luck}, {@link Flair} map, AND {@link #completion}. */
+    @Nonnull
+    public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
+            @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
+            @Nullable Animation animation, @Nullable Presentation presentation,
+            @Nullable Requires requires, @Nullable Luck luck, @Nullable Map<String, Flair> flairs,
+            @Nullable Presentation completion) {
+        StationAsset a = of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires,
+                luck, flairs);
+        a.completion = completion;
+        return a;
+    }
+
+    /** The CANONICAL lowercase station id, normalized at decode from the engine's PascalCase filename key. */
+    @Override
+    public String getId() {
+        return id;
+    }
+
+    /**
+     * The PascalCase, underscore-preserving filename a station id decodes to (the CODEC's
+     * {@code toLowerCase} transform run backwards). Used by tests to locate a shipped
+     * {@code Server/RpgStations/Stations/<Name>.json} by id.
+     */
+    @Nonnull
+    public static String filenameFor(@Nonnull String id) {
+        String[] parts = id.split("_");
+        StringBuilder sb = new StringBuilder(id.length());
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                sb.append('_');
+            }
+            String part = parts[i];
+            if (part.isEmpty()) {
+                continue;
+            }
+            sb.append(Character.toUpperCase(part.charAt(0)));
+            if (part.length() > 1) {
+                sb.append(part.substring(1));
+            }
+        }
+        return sb.toString();
+    }
+
+    @Nullable
+    public Identity getIdentity() {
+        return identity;
+    }
+
+    @Nullable
+    public Work getWork() {
+        return work;
+    }
+
+    @Nullable
+    public Recipe getRecipe() {
+        return recipe;
+    }
+
+    @Nullable
+    public Hold getHold() {
+        return hold;
+    }
+
+    @Nullable
+    public Tool getTool() {
+        return tool;
+    }
+
+    @Nullable
+    public Luck getLuck() {
+        return luck;
+    }
+
+    @Nullable
+    public Camera getCamera() {
+        return camera;
+    }
+
+    @Nullable
+    public Animation getAnimation() {
+        return animation;
+    }
+
+    /** The CYCLE-complete presentation moment (sound/particles at the block per finished cycle). */
+    @Nullable
+    public Presentation getPresentation() {
+        return presentation;
+    }
+
+    /** The SESSION-COMPLETION presentation moment; null = silent (no completion flourish). */
+    @Nullable
+    public Presentation getCompletion() {
+        return completion;
+    }
+
+    @Nullable
+    public Requires getRequires() {
+        return requires;
+    }
+
+    /** Named cosmetic flair overrides, keyed by flair id; null = none authored. */
+    @Nullable
+    public Map<String, Flair> getFlairs() {
+        return flairs;
+    }
+
+    // ==================== Nested groups (nullable leaves) ====================
+
+    /** Display keys and icon (an item id, per the ability-icon convention). */
+    public static final class Identity {
+        @Nullable protected String nameKey;
+        @Nullable protected String descKey;
+        @Nullable protected String icon;
+
+        public static final BuilderCodec<Identity> CODEC = BuilderCodec.builder(Identity.class, Identity::new)
+                .appendInherited(new KeyedCodec<>("NameKey", Codec.STRING, false),
+                        (o, v) -> o.nameKey = v, o -> o.nameKey, (o, p) -> o.nameKey = p.nameKey).add()
+                .appendInherited(new KeyedCodec<>("DescKey", Codec.STRING, false),
+                        (o, v) -> o.descKey = v, o -> o.descKey, (o, p) -> o.descKey = p.descKey).add()
+                .appendInherited(new KeyedCodec<>("Icon", Codec.STRING, false),
+                        (o, v) -> o.icon = v, o -> o.icon, (o, p) -> o.icon = p.icon).add()
+                .build();
+
+        @Nonnull
+        public static Identity of(@Nullable String nameKey, @Nullable String descKey, @Nullable String icon) {
+            Identity i = new Identity();
+            i.nameKey = nameKey;
+            i.descKey = descKey;
+            i.icon = icon;
+            return i;
+        }
+
+        @Nullable
+        public String getNameKey() {
+            return nameKey;
+        }
+
+        @Nullable
+        public String getDescKey() {
+            return descKey;
+        }
+
+        @Nullable
+        public String getIcon() {
+            return icon;
+        }
+    }
+
+    /**
+     * The work-loop cadence and bounds. Reader defaults ({@code StationService}):
+     * {@code CycleMs} 5000, {@code MaxDurationMs} 600000, {@code MaxMoveMeters} 1.5,
+     * {@code Exclusive} true. {@code MaxMoveMeters} is an EXIT trigger, NOT an anti-idle guard.
+     */
+    public static final class Work {
+        @Nullable protected Long cycleMs;
+        @Nullable protected Long maxDurationMs;
+        @Nullable protected Double maxMoveMeters;
+        @Nullable protected Boolean exclusive;
+        @Nullable protected WorkXp[] xp;
+        @Nullable protected Idle idle;
+
+        public static final BuilderCodec<Work> CODEC = BuilderCodec.builder(Work.class, Work::new)
+                .appendInherited(new KeyedCodec<>("CycleMs", Codec.LONG, false),
+                        (o, v) -> o.cycleMs = v, o -> o.cycleMs, (o, p) -> o.cycleMs = p.cycleMs).add()
+                .appendInherited(new KeyedCodec<>("MaxDurationMs", Codec.LONG, false),
+                        (o, v) -> o.maxDurationMs = v, o -> o.maxDurationMs,
+                        (o, p) -> o.maxDurationMs = p.maxDurationMs).add()
+                .appendInherited(new KeyedCodec<>("MaxMoveMeters", Codec.DOUBLE, false),
+                        (o, v) -> o.maxMoveMeters = v, o -> o.maxMoveMeters,
+                        (o, p) -> o.maxMoveMeters = p.maxMoveMeters).add()
+                .appendInherited(new KeyedCodec<>("Exclusive", Codec.BOOLEAN, false),
+                        (o, v) -> o.exclusive = v, o -> o.exclusive, (o, p) -> o.exclusive = p.exclusive).add()
+                .appendInherited(new KeyedCodec<>("Xp", new ArrayCodec<>(WorkXp.CODEC, WorkXp[]::new), false),
+                        (o, v) -> o.xp = v, o -> o.xp, (o, p) -> o.xp = p.xp).add()
+                .appendInherited(new KeyedCodec<>("Idle", Idle.CODEC, false),
+                        (o, v) -> o.idle = v, o -> o.idle, (o, p) -> o.idle = p.idle).add()
+                .build();
+
+        @Nonnull
+        public static Work of(@Nullable Long cycleMs, @Nullable Long maxDurationMs,
+                @Nullable Double maxMoveMeters, @Nullable Boolean exclusive, @Nullable WorkXp[] xp) {
+            return of(cycleMs, maxDurationMs, maxMoveMeters, exclusive, xp, null);
+        }
+
+        @Nonnull
+        public static Work of(@Nullable Long cycleMs, @Nullable Long maxDurationMs,
+                @Nullable Double maxMoveMeters, @Nullable Boolean exclusive, @Nullable WorkXp[] xp,
+                @Nullable Idle idle) {
+            Work w = new Work();
+            w.cycleMs = cycleMs;
+            w.maxDurationMs = maxDurationMs;
+            w.maxMoveMeters = maxMoveMeters;
+            w.exclusive = exclusive;
+            w.xp = xp;
+            w.idle = idle;
+            return w;
+        }
+
+        @Nullable
+        public Long getCycleMs() {
+            return cycleMs;
+        }
+
+        @Nullable
+        public Long getMaxDurationMs() {
+            return maxDurationMs;
+        }
+
+        @Nullable
+        public Double getMaxMoveMeters() {
+            return maxMoveMeters;
+        }
+
+        @Nullable
+        public Boolean getExclusive() {
+            return exclusive;
+        }
+
+        @Nullable
+        public WorkXp[] getXp() {
+            return xp;
+        }
+
+        @Nullable
+        public Idle getIdle() {
+            return idle;
+        }
+
+        /**
+         * Opt-in no-material idle practice: when the station has no runnable conversion AND
+         * {@link #enabled}, the session grants tiny fractional XP-ask forwarding instead of
+         * stopping. Default OFF. {@link #cycleMs} reader-defaults to 3x the effective
+         * {@code Work.CycleMs}, floored at 2x it; {@link #xpFraction} reader-defaults to 0.1,
+         * clamped to {@code [0, 1]}.
+         */
+        public static final class Idle {
+            @Nullable protected Boolean enabled;
+            @Nullable protected Long cycleMs;
+            @Nullable protected Double xpFraction;
+
+            public static final BuilderCodec<Idle> CODEC = BuilderCodec.builder(Idle.class, Idle::new)
+                    .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
+                            (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled).add()
+                    .appendInherited(new KeyedCodec<>("CycleMs", Codec.LONG, false),
+                            (o, v) -> o.cycleMs = v, o -> o.cycleMs, (o, p) -> o.cycleMs = p.cycleMs).add()
+                    .appendInherited(new KeyedCodec<>("XpFraction", Codec.DOUBLE, false),
+                            (o, v) -> o.xpFraction = v, o -> o.xpFraction, (o, p) -> o.xpFraction = p.xpFraction).add()
+                    .build();
+
+            @Nonnull
+            public static Idle of(@Nullable Boolean enabled, @Nullable Long cycleMs, @Nullable Double xpFraction) {
+                Idle i = new Idle();
+                i.enabled = enabled;
+                i.cycleMs = cycleMs;
+                i.xpFraction = xpFraction;
+                return i;
+            }
+
+            @Nullable
+            public Boolean getEnabled() {
+                return enabled;
+            }
+
+            @Nullable
+            public Long getCycleMs() {
+                return cycleMs;
+            }
+
+            @Nullable
+            public Double getXpFraction() {
+                return xpFraction;
+            }
+        }
+    }
+
+    /**
+     * One fixed per-CYCLE progression declaration. The engine never interprets this itself
+     * (design section 4.4.1) - it forwards the ask + the resolved tool multiplier on the
+     * cycle-completed event; whichever progression mod is present (or none) decides what to
+     * do with it.
+     */
+    public static final class WorkXp {
+        @Nullable protected String skill;
+        @Nullable protected Double perCycle;
+
+        public static final BuilderCodec<WorkXp> CODEC = BuilderCodec.builder(WorkXp.class, WorkXp::new)
+                .appendInherited(new KeyedCodec<>("Skill", Codec.STRING, false),
+                        (o, v) -> o.skill = v, o -> o.skill, (o, p) -> o.skill = p.skill).add()
+                .appendInherited(new KeyedCodec<>("PerCycle", Codec.DOUBLE, false),
+                        (o, v) -> o.perCycle = v, o -> o.perCycle, (o, p) -> o.perCycle = p.perCycle).add()
+                .build();
+
+        @Nonnull
+        public static WorkXp of(@Nullable String skill, @Nullable Double perCycle) {
+            WorkXp x = new WorkXp();
+            x.skill = skill;
+            x.perCycle = perCycle;
+            return x;
+        }
+
+        @Nullable
+        public String getSkill() {
+            return skill;
+        }
+
+        @Nullable
+        public Double getPerCycle() {
+            return perCycle;
+        }
+    }
+
+    /**
+     * The Convert recipe. Its EFFECTIVE conversions ({@code StationCatalog.resolvedConversions})
+     * are authored {@link #conversions} FIRST, then any {@link FromCrafting}-derived conversions.
+     */
+    public static final class Recipe {
+        @Nullable protected Conversion[] conversions;
+        @Nullable protected FromCrafting fromCrafting;
+
+        public static final BuilderCodec<Recipe> CODEC = BuilderCodec.builder(Recipe.class, Recipe::new)
+                .appendInherited(new KeyedCodec<>("Conversions",
+                                new ArrayCodec<>(Conversion.CODEC, Conversion[]::new), false),
+                        (o, v) -> o.conversions = v, o -> o.conversions,
+                        (o, p) -> o.conversions = p.conversions).add()
+                .appendInherited(new KeyedCodec<>("FromCrafting", FromCrafting.CODEC, false),
+                        (o, v) -> o.fromCrafting = v, o -> o.fromCrafting,
+                        (o, p) -> o.fromCrafting = p.fromCrafting).add()
+                .build();
+
+        @Nonnull
+        public static Recipe of(@Nullable Conversion[] conversions) {
+            return of(conversions, null);
+        }
+
+        @Nonnull
+        public static Recipe of(@Nullable Conversion[] conversions, @Nullable FromCrafting fromCrafting) {
+            Recipe r = new Recipe();
+            r.conversions = conversions;
+            r.fromCrafting = fromCrafting;
+            return r;
+        }
+
+        @Nullable
+        public Conversion[] getConversions() {
+            return conversions;
+        }
+
+        @Nullable
+        public FromCrafting getFromCrafting() {
+            return fromCrafting;
+        }
+    }
+
+    /**
+     * Derive-from-native rule: one Conversion is derived per LIVE {@code Item} whose native
+     * bench-requirement categories intersect {@link #categories} and whose native recipe has
+     * EXACTLY ONE input. {@link #outputPerInput} (default 1) is the OPTIONAL yield multiplier.
+     */
+    public static final class FromCrafting {
+        @Nullable protected String[] categories;
+        @Nullable protected Integer outputPerInput;
+
+        public static final BuilderCodec<FromCrafting> CODEC = BuilderCodec.builder(FromCrafting.class, FromCrafting::new)
+                .appendInherited(new KeyedCodec<>("Categories", new ArrayCodec<>(Codec.STRING, String[]::new), false),
+                        (o, v) -> o.categories = v, o -> o.categories, (o, p) -> o.categories = p.categories).add()
+                .appendInherited(new KeyedCodec<>("OutputPerInput", Codec.INTEGER, false),
+                        (o, v) -> o.outputPerInput = v, o -> o.outputPerInput,
+                        (o, p) -> o.outputPerInput = p.outputPerInput).add()
+                .build();
+
+        @Nonnull
+        public static FromCrafting of(@Nullable String[] categories, @Nullable Integer outputPerInput) {
+            FromCrafting f = new FromCrafting();
+            f.categories = categories;
+            f.outputPerInput = outputPerInput;
+            return f;
+        }
+
+        @Nullable
+        public String[] getCategories() {
+            return categories;
+        }
+
+        @Nullable
+        public Integer getOutputPerInput() {
+            return outputPerInput;
+        }
+    }
+
+    /**
+     * One native-shaped input-to-output conversion. {@code Input} is a native
+     * {@link Ingredient} (exactly one of {@code ItemId}/{@code ResourceTypeId}); {@code Output}
+     * is always an exact {@code ItemId} ingredient.
+     */
+    public static final class Conversion {
+        @Nullable protected Ingredient input;
+        @Nullable protected Ingredient output;
+
+        public static final BuilderCodec<Conversion> CODEC = BuilderCodec.builder(Conversion.class, Conversion::new)
+                .appendInherited(new KeyedCodec<>("Input", Ingredient.CODEC, false),
+                        (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input).add()
+                .appendInherited(new KeyedCodec<>("Output", Ingredient.CODEC, false),
+                        (o, v) -> o.output = v, o -> o.output, (o, p) -> o.output = p.output).add()
+                .build();
+
+        @Nonnull
+        public static Conversion of(@Nullable Ingredient input, @Nullable Ingredient output) {
+            Conversion c = new Conversion();
+            c.input = input;
+            c.output = output;
+            return c;
+        }
+
+        @Nullable
+        public Ingredient getInput() {
+            return input;
+        }
+
+        @Nullable
+        public Ingredient getOutput() {
+            return output;
+        }
+    }
+
+    /**
+     * A native-shaped recipe ingredient mirroring vanilla {@code MaterialQuantity}. An INPUT
+     * sets exactly one of {@link #itemId} or {@link #resourceTypeId} (a native
+     * {@code Item.ResourceTypes} family - the "any log" route); an OUTPUT sets only {@code ItemId}.
+     */
+    public static final class Ingredient {
+        @Nullable protected String itemId;
+        @Nullable protected String resourceTypeId;
+        @Nullable protected Integer quantity;
+
+        public static final BuilderCodec<Ingredient> CODEC = BuilderCodec.builder(Ingredient.class, Ingredient::new)
+                .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
+                        (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId).add()
+                .appendInherited(new KeyedCodec<>("ResourceTypeId", Codec.STRING, false),
+                        (o, v) -> o.resourceTypeId = v, o -> o.resourceTypeId,
+                        (o, p) -> o.resourceTypeId = p.resourceTypeId).add()
+                .appendInherited(new KeyedCodec<>("Quantity", Codec.INTEGER, false),
+                        (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity).add()
+                .build();
+
+        @Nonnull
+        public static Ingredient of(@Nullable String itemId, @Nullable String resourceTypeId,
+                @Nullable Integer quantity) {
+            Ingredient i = new Ingredient();
+            i.itemId = itemId;
+            i.resourceTypeId = resourceTypeId;
+            i.quantity = quantity;
+            return i;
+        }
+
+        /** Convenience: an exact-item ingredient ({@code ItemId}). */
+        @Nonnull
+        public static Ingredient item(@Nullable String itemId, @Nullable Integer quantity) {
+            return of(itemId, null, quantity);
+        }
+
+        /** Convenience: a native resource-type family ingredient ({@code ResourceTypeId}); INPUT only. */
+        @Nonnull
+        public static Ingredient resource(@Nullable String resourceTypeId, @Nullable Integer quantity) {
+            return of(null, resourceTypeId, quantity);
+        }
+
+        @Nullable
+        public String getItemId() {
+            return itemId;
+        }
+
+        @Nullable
+        public String getResourceTypeId() {
+            return resourceTypeId;
+        }
+
+        @Nullable
+        public Integer getQuantity() {
+            return quantity;
+        }
+    }
+
+    /**
+     * The movement-hold layer: a short-TTL self-targeted {@code EntityEffect} re-applied every
+     * heartbeat (decay-as-release). Reader defaults: {@code MovementLock} true, {@code EffectId}
+     * {@code "RPG_Station_Hold"}, {@code InterruptOnDamage} true.
+     *
+     * <p>{@link #seat}: an alternate hold strategy trading the packet-camera hunt for the
+     * engine's own native seated mount ({@code BlockMountAPI.mountOnBlock}). When
+     * {@link Seat#getEnabled()} is true, {@link #movementLock}/{@link #effectId} are IGNORED
+     * at runtime (the mount itself is the movement lock); {@link #interruptOnDamage} stays
+     * live either way. Requires the station BLOCK to author {@code BlockType.Seats[]}.
+     */
+    public static final class Hold {
+        @Nullable protected Boolean movementLock;
+        @Nullable protected String effectId;
+        @Nullable protected Boolean interruptOnDamage;
+        @Nullable protected Seat seat;
+
+        public static final BuilderCodec<Hold> CODEC = BuilderCodec.builder(Hold.class, Hold::new)
+                .appendInherited(new KeyedCodec<>("MovementLock", Codec.BOOLEAN, false),
+                        (o, v) -> o.movementLock = v, o -> o.movementLock,
+                        (o, p) -> o.movementLock = p.movementLock).add()
+                .appendInherited(new KeyedCodec<>("EffectId", Codec.STRING, false),
+                        (o, v) -> o.effectId = v, o -> o.effectId, (o, p) -> o.effectId = p.effectId).add()
+                .appendInherited(new KeyedCodec<>("InterruptOnDamage", Codec.BOOLEAN, false),
+                        (o, v) -> o.interruptOnDamage = v, o -> o.interruptOnDamage,
+                        (o, p) -> o.interruptOnDamage = p.interruptOnDamage).add()
+                .appendInherited(new KeyedCodec<>("Seat", Seat.CODEC, false),
+                        (o, v) -> o.seat = v, o -> o.seat, (o, p) -> o.seat = p.seat).add()
+                .build();
+
+        @Nonnull
+        public static Hold of(@Nullable Boolean movementLock, @Nullable String effectId,
+                @Nullable Boolean interruptOnDamage) {
+            return of(movementLock, effectId, interruptOnDamage, null);
+        }
+
+        @Nonnull
+        public static Hold of(@Nullable Boolean movementLock, @Nullable String effectId,
+                @Nullable Boolean interruptOnDamage, @Nullable Seat seat) {
+            Hold h = new Hold();
+            h.movementLock = movementLock;
+            h.effectId = effectId;
+            h.interruptOnDamage = interruptOnDamage;
+            h.seat = seat;
+            return h;
+        }
+
+        @Nullable
+        public Boolean getMovementLock() {
+            return movementLock;
+        }
+
+        @Nullable
+        public String getEffectId() {
+            return effectId;
+        }
+
+        @Nullable
+        public Boolean getInterruptOnDamage() {
+            return interruptOnDamage;
+        }
+
+        @Nullable
+        public Seat getSeat() {
+            return seat;
+        }
+
+        /** Opt-in SEAT hold mode. {@link #enabled} default OFF. */
+        public static final class Seat {
+            @Nullable protected Boolean enabled;
+
+            public static final BuilderCodec<Seat> CODEC = BuilderCodec.builder(Seat.class, Seat::new)
+                    .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
+                            (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled).add()
+                    .build();
+
+            @Nonnull
+            public static Seat of(@Nullable Boolean enabled) {
+                Seat s = new Seat();
+                s.enabled = enabled;
+                return s;
+            }
+
+            @Nullable
+            public Boolean getEnabled() {
+                return enabled;
+            }
+        }
+    }
+
+    /**
+     * The held-tool gate: the player must be HOLDING a matching tool to start (and keep)
+     * working. Three optional NATIVE match routes; match = ANY route satisfied.
+     */
+    public static final class Tool {
+        @Nullable protected Map<String, String[]> tags;
+        @Nullable protected Gather gather;
+        @Nullable protected String[] ids;
+        @Nullable protected XpScale xpScale;
+        @Nullable protected Durability durability;
+
+        public static final BuilderCodec<Tool> CODEC = BuilderCodec.builder(Tool.class, Tool::new)
+                .appendInherited(new KeyedCodec<>("Tags",
+                                new MapCodec<>(new ArrayCodec<>(Codec.STRING, String[]::new), LinkedHashMap::new), false),
+                        (o, v) -> o.tags = v, o -> o.tags, (o, p) -> o.tags = p.tags).add()
+                .appendInherited(new KeyedCodec<>("Gather", Gather.CODEC, false),
+                        (o, v) -> o.gather = v, o -> o.gather, (o, p) -> o.gather = p.gather).add()
+                .appendInherited(new KeyedCodec<>("Ids", new ArrayCodec<>(Codec.STRING, String[]::new), false),
+                        (o, v) -> o.ids = v, o -> o.ids, (o, p) -> o.ids = p.ids).add()
+                .appendInherited(new KeyedCodec<>("XpScale", XpScale.CODEC, false),
+                        (o, v) -> o.xpScale = v, o -> o.xpScale, (o, p) -> o.xpScale = p.xpScale).add()
+                .appendInherited(new KeyedCodec<>("Durability", Durability.CODEC, false),
+                        (o, v) -> o.durability = v, o -> o.durability, (o, p) -> o.durability = p.durability).add()
+                .build();
+
+        @Nonnull
+        public static Tool of(@Nullable Map<String, String[]> tags, @Nullable Gather gather,
+                @Nullable String[] ids) {
+            return of(tags, gather, ids, null);
+        }
+
+        @Nonnull
+        public static Tool of(@Nullable Map<String, String[]> tags, @Nullable Gather gather,
+                @Nullable String[] ids, @Nullable XpScale xpScale) {
+            return of(tags, gather, ids, xpScale, null);
+        }
+
+        @Nonnull
+        public static Tool of(@Nullable Map<String, String[]> tags, @Nullable Gather gather,
+                @Nullable String[] ids, @Nullable XpScale xpScale, @Nullable Durability durability) {
+            Tool t = new Tool();
+            t.tags = tags;
+            t.gather = gather;
+            t.ids = ids;
+            t.xpScale = xpScale;
+            t.durability = durability;
+            return t;
+        }
+
+        @Nullable
+        public Map<String, String[]> getTags() {
+            return tags;
+        }
+
+        @Nullable
+        public Gather getGather() {
+            return gather;
+        }
+
+        @Nullable
+        public String[] getIds() {
+            return ids;
+        }
+
+        @Nullable
+        public XpScale getXpScale() {
+            return xpScale;
+        }
+
+        @Nullable
+        public Durability getDurability() {
+            return durability;
+        }
+
+        /** The functional gather route: a {@code GatherType} plus a {@code MinPower} floor. */
+        public static final class Gather {
+            @Nullable protected String gatherType;
+            @Nullable protected Double minPower;
+
+            public static final BuilderCodec<Gather> CODEC = BuilderCodec.builder(Gather.class, Gather::new)
+                    .appendInherited(new KeyedCodec<>("GatherType", Codec.STRING, false),
+                            (o, v) -> o.gatherType = v, o -> o.gatherType, (o, p) -> o.gatherType = p.gatherType).add()
+                    .appendInherited(new KeyedCodec<>("MinPower", Codec.DOUBLE, false),
+                            (o, v) -> o.minPower = v, o -> o.minPower, (o, p) -> o.minPower = p.minPower).add()
+                    .build();
+
+            @Nonnull
+            public static Gather of(@Nullable String gatherType, @Nullable Double minPower) {
+                Gather g = new Gather();
+                g.gatherType = gatherType;
+                g.minPower = minPower;
+                return g;
+            }
+
+            @Nullable
+            public String getGatherType() {
+                return gatherType;
+            }
+
+            @Nullable
+            public Double getMinPower() {
+                return minPower;
+            }
+        }
+
+        /**
+         * Tool-power XP scaling: cycle XP multiplies by
+         * {@code clamp((heldPower / ReferencePower) ^ Exponent, MinMult, MaxMult)}. OMIT this
+         * group and the multiplier stays 1.0. Reader defaults: {@link #exponent} 1.0,
+         * {@link #minMult} 0.5, {@link #maxMult} 2.0.
+         */
+        public static final class XpScale {
+            @Nullable protected String gatherType;
+            @Nullable protected Double referencePower;
+            @Nullable protected Double exponent;
+            @Nullable protected Double minMult;
+            @Nullable protected Double maxMult;
+
+            public static final BuilderCodec<XpScale> CODEC = BuilderCodec.builder(XpScale.class, XpScale::new)
+                    .appendInherited(new KeyedCodec<>("GatherType", Codec.STRING, false),
+                            (o, v) -> o.gatherType = v, o -> o.gatherType, (o, p) -> o.gatherType = p.gatherType).add()
+                    .appendInherited(new KeyedCodec<>("ReferencePower", Codec.DOUBLE, false),
+                            (o, v) -> o.referencePower = v, o -> o.referencePower,
+                            (o, p) -> o.referencePower = p.referencePower).add()
+                    .appendInherited(new KeyedCodec<>("Exponent", Codec.DOUBLE, false),
+                            (o, v) -> o.exponent = v, o -> o.exponent, (o, p) -> o.exponent = p.exponent).add()
+                    .appendInherited(new KeyedCodec<>("MinMult", Codec.DOUBLE, false),
+                            (o, v) -> o.minMult = v, o -> o.minMult, (o, p) -> o.minMult = p.minMult).add()
+                    .appendInherited(new KeyedCodec<>("MaxMult", Codec.DOUBLE, false),
+                            (o, v) -> o.maxMult = v, o -> o.maxMult, (o, p) -> o.maxMult = p.maxMult).add()
+                    .build();
+
+            @Nonnull
+            public static XpScale of(@Nullable String gatherType, @Nullable Double referencePower,
+                    @Nullable Double exponent, @Nullable Double minMult, @Nullable Double maxMult) {
+                XpScale x = new XpScale();
+                x.gatherType = gatherType;
+                x.referencePower = referencePower;
+                x.exponent = exponent;
+                x.minMult = minMult;
+                x.maxMult = maxMult;
+                return x;
+            }
+
+            @Nullable
+            public String getGatherType() {
+                return gatherType;
+            }
+
+            @Nullable
+            public Double getReferencePower() {
+                return referencePower;
+            }
+
+            @Nullable
+            public Double getExponent() {
+                return exponent;
+            }
+
+            @Nullable
+            public Double getMinMult() {
+                return minMult;
+            }
+
+            @Nullable
+            public Double getMaxMult() {
+                return maxMult;
+            }
+        }
+
+        /**
+         * Opt-in held-tool durability drain (both leaves default OFF; either, both, or
+         * neither may be authored).
+         */
+        public static final class Durability {
+            @Nullable protected Integer perSwing;
+            @Nullable protected Integer perCycle;
+
+            public static final BuilderCodec<Durability> CODEC = BuilderCodec.builder(Durability.class, Durability::new)
+                    .appendInherited(new KeyedCodec<>("PerSwing", Codec.INTEGER, false),
+                            (o, v) -> o.perSwing = v, o -> o.perSwing, (o, p) -> o.perSwing = p.perSwing).add()
+                    .appendInherited(new KeyedCodec<>("PerCycle", Codec.INTEGER, false),
+                            (o, v) -> o.perCycle = v, o -> o.perCycle, (o, p) -> o.perCycle = p.perCycle).add()
+                    .build();
+
+            @Nonnull
+            public static Durability of(@Nullable Integer perSwing, @Nullable Integer perCycle) {
+                Durability d = new Durability();
+                d.perSwing = perSwing;
+                d.perCycle = perCycle;
+                return d;
+            }
+
+            @Nullable
+            public Integer getPerSwing() {
+                return perSwing;
+            }
+
+            @Nullable
+            public Integer getPerCycle() {
+                return perCycle;
+            }
+        }
+    }
+
+    /**
+     * Customizable per-station luck (UNCHANGED from the MMO original this leg - the loot
+     * engine that supersedes this with a {@code Loot} group lands in leg 3; see this class's
+     * javadoc). Each work cycle rolls the player's per-skill luck for ONE bonus copy of that
+     * cycle's output. OMIT this group and the station's luck skills DEFAULT to the skills
+     * already listed in {@code Work.Xp}. An authored EMPTY {@code Skills} array DISABLES luck.
+     */
+    public static final class Luck {
+        @Nullable protected String[] skills;
+        @Nullable protected Tier[] tiers;
+        @Nullable protected Map<String, Tier[]> skillTiers;
+
+        public static final BuilderCodec<Luck> CODEC = BuilderCodec.builder(Luck.class, Luck::new)
+                .appendInherited(new KeyedCodec<>("Skills", new ArrayCodec<>(Codec.STRING, String[]::new), false),
+                        (o, v) -> o.skills = v, o -> o.skills, (o, p) -> o.skills = p.skills).add()
+                .appendInherited(new KeyedCodec<>("Tiers", new ArrayCodec<>(Tier.CODEC, Tier[]::new), false),
+                        (o, v) -> o.tiers = v, o -> o.tiers, (o, p) -> o.tiers = p.tiers).add()
+                .appendInherited(new KeyedCodec<>("SkillTiers",
+                                new MapCodec<>(new ArrayCodec<>(Tier.CODEC, Tier[]::new), LinkedHashMap::new), false),
+                        (o, v) -> o.skillTiers = v, o -> o.skillTiers, (o, p) -> o.skillTiers = p.skillTiers).add()
+                .build();
+
+        @Nonnull
+        public static Luck of(@Nullable String[] skills) {
+            return of(skills, null, null);
+        }
+
+        @Nonnull
+        public static Luck of(@Nullable String[] skills, @Nullable Tier[] tiers,
+                @Nullable Map<String, Tier[]> skillTiers) {
+            Luck l = new Luck();
+            l.skills = skills;
+            l.tiers = tiers;
+            l.skillTiers = skillTiers;
+            return l;
+        }
+
+        @Nullable
+        public String[] getSkills() {
+            return skills;
+        }
+
+        @Nullable
+        public Tier[] getTiers() {
+            return tiers;
+        }
+
+        @Nullable
+        public Map<String, Tier[]> getSkillTiers() {
+            return skillTiers;
+        }
+
+        /** One {@code {MinLuck, DropList}} floor in a loot-tier ladder. */
+        public static final class Tier {
+            @Nullable protected Double minLuck;
+            @Nullable protected String dropList;
+            @Nullable protected Presentation presentation;
+
+            public static final BuilderCodec<Tier> CODEC = BuilderCodec.builder(Tier.class, Tier::new)
+                    .appendInherited(new KeyedCodec<>("MinLuck", Codec.DOUBLE, false),
+                            (o, v) -> o.minLuck = v, o -> o.minLuck, (o, p) -> o.minLuck = p.minLuck).add()
+                    .appendInherited(new KeyedCodec<>("DropList", Codec.STRING, false),
+                            (o, v) -> o.dropList = v, o -> o.dropList, (o, p) -> o.dropList = p.dropList).add()
+                    .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
+                            (o, v) -> o.presentation = v, o -> o.presentation,
+                            (o, p) -> o.presentation = p.presentation).add()
+                    .build();
+
+            @Nonnull
+            public static Tier of(@Nullable Double minLuck, @Nullable String dropList) {
+                return of(minLuck, dropList, null);
+            }
+
+            @Nonnull
+            public static Tier of(@Nullable Double minLuck, @Nullable String dropList,
+                    @Nullable Presentation presentation) {
+                Tier t = new Tier();
+                t.minLuck = minLuck;
+                t.dropList = dropList;
+                t.presentation = presentation;
+                return t;
+            }
+
+            @Nullable
+            public Double getMinLuck() {
+                return minLuck;
+            }
+
+            @Nullable
+            public String getDropList() {
+                return dropList;
+            }
+
+            @Nullable
+            public Presentation getPresentation() {
+                return presentation;
+            }
+        }
+    }
+
+    /** Camera pull while working. See {@code station/CLAUDE.md} for the FaceBlock hunt history. */
+    public static final class Camera {
+        @Nullable protected String mode;
+        @Nullable protected Boolean locked;
+        @Nullable protected Boolean faceBlock;
+        @Nullable protected String faceBlockMode;
+
+        public static final BuilderCodec<Camera> CODEC = BuilderCodec.builder(Camera.class, Camera::new)
+                .appendInherited(new KeyedCodec<>("Mode", Codec.STRING, false),
+                        (o, v) -> o.mode = v, o -> o.mode, (o, p) -> o.mode = p.mode).add()
+                .appendInherited(new KeyedCodec<>("Locked", Codec.BOOLEAN, false),
+                        (o, v) -> o.locked = v, o -> o.locked, (o, p) -> o.locked = p.locked).add()
+                .appendInherited(new KeyedCodec<>("FaceBlock", Codec.BOOLEAN, false),
+                        (o, v) -> o.faceBlock = v, o -> o.faceBlock, (o, p) -> o.faceBlock = p.faceBlock).add()
+                .appendInherited(new KeyedCodec<>("FaceBlockMode", Codec.STRING, false),
+                        (o, v) -> o.faceBlockMode = v, o -> o.faceBlockMode,
+                        (o, p) -> o.faceBlockMode = p.faceBlockMode).add()
+                .build();
+
+        @Nonnull
+        public static Camera of(@Nullable String mode, @Nullable Boolean locked) {
+            return of(mode, locked, null);
+        }
+
+        @Nonnull
+        public static Camera of(@Nullable String mode, @Nullable Boolean locked, @Nullable Boolean faceBlock) {
+            return of(mode, locked, faceBlock, null);
+        }
+
+        @Nonnull
+        public static Camera of(@Nullable String mode, @Nullable Boolean locked, @Nullable Boolean faceBlock,
+                @Nullable String faceBlockMode) {
+            Camera c = new Camera();
+            c.mode = mode;
+            c.locked = locked;
+            c.faceBlock = faceBlock;
+            c.faceBlockMode = faceBlockMode;
+            return c;
+        }
+
+        @Nullable
+        public String getMode() {
+            return mode;
+        }
+
+        @Nullable
+        public Boolean getLocked() {
+            return locked;
+        }
+
+        @Nullable
+        public Boolean getFaceBlock() {
+            return faceBlock;
+        }
+
+        @Nullable
+        public String getFaceBlockMode() {
+            return faceBlockMode;
+        }
+    }
+
+    /**
+     * The work animation: a registered {@code EmoteAsset} id, plus the optional per-swing
+     * cadence layer. The work emote must NOT loop client-side; the engine re-fires the clip
+     * as a one-shot on every swing tick.
+     */
+    public static final class Animation {
+        @Nullable protected String emoteId;
+        @Nullable protected Swing swing;
+        @Nullable protected String actionClip;
+
+        public static final BuilderCodec<Animation> CODEC = BuilderCodec.builder(Animation.class, Animation::new)
+                .appendInherited(new KeyedCodec<>("EmoteId", Codec.STRING, false),
+                        (o, v) -> o.emoteId = v, o -> o.emoteId, (o, p) -> o.emoteId = p.emoteId).add()
+                .appendInherited(new KeyedCodec<>("Swing", Swing.CODEC, false),
+                        (o, v) -> o.swing = v, o -> o.swing, (o, p) -> o.swing = p.swing).add()
+                .appendInherited(new KeyedCodec<>("ActionClip", Codec.STRING, false),
+                        (o, v) -> o.actionClip = v, o -> o.actionClip, (o, p) -> o.actionClip = p.actionClip).add()
+                .build();
+
+        @Nonnull
+        public static Animation of(@Nullable String emoteId) {
+            return of(emoteId, null);
+        }
+
+        @Nonnull
+        public static Animation of(@Nullable String emoteId, @Nullable Swing swing) {
+            return of(emoteId, swing, null);
+        }
+
+        @Nonnull
+        public static Animation of(@Nullable String emoteId, @Nullable Swing swing, @Nullable String actionClip) {
+            Animation a = new Animation();
+            a.emoteId = emoteId;
+            a.swing = swing;
+            a.actionClip = actionClip;
+            return a;
+        }
+
+        @Nullable
+        public String getEmoteId() {
+            return emoteId;
+        }
+
+        @Nullable
+        public Swing getSwing() {
+            return swing;
+        }
+
+        /**
+         * Optional Action-slot clip id override for a SEAT-MODE station's per-swing cue (the
+         * seated-worker swing fix): fires on {@code AnimationSlot.Action} against the held
+         * item's OWN {@code ItemPlayerAnimations} clip set instead of the {@link #emoteId} on
+         * the {@code Emote} slot. Null/blank resolves to {@code StationHoldController
+         * .DEFAULT_ACTION_CLIP} ({@code "Chop"}, the Hatchet family clip) at swing time.
+         */
+        @Nullable
+        public String getActionClip() {
+            return actionClip;
+        }
+
+        /**
+         * Per-swing cadence + flair: a server-timed cue played at the block every
+         * {@link #intervalMs} while WORKING. OMIT this group and the pre-round-2 behavior is
+         * unchanged (no swing layer).
+         */
+        public static final class Swing {
+            @Nullable protected Long intervalMs;
+            @Nullable protected Presentation presentation;
+            @Nullable protected Impact impact;
+
+            public static final BuilderCodec<Swing> CODEC = BuilderCodec.builder(Swing.class, Swing::new)
+                    .appendInherited(new KeyedCodec<>("IntervalMs", Codec.LONG, false),
+                            (o, v) -> o.intervalMs = v, o -> o.intervalMs, (o, p) -> o.intervalMs = p.intervalMs).add()
+                    .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
+                            (o, v) -> o.presentation = v, o -> o.presentation, (o, p) -> o.presentation = p.presentation).add()
+                    .appendInherited(new KeyedCodec<>("Impact", Impact.CODEC, false),
+                            (o, v) -> o.impact = v, o -> o.impact, (o, p) -> o.impact = p.impact).add()
+                    .build();
+
+            @Nonnull
+            public static Swing of(@Nullable Long intervalMs, @Nullable Presentation presentation) {
+                return of(intervalMs, presentation, null);
+            }
+
+            @Nonnull
+            public static Swing of(@Nullable Long intervalMs, @Nullable Presentation presentation,
+                    @Nullable Impact impact) {
+                Swing s = new Swing();
+                s.intervalMs = intervalMs;
+                s.presentation = presentation;
+                s.impact = impact;
+                return s;
+            }
+
+            @Nullable
+            public Long getIntervalMs() {
+                return intervalMs;
+            }
+
+            @Nullable
+            public Presentation getPresentation() {
+                return presentation;
+            }
+
+            @Nullable
+            public Impact getImpact() {
+                return impact;
+            }
+
+            /** The delayed impact cue. {@link #delayMs} null/nonpositive = fire with the swing. */
+            public static final class Impact {
+                @Nullable protected Long delayMs;
+                @Nullable protected Presentation presentation;
+
+                public static final BuilderCodec<Impact> CODEC = BuilderCodec.builder(Impact.class, Impact::new)
+                        .appendInherited(new KeyedCodec<>("DelayMs", Codec.LONG, false),
+                                (o, v) -> o.delayMs = v, o -> o.delayMs, (o, p) -> o.delayMs = p.delayMs).add()
+                        .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
+                                (o, v) -> o.presentation = v, o -> o.presentation,
+                                (o, p) -> o.presentation = p.presentation).add()
+                        .build();
+
+                @Nonnull
+                public static Impact of(@Nullable Long delayMs, @Nullable Presentation presentation) {
+                    Impact i = new Impact();
+                    i.delayMs = delayMs;
+                    i.presentation = presentation;
+                    return i;
+                }
+
+                @Nullable
+                public Long getDelayMs() {
+                    return delayMs;
+                }
+
+                @Nullable
+                public Presentation getPresentation() {
+                    return presentation;
+                }
+            }
+        }
+    }
+
+    /**
+     * One NAMED cosmetic flair layer: a grantor (any run-a-command reward system) unlocks a
+     * flair id for a player, and {@code StationFlairs.effective} overlays its non-null leaves
+     * onto the station's base moment presentation, per LEAF.
+     */
+    public static final class Flair {
+        @Nullable protected Presentation swing;
+        @Nullable protected Presentation cycle;
+        @Nullable protected Presentation rareFind;
+        @Nullable protected Presentation completion;
+
+        public static final BuilderCodec<Flair> CODEC = BuilderCodec.builder(Flair.class, Flair::new)
+                .appendInherited(new KeyedCodec<>("Swing", Presentation.CODEC, false),
+                        (o, v) -> o.swing = v, o -> o.swing, (o, p) -> o.swing = p.swing).add()
+                .appendInherited(new KeyedCodec<>("Cycle", Presentation.CODEC, false),
+                        (o, v) -> o.cycle = v, o -> o.cycle, (o, p) -> o.cycle = p.cycle).add()
+                .appendInherited(new KeyedCodec<>("RareFind", Presentation.CODEC, false),
+                        (o, v) -> o.rareFind = v, o -> o.rareFind, (o, p) -> o.rareFind = p.rareFind).add()
+                .appendInherited(new KeyedCodec<>("Completion", Presentation.CODEC, false),
+                        (o, v) -> o.completion = v, o -> o.completion, (o, p) -> o.completion = p.completion).add()
+                .build();
+
+        @Nonnull
+        public static Flair of(@Nullable Presentation swing, @Nullable Presentation cycle) {
+            return of(swing, cycle, null);
+        }
+
+        @Nonnull
+        public static Flair of(@Nullable Presentation swing, @Nullable Presentation cycle,
+                @Nullable Presentation rareFind) {
+            return of(swing, cycle, rareFind, null);
+        }
+
+        @Nonnull
+        public static Flair of(@Nullable Presentation swing, @Nullable Presentation cycle,
+                @Nullable Presentation rareFind, @Nullable Presentation completion) {
+            Flair f = new Flair();
+            f.swing = swing;
+            f.cycle = cycle;
+            f.rareFind = rareFind;
+            f.completion = completion;
+            return f;
+        }
+
+        @Nullable
+        public Presentation getSwing() {
+            return swing;
+        }
+
+        @Nullable
+        public Presentation getCycle() {
+            return cycle;
+        }
+
+        @Nullable
+        public Presentation getRareFind() {
+            return rareFind;
+        }
+
+        @Nullable
+        public Presentation getCompletion() {
+            return completion;
+        }
+    }
+}
