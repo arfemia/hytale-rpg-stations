@@ -170,31 +170,37 @@ class StationCustodyTest {
     @Test
     void matchesInput_exactItemIdRoute() {
         ActionInput matcher = ActionInput.of("MMO_Sharpened_Iron_Bar", null, null, null);
-        assertTrue(StationCustody.matchesInput(matcher, "MMO_Sharpened_Iron_Bar", new String[0], Map.of()));
-        assertFalse(StationCustody.matchesInput(matcher, "MMO_Sharpened_Gold_Bar", new String[0], Map.of()));
+        assertTrue(StationCustody.matchesInput(matcher, "MMO_Sharpened_Iron_Bar", new String[0], Map.of(), null));
+        assertFalse(StationCustody.matchesInput(matcher, "MMO_Sharpened_Gold_Bar", new String[0], Map.of(), null));
     }
 
     @Test
     void matchesInput_resourceTypeFamilyRoute() {
         ActionInput matcher = ActionInput.of(null, "Wood_Hardwood_Trunk", null, null);
         assertTrue(StationCustody.matchesInput(matcher, "Wood_Oak_Log",
-                new String[] {"Wood_Hardwood_Trunk", "Wood_Trunk"}, Map.of()));
-        assertFalse(StationCustody.matchesInput(matcher, "Stone_Cobble", new String[] {"Stone"}, Map.of()));
+                new String[] {"Wood_Hardwood_Trunk", "Wood_Trunk"}, Map.of(), null));
+        assertFalse(StationCustody.matchesInput(matcher, "Stone_Cobble", new String[] {"Stone"}, Map.of(), null));
     }
 
     @Test
     void matchesInput_tagsRoute() {
         ActionInput matcher = ActionInput.of(null, null, Map.of("Family", new String[] {"Hatchet"}), null);
         assertTrue(StationCustody.matchesInput(matcher, "Some_Axe", new String[0],
-                Map.of("Family", new String[] {"Hatchet"})));
+                Map.of("Family", new String[] {"Hatchet"}), null));
         assertFalse(StationCustody.matchesInput(matcher, "Some_Pick", new String[0],
-                Map.of("Family", new String[] {"Pickaxe"})));
+                Map.of("Family", new String[] {"Pickaxe"}), null));
     }
 
+    // SMOKE-FIX S4: the Function route now matches in StationCustody.matchesInput (previously
+    // "deferred to leg E" per stale javadoc, but never actually wired even after leg E landed -
+    // the anvil's enhance action's Custody.Input:{"Function":"Weapon"} never accepted a held
+    // weapon for placement until this fix).
     @Test
-    void matchesInput_functionRoute_deferredToLegE_neverMatches() {
+    void matchesInput_functionRoute_matches() {
         ActionInput matcher = ActionInput.of(null, null, null, "Weapon");
-        assertFalse(StationCustody.matchesInput(matcher, "Any_Item", new String[0], Map.of()));
+        assertTrue(StationCustody.matchesInput(matcher, "Any_Item", new String[0], Map.of(), "Weapon"));
+        assertFalse(StationCustody.matchesInput(matcher, "Any_Item", new String[0], Map.of(), "Armor"));
+        assertFalse(StationCustody.matchesInput(matcher, "Any_Item", new String[0], Map.of(), null));
     }
 
     @Test

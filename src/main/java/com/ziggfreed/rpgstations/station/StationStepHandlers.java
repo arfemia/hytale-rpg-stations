@@ -215,7 +215,8 @@ final class StationStepHandlers {
             }
             LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, ctx.snapshot,
                     ctx.player, ctx.cycleOutputForBonusCopies, ctx.session.playerRef, ctx.session.stationId,
-                    ctx.action.getActionId(), ctx.cycleIndex);
+                    ctx.action.getActionId(), ctx.cycleIndex, ctx.store,
+                    ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
             StationService.applyGrantResult(ctx.session, ctx.store, result);
             return StationStepResult.SUCCESS;
         }

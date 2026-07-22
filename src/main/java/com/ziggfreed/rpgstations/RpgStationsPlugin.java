@@ -9,12 +9,18 @@ import javax.annotation.Nonnull;
 
 import com.hypixel.hytale.assetstore.event.LoadedAssetsEvent;
 import com.hypixel.hytale.assetstore.map.DefaultAssetMap;
+import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.logger.HytaleLogger;
+import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerReadyEvent;
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.Interaction;
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
+import com.hypixel.hytale.server.core.universe.PlayerRef;
+import com.hypixel.hytale.server.core.universe.Universe;
+import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.asset.AssetStoreRegistrar;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
@@ -37,6 +43,7 @@ import com.ziggfreed.rpgstations.station.StationFrameSystem;
 import com.ziggfreed.rpgstations.station.StationInterruptDamageSystem;
 import com.ziggfreed.rpgstations.station.StationService;
 import com.ziggfreed.rpgstations.station.StationValidator;
+import com.ziggfreed.rpgstations.ui.StationSummaryHud;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -100,6 +107,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerStationSystems();
         registerTeardownHooks();
         registerPostLoadAudit();
+        registerSummaryHudInstall();
         getCommandRegistry().registerCommand(new RpgStationsCommand());
         Log.info("RpgStations setup complete (leg 4 - the api artifact is live: events fire, "
                 + "the factor/flair-unlock/summary-enricher registries are wired into the engine).");
@@ -138,6 +146,22 @@ public class RpgStationsPlugin extends JavaPlugin {
      * wired to a live event until now (design section 4.2; leg 5 relies on RpgStations owning
      * these once the MMO's equivalent calls are deleted). Server-shutdown teardown was already
      * covered by {@link #shutdown()}'s {@code stopAll}.
+     *
+     * <p><b>SMOKE-FIX S3 (custody return "not coming back at session stop at all"):</b>
+     * {@code StationService#stop} touches {@code Store} repeatedly (custody's inventory-return /
+     * drop-at-block writes, camera reset, hold release, mount dismount) - and {@code Store}
+     * (hytale-shared-source {@code component/Store.java}) asserts it is only ever touched on its
+     * owning world thread. Every OTHER {@code stop()} entry point already runs on the world
+     * thread (the heartbeat/cycle paths run inside an {@code AbstractWorldFrameSystem} tick,
+     * {@code toggle()} runs inside the {@code rpg_station_use} interaction handler, death runs
+     * inside an {@code EntityStoreRegistry} system) - {@code PlayerDisconnectEvent} does NOT
+     * (mirrors the MMO's OWN {@code PlayerDisconnectEvent} handler, which world.execute-hops its
+     * own store-touching cleanup for the identical reason). Calling {@code stopFor} directly here
+     * risked an off-thread throw partway through {@code returnCustody} - AFTER it had already
+     * removed the claim from {@code custodyByBlock} but before the items landed in the owner's
+     * inventory or were dropped at the block - silently losing them. Hopping to the player's own
+     * world before calling {@code stopFor} closes that gap; a null/dead world (already torn down)
+     * falls back to the direct call so a shutdown-adjacent disconnect still attempts cleanup.
      */
     private void registerTeardownHooks() {
         getEntityStoreRegistry().registerSystem(new StationDeathSystem());
@@ -145,7 +169,20 @@ public class RpgStationsPlugin extends JavaPlugin {
             try {
                 var playerRef = event.getPlayerRef();
                 var uuid = playerRef != null ? playerRef.getUuid() : null;
-                if (uuid != null) {
+                if (uuid == null) {
+                    return;
+                }
+                var worldUuid = playerRef.getWorldUuid();
+                World world = worldUuid != null ? Universe.get().getWorld(worldUuid) : null;
+                if (world != null && world.isAlive()) {
+                    world.execute(() -> {
+                        try {
+                            StationService.getInstance().stopFor(uuid, StationService.StopReason.DISCONNECTED);
+                        } catch (Throwable t) {
+                            Log.warn("Station disconnect teardown failed (world thread): " + t.getMessage());
+                        }
+                    });
+                } else {
                     StationService.getInstance().stopFor(uuid, StationService.StopReason.DISCONNECTED);
                 }
             } catch (Throwable t) {
@@ -319,6 +356,47 @@ public class RpgStationsPlugin extends JavaPlugin {
         } catch (Exception e) {
             Log.severe("Failed to register StationUse interaction: " + e.getMessage());
         }
+    }
+
+    /**
+     * SMOKE-FIX S1: installs the session-summary HUD ({@link StationSummaryHud}) on the native
+     * per-player {@code HudManager} at first ready, the missing half of the phase-1 leg-5 move
+     * ("RpgStations installs its own HUD now" per {@code MMOSkillTreePlugin}'s own comment at the
+     * spot it deleted the old install call) - nothing in this jar ever called {@code
+     * player.getHudManager().addCustomHud(...)} for this HUD, so {@code StationSummaryHud.tryShow}
+     * always failed {@code KeyedCustomHud.get}'s native lookup and every session silently fell
+     * back to the plain-toast path, which read in-game as "the completion HUD no longer appears
+     * at all". Mirrors the pre-extraction MMO's own {@code AbilityCooldownHud}/{@code
+     * QuestTrackerHud} install shape at {@code PlayerReadyEvent} (world.execute hop before any
+     * Store/Ref/HudManager touch); {@code HudManager#addCustomHud} itself is replace-safe on a
+     * reconnect (clears + re-adds under the same key), so no existence guard is needed here.
+     */
+    private void registerSummaryHudInstall() {
+        getEventRegistry().registerGlobal(PlayerReadyEvent.class, event -> {
+            try {
+                Player player = event.getPlayer();
+                World world = player.getWorld();
+                world.execute(() -> {
+                    try {
+                        Ref<EntityStore> ref = player.getReference();
+                        if (ref == null || !ref.isValid()) {
+                            return;
+                        }
+                        // Player.getPlayerRef() is @Deprecated(forRemoval=true) - fetch the
+                        // PlayerRef component manually per its own javadoc replacement note.
+                        PlayerRef playerRef = ref.getStore().getComponent(ref, PlayerRef.getComponentType());
+                        Player readyPlayer = ref.getStore().getComponent(ref, Player.getComponentType());
+                        if (playerRef != null && readyPlayer != null) {
+                            readyPlayer.getHudManager().addCustomHud(playerRef, new StationSummaryHud(playerRef));
+                        }
+                    } catch (Throwable t) {
+                        Log.warn("Failed to install station summary HUD: " + t.getMessage());
+                    }
+                });
+            } catch (Throwable t) {
+                Log.warn("Station summary HUD install (outer) failed: " + t.getMessage());
+            }
+        });
     }
 
     /**

@@ -112,12 +112,17 @@ final class StationCustody {
 
     /**
      * The explicit {@link Custody#getInput()} placement matcher: {@code ActionInput}'s
-     * ItemId/ResourceTypeId/Tags routes (match = ANY route satisfied, the {@code Tool}/
-     * {@code ActionInput} convention). The {@code Function} route stays deferred to phase-2 leg E
-     * (same posture {@link ActionInput}'s own javadoc documents) - never matches here yet.
+     * ItemId/ResourceTypeId/Tags/Function routes (match = ANY route satisfied, the {@code Tool}/
+     * {@code ActionInput} convention). SMOKE-FIX S4: the {@code Function} route now matches
+     * (previously "deferred to phase-2 leg E" per stale javadoc, but leg E's own
+     * {@code ActionResolver.matches}/{@code matchesAnyResourceType} DID land it for ACTION
+     * SELECTION - this custody PLACEMENT matcher was simply never updated to match, so the
+     * anvil's {@code enhance} action's {@code Custody.Input:{"Function":"Weapon"}} never accepted
+     * a held weapon for placement even though holding one correctly SELECTED the enhance action).
      */
     static boolean matchesInput(@Nonnull ActionInput matcher, @Nullable String heldItemId,
-            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags) {
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
         String wantItem = matcher.getItemId();
         if (wantItem != null && !wantItem.isBlank() && wantItem.equalsIgnoreCase(heldItemId)) {
             return true;
@@ -129,6 +134,10 @@ final class StationCustody {
                     return true;
                 }
             }
+        }
+        String wantFunction = matcher.getFunction();
+        if (wantFunction != null && !wantFunction.isBlank() && wantFunction.equalsIgnoreCase(heldFunction)) {
+            return true;
         }
         Map<String, String[]> wantTags = matcher.getTags();
         if (wantTags != null && !wantTags.isEmpty() && heldTags != null && !heldTags.isEmpty()) {

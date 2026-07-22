@@ -10,14 +10,20 @@ import java.util.concurrent.ThreadLocalRandom;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
+import com.hypixel.hytale.server.core.inventory.InventoryComponent;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
+import com.hypixel.hytale.server.core.inventory.container.ItemContainer;
 import com.hypixel.hytale.server.core.modules.item.ItemModule;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
+import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.rpgstations.util.ItemDropUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -28,12 +34,14 @@ import com.ziggfreed.rpgstations.util.Log;
  * mutation, native {@code ItemDropList} rolling, and command dispatch - never store mutation
  * inside the pure evaluator.
  *
- * <p>Every grant is storage-first with a per-stack room check and a SILENT remainder skip on a
- * full inventory (never fails or stops the cycle - the pre-extraction {@code StationLuck}/
- * {@code rollTier} convention carries over unchanged). {@link GrantResult} tallies what actually
- * landed so the caller ({@code StationService}) can fold it into its own session item ledger and
- * play the reached floors' presentations through its OWN {@code emitMoment} choke point (this
- * class stays presentation-agnostic; it only reports WHAT to play).
+ * <p>Every grant is storage-first with a per-stack room check; SMOKE-FIX S3 (b) (MAINTAINER
+ * DIRECTIVE, 2026-07-22) supersedes the old "room-checked, skipped silently when full" behavior -
+ * a stack that cannot fit in the player's inventory now drops as a ground item at the station
+ * block via the shared {@link ItemDropUtil} sink instead of being discarded (never fails or stops
+ * the cycle either way). {@link GrantResult} tallies what actually landed (inventory OR ground)
+ * so the caller ({@code StationService}) can fold it into its own session item ledger and play
+ * the reached floors' presentations through its OWN {@code emitMoment} choke point (this class
+ * stays presentation-agnostic; it only reports WHAT to play).
  */
 public final class LootEngine {
 
@@ -122,11 +130,15 @@ public final class LootEngine {
      * this cycle's {@code {ItemId, Quantity}} for {@code Grants.BonusOutputCopies} - pass
      * {@code null} for a trigger with no live cycle output (Completion); a roll authoring
      * {@code BonusOutputCopies} there is silently skipped (the validator warns at author time).
+     * {@code store}/{@code blockX,Y,Z} are the SMOKE-FIX S3 (b) world-drop fallback target (a
+     * {@code null} store degrades to the old "log and lose it" behavior only when the caller
+     * genuinely cannot resolve one - every live call site has a store).
      */
     @Nonnull
     public static GrantResult rollAndGrant(@Nonnull List<Roll> rolls, @Nonnull String trigger,
             @Nonnull FactorSnapshot snapshot, @Nonnull Player player, @Nullable ItemStack cycleOutput,
-            @Nullable PlayerRef playerRef, @Nonnull String stationId, @Nonnull String actionId, int cycleIndex) {
+            @Nullable PlayerRef playerRef, @Nonnull String stationId, @Nonnull String actionId, int cycleIndex,
+            @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
         GrantResult result = new GrantResult();
         CommandRewardExecutor.Placeholders placeholders = playerRef != null
                 ? CommandRewardExecutor.Placeholders.of(playerRef, stationId, actionId, cycleIndex)
@@ -140,8 +152,8 @@ public final class LootEngine {
             if (!outcome.isHit()) {
                 continue;
             }
-            applyGrants(outcome.getTopGrants(), player, cycleOutput, placeholders, result);
-            applyGrants(outcome.getFloorGrants(), player, cycleOutput, placeholders, result);
+            applyGrants(outcome.getTopGrants(), player, cycleOutput, placeholders, result, store, blockX, blockY, blockZ);
+            applyGrants(outcome.getFloorGrants(), player, cycleOutput, placeholders, result, store, blockX, blockY, blockZ);
             // A floor's Presentation plays whenever the floor is REACHED (design 4.5.1), regardless
             // of whether that floor also authored Grants (the validator separately flags a
             // Grants-less floor as a content mistake - it does not silence the moment).
@@ -154,16 +166,17 @@ public final class LootEngine {
 
     private static void applyGrants(@Nullable Roll.Grants grants, @Nonnull Player player,
             @Nullable ItemStack cycleOutput, @Nullable CommandRewardExecutor.Placeholders placeholders,
-            @Nonnull GrantResult result) {
+            @Nonnull GrantResult result, @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
         if (grants == null) {
             return;
         }
         if (grants.getBonusOutputCopies() != null && grants.getBonusOutputCopies() > 0 && cycleOutput != null) {
-            grantBonusOutputCopies(player, cycleOutput, grants.getBonusOutputCopies(), result);
+            grantBonusOutputCopies(player, cycleOutput, grants.getBonusOutputCopies(), result,
+                    store, blockX, blockY, blockZ);
         }
         String dropListId = grants.getDropList();
         if (dropListId != null && !dropListId.isBlank()) {
-            grantDropList(player, dropListId, result);
+            grantDropList(player, dropListId, result, store, blockX, blockY, blockZ);
         }
         String[] commands = grants.getCommands();
         if (commands != null && placeholders != null) {
@@ -177,16 +190,42 @@ public final class LootEngine {
         }
     }
 
-    /** N extra copies of {@code cycleOutput}, storage-first, silent skip when full. */
+    /**
+     * The non-deprecated replacement for {@code Player.getInventory().getStorage()}
+     * ({@code Inventory#getStorage} is {@code @Deprecated(forRemoval=true)}; its own javadoc
+     * names this exact replacement): the {@code InventoryComponent.Storage} component fetched
+     * off the player's own ref/store, mirroring the established in-mod precedent
+     * ({@code station.StationService#placeIntoCustody}'s {@code InventoryComponent.Hotbar}
+     * fetch). {@code null} when the player's ref/store cannot be resolved (never throws).
+     */
+    @Nullable
+    private static ItemContainer storageContainerOf(@Nonnull Player player) {
+        Ref<EntityStore> ref = player.getReference();
+        if (ref == null || !ref.isValid()) {
+            return null;
+        }
+        InventoryComponent.Storage storage = ref.getStore()
+                .getComponent(ref, InventoryComponent.Storage.getComponentType());
+        return storage != null ? storage.getInventory() : null;
+    }
+
+    /**
+     * N extra copies of {@code cycleOutput}, storage-first; a copy that cannot fit drops as a
+     * ground item at the block instead of being skipped (SMOKE-FIX S3 (b)) - every copy still
+     * counts as granted either way, so the remaining copies keep rolling.
+     */
     private static void grantBonusOutputCopies(@Nonnull Player player, @Nonnull ItemStack cycleOutput,
-            int copies, @Nonnull GrantResult result) {
+            int copies, @Nonnull GrantResult result, @Nullable Store<EntityStore> store,
+            int blockX, int blockY, int blockZ) {
+        ItemContainer container = storageContainerOf(player);
         for (int i = 0; i < copies; i++) {
             try {
                 ItemStack bonus = new ItemStack(cycleOutput.getItemId(), cycleOutput.getQuantity());
-                if (!player.getInventory().getStorage().canAddItemStacks(List.of(bonus))) {
-                    return; // full inventory - skip the remainder silently, never stop the cycle
+                if (container != null && container.canAddItemStacks(List.of(bonus))) {
+                    container.addItemStack(bonus);
+                } else {
+                    ItemDropUtil.dropAtBlock(store, blockX, blockY, blockZ, bonus);
                 }
-                player.getInventory().getStorage().addItemStack(bonus);
                 result.bonusCopyItems.merge(cycleOutput.getItemId(), cycleOutput.getQuantity(), Integer::sum);
             } catch (Throwable t) {
                 Log.fine("STATION loot bonus-copy grant failed: " + t.getMessage());
@@ -198,10 +237,11 @@ public final class LootEngine {
     /**
      * Roll {@code dropListId} once via the native {@code ItemModule.getRandomItemDrops} (pure,
      * world-thread-safe; frequency control lives entirely in the droplist's own weighted
-     * container) and grant every resulting stack storage-first with a per-stack room check.
+     * container) and grant every resulting stack storage-first; a stack that cannot fit drops as
+     * a ground item at the block instead of being skipped (SMOKE-FIX S3 (b)).
      */
     private static void grantDropList(@Nonnull Player player, @Nonnull String dropListId,
-            @Nonnull GrantResult result) {
+            @Nonnull GrantResult result, @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
         List<ItemStack> drops;
         try {
             drops = ItemModule.get().getRandomItemDrops(dropListId);
@@ -212,12 +252,14 @@ public final class LootEngine {
         if (drops == null || drops.isEmpty()) {
             return;
         }
+        ItemContainer container = storageContainerOf(player);
         for (ItemStack stack : drops) {
             try {
-                if (!player.getInventory().getStorage().canAddItemStacks(List.of(stack))) {
-                    continue; // full inventory - skip the remainder silently, never stop the cycle
+                if (container != null && container.canAddItemStacks(List.of(stack))) {
+                    container.addItemStack(stack);
+                } else {
+                    ItemDropUtil.dropAtBlock(store, blockX, blockY, blockZ, stack);
                 }
-                player.getInventory().getStorage().addItemStack(stack);
                 result.dropListItems.merge(stack.getItemId(), stack.getQuantity(), Integer::sum);
             } catch (Throwable t) {
                 Log.fine("STATION loot droplist item grant failed: " + t.getMessage());

@@ -18,11 +18,9 @@ import org.joml.Vector3d;
 import org.joml.Vector3i;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
-import com.hypixel.hytale.component.AddReason;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
-import com.hypixel.hytale.math.vector.Rotation3f;
 import com.hypixel.hytale.protocol.ItemResourceType;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
@@ -40,7 +38,6 @@ import com.hypixel.hytale.server.core.inventory.ResourceQuantity;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransaction;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
-import com.hypixel.hytale.server.core.modules.entity.item.ItemComponent;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
@@ -72,6 +69,7 @@ import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.loot.FactorSnapshot;
 import com.ziggfreed.rpgstations.loot.LootEngine;
 import com.ziggfreed.rpgstations.ui.StationSummaryHud;
+import com.ziggfreed.rpgstations.util.ItemDropUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -1004,7 +1002,7 @@ public final class StationService {
         }
         FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, asset));
         LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_COMPLETION, snapshot, player,
-                null, s.playerRef, s.stationId, ACTION_WORK, s.cyclesDone);
+                null, s.playerRef, s.stationId, ACTION_WORK, s.cyclesDone, store, s.blockX, s.blockY, s.blockZ);
         applyGrantResult(s, store, result);
     }
 
@@ -1696,7 +1694,8 @@ public final class StationService {
         String[] heldResourceTypeIds = liveResourceTypeIdsOf(heldItemId);
         var matcher = custody.getInput();
         if (matcher != null) {
-            return StationCustody.matchesInput(matcher, heldItemId, heldResourceTypeIds, liveRawTagsOf(heldItemId));
+            return StationCustody.matchesInput(matcher, heldItemId, heldResourceTypeIds, liveRawTagsOf(heldItemId),
+                    liveFunctionOf(heldItemId));
         }
         StationAsset.Conversion[] conversions =
                 StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
@@ -1816,7 +1815,20 @@ public final class StationService {
         StationCustodyDisplay.despawn(claim.displayRef(), ownerStore);
         if (!claim.isEmpty()) {
             List<ItemStack> stacks = claim.toItemStacks();
-            Player player = ownerStore != null ? ownerStore.getComponent(s.ref, Player.getComponentType()) : null;
+            // Try-guarded (SMOKE-FIX S3 hardening): this is the FIRST point custody-return
+            // mutates anything, but the claim was already popped off custodyByBlock above - an
+            // unguarded throw here would escape returnCustody entirely (never reaching the
+            // drop-at-block fallback below, and short-circuiting stop()'s own remaining teardown
+            // + its unconditional StationSessionCompletedEvent fire), silently losing the items.
+            // Degrading to "no player found" (same as an unresolved store) routes it through the
+            // SAME drop-at-block fallback every other unreachable-owner case already uses.
+            Player player;
+            try {
+                player = ownerStore != null ? ownerStore.getComponent(s.ref, Player.getComponentType()) : null;
+            } catch (Throwable t) {
+                Log.warn("STATION custody return player lookup failed: " + t.getMessage());
+                player = null;
+            }
             boolean hasRoom = player != null;
             if (hasRoom) {
                 try {
@@ -1881,24 +1893,14 @@ public final class StationService {
         dropCustodyAtBlock(store, x, y, z, claim.toItemStacks());
     }
 
-    /** Drops {@code stacks} at the block's center via the native dropped-item spawn. */
+    /**
+     * Drops {@code stacks} at the block's center via the shared {@link ItemDropUtil} sink
+     * (SMOKE-FIX S3 (b) lifted this out to a mod-wide utility so {@code loot.LootEngine}'s luck/
+     * tier grants reuse the SAME world-drop mechanism instead of re-deriving it).
+     */
     private static void dropCustodyAtBlock(@Nullable Store<EntityStore> store, int x, int y, int z,
             @Nonnull List<ItemStack> stacks) {
-        if (store == null || stacks.isEmpty()) {
-            if (!stacks.isEmpty()) {
-                Log.warn("STATION custody items lost - no store available to drop at (" + x + "," + y + "," + z + ")");
-            }
-            return;
-        }
-        try {
-            Vector3d pos = new Vector3d(x + 0.5, y + 1.0, z + 0.5);
-            var holders = ItemComponent.generateItemDrops(store, stacks, pos, Rotation3f.IDENTITY);
-            for (var holder : holders) {
-                store.addEntity(holder, AddReason.SPAWN);
-            }
-        } catch (Throwable t) {
-            Log.warn("STATION custody drop-at-block failed: " + t.getMessage());
-        }
+        ItemDropUtil.dropAtBlock(store, x, y, z, stacks);
     }
 
     /**

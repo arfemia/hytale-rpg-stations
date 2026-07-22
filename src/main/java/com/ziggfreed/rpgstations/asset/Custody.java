@@ -17,8 +17,9 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
  * repo-wide no-per-player-persistence constraint) - this codec is just the AUTHORING knob.
  *
  * <p>{@link #input} is the placement-acceptance matcher, reusing {@link ActionInput}'s
- * ItemId/ResourceTypeId/Tags routes (the {@code Function} route stays deferred to phase-2 leg E,
- * same posture as {@link ActionInput} itself). When {@link #input} is absent, acceptance derives
+ * ItemId/ResourceTypeId/Tags/Function routes (SMOKE-FIX S4: the {@code Function} route now
+ * matches in {@code station.StationCustody#matchesInput} - the anvil's {@code enhance} action
+ * relies on it for weapon placement). When {@link #input} is absent, acceptance derives
  * from the resolved station's {@code Recipe.Conversions} inputs instead (the sawmill's "logs by
  * ResourceTypeId family" - zero extra authoring needed on top of the existing {@code Recipe}
  * group); an explicit {@link #input} is for a future non-Recipe custody item (e.g. the anvil's
