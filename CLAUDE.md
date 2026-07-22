@@ -8,8 +8,10 @@ is RICH, not a husk: with RpgStations alone installed, its own jar-shipped Sawmi
 diegetic work loop plus a generic reward layer (conditional lootables over native `ItemDropList`s,
 command rewards) with zero progression. Package root `com.ziggfreed.rpgstations`. **Status:
 phase 1 (extraction) legs 0-6 landed** (scaffold, common lift, engine move, lootables, api
-artifact, MMO bridge, pack bridge); phase 2 (multi-action stations, the anvil arc) is design-only,
-not started. Design authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
+artifact, MMO bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
+camera <preset>|list` + `/rpgstations validate`, the design 4.1 scope the phase-1 legs had left
+unimplemented); phase 2 (multi-action stations, the anvil arc) is design-only, not started. Design
+authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
 (grounded by the decision log `../../.claude/research/rpg-stations-extraction-design.md` and the
 adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-2026-07-21.md`, ALL
 adopted fixes binding). Origin plan: `../../.claude/plans/interactive-stations.md` +
@@ -64,6 +66,7 @@ src/main/java/com/ziggfreed/rpgstations/
   asset/                     see asset/CLAUDE.md - StationAsset/LootableAsset/SettingsAsset/Presentation/Requires/Roll/Condition codecs
   station/                   see station/CLAUDE.md - the session engine (THE big package; the hard-won engine rules live here)
   loot/                      see loot/CLAUDE.md - LootEngine/RollEvaluator/FactorSnapshot/CommandRewardExecutor/LootableCatalog
+  command/                    see command/CLAUDE.md - RpgStationsCommand (/rpgstations camera|validate, admin-gated)
   interaction/                see interaction/CLAUDE.md - StationUseInteraction (the rpg_station_use RootInteraction handler)
   ui/                         see ui/CLAUDE.md - StationSummaryHud (extends common's KeyedCustomHud)
   i18n/                       see i18n/CLAUDE.md - RpgMsg (the rpgstations. prefix wrapper over common Msg) + RpgStationsLangKeys

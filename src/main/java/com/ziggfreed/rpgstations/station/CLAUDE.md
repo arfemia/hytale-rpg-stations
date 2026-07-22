@@ -128,11 +128,10 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   8 presets, each a targeted field-diff experiment - see its own javadoc for the confirmed
   results: `LOOK_ROT` is the first recipe that holds the body but pins the camera too; `FROZEN`
   is the full fixed-camera win described above; `FREE_NULL`/`FREE_DIR` keep the camera free but
-  fail to hold the body). `[`StationCameraPrefs`](StationCameraPrefs.java) is the transient,
-  never-persisted per-player override (`/rpgstations camera <preset>`, not yet landed as of leg
-  7A - no `command/` package exists in this mod yet; `StationCameraPreset.resolve` is wired and
-  ready for it). **Never invent a fourth `ServerCameraSettings` field combination beyond what
-  those three first-party sources establish.**
+  fail to hold the body). [`StationCameraPrefs`](StationCameraPrefs.java) is the transient,
+  never-persisted per-player override, set via [`/rpgstations camera <preset>|list`](../command/CLAUDE.md)
+  (leg P0, phase-1 closeout) - `StationCameraPreset.resolve` consults it. **Never invent a fourth
+  `ServerCameraSettings` field combination beyond what those three first-party sources establish.**
 - **Seat hold mode, the camera-problem's real answer** (`StationAsset.Hold.Seat.Enabled`,
   [`StationMountController`](StationMountController.java)): mounts the player on the station
   block via native `BlockMountAPI.mountOnBlock` - the answer to the packet hunt's dead end (no
@@ -204,8 +203,8 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   `Enabled` backs the heartbeat's engine-wide feature-toggle terminate check.
 - **Validation**: [`StationValidator`](StationValidator.java) (750 lines) runs at every asset-load
   fold (`RpgStationsPlugin.onStationAssetsLoaded` calls `StationValidator.runAndLog()`); the pure
-  `validate(...)` core is unit-tested. No `/rpgstations validate` command exists yet (see the
-  camera-command note above) - findings currently surface via the boot log only.
-- **Not yet landed** (design scope, not started): the `command/` package (`/rpgstations
-  camera|validate`), phase 2's multi-action/step-sequence/Mount-knob-family/custody work (see the
-  mod-root `CLAUDE.md`'s Phase 2 section).
+  `validate(...)` core is unit-tested. [`/rpgstations validate`](../command/CLAUDE.md) (leg P0) runs
+  the same live validator and chats the aggregate (summary + every finding), matching what the
+  boot-log audit prints.
+- **Not yet landed** (design scope, not started): phase 2's multi-action/step-sequence/
+  Mount-knob-family/custody work (see the mod-root `CLAUDE.md`'s Phase 2 section).

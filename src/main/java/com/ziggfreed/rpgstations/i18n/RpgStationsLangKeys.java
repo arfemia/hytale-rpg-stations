@@ -15,9 +15,10 @@ import javax.annotation.Nonnull;
  * <p>Keep this set in lockstep with {@code src/main/resources/Server/Languages/en-US/
  * rpgstations.lang} whenever a key is added or removed. Leg 3 adds the {@code rare_find}/
  * {@code lucky} loot-notification keys, the summary-panel keys, and the shipped sawmill's own
- * content keys ({@code station.sawmill.name}/{@code .desc}). A mismatch means either a shipped
- * key the validator doesn't know about (harmless) or a validator entry for a retired key (also
- * harmless, but stale).
+ * content keys ({@code station.sawmill.name}/{@code .desc}). Leg P0 (phase-1 closeout) adds the
+ * {@code command.*} keys backing {@code RpgStationsCommand} ({@code /rpgstations camera|validate}).
+ * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
+ * validator entry for a retired key (also harmless, but stale).
  */
 public final class RpgStationsLangKeys {
 
@@ -48,7 +49,17 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.summary.lucky",
             "rpgstations.ui.station.summary.items_more",
             "rpgstations.station.sawmill.name",
-            "rpgstations.station.sawmill.desc");
+            "rpgstations.station.sawmill.desc",
+            "rpgstations.command.desc",
+            "rpgstations.command.arg.sub",
+            "rpgstations.command.arg.action",
+            "rpgstations.command.usage",
+            "rpgstations.command.camera.usage",
+            "rpgstations.command.camera.players_only",
+            "rpgstations.command.camera.unknown_preset",
+            "rpgstations.command.camera.set",
+            "rpgstations.command.camera.list",
+            "rpgstations.command.validate.header");
 
     private RpgStationsLangKeys() {
     }

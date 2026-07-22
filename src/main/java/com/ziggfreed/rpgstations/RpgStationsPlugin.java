@@ -20,6 +20,7 @@ import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.SettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.rpgstations.command.RpgStationsCommand;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
@@ -50,6 +51,10 @@ import com.ziggfreed.rpgstations.util.Log;
  * FlairUnlockRegistry}/{@code SummaryEnricherRegistry} unions from {@code StationService}/{@code
  * StationFlairs} - see {@code .claude/research/raw/rpg-stations-unified-design-2026-07-21.md}
  * section 3. The MMO bridge (leg 5) is the first real external consumer.
+ *
+ * <p><b>Phase-1 closeout (leg P0):</b> registers {@link RpgStationsCommand}
+ * ({@code /rpgstations camera <preset>|list}, {@code /rpgstations validate}), the design 4.1
+ * command-group scope that was never landed before the MMO deleted its own camera subgroup.
  */
 public class RpgStationsPlugin extends JavaPlugin {
 
@@ -78,6 +83,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerStationInteraction();
         registerStationSystems();
         registerTeardownHooks();
+        getCommandRegistry().registerCommand(new RpgStationsCommand());
         Log.info("RpgStations setup complete (leg 4 - the api artifact is live: events fire, "
                 + "the factor/flair-unlock/summary-enricher registries are wired into the engine).");
     }

@@ -14,5 +14,5 @@ just logs its own findings at fold time).
 The one real validator, `station.StationValidator`, lives in `../station/` (not here) because it
 is entangled with `StationCatalog`/`StationAsset` internals; this package holds only the shared
 result shapes it (and any future validator) returns. `RpgStationsPlugin.onStationAssetsLoaded`
-calls `StationValidator.runAndLog()` at every fold - findings surface via the boot log only; no
-`/rpgstations validate` command exists yet (see `../station/CLAUDE.md`).
+calls `StationValidator.runAndLog()` at every fold, logging the same findings
+[`/rpgstations validate`](../command/CLAUDE.md) (leg P0) chats on demand (see `../station/CLAUDE.md`).
