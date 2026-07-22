@@ -2,6 +2,7 @@ package com.ziggfreed.rpgstations.station;
 
 import java.awt.Color;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -26,8 +27,10 @@ import com.hypixel.hytale.protocol.ItemResourceType;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
+import com.hypixel.hytale.server.core.asset.type.item.config.ItemArmor;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemTool;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemToolSpec;
+import com.hypixel.hytale.server.core.asset.type.item.config.ItemWeapon;
 import com.hypixel.hytale.server.core.entity.ItemUtils;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent;
@@ -134,7 +137,21 @@ public final class StationService {
          * pre-refactor inline code did not already catch), but any FUTURE authored step program
          * degrades to a clean session stop instead of a world-drain crash.
          */
-        STEP_FAILED
+        STEP_FAILED,
+        /**
+         * {@code Work.Repeat: false}'s "one completed program run completes the SESSION" (design
+         * 9.3, phase 2 leg E - the anvil's Enhance ritual): a non-repeating action's program
+         * completed successfully; the session stops right here, non-silent (a real completion,
+         * not a denial).
+         */
+        RITUAL_COMPLETE,
+        /**
+         * A Stamp step's {@code Stats} leaf clamped its roll to nothing (design 9.5: "a
+         * fully-capped item stamps nothing, consumes nothing, and denies with a keyed toast") -
+         * every authored cap ({@code PerItemBudget}/{@code PerStat}/{@code SkillScaledBudget}) is
+         * already saturated for this item. No reagents were consumed.
+         */
+        ENHANCE_CAPPED
     }
 
     private static final StationService INSTANCE = new StationService();
@@ -213,12 +230,6 @@ public final class StationService {
             return;
         }
 
-        // 2) Requires gate (RpgStations' own Permission + Conditions, design section 4.4.2).
-        if (!checkRequires(asset.getRequires(), playerRef, asset)) {
-            toast(playerRef, RpgMsg.tr("ui.station.locked"));
-            return;
-        }
-
         UUID worldUuid = playerRef.getWorldUuid();
         String blockKey = worldUuid + ":" + blockX + ":" + blockY + ":" + blockZ;
         World world;
@@ -229,13 +240,35 @@ public final class StationService {
             return;
         }
 
-        // 2.5) Placed-input custody (design section 9.4): a state-dependent F BEFORE the classic
+        // 2) Diegetic action selection (design section 9.1, phase 2 leg E) - BEFORE Requires, so a
+        // per-action Requires override (design 9.1) gates the RIGHT action. A loaded claim already
+        // owned by this player commits to ITS OWN action (re-pressing F with a different item held
+        // must never switch a ritual already in progress mid-flight); otherwise select by the
+        // currently held stack. A single-action station (no Actions map) always resolves
+        // ACTION_WORK, byte-identical to phase 1.
+        StationCustodyClaim preClaim = custodyByBlock.get(blockKey);
+        String selectedActionId = (preClaim != null && preClaim.ownerId.equals(playerUuid) && !preClaim.isEmpty())
+                ? preClaim.actionId
+                : selectActionForHeld(asset, player);
+        if (selectedActionId == null) {
+            toast(playerRef, RpgMsg.tr("ui.station.no_action"));
+            return;
+        }
+        ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, selectedActionId);
+
+        // 2.5) Requires gate (RpgStations' own Permission + Conditions, design section 4.4.2) -
+        // the RESOLVED action's own override when authored, else the station-level default.
+        if (!checkRequires(action.getRequires(), playerRef, asset)) {
+            toast(playerRef, RpgMsg.tr("ui.station.locked"));
+            return;
+        }
+
+        // 2.75) Placed-input custody (design section 9.4): a state-dependent F BEFORE the classic
         // engage flow - empty + a matching held stack places (or tops up); loaded + owner F falls
         // through to engage, sourcing the convert check from the claim instead of live inventory.
-        ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, ACTION_WORK);
         Custody custody = action.getCustody();
         if (custody != null) {
-            StationCustodyClaim claim = custodyByBlock.get(blockKey);
+            StationCustodyClaim claim = preClaim;
             if (claim != null && !claim.ownerId.equals(playerUuid)) {
                 toast(playerRef, RpgMsg.tr("ui.station.occupied"));
                 return;
@@ -248,7 +281,7 @@ public final class StationService {
             }
             ItemStack heldForPlacement = player.getInventory().getActiveHotbarItem();
             boolean roomLeft = claim == null || claim.totalQuantity() < custody.effectiveMaxQuantity();
-            if (roomLeft && custodyAccepts(custody, asset, heldForPlacement)) {
+            if (roomLeft && custodyAccepts(custody, asset, action, heldForPlacement)) {
                 int moved = placeIntoCustody(store, ref, blockKey, playerUuid, asset.getId(),
                         action.getActionId(), heldForPlacement, custody);
                 if (moved > 0) {
@@ -263,8 +296,8 @@ public final class StationService {
             // Nothing placed (no match, or already full): fall through to engage below.
         }
 
-        // 3) Exclusive occupancy.
-        StationAsset.Work work = asset.getWork();
+        // 3) Exclusive occupancy - the RESOLVED action's own Work override when authored.
+        StationAsset.Work work = action.getWork();
         boolean exclusive = work == null || work.getExclusive() == null || work.getExclusive();
         if (exclusive) {
             UUID occupant = byBlock.get(blockKey);
@@ -274,19 +307,33 @@ public final class StationService {
             }
         }
 
-        // 4) Held-tool gate.
-        if (!heldToolMatches(player, asset.getTool())) {
+        // 4) Held-tool gate - the RESOLVED action's own Tool override when authored.
+        if (!heldToolMatches(player, action.getTool())) {
             toast(playerRef, RpgMsg.tr("ui.station.wrong_tool"));
             return;
         }
 
-        // 5) Convert viability (custody-sourced when Custody governs), or idle practice when the
-        // station opts in.
+        // 5) Viability: a Steps-authored action (design 9.3, phase 2 leg E - no Recipe/Convert
+        // check applies) is runnable exactly when its OWN Custody governs and already holds
+        // something (an ungoverned Steps action, no Custody authored, is always runnable - nothing
+        // gates its engagement); a classic Recipe-driven action runs the Convert check
+        // (custody-sourced when Custody governs), or idle practice when the station opts in.
+        boolean stepsProgram = action.getSteps() != null && action.getSteps().length > 0;
         StationAsset.Work.Idle idleGroup = work != null ? work.getIdle() : null;
-        boolean idleEnabled = idleGroup != null && idleGroup.getEnabled() != null && idleGroup.getEnabled();
-        ConversionCheck check = custody != null
-                ? firstRunnableConversionFromCustody(custodyByBlock.get(blockKey), player, asset)
-                : firstRunnableConversion(player, asset);
+        boolean idleEnabled = !stepsProgram && idleGroup != null
+                && idleGroup.getEnabled() != null && idleGroup.getEnabled();
+        ConversionCheck check;
+        if (stepsProgram) {
+            boolean runnable = custody == null || (preClaim != null && !preClaim.isEmpty());
+            check = new ConversionCheck(runnable ? ConversionState.RUNNABLE : ConversionState.NO_INPUTS,
+                    false, null, 0, null, 0);
+        } else {
+            StationAsset.Conversion[] conversions =
+                    StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
+            check = custody != null
+                    ? firstRunnableConversionFromCustody(preClaim, player, conversions)
+                    : firstRunnableConversion(player, conversions);
+        }
         boolean startIdle = false;
         if (check.state == ConversionState.NO_INPUTS) {
             if (!idleEnabled) {
@@ -312,6 +359,7 @@ public final class StationService {
         s.ref = ref;
         s.playerRef = playerRef;
         s.stationId = asset.getId();
+        s.actionId = action.getActionId();
         s.blockKey = blockKey;
         s.blockX = blockX;
         s.blockY = blockY;
@@ -334,7 +382,7 @@ public final class StationService {
         s.maxMoveSq = maxMove * maxMove;
         s.exclusive = exclusive;
 
-        StationAsset.Hold hold = asset.getHold();
+        StationAsset.Hold hold = action.getHold();
         StationAsset.Hold.Mount mountGroup = hold != null ? hold.getMount() : null;
         boolean mounted = mountGroup != null;
         s.entityMountMode = mounted && mountGroup.isEntitySurface();
@@ -370,7 +418,7 @@ public final class StationService {
         s.movementLock = (!mounted && (hold == null || hold.getMovementLock() == null || hold.getMovementLock()))
                 || (s.entityMountMode && !s.entitySteerable);
 
-        StationAsset.Camera camera = asset.getCamera();
+        StationAsset.Camera camera = action.getCamera();
         String cameraMode = camera != null && camera.getMode() != null ? camera.getMode() : "ThirdPerson";
         boolean mountDefaultNoCamera = mounted && camera == null;
         s.cameraApplied = !mountDefaultNoCamera && !"None".equalsIgnoreCase(cameraMode);
@@ -378,10 +426,10 @@ public final class StationService {
         s.faceBlock = s.cameraApplied && camera != null && camera.getFaceBlock() != null && camera.getFaceBlock();
         s.cameraRecipe = camera != null ? camera.getRecipe() : null;
 
-        StationAsset.Animation animation = asset.getAnimation();
+        StationAsset.Animation animation = action.getAnimation();
         s.emoteId = animation != null ? animation.getEmoteId() : null;
         s.actionClip = animation != null ? animation.getActionClip() : null;
-        s.toolReq = asset.getTool();
+        s.toolReq = action.getTool();
 
         StationAsset.Tool.Durability durability = s.toolReq != null ? s.toolReq.getDurability() : null;
         s.durabilityPerSwing = StationToolScaling.resolvedDurabilityAmount(
@@ -426,7 +474,7 @@ public final class StationService {
         }
 
         StationEvents.fireSessionStarted(store, s.playerRef, s.playerUuid, s.sessionId, s.stationId,
-                ACTION_WORK, s.blockX, s.blockY, s.blockZ, s.idleMode);
+                s.actionId, s.blockX, s.blockY, s.blockZ, s.idleMode);
 
         toast(playerRef, RpgMsg.tr("ui.station.start", stationNameMsg(asset)).color(Color.WHITE));
 
@@ -568,9 +616,10 @@ public final class StationService {
     }
 
     /**
-     * One cycle: a real Convert cycle when a conversion is runnable, an opt-in idle practice
-     * cycle when materials are absent AND the station enables {@code Work.Idle}, or a stop
-     * (out-of-inputs / inventory-full) otherwise.
+     * One cycle: an authored {@code Steps} program (design 9.3/9.5, phase 2 leg E - the anvil's
+     * Enhance ritual) when the resolved action authors one; else a real Convert cycle when a
+     * conversion is runnable, an opt-in idle practice cycle when materials are absent AND the
+     * station enables {@code Work.Idle}, or a stop (out-of-inputs / inventory-full) otherwise.
      */
     private boolean runCycle(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
                              @Nonnull CommandBuffer<EntityStore> commandBuffer) {
@@ -585,15 +634,22 @@ public final class StationService {
             return false;
         }
 
-        Custody custody = ActionResolver.resolve(asset, ACTION_WORK).getCustody();
+        ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, s.actionId);
+        if (action.getSteps() != null && action.getSteps().length > 0) {
+            return runAuthoredProgram(s, store, commandBuffer, asset, action, player);
+        }
+
+        Custody custody = action.getCustody();
+        StationAsset.Conversion[] conversions =
+                StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
         ConversionCheck check = custody != null
-                ? firstRunnableConversionFromCustody(custodyByBlock.get(s.blockKey), player, asset)
-                : firstRunnableConversion(player, asset);
+                ? firstRunnableConversionFromCustody(custodyByBlock.get(s.blockKey), player, conversions)
+                : firstRunnableConversion(player, conversions);
         if (check.state == ConversionState.RUNNABLE) {
             if (s.idleMode) {
                 s.idleMode = false;
             }
-            return runRealCycle(s, store, commandBuffer, asset, player, check);
+            return runRealCycle(s, store, commandBuffer, asset, action, player, check);
         } else if (check.state == ConversionState.NO_INPUTS && s.idleEnabled) {
             if (!s.idleMode) {
                 s.idleMode = true;
@@ -614,18 +670,17 @@ public final class StationService {
      * The real Convert cycle: design 9.3's "one engine, no dual path" - the pre-chosen {@code
      * check} conversion becomes the IMPLICIT four-step program ({@link ImplicitProgram}), walked
      * through {@link #dispatchProgram}, the SAME choke point an authored multi-action
-     * {@code Steps} program would use. Precondition: {@code check.state == RUNNABLE}.
+     * {@code Steps} program uses. Precondition: {@code check.state == RUNNABLE}.
      *
      * <p>The implicit program has no {@code Wait} step, so it NEVER suspends - this call always
      * resolves synchronously to {@code Completed} or {@code Failed} within the SAME frame (the
      * byte-stable regression anchor: today's sawmill schedules exactly as before, every
-     * pre-refactor behavior test stays green). {@link #resumeCycleProgram} exists for a FUTURE
-     * authored non-implicit program's {@code Suspended} case only - never reached by the sawmill.
+     * pre-refactor behavior test stays green).
      */
     private boolean runRealCycle(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
                                  @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
-                                 @Nonnull Player player, @Nonnull ConversionCheck check) {
-        ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, ACTION_WORK);
+                                 @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
+                                 @Nonnull ConversionCheck check) {
         int attemptCycleIndex = s.cyclesDone + 1;
         // Sawmill migration (design 9.4): an action authoring Custody ALWAYS draws its implicit
         // Consume from the claim, never the live inventory - the backpack drain the pre-leg-C
@@ -647,12 +702,31 @@ public final class StationService {
     }
 
     /**
+     * An AUTHORED {@code Steps} program cycle attempt (design 9.3/9.5, phase 2 leg E): unlike
+     * {@link #runRealCycle}, there is no live {@code ConversionCheck} - the program's own steps
+     * (Consume/Produce/Roll/Stamp/...) validate and mutate whatever they individually need
+     * (custody, inventory, reagents), so {@link #dispatchProgram} is called with a {@code null}
+     * cycle output (a Roll step's {@code BonusOutputCopies} stays inert for an authored program
+     * with no live conversion output, same as today's Completion-trigger pass - design 4.5.1's
+     * existing rule, not a new one).
+     */
+    private boolean runAuthoredProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player) {
+        List<StationStep> steps = Arrays.asList(action.getSteps());
+        int attemptCycleIndex = s.cyclesDone + 1;
+        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, null, attemptCycleIndex, 0);
+    }
+
+    /**
      * Re-enters a {@code programSuspended} session's in-flight program at
      * {@code s.programIndex}, called from {@link #tickFrameOnce} once {@code s.stepDeadlineMs}
      * passes - bypassing the normal {@code Work.CycleMs} cadence gate entirely while suspended.
      * Rebuilds NOTHING from live inventory state (the whole point of {@link StationSession}'s
      * {@code activeProgram*} snapshot fields, design 9.3: a resume must never re-derive WHICH
-     * conversion is running, since the live inventory may have changed mid-suspension).
+     * conversion is running, since the live inventory may have changed mid-suspension). A
+     * {@code null} {@code activeProgramCycleOutput} is LEGAL here (an authored program's own
+     * cycle output, phase 2 leg E - only a missing {@code steps} snapshot is an error).
      */
     private boolean resumeCycleProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
                                        @Nonnull CommandBuffer<EntityStore> commandBuffer) {
@@ -667,14 +741,13 @@ public final class StationService {
             return false;
         }
         List<StationStep> steps = s.activeProgramSteps;
-        ItemStack cycleOutput = s.activeProgramCycleOutput;
-        if (steps == null || cycleOutput == null) {
+        if (steps == null) {
             Log.warn("STATION resume with no active program snapshot for '" + s.stationId + "' - stopping");
             stop(s, StopReason.STEP_FAILED, store);
             return false;
         }
-        ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, ACTION_WORK);
-        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, cycleOutput,
+        ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, s.actionId);
+        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, s.activeProgramCycleOutput,
                 s.activeProgramCycleIndex, s.programIndex);
     }
 
@@ -687,12 +760,18 @@ public final class StationService {
      * step's placeholder + factor-context substitution sees, and the value the cycle-completed
      * event fires with below) is {@code s.cyclesDone + 1}, computed ONCE by the caller before the
      * walk starts so it stays stable across a suspend/resume pair without persisting the counter
-     * early.
+     * early. {@code cycleOutput} is nullable (an authored program with no live Convert check,
+     * design 9.3/9.5's Steps programs, phase 2 leg E).
+     *
+     * <p>{@code Work.Repeat: false} (design 9.3's "one completed program run completes the
+     * SESSION" - the anvil's Enhance ritual): a COMPLETED program under a non-repeating action
+     * stops the session right here, non-silent, immediately after the cycle-completed event fires
+     * (so XP/luck listeners still see it) - never schedules another cycle attempt.
      */
     private boolean dispatchProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
-            @Nonnull ItemStack cycleOutput, int attemptCycleIndex, int startIndex) {
+            @Nullable ItemStack cycleOutput, int attemptCycleIndex, int startIndex) {
         FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, asset, attemptCycleIndex));
         StationStepContext ctx = new StationStepContext(s, store, commandBuffer, player, asset, action, snapshot,
                 steps, attemptCycleIndex, cycleOutput);
@@ -724,6 +803,12 @@ public final class StationService {
         }
         double xpMult = resolveXpMultiplier(player, asset);
         onCycleCompleted(s, store, commandBuffer, asset, xpMult, false, s.cyclesDone);
+
+        StationAsset.Work work = action.getWork();
+        if (work != null && !work.effectiveRepeat()) {
+            stop(s, StopReason.RITUAL_COMPLETE, store);
+            return false;
+        }
         return true;
     }
 
@@ -1252,7 +1337,8 @@ public final class StationService {
         // funnels through this ONE call, unconditionally, before any of the notification logic
         // below runs.
         StationAsset stopAsset = StationCatalog.getInstance().getStation(s.stationId);
-        Custody stopCustody = stopAsset != null ? ActionResolver.resolve(stopAsset, ACTION_WORK).getCustody() : null;
+        String stopActionId = s.actionId != null ? s.actionId : ACTION_WORK;
+        Custody stopCustody = stopAsset != null ? ActionResolver.resolve(stopAsset, stopActionId).getCustody() : null;
         returnCustody(s, stopCustody);
 
         boolean entityAlive = store != null && s.ref != null && s.ref.isValid() && s.ref.getStore() == store;
@@ -1386,13 +1472,14 @@ public final class StationService {
     }
 
     /**
-     * Scan {@code Recipe.Conversions} in order; the FIRST whose input the inventory satisfies
-     * wins. {@code NO_ROOM} is reported only when some conversion had its input but lacked
-     * output room.
+     * Scan {@code conversions} (the caller's already action-resolved
+     * {@code StationCatalog.resolvedConversions} result) in order; the FIRST whose input the
+     * inventory satisfies wins. {@code NO_ROOM} is reported only when some conversion had its
+     * input but lacked output room.
      */
     @Nonnull
-    private ConversionCheck firstRunnableConversion(@Nonnull Player player, @Nonnull StationAsset asset) {
-        StationAsset.Conversion[] conversions = StationCatalog.getInstance().resolvedConversions(asset);
+    private ConversionCheck firstRunnableConversion(@Nonnull Player player,
+            @Nullable StationAsset.Conversion[] conversions) {
         if (conversions == null || conversions.length == 0) {
             return new ConversionCheck(ConversionState.NO_INPUTS, false, null, 0, null, 0);
         }
@@ -1441,17 +1528,17 @@ public final class StationService {
 
     /**
      * The custody-sourced sibling of {@link #firstRunnableConversion} (design section 9.4): the
-     * SAME {@code Recipe.Conversions} scan, but availability reads {@code claim} (the placed-input
-     * pouch) instead of the player's live inventory - output room is STILL checked against the
-     * player's real inventory (only the input side moved into custody at placement; {@code Produce}
-     * always writes {@code To: Inventory}). A null/empty {@code claim} always yields
-     * {@code NO_INPUTS} (an empty custody station behaves exactly like an out-of-materials one, so
-     * the existing idle-practice fallback in {@link #toggle}/{@link #runCycle} applies unchanged).
+     * SAME action-resolved {@code conversions} scan, but availability reads {@code claim} (the
+     * placed-input pouch) instead of the player's live inventory - output room is STILL checked
+     * against the player's real inventory (only the input side moved into custody at placement;
+     * {@code Produce} always writes {@code To: Inventory}). A null/empty {@code claim} always
+     * yields {@code NO_INPUTS} (an empty custody station behaves exactly like an out-of-materials
+     * one, so the existing idle-practice fallback in {@link #toggle}/{@link #runCycle} applies
+     * unchanged).
      */
     @Nonnull
     private ConversionCheck firstRunnableConversionFromCustody(@Nullable StationCustodyClaim claim,
-            @Nonnull Player player, @Nonnull StationAsset asset) {
-        StationAsset.Conversion[] conversions = StationCatalog.getInstance().resolvedConversions(asset);
+            @Nonnull Player player, @Nullable StationAsset.Conversion[] conversions) {
         if (conversions == null || conversions.length == 0 || claim == null) {
             return new ConversionCheck(ConversionState.NO_INPUTS, false, null, 0, null, 0);
         }
@@ -1505,12 +1592,14 @@ public final class StationService {
     }
 
     /**
-     * True when {@code held} satisfies the station's custody placement matcher: an explicit
-     * {@link Custody#getInput()} when authored, else ANY resolved {@code Recipe.Conversions}
-     * input (the sawmill's "logs by ResourceTypeId family" - zero extra authoring).
+     * True when {@code held} satisfies {@code action}'s custody placement matcher: an explicit
+     * {@link Custody#getInput()} when authored, else ANY of the RESOLVED action's
+     * {@code Recipe.Conversions} inputs (the sawmill's "logs by ResourceTypeId family" - zero
+     * extra authoring; the anvil's Enhance action always authors an explicit {@link Custody#getInput()}
+     * instead, since it has no {@code Recipe} at all).
      */
     private static boolean custodyAccepts(@Nonnull Custody custody, @Nonnull StationAsset asset,
-            @Nullable ItemStack held) {
+            @Nonnull ActionResolver.ResolvedAction action, @Nullable ItemStack held) {
         if (held == null || held.isEmpty()) {
             return false;
         }
@@ -1520,7 +1609,8 @@ public final class StationService {
         if (matcher != null) {
             return StationCustody.matchesInput(matcher, heldItemId, heldResourceTypeIds, liveRawTagsOf(heldItemId));
         }
-        StationAsset.Conversion[] conversions = StationCatalog.getInstance().resolvedConversions(asset);
+        StationAsset.Conversion[] conversions =
+                StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
         return conversions != null && conversions.length > 0
                 && StationCustody.matchesAnyConversionInput(conversions, heldItemId, heldResourceTypeIds);
     }
@@ -1530,6 +1620,17 @@ public final class StationService {
      * HOTBAR SLOT into the block's claim (creating it, owned by {@code playerUuid}, on first
      * placement), removing exactly that amount from the slot. Returns the amount actually moved
      * (0 = nothing eligible / no room / the slot removal failed).
+     *
+     * <p><b>Metadata-preserving single-item placement</b> (a genuine fix, not in the original
+     * leg-C design): when {@code custody.effectiveMaxQuantity() == 1} (the anvil's Enhance
+     * action - one specific weapon, not a fungible resource pile), the REAL removed
+     * {@link ItemStack} (durability/prior-enhancement metadata intact, via the removal
+     * transaction's {@code getOutput()}) is stashed on the claim ({@link StationCustodyClaim#setUniqueStack})
+     * alongside the count bookkeeping every custody claim already keeps - {@code toItemStacks()}
+     * then returns THAT stack on auto-return instead of synthesizing a bare fresh one, and the
+     * Stamp step reads/mutates it directly. The bulk fungible-resource case (the sawmill's logs,
+     * any {@code MaxQuantity > 1} station) is completely unaffected - only the count map matters
+     * there, exactly as before.
      */
     private int placeIntoCustody(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
             @Nonnull String blockKey, @Nonnull UUID playerUuid, @Nonnull String stationId,
@@ -1549,8 +1650,10 @@ public final class StationService {
         if (hotbar == null || hotbar.getActiveSlot() == InventoryComponent.INACTIVE_SLOT_INDEX) {
             return 0;
         }
+        ItemStack movedStack;
         try {
-            hotbar.getInventory().removeItemStackFromSlot(hotbar.getActiveSlot(), moveCount);
+            var transaction = hotbar.getInventory().removeItemStackFromSlot(hotbar.getActiveSlot(), moveCount);
+            movedStack = transaction != null ? transaction.getOutput() : null;
         } catch (Throwable t) {
             Log.warn("STATION custody placement removal failed: " + t.getMessage());
             return 0;
@@ -1560,6 +1663,9 @@ public final class StationService {
             custodyByBlock.put(blockKey, claim);
         }
         claim.add(itemId, moveCount);
+        if (custody.effectiveMaxQuantity() == 1 && movedStack != null) {
+            claim.setUniqueStack(movedStack);
+        }
         return moveCount;
     }
 
@@ -1739,6 +1845,51 @@ public final class StationService {
         return raw != null ? raw : Map.of();
     }
 
+    /**
+     * The diegetic action-selection choke point (design section 9.1, phase 2 leg E): resolves
+     * {@code asset}'s effective action id against the player's CURRENTLY HELD active-hotbar stack
+     * (item id, EVERY resolved resource-type family, native raw tags, and the functional route -
+     * {@link #liveFunctionOf}). A single-action station (no {@code Actions} map) always resolves
+     * {@link ActionResolver#ACTION_WORK} with zero live-item reads, byte-identical to phase 1.
+     */
+    @Nullable
+    private static String selectActionForHeld(@Nonnull StationAsset asset, @Nonnull Player player) {
+        if (asset.getActions() == null || asset.getActions().isEmpty()) {
+            return ActionResolver.ACTION_WORK;
+        }
+        ItemStack held = player.getInventory().getActiveHotbarItem();
+        String heldItemId = held != null ? held.getItemId() : null;
+        return ActionResolver.selectActionByFamily(asset, heldItemId, liveResourceTypeIdsOf(heldItemId),
+                liveRawTagsOf(heldItemId), liveFunctionOf(heldItemId));
+    }
+
+    /**
+     * The held item's FUNCTIONAL route (design 9.1's {@code ActionInput.Function}, phase 2 leg E -
+     * previously schema-only, resolved for the first time here): {@code "Weapon"}/{@code "Armor"}/
+     * {@code "Tool"} tested against the live {@link Item} shape (the {@code item/ItemEnhanceRoll}
+     * gate precedent from the MMO's own item-enhancement package - re-derived independently here
+     * since RpgStations has zero MMO dependency). {@code null} when unresolvable or none apply.
+     */
+    @Nullable
+    private static String liveFunctionOf(@Nullable String itemId) {
+        if (itemId == null || itemId.isBlank()) {
+            return null;
+        }
+        Item item = Item.getAssetMap().getAsset(itemId);
+        if (item == null) {
+            return null;
+        }
+        ItemWeapon weapon = item.getWeapon();
+        if (weapon != null) {
+            return "Weapon";
+        }
+        ItemArmor armor = item.getArmor();
+        if (armor != null) {
+            return "Armor";
+        }
+        return item.getTool() != null ? "Tool" : null;
+    }
+
     // ==================== Requires gate (design section 4.4.2) ====================
 
     /**
@@ -1875,6 +2026,8 @@ public final class StationService {
             case TOOL_BROKEN -> "ui.station.stop.tool_broke";
             case FEATURE_DISABLED -> "ui.station.locked";
             case STEP_FAILED -> "ui.station.stop.step_failed";
+            case RITUAL_COMPLETE -> "ui.station.stop.complete";
+            case ENHANCE_CAPPED -> "ui.station.stop.capped";
             default -> null;
         };
     }

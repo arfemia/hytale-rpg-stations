@@ -35,6 +35,19 @@ static [`RpgStationsApi`](RpgStationsApi.java) holder.
   consults the UNION across every registered provider. No provider registered = empty set = base
   presentations only. Persistence is the REGISTERING mod's own concern - RpgStations never stores
   a per-player fact.
+- **[`EnhanceStamperRegistry`](EnhanceStamperRegistry.java)** / **[`EnhanceStamper`](EnhanceStamper.java)**
+  / **[`StampInspection`](StampInspection.java)** / **[`StatRoll`](StatRoll.java)** (design section
+  9.5, phase 2 leg E) - the anvil Stamp step's `Stats`-leaf delegate: a SINGLE active slot
+  (last-registration-wins, `FactorRegistry`'s discipline, NOT `FlairUnlockRegistry`'s union-of-all
+  shape - there is one "how does this server encode enhancement points" answer at a time).
+  `EnhanceStamper` is a lean 2-method contract RpgStations' own `station.StampCapEngine` calls:
+  `inspect(stack)` reads the stack's CURRENT enhancement state (format-opaque to RpgStations - the
+  MMO's registered stamper reads `item.ItemStatsMeta`) BEFORE any roll/cap math runs (zero
+  mutation); `apply(stack, entries)` writes the ALREADY rolled + cap-clamped entries (RpgStations
+  never re-derives a cap here) and returns the new stack, called only after every compute-phase
+  validation already passed. `null` from `active()` = no stamper registered = the Stats leaf
+  no-ops (Durability still lands). Deliberately simpler than the design doc's literal
+  `StampContext`/`StampResult` prose - unfrozen pre-1.0.0, free to reshape.
 - **[`SummaryEnricherRegistry`](SummaryEnricherRegistry.java)** / **[`SummaryEnricher`](SummaryEnricher.java)**
   / **[`SummaryContext`](SummaryContext.java)** / **[`SummaryDecorateContext`](SummaryDecorateContext.java)**
   - `rows(ctx)` returns extra ledger rows PREPENDED before the engine's own item rows

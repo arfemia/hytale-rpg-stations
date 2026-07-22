@@ -10,11 +10,14 @@ command rewards) with zero progression. Package root `com.ziggfreed.rpgstations`
 phase 1 (extraction) legs 0-6 landed** (scaffold, common lift, engine move, lootables, api
 artifact, MMO bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
 camera <preset>|list` + `/rpgstations validate`, the design 4.1 scope the phase-1 legs had left
-unimplemented); **phase 2 leg A (common kernel reshape), leg B (multi-action schema + step
-engine), leg C (placed-input custody + block states + sawmill migration), and leg D (the
-`Hold.Mount` knob family - the Block/Entity surface discriminator, the standing work mount) are
-LANDED** - see the "Phase 2" section below; legs E-H (the anvil, open flair vocabulary, art,
-smoke) remain design-only. Design
+unimplemented); **phase 2 legs A-E are LANDED**: leg A (common kernel reshape), leg B
+(multi-action schema + step engine), leg C (placed-input custody + block states + sawmill
+migration), leg D (the `Hold.Mount` knob family - the Block/Entity surface discriminator, the
+standing work mount), and **leg E (the anvil arc - the `Stamp` step, composable roll+cap models,
+the `EnhanceStamperRegistry` api registry, AND the live wiring that makes multi-action stations
+actually run: diegetic action selection at engage, an authored-`Steps` program dispatch path,
+`Work.Repeat` session completion - see the "Phase 2" section below); legs F-H (open flair
+vocabulary, art, smoke) remain design-only. Design
 authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
 (grounded by the decision log `../../.claude/research/rpg-stations-extraction-design.md` and the
 adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-2026-07-21.md`, ALL
@@ -138,7 +141,7 @@ extensible numeric vocabulary conditional lootables/`Requires` gates evaluate ov
 See `api/CLAUDE.md` for the full type-by-type reference and `api/impl/CLAUDE.md` for the concrete
 implementation this mod installs at `setup()`.
 
-## Phase 2 (legs A-D landed; E-H design-only)
+## Phase 2 (legs A-E landed; F-H design-only)
 
 Full spec: design doc sections 9 + 10 (leg sequence A-H) + 12 (risks) + 13 (decision points).
 Phase 2 work started ahead of the maintainer's in-game phase-1 parity gate smoke (design section
@@ -222,7 +225,52 @@ fix layers on cleanly.
   `SEAT_FACE_BLOCK_CONFLICT`), `UNKNOWN_MOUNT_SURFACE`, `MOUNT_ENTITY_GROUP_IGNORED`, and
   `MOUNT_STEERABLE_UNTESTED` (all warn-only, per the maintainer ruling). See `station/CLAUDE.md`'s
   Mount bullet for the full file-by-file detail.
-- **Legs E-H (design-only)**: the anvil (Convert + Enhance, the flagship step-sequence exemplar
-  with the `Stamp` step - authoring `Surface: "Entity"`, the maintainer's standing-smith call), the
-  open flair/moment vocabulary, the art leg (including custody's own display-entity visual layer),
-  and the phase-2 smoke round (the FIRST item: confirm the Entity-surface standing render).
+- **Leg E (LANDED, this mod + the MMO bridge + the pack)**: the anvil arc (design 9.5) - the
+  `Stamp` step un-reserved (`asset.StationStep.Stamp{Reagents,Durability,Stats}`, nested
+  `Stats{Pool,Entries,Picks,Unique,Caps{PerItemBudget,PerStat,SkillScaledBudget,Economics}}`), a
+  NEW `asset.RollPool` Pattern-A store (`Server/RpgStations/RollPools/*.json`, `loot.RollPoolCatalog`)
+  + the shared `asset.StatRollEntry` codec both `RollPool.Entries` and inline `Stats.Entries` use,
+  the PURE `station.StampCapEngine` (roll + weighted-pick/`Picks`/`Unique` + the M2-bound
+  cap-composition MIN rule, unit-tested with fixture caps - `StampCapEngineTest`), and
+  `station.StationStepHandlers.StampHandler` (compute-then-commit per critique M5: roll/cap-clamp
+  + reagent-availability + weapon-return-room validated with ZERO mutation first, then reagent
+  consumption and the `applyStampMutation` weapon mutation each run under their OWN try/catch that
+  restores exactly what was consumed on failure - `claim.setUniqueStack` is the LAST line, reached
+  only on full success). **Also landed this leg (beyond the Stamp step itself, required to make
+  a real multi-action station function at all - leg B shipped the schema/step-engine machinery but
+  never wired the live entry point to honor it):** `StationSession.actionId` + diegetic action
+  selection at `toggle()` (`ActionResolver.selectActionByFamily`, a resource-type-FAMILY-aware
+  sibling of `selectAction`; a loaded custody claim commits to ITS OWN action, never re-selected by
+  whatever is currently held), EVERY per-action group `toggle()` reads (`Work`/`Hold`/`Camera`/
+  `Animation`/`Tool`/`Requires`) switched from the station-level default to the RESOLVED action,
+  an authored-`Steps` dispatch path (`runAuthoredProgram`, bypassing the Convert-check machinery
+  entirely - a Steps action's viability is "does its own Custody already hold something"), and
+  `Work.Repeat: false` session completion (`StopReason.RITUAL_COMPLETE`) wired into
+  `dispatchProgram`. **A genuine correctness fix along the way**: `StationCustodyClaim` gained an
+  optional `uniqueStack` (the REAL placed `ItemStack`, metadata intact) for a `MaxQuantity: 1`
+  placement - the pre-existing count-only model would have silently reset a placed weapon's
+  durability/prior enhancements to a bare fresh stack on auto-return, an item-loss-equivalent bug
+  the bulk sawmill-logs case never exercised. See `station/CLAUDE.md`'s Stamp bullet for the full
+  file-by-file detail, `api/CLAUDE.md`'s `EnhanceStamperRegistry` entry for the api contract, and
+  `content-packs/skill-stations-pack/CLAUDE.md` (hyMMO root) for the shipped Anvil content.
+  **Deviations from the design doc's literal prose** (all evidence-grounded, see each site's own
+  javadoc): the Convert action matches vanilla `Metal_Bars` (not the doc's placeholder
+  `Metal_Ingot`); the anvil's Tool gate uses `Ids: ["Tool_Hammer_Crude","Tool_Hammer_Iron"]` (no
+  `Tags.Family:["Hammer"]` exists on the real vanilla hammer items); the shipped `PerStat` cap key
+  is `MMO_CritChance` (the MMO's real `reward.MmoStats` constant, not the doc's `MMO_Crit_Chance`);
+  the ritual's Wait steps use `DurationMs` (`Beats` stays schema-reserved/unimplemented - the doc's
+  own example would have hard-failed the ritual at its first step); the placeholder empty `Roll`
+  step in the doc's example was dropped (the Stamp step's OWN roll engine already covers stat
+  rolling, a second roll layer added nothing); `EnhanceStamper` is a lean 2-method
+  `inspect`/`apply` contract, not the doc's literal `StampContext`/`StampResult` shape (the api is
+  unfrozen pre-1.0.0, free to reshape - RpgStations owns all the roll/cap math, so the stamper
+  needs nothing richer). **m9 correction (Smithing skill ownership)**: SMITHING is NOT shipped via
+  `custom-skills.json` in the pack - that file is a local SERVER-OWNER config
+  (`mods/mmoskilltree/custom-skills.json`, loaded from a `Path` at plugin startup), not a
+  pack-authorable asset at all, so a pack zip cannot ship into it. SMITHING was ALREADY a dormant
+  `BUILTIN_SKILL_DATA` entry in the MMO's `skill.SkillRegistry`; leg E promotes it to `BUILTIN_SKILL_NAMES`
+  with `requiresFeatures: ["stations"]` - the EXACT TAMING precedent (a built-in, feature-gated on
+  the owning integration's presence), a small MMO-jar code change, not pack content.
+- **Legs F-H (design-only)**: the open flair/moment vocabulary, the art leg (including custody's
+  own display-entity visual layer, the Anvil's texture-path verification), and the phase-2 smoke
+  round (the FIRST item: confirm the Entity-surface standing render).

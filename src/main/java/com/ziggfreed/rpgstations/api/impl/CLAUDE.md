@@ -21,6 +21,10 @@ is used.
   registered providers; the union read iterates all of them per resolution.
 - **[`SummaryEnricherRegistryImpl`](SummaryEnricherRegistryImpl.java)** - same shape, registration
   order preserved (drives the "prepended before the engine's own rows, registration order" rule).
+- **[`EnhanceStamperRegistryImpl`](EnhanceStamperRegistryImpl.java)** (phase 2 leg E) - a single
+  `volatile` active slot, last-registration-wins (mirrors `FactorRegistryImpl`'s discipline, NOT
+  the union-of-all shape the other three registries use). Read by
+  `station.StationStepHandlers.StampHandler` directly (not back through `RpgStationsApi`).
 - **[`StationViewImpl`](StationViewImpl.java)** - the read-only per-station projection built from
   the live `station.StationCatalog` entry at query time (never cached/stale).
 

@@ -13,9 +13,10 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   `../loot/CLAUDE.md`), and (phase 2 leg B) `Camera.FaceBlockMode` is RENAMED `Camera.Recipe`
   (design 9.7, no alias). Groups: `Identity` (name/desc/icon keys), `Work` (cycle cadence + `Xp[]`
   progression declarations the engine never interprets, forwarded verbatim on
-  `StationCycleCompletedEvent.xpAsks`; optional `Idle` practice mode; `Repeat` - phase 2 leg B,
-  read only by the `station.step` engine's program-completion handling, unused by any shipped
-  content yet), `Recipe` (authored `Conversions` or `FromCrafting` derivation), `Hold` (the
+  `StationCycleCompletedEvent.xpAsks`; optional `Idle` practice mode; `Repeat` - `false` completes
+  the whole SESSION after one program run instead of looping, `station.StationService.dispatchProgram`
+  reads it - the anvil's Enhance action ships the first real `Repeat: false` content, phase 2 leg E),
+  `Recipe` (authored `Conversions` or `FromCrafting` derivation), `Hold` (the
   movement-lock effect / the `Mount` knob family - phase 2 leg D, design 9.2, see
   `../station/CLAUDE.md`'s Mount bullet for the Block/Entity surface breakdown), `Tool` (the
   held-tool gate + `XpScale`), `Custody` (phase 2
@@ -46,20 +47,38 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   Whole-GROUP overridable on `ActionDef` same as every other group. See `../station/CLAUDE.md` for
   the full engine-side behavior (`StationCustody`/`StationCustodyClaim`/`StationCustodyBreakSystem`).
 - **[`ActionInput`](ActionInput.java)** (design 9.1) - the diegetic action-selection matcher:
-  `{ItemId?, ResourceTypeId?, Tags?, Function?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, the new
-  functional route; its live resolution against the held item is phase-2 leg E scope, unimplemented
-  this leg). `isCatchAll()` = no route authored (matches anything; `StationValidator` flags an
-  unreachable LATER catch-all).
-- **[`StationStep`](StationStep.java)** (design 9.3) - ONE step of a multi-action station's step
-  PROGRAM: a `Type` discriminator (`Consume`/`Produce`/`Wait`/`Roll`/`Command` - executable this
-  leg via `station.StationStepKernel`; `Stamp`/`Mount` - schema-reserved, decode fine, no handler
-  yet) + base fields every type shares (`Id`, `Conditions`, `OnConditionFail{Result,Goto}` - the
-  "Branch is NOT a step type" branch mechanism, `Presentation`) + ONE per-type nested group.
+  `{ItemId?, ResourceTypeId?, Tags?, Function?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, resolved
+  against the held item's live shape - `station.StationService.liveFunctionOf`, phase 2 leg E).
+  `isCatchAll()` = no route authored (matches anything; `StationValidator` flags an unreachable
+  LATER catch-all). Live selection itself runs through `station.ActionResolver.selectActionByFamily`
+  (a DIFFERENT NAME, never an overload of `selectAction` - see that method's own javadoc), which
+  matches against the held item's FULL resolved `ResourceTypeId` family array, not a single id.
+- **[`StationStep`](StationStep.java)** (design 9.3/9.5) - ONE step of a multi-action station's step
+  PROGRAM: a `Type` discriminator (`Consume`/`Produce`/`Wait`/`Roll`/`Command`/`Stamp` - all six
+  executable via `station.StationStepKernel`; `Mount` stays schema-reserved, decodes fine, no
+  handler yet) + base fields every type shares (`Id`, `Conditions`, `OnConditionFail{Result,Goto}` -
+  the "Branch is NOT a step type" branch mechanism, `Presentation`) + ONE per-type nested group.
   `Consume` supports `From` `"Inventory"` OR `"Custody"` (phase 2 leg C - drains the block's placed-
   input claim); `Produce` supports only `To` `"Inventory"` this leg (`"Custody"` decodes,
   schema-reserved for a future output-stays-in-custody leg, fails cleanly at runtime until then).
   `Roll` shares the SAME `Roll`/`LootableAsset` vocabulary a station's own `Loot` group uses (DRY,
-  one roll engine).
+  one roll engine). **`Stamp`** (design 9.5, phase 2 leg E, the anvil's enhance-commit step) is
+  nested `{Reagents[], Durability{AddMax}, Stats{Pool?, Entries?, Picks{Min,Max}, Unique, Caps{
+  PerItemBudget, PerStat, SkillScaledBudget{Factor,Param,PointsPerLevel}, Economics{RepeatCostMultiplier}}}}`
+  - `Reagents` are consumed FROM THE PLAYER'S INVENTORY (not a second custody claim; see the
+  class's own javadoc for why), `Stats.Pool`/`Entries` share [`StatRollEntry`](StatRollEntry.java)
+  with [`RollPool`](RollPool.java) (below), and `Caps`' composition rule (M2's binding fix -
+  effective total budget = MIN of every authored total-budget cap, `PerStat` layers on top) is
+  documented on `Caps`' own javadoc, resolved by the PURE `station.StampCapEngine`
+  (unit-tested, `StampCapEngineTest`). The Stats leaf delegates the actual item-format write to a
+  registered `api.EnhanceStamper` (see `../api/CLAUDE.md`); `Durability` is RpgStations-native
+  (real without the MMO).
+- **[`StatRollEntry`](StatRollEntry.java)** (design 9.5) - ONE candidate stat-roll entry
+  `{Stat, Points{Min,Max}, Weight, Always}`, shared verbatim by `RollPool.Entries` and inline
+  `StationStep.Stamp.Stats.Entries` - never duplicated per authoring route.
+- **[`RollPool`](RollPool.java)** (design 9.5) - `Server/RpgStations/RollPools/<Name>.json`
+  (id = lowercased filename, mirrors `LootableAsset`'s exact shape), body `{Entries: [StatRollEntry, ...]}`,
+  referenced by a Stamp step's `Stats.Pool`. Folded into `loot.RollPoolCatalog`.
 - **[`Presentation`](Presentation.java)** - RpgStations' OWN codec (design section 4.1: a
   deliberate small divergence from the MMO's copy of the same shape, not a `ziggfreed-common`
   lift - the two authoring-side vocabularies diverge, this one drops the MMO's `Feedback` leaf

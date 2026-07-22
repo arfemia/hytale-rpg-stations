@@ -5,15 +5,24 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import org.joml.Vector3d;
 
+import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.inventory.ResourceQuantity;
+import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransaction;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.ziggfreed.common.cast.step.StepHandler;
+import com.ziggfreed.rpgstations.api.EnhanceStamper;
+import com.ziggfreed.rpgstations.api.StampInspection;
+import com.ziggfreed.rpgstations.api.StatRoll;
+import com.ziggfreed.rpgstations.api.impl.EnhanceStamperRegistryImpl;
+import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationStep;
@@ -23,8 +32,8 @@ import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * The six executable {@code station.step} handlers (design section 9.3's initial step-type set,
- * minus the two schema-reserved-unimplemented ids - see {@link StationStep}'s javadoc). Each is
+ * The seven executable {@code station.step} handlers (design sections 9.3/9.5, minus the one
+ * schema-reserved-unimplemented {@code Mount} id - see {@link StationStep}'s javadoc). Each is
  * registered UNGUARDED here; {@link StationStepRegistry} wraps every one in the conditions-gate +
  * throw-guard layer (design 9.3/M4's binding fix) before handing it to the kernel, so a handler
  * body below may assume its step's {@code Conditions} already passed and never needs its own
@@ -243,6 +252,258 @@ final class StationStepHandlers {
                     ctx.session.blockZ + 0.5);
             StationService.emitMoment(ctx.store, ctx.session, StationFlairs.Slot.CYCLE, step.getPresentation(), blockPos);
             return StationStepResult.SUCCESS;
+        }
+    }
+
+    /**
+     * The anvil's enhance-commit step (design section 9.5, critique M5's binding fix): COMPUTE
+     * everything first with ZERO mutation (roll + cap-clamp the {@code Stats} leaf via
+     * {@link StampCapEngine}, validate reagent availability, validate the enhanced weapon can be
+     * returned to the player's inventory when the session later stops), THEN commit reagent
+     * consumption + the durability/stat mutation under one {@code try/catch} that restores the
+     * EXACT pre-step reagent quantities to the player's inventory on any failure and NEVER writes
+     * the mutated weapon back to custody unless the whole commit succeeds - custody's live
+     * {@link StationCustodyClaim#uniqueStack()} is the ONE write, as the very last line. Denies
+     * cleanly (no consume, no mutation) on: no weapon in custody, a fully-capped {@code Stats}
+     * roll ({@code ENHANCE_CAPPED}), insufficient reagents, or no room to return the weapon
+     * (both {@code OUT_OF_INPUTS}/{@code INVENTORY_FULL} - the SAME reasons the classic Convert
+     * cycle already uses for the equivalent denials).
+     */
+    static final class StampHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
+        @Override
+        public StationStepResult execute(StationStepContext ctx, StationStep step) {
+            StationStep.Stamp stamp = step.getStamp();
+            if (stamp == null) {
+                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                        "Stamp step '" + step.getId() + "' has no Stamp group");
+            }
+            Custody custody = ctx.action.getCustody();
+            StationCustodyClaim claim = custody != null
+                    ? StationService.getInstance().custodyClaimFor(ctx.session.blockKey) : null;
+            ItemStack weaponStack = claim != null ? claim.uniqueStack() : null;
+            if (weaponStack == null) {
+                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                        "Stamp step '" + step.getId() + "' has no custody item to enhance");
+            }
+
+            // ===== COMPUTE PHASE (zero mutation, per M5) =====
+            StationStep.Stamp.Stats statsGroup = stamp.getStats();
+            EnhanceStamper stamper = EnhanceStamperRegistryImpl.getInstance().active();
+            StampInspection inspection = StampInspection.empty();
+            StampCapEngine.Plan plan = StampCapEngine.Plan.NOTHING_TO_GRANT;
+            if (statsGroup != null) {
+                if (stamper == null) {
+                    Log.fine("STAMP step '" + step.getId() + "' authors Stats with no registered EnhanceStamper "
+                            + "- the Stats leaf no-ops this attempt (Durability still lands)");
+                } else {
+                    inspection = safeInspect(stamper, weaponStack);
+                    StampCapEngine.FactorLookup lookup = ctx.snapshot::resolve;
+                    StampCapEngine.RollSource rng = () -> ThreadLocalRandom.current().nextDouble();
+                    plan = StampCapEngine.resolve(statsGroup, inspection, lookup, rng);
+                    if (plan.denied()) {
+                        return StationStepResult.fail(StationService.StopReason.ENHANCE_CAPPED,
+                                "Stamp step '" + step.getId() + "' fully capped for '"
+                                        + weaponStack.getItemId() + "'");
+                    }
+                }
+            }
+
+            StationStep.Stamp.Reagent[] reagents = stamp.getReagents();
+            double repeatCostMultiplier = economicsMultiplier(statsGroup);
+            int stampCount = stamper != null ? inspection.stampCount() : 0;
+            List<ItemStack> effectiveReagents = new ArrayList<>();
+            if (reagents != null) {
+                for (StationStep.Stamp.Reagent r : reagents) {
+                    if (r == null) {
+                        continue;
+                    }
+                    int effectiveQty = effectiveReagentQuantity(r.effectiveQuantity(), repeatCostMultiplier, stampCount);
+                    boolean isResource = r.getResourceTypeId() != null && !r.getResourceTypeId().isBlank();
+                    String reagentRef = isResource ? r.getResourceTypeId() : r.getItemId();
+                    if (reagentRef == null || reagentRef.isBlank()) {
+                        continue;
+                    }
+                    if (!reagentAvailable(ctx.player, isResource, reagentRef, effectiveQty)) {
+                        return StationStepResult.fail(StationService.StopReason.OUT_OF_INPUTS,
+                                "Stamp step '" + step.getId() + "' reagents unavailable ('" + reagentRef + "' x"
+                                        + effectiveQty + ")");
+                    }
+                    if (!isResource) {
+                        effectiveReagents.add(new ItemStack(reagentRef, effectiveQty));
+                    }
+                }
+            }
+
+            if (!ctx.player.getInventory().getStorage().canAddItemStacks(List.of(weaponStack))) {
+                return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL,
+                        "Stamp step '" + step.getId() + "' - no room to return the enhanced item later");
+            }
+
+            // ===== COMMIT PHASE (mutation, restore-on-failure per M5) =====
+            // Reagent consumption and the weapon MUTATION are two separate try/catch blocks
+            // (not one), so a throw at EITHER point restores exactly what was consumed so far and
+            // - critically - claim.setUniqueStack (the ONE custody write) is reached ONLY on the
+            // final line, after applyStampMutation has ALREADY returned successfully: a throwing
+            // mutation (a bad third-party EnhanceStamper) can therefore NEVER leave a
+            // partially-applied stamp on the claim.
+            List<ItemStack> consumedForRestore = new ArrayList<>();
+            try {
+                if (reagents != null) {
+                    for (StationStep.Stamp.Reagent r : reagents) {
+                        if (r == null) {
+                            continue;
+                        }
+                        int effectiveQty = effectiveReagentQuantity(r.effectiveQuantity(), repeatCostMultiplier, stampCount);
+                        boolean isResource = r.getResourceTypeId() != null && !r.getResourceTypeId().isBlank();
+                        String reagentRef = isResource ? r.getResourceTypeId() : r.getItemId();
+                        if (reagentRef == null || reagentRef.isBlank()) {
+                            continue;
+                        }
+                        consumedForRestore.addAll(consumeReagent(ctx.player, isResource, reagentRef, effectiveQty));
+                    }
+                }
+            } catch (Throwable t) {
+                restoreReagents(ctx.player, consumedForRestore);
+                Log.warn("STAMP step '" + step.getId() + "' reagent consumption failed, restored: " + t.getMessage(), t);
+                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                        "Stamp step '" + step.getId() + "' reagent consumption failed: " + t.getMessage());
+            }
+
+            ItemStack mutated;
+            try {
+                mutated = applyStampMutation(weaponStack, stamp.getDurability(), plan, stamper);
+            } catch (Throwable t) {
+                restoreReagents(ctx.player, consumedForRestore);
+                Log.warn("STAMP step '" + step.getId() + "' mutation failed, restored reagents: " + t.getMessage(), t);
+                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                        "Stamp step '" + step.getId() + "' mutation failed: " + t.getMessage());
+            }
+            claim.setUniqueStack(mutated);
+            return StationStepResult.SUCCESS;
+        }
+
+        /**
+         * PURE: applies {@code Durability.AddMax} then the (already rolled + cap-clamped)
+         * {@code plan} entries via {@code stamper}, in that order - both are {@code ItemStack}
+         * with-copy operations, so no live server/Player is needed here (unit-tested directly,
+         * incl. a THROWING stamper - proves a mutation failure never reaches
+         * {@link StationCustodyClaim#setUniqueStack}, the caller's job, never this method's).
+         */
+        @Nonnull
+        static ItemStack applyStampMutation(@Nonnull ItemStack weaponStack,
+                @Nullable StationStep.Stamp.Durability durabilityGroup, @Nonnull StampCapEngine.Plan plan,
+                @Nullable EnhanceStamper stamper) {
+            ItemStack mutated = weaponStack;
+            if (durabilityGroup != null && durabilityGroup.getAddMax() != null && durabilityGroup.getAddMax() > 0) {
+                double addMax = durabilityGroup.getAddMax();
+                mutated = mutated.withMaxDurability(mutated.getMaxDurability() + addMax)
+                        .withIncreasedDurability(addMax);
+            }
+            if (!plan.entries().isEmpty() && stamper != null) {
+                mutated = stamper.apply(mutated, plan.entries());
+            }
+            return mutated;
+        }
+
+        /** Best-effort restore: each stack failing independently is logged, never re-thrown (a restore must not itself crash the drain). */
+        private static void restoreReagents(@Nonnull Player player, @Nonnull List<ItemStack> toRestore) {
+            for (ItemStack restore : toRestore) {
+                if (restore != null) {
+                    try {
+                        player.getInventory().getStorage().addItemStack(restore);
+                    } catch (Throwable restoreFailure) {
+                        Log.warn("STAMP restore failed for '" + restore.getItemId() + "': " + restoreFailure.getMessage());
+                    }
+                }
+            }
+        }
+
+        /** Never-throwing {@link EnhanceStamper#inspect} - a bad third-party stamper must never crash a ritual. */
+        @Nonnull
+        private static StampInspection safeInspect(@Nonnull EnhanceStamper stamper, @Nonnull ItemStack stack) {
+            try {
+                return stamper.inspect(stack);
+            } catch (Throwable t) {
+                Log.warn("STAMP EnhanceStamper#inspect threw, treating as bare: " + t.getMessage());
+                return StampInspection.empty();
+            }
+        }
+
+        /**
+         * The REAL drained stack(s) for {@code tx} (a {@code ResourceTypeId} route can drain
+         * several distinct concrete item ids - mirrors {@code StationService#tallyResourceConsumption}'s
+         * exact per-slot read), for a precise restore-on-failure (M5's binding fix: restore the
+         * EXACT pre-step contents, never a guessed substitute).
+         */
+        @Nonnull
+        private static List<ItemStack> drainedStacksOf(@Nullable ResourceTransaction tx) {
+            List<ItemStack> out = new ArrayList<>();
+            if (tx == null) {
+                return out;
+            }
+            for (ResourceSlotTransaction slotTx : tx.getList()) {
+                if (slotTx != null && slotTx.succeeded() && slotTx.getConsumed() > 0) {
+                    ItemStack before = slotTx.getSlotBefore();
+                    if (before != null && before.getItemId() != null) {
+                        out.add(new ItemStack(before.getItemId(), slotTx.getConsumed()));
+                    }
+                }
+            }
+            return out;
+        }
+
+        /** {@code Stats.Caps.Economics.RepeatCostMultiplier}, or 0 (flat cost) when unauthored. */
+        private static double economicsMultiplier(@Nullable StationStep.Stamp.Stats statsGroup) {
+            if (statsGroup == null || statsGroup.getCaps() == null || statsGroup.getCaps().getEconomics() == null) {
+                return 0.0;
+            }
+            Double m = statsGroup.getCaps().getEconomics().getRepeatCostMultiplier();
+            return m != null ? m : 0.0;
+        }
+
+        /** {@code ceil(baseQuantity * (1 + RepeatCostMultiplier * stampCount))} (design 9.5, critique M2 fix (b)). */
+        private static int effectiveReagentQuantity(int baseQuantity, double repeatCostMultiplier, int stampCount) {
+            if (repeatCostMultiplier <= 0.0 || stampCount <= 0) {
+                return baseQuantity;
+            }
+            return (int) Math.ceil(baseQuantity * (1.0 + repeatCostMultiplier * stampCount));
+        }
+
+        /** Pure availability query (storage then combined) - never mutates, mirrors {@link ConsumeHandler}'s routing. */
+        private static boolean reagentAvailable(@Nonnull Player player, boolean isResource, @Nonnull String ref,
+                int quantity) {
+            if (isResource) {
+                ResourceQuantity resource = new ResourceQuantity(ref, quantity);
+                return player.getInventory().getStorage().canRemoveResource(resource)
+                        || player.getInventory().getCombinedBackpackStorageHotbar().canRemoveResource(resource);
+            }
+            ItemStack want = new ItemStack(ref, quantity);
+            return player.getInventory().getStorage().canRemoveItemStack(want)
+                    || player.getInventory().getCombinedBackpackStorageHotbar().canRemoveItemStack(want);
+        }
+
+        /**
+         * Mirrors {@link ConsumeHandler}'s storage-first-then-combined removal routing exactly;
+         * returns the REAL drained stack(s) (metadata-free reagents this leg, but generic) for the
+         * caller's restore-on-failure ledger.
+         */
+        @Nonnull
+        private static List<ItemStack> consumeReagent(@Nonnull Player player, boolean isResource,
+                @Nonnull String ref, int quantity) {
+            if (isResource) {
+                ResourceQuantity resource = new ResourceQuantity(ref, quantity);
+                ResourceTransaction tx = player.getInventory().getStorage().canRemoveResource(resource)
+                        ? player.getInventory().getStorage().removeResource(resource)
+                        : player.getInventory().getCombinedBackpackStorageHotbar().removeResource(resource);
+                return drainedStacksOf(tx);
+            }
+            ItemStack want = new ItemStack(ref, quantity);
+            if (player.getInventory().getStorage().canRemoveItemStack(want)) {
+                player.getInventory().getStorage().removeItemStack(want);
+            } else {
+                player.getInventory().getCombinedBackpackStorageHotbar().removeItemStack(want);
+            }
+            return List.of(want);
         }
     }
 }

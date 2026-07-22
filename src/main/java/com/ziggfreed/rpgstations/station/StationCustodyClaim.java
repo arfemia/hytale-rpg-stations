@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 
@@ -28,6 +29,18 @@ final class StationCustodyClaim {
 
     /** {@code itemId -> quantity}, insertion order = placement order (oldest first). */
     private final Map<String, Integer> items = new LinkedHashMap<>();
+
+    /**
+     * The REAL placed {@link ItemStack} (metadata intact - durability, any prior enhancement),
+     * for a single-item, metadata-preserving custody placement ONLY (the anvil's Enhance action,
+     * {@code Custody.MaxQuantity: 1}). Null for the bulk fungible-resource case (the sawmill's
+     * logs), where {@link #items} alone is authoritative and this field stays unused - a genuine
+     * correctness fix over the count-only model: {@link #toItemStacks()} would otherwise
+     * synthesize a bare fresh stack on auto-return, silently discarding the placed item's actual
+     * durability/enhancement state (an item-loss-equivalent bug the generic bulk path never
+     * exercises since fungible resources carry no per-stack identity worth preserving).
+     */
+    @Nullable private ItemStack uniqueStack;
 
     StationCustodyClaim(@Nonnull UUID ownerId, @Nonnull String stationId, @Nonnull String actionId) {
         this.ownerId = ownerId;
@@ -59,9 +72,26 @@ final class StationCustodyClaim {
         return items.isEmpty();
     }
 
-    /** One concrete {@link ItemStack} per tallied item id, for the auto-return path. */
+    /**
+     * The real, metadata-bearing placed stack ({@link #uniqueStack}), or {@code null} for a bulk
+     * fungible-resource claim.
+     */
+    @Nullable
+    ItemStack uniqueStack() {
+        return uniqueStack;
+    }
+
+    /** Sets/replaces the metadata-preserving unique stack (the Stamp step's commit phase writes the mutated result back here). */
+    void setUniqueStack(@Nullable ItemStack stack) {
+        this.uniqueStack = stack;
+    }
+
+    /** One concrete {@link ItemStack} per tallied item id, for the auto-return path - prefers {@link #uniqueStack} when set (metadata preserved). */
     @Nonnull
     List<ItemStack> toItemStacks() {
+        if (uniqueStack != null) {
+            return List.of(uniqueStack);
+        }
         List<ItemStack> out = new ArrayList<>(items.size());
         for (Map.Entry<String, Integer> e : items.entrySet()) {
             if (e.getValue() != null && e.getValue() > 0) {

@@ -451,11 +451,12 @@ public class StationAssetCodecTest {
 
     @Test
     void stationStep_reservedTypes_decodeAndFlagUnimplemented() throws Exception {
+        // Stamp lands phase 2 leg E (design 9.5) - only Mount stays schema-reserved-unimplemented.
         StationAsset a = decodeAsset("{ \"Actions\": { \"anvil\": { \"Steps\": ["
                 + " { \"Id\": \"stamp\", \"Type\": \"Stamp\" },"
                 + " { \"Id\": \"mount\", \"Type\": \"Mount\" } ] } } }");
         StationStep[] steps = a.getActions().get("anvil").getSteps();
-        assertTrue(steps[0].isReservedUnimplemented());
+        assertFalse(steps[0].isReservedUnimplemented());
         assertTrue(steps[1].isReservedUnimplemented());
     }
 

@@ -71,6 +71,24 @@ public final class StationCatalog {
                 k -> StationRecipeDeriver.resolve(asset.getRecipe(), StationRecipeDeriver.liveCandidates()));
     }
 
+    /**
+     * The ACTION-AWARE sibling of {@link #resolvedConversions(StationAsset)} (design section 9.1,
+     * phase 2 leg E): a multi-action station's per-action {@code Recipe} override (e.g. the
+     * anvil's "convert" action) needs its OWN derived-conversion cache entry, distinct from the
+     * station-level one - {@code actionRecipe} is the caller's ALREADY {@code ActionResolver}-resolved
+     * group (whole-group-override applied), never re-derived here. Cached under a
+     * {@code "<stationId>::<actionId>"} key so the single-action ({@code ACTION_WORK}) case never
+     * collides with (or invalidates) the plain per-station cache entry above.
+     */
+    @Nonnull
+    public StationAsset.Conversion[] resolvedConversions(@Nonnull StationAsset asset, @Nonnull String actionId,
+            @Nullable StationAsset.Recipe actionRecipe) {
+        String id = asset.getId();
+        String cacheKey = (id != null ? id.toLowerCase(Locale.ROOT) : "?") + "::" + actionId.toLowerCase(Locale.ROOT);
+        return resolvedConversions.computeIfAbsent(cacheKey,
+                k -> StationRecipeDeriver.resolve(actionRecipe, StationRecipeDeriver.liveCandidates()));
+    }
+
     @Nullable
     public StationAsset getStation(@Nonnull String id) {
         return stations.get(id.toLowerCase(Locale.ROOT));

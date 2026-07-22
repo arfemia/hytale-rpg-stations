@@ -26,6 +26,7 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.i18n.RpgStationsLangKeys;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
+import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
 import com.ziggfreed.rpgstations.util.Log;
 import com.ziggfreed.rpgstations.validation.Finding;
 import com.ziggfreed.rpgstations.validation.Report;
@@ -67,7 +68,8 @@ public final class StationValidator {
                     RpgStationsLangKeys::isKnown,
                     StationValidator::dropListKnownLive,
                     FactorRegistryImpl.getInstance()::isKnown,
-                    id -> LootableCatalog.getInstance().get(id) != null));
+                    id -> LootableCatalog.getInstance().get(id) != null,
+                    id -> RollPoolCatalog.getInstance().get(id) != null));
             out.addAll(validateLootables(LootableCatalog.getInstance().all().values(),
                     StationValidator::dropListKnownLive, FactorRegistryImpl.getInstance()::isKnown));
             return out;
@@ -99,16 +101,22 @@ public final class StationValidator {
                                          @Nonnull Predicate<String> langKeyKnown,
                                          @Nonnull Predicate<String> dropListKnown,
                                          @Nonnull Predicate<String> factorKnown) {
-        return validate(stations, langKeyKnown, dropListKnown, factorKnown, id -> true);
+        return validate(stations, langKeyKnown, dropListKnown, factorKnown, id -> true, id -> true);
     }
 
-    /** Singleton-free core, full form - {@code lootableKnown} answers "does this LootableAsset id exist". */
+    /**
+     * Singleton-free core, full form - {@code lootableKnown} answers "does this LootableAsset id
+     * exist"; {@code rollPoolKnown} (phase 2 leg E) answers "does this RollPool id exist" - a
+     * caller that does not care about {@code Stamp.Stats.Pool} reference checks defaults it to
+     * always-known via the 4-arg convenience overload above.
+     */
     @Nonnull
     public static List<Finding> validate(@Nonnull Collection<StationAsset> stations,
                                          @Nonnull Predicate<String> langKeyKnown,
                                          @Nonnull Predicate<String> dropListKnown,
                                          @Nonnull Predicate<String> factorKnown,
-                                         @Nonnull Predicate<String> lootableKnown) {
+                                         @Nonnull Predicate<String> lootableKnown,
+                                         @Nonnull Predicate<String> rollPoolKnown) {
         List<Finding> out = new ArrayList<>();
         for (StationAsset a : stations) {
             if (a == null) {
@@ -130,7 +138,7 @@ public final class StationValidator {
             checkCompletion(a, id, label, out);
             checkFlairs(a, id, label, out);
             checkCustody(a.getCustody(), a.getRecipe(), label, id, out);
-            checkActions(a, id, label, dropListKnown, factorKnown, lootableKnown, out);
+            checkActions(a, id, label, dropListKnown, factorKnown, lootableKnown, rollPoolKnown, out);
         }
         return out;
     }
@@ -782,7 +790,8 @@ public final class StationValidator {
      */
     private static void checkActions(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
             @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
-            @Nonnull Predicate<String> lootableKnown, @Nonnull List<Finding> out) {
+            @Nonnull Predicate<String> lootableKnown, @Nonnull Predicate<String> rollPoolKnown,
+            @Nonnull List<Finding> out) {
         Map<String, ActionDef> actions = a.getActions();
         if (actions == null || actions.isEmpty()) {
             return;
@@ -846,7 +855,7 @@ public final class StationValidator {
             }
             StationStep[] steps = def.getSteps();
             if (steps != null && steps.length > 0) {
-                checkSteps(steps, actionLabel, id, dropListKnown, factorKnown, lootableKnown, out);
+                checkSteps(steps, actionLabel, id, dropListKnown, factorKnown, lootableKnown, rollPoolKnown, out);
             }
         }
     }
@@ -857,17 +866,18 @@ public final class StationValidator {
     }
 
     /**
-     * The authored step-program coverage (design 9.3): duplicate {@code Id}s, the two
-     * schema-reserved-unimplemented types ({@code Stamp}/{@code Mount}), an unimplemented
+     * The authored step-program coverage (design 9.3/9.5): duplicate {@code Id}s, the one
+     * schema-reserved-unimplemented type ({@code Mount}), an unimplemented
      * {@code Consume.From}/{@code Produce.To} route, a {@code Wait} step missing BOTH routes (or
      * authoring only the unimplemented {@code Beats} one), an {@code OnConditionFail.Goto}
-     * referencing an unknown sibling step id, and a {@code Roll} step's inline {@link Roll}s
-     * through the SAME shared {@link #checkRoll} core every other Roll site uses.
+     * referencing an unknown sibling step id, a {@code Roll} step's inline {@link Roll}s through
+     * the SAME shared {@link #checkRoll} core every other Roll site uses, and (phase 2 leg E) a
+     * {@code Stamp} step's own coverage - see the {@code Stamp}-specific checks below.
      */
     private static void checkSteps(@Nonnull StationStep[] steps,
             @Nonnull String actionLabel, @Nonnull String id, @Nonnull Predicate<String> dropListKnown,
             @Nonnull Predicate<String> factorKnown, @Nonnull Predicate<String> lootableKnown,
-            @Nonnull List<Finding> out) {
+            @Nonnull Predicate<String> rollPoolKnown, @Nonnull List<Finding> out) {
         Set<String> seenIds = new HashSet<>();
         Set<String> knownIds = new HashSet<>();
         for (StationStep s : steps) {
@@ -947,6 +957,61 @@ public final class StationValidator {
                         checkRoll(inlineRolls[r], stepLabel + ".Rolls[" + r + "]", id, dropListKnown, factorKnown, out);
                     }
                 }
+            } else if (StationStep.TYPE_STAMP.equalsIgnoreCase(step.getType())) {
+                checkStamp(step.getStamp(), stepLabel, id, factorKnown, rollPoolKnown, out);
+            }
+        }
+    }
+
+    /**
+     * A Stamp step's own coverage (design 9.5, phase 2 leg E): no {@code Stamp} group at all, no
+     * {@code Reagents} (a free ritual - warn, not an error, some future station may genuinely want
+     * that), a {@code Stats.Pool} reference to an unknown {@code RollPool}, a non-positive
+     * {@code Caps.PerItemBudget} when authored, and a {@code SkillScaledBudget.Factor} referencing
+     * an unregistered factor (the SAME {@code factorKnown} check every other factor reference in
+     * this file uses - warn-not-error, "providers may register later").
+     */
+    private static void checkStamp(@Nullable StationStep.Stamp stamp, @Nonnull String stepLabel,
+            @Nonnull String id, @Nonnull Predicate<String> factorKnown, @Nonnull Predicate<String> rollPoolKnown,
+            @Nonnull List<Finding> out) {
+        if (stamp == null) {
+            out.add(Finding.warning(DOMAIN, "STAMP_STEP_EMPTY", stepLabel + " has no Stamp group", id));
+            return;
+        }
+        if (stamp.getReagents() == null || stamp.getReagents().length == 0) {
+            out.add(Finding.warning(DOMAIN, "STAMP_NO_REAGENTS", stepLabel + " authors no Reagents (a free ritual)", id));
+        }
+        StationStep.Stamp.Stats stats = stamp.getStats();
+        if (stats == null && stamp.getDurability() == null) {
+            out.add(Finding.warning(DOMAIN, "STAMP_NO_PAYLOAD",
+                    stepLabel + " authors neither Stats nor Durability - this step grants nothing", id));
+            return;
+        }
+        if (stats == null) {
+            return;
+        }
+        String pool = stats.getPool();
+        if (pool != null && !pool.isBlank() && !rollPoolKnown.test(pool.toLowerCase(Locale.ROOT))) {
+            out.add(Finding.warning(DOMAIN, "STAMP_UNKNOWN_POOL",
+                    stepLabel + " Stats.Pool references unknown RollPool '" + pool + "'", id));
+        }
+        if ((stats.getEntries() == null || stats.getEntries().length == 0) && (pool == null || pool.isBlank())) {
+            out.add(Finding.warning(DOMAIN, "STAMP_STATS_NO_ENTRIES",
+                    stepLabel + " authors Stats with neither Pool nor inline Entries", id));
+        }
+        StationStep.Stamp.Stats.Caps caps = stats.getCaps();
+        if (caps != null) {
+            Double perItemBudget = caps.getPerItemBudget();
+            if (perItemBudget != null && perItemBudget <= 0.0) {
+                out.add(Finding.warning(DOMAIN, "STAMP_NONPOSITIVE_BUDGET",
+                        stepLabel + " Caps.PerItemBudget is not positive (" + perItemBudget + ")", id));
+            }
+            StationStep.Stamp.Stats.SkillScaledBudget scaled = caps.getSkillScaledBudget();
+            String factor = scaled != null ? scaled.getFactor() : null;
+            if (factor != null && !factor.isBlank() && !factorKnown.test(factor.toLowerCase(Locale.ROOT))) {
+                out.add(Finding.warning(DOMAIN, "STAMP_UNKNOWN_FACTOR",
+                        stepLabel + " Caps.SkillScaledBudget.Factor references unregistered factor '"
+                                + factor + "'", id));
             }
         }
     }

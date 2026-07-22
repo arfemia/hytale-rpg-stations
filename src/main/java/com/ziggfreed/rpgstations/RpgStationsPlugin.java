@@ -18,11 +18,13 @@ import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
+import com.ziggfreed.rpgstations.asset.RollPool;
 import com.ziggfreed.rpgstations.asset.SettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.command.RpgStationsCommand;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
+import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.station.StationCatalog;
 import com.ziggfreed.rpgstations.station.StationCustodyBreakSystem;
@@ -80,6 +82,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         FactorRegistryImpl.getInstance().registerBuiltins();
         registerStationAssetStore();
         registerLootableAssetStore();
+        registerRollPoolAssetStore();
         registerSettingsAssetStore();
         registerStationInteraction();
         registerStationSystems();
@@ -168,6 +171,35 @@ public class RpgStationsPlugin extends JavaPlugin {
         }
         LootableCatalog.getInstance().fold(layer, false);
         Log.info("Lootable asset layer: folded " + layer.size() + " lootable table(s) into LootableCatalog: "
+                + layer.keySet());
+    }
+
+    /**
+     * Registers the {@link RollPool} Pattern-A store at {@code Server/RpgStations/RollPools}
+     * (design section 9.5, phase 2 leg E) and folds every loaded entry into
+     * {@link RollPoolCatalog} - the anvil's Stamp step's {@code Stats.Pool} reference target.
+     */
+    private void registerRollPoolAssetStore() {
+        AssetStoreRegistrar.registerStore(
+                RollPool.class,
+                new DefaultAssetMap<String, RollPool>(),
+                "RpgStations/RollPools",
+                RollPool::getId,
+                RollPool.CODEC,
+                null);
+        getEventRegistry().register(LoadedAssetsEvent.class, RollPool.class,
+                RpgStationsPlugin::onRollPoolAssetsLoaded);
+    }
+
+    private static void onRollPoolAssetsLoaded(
+            LoadedAssetsEvent<String, RollPool, DefaultAssetMap<String, RollPool>> event) {
+        DefaultAssetMap<String, RollPool> assetMap = event.getAssetMap();
+        Map<String, RollPool> layer = new LinkedHashMap<>();
+        for (Map.Entry<String, RollPool> entry : assetMap.getAssetMap().entrySet()) {
+            layer.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
+        }
+        RollPoolCatalog.getInstance().fold(layer, false);
+        Log.info("RollPool asset layer: folded " + layer.size() + " roll pool(s) into RollPoolCatalog: "
                 + layer.keySet());
     }
 

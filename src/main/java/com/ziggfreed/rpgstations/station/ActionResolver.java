@@ -100,6 +100,48 @@ public final class ActionResolver {
         return null;
     }
 
+    /**
+     * The live-item-aware sibling of {@link #selectAction} (phase 2 leg E, a DIFFERENT name -
+     * never an overload - since a {@code null} 3rd argument would otherwise be ambiguous between
+     * the {@code String}/{@code String[]} forms): matches against the held item's FULL
+     * {@code ResourceTypeId} FAMILY set (an item can belong to more than one family) instead of a
+     * single id - the anvil's "convert" action matches ANY vanilla {@code Ingredient_Bar_<Metal>}
+     * by its {@code Metal_Bars} family membership, the exact same family-array matching
+     * {@code station.StationCustody} already uses for placed-input custody.
+     */
+    @Nullable
+    public static String selectActionByFamily(@Nonnull StationAsset asset, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        Map<String, ActionDef> actions = asset.getActions();
+        if (actions == null || actions.isEmpty()) {
+            return ACTION_WORK;
+        }
+        for (Map.Entry<String, ActionDef> e : actions.entrySet()) {
+            ActionDef def = e.getValue();
+            ActionInput input = def != null ? def.getInput() : null;
+            if (input == null || input.isCatchAll()
+                    || matchesAnyResourceType(input, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
+    private static boolean matchesAnyResourceType(@Nonnull ActionInput input, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        if (heldResourceTypeIds != null && heldResourceTypeIds.length > 0) {
+            for (String rt : heldResourceTypeIds) {
+                if (matches(input, heldItemId, rt, heldTags, heldFunction)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return matches(input, heldItemId, null, heldTags, heldFunction);
+    }
+
     private static boolean matches(@Nonnull ActionInput input, @Nullable String heldItemId,
             @Nullable String heldResourceTypeId, @Nullable Map<String, String[]> heldTags,
             @Nullable String heldFunction) {

@@ -332,7 +332,25 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   the design's accepted crash-loses-it ruling) resets on the next press, no dupe risk. The shipped
   sawmill (jar default AND the pack's MMO-bridged copy) migrated to placed input this leg - see
   `asset/CLAUDE.md`'s `Custody` entry and the pack's own `CLAUDE.md`.
-- **Not yet landed** (design scope, not started): phase 2 legs E-H - the anvil (Convert + Enhance,
-  the `Stamp` step), the open flair/moment vocabulary, the art leg, and the phase-2 smoke round
-  (see the mod-root `CLAUDE.md`'s Phase 2 section). Leg D (the `Hold.Mount` knob family, above) is
-  LANDED.
+- **The anvil arc (design section 9.5, phase 2 leg E, LANDED)**: see the mod-root `CLAUDE.md`'s
+  Phase 2 section for the full narrative (the `Stamp` step, the `StampCapEngine` roll/cap engine,
+  AND the live multi-action wiring leg E ALSO had to land - leg B shipped the schema/step-engine
+  machinery but never actually wired `toggle()`/`runCycle()` to read a resolved action's groups or
+  dispatch an authored `Steps` program). In THIS file's terms: [`StampCapEngine`](StampCapEngine.java)
+  (pure, `station`-package-private, unit-tested via `StampCapEngineTest`) is called ONLY from
+  [`StationStepHandlers.StampHandler`](StationStepHandlers.java) (registered in
+  [`StationStepRegistry`](StationStepRegistry.java) alongside the other six handlers).
+  [`ActionResolver.selectActionByFamily`](ActionResolver.java) (a DIFFERENT NAME from
+  `selectAction`, never an overload - a `null` 3rd arg would otherwise be ambiguous between the
+  `String`/`String[]` forms) is the resource-type-FAMILY-aware selection entry `StationService`
+  calls from its new `selectActionForHeld`/`liveFunctionOf` helpers. `StationCustodyClaim` gained
+  `uniqueStack`/`setUniqueStack` (a metadata-preserving single-item placement, `placeIntoCustody`
+  populates it whenever `custody.effectiveMaxQuantity() == 1`, `toItemStacks()` prefers it) - the
+  weapon-durability/prior-enhancement-loss fix. `StationCatalog` gained an action-aware
+  `resolvedConversions(asset, actionId, actionRecipe)` overload (a multi-action station's per-action
+  `Recipe` override needs its OWN derived-conversion cache entry). `StationService.dispatchProgram`
+  reads the resolved action's `Work.effectiveRepeat()` and calls `stop(..., StopReason.RITUAL_COMPLETE, ...)`
+  on a completed non-repeating program.
+- **Not yet landed** (design scope, not started): phase 2 legs F-H - the open flair/moment
+  vocabulary, the art leg, and the phase-2 smoke round (see the mod-root `CLAUDE.md`'s Phase 2
+  section).

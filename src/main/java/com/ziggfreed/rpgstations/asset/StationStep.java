@@ -3,10 +3,14 @@ package com.ziggfreed.rpgstations.asset;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
+import com.hypixel.hytale.codec.codecs.map.MapCodec;
 
 /**
  * ONE step of a multi-action station's step PROGRAM (design section 9.3), a Pattern A union
@@ -21,24 +25,23 @@ import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
  * to jump, via the reshaped {@code cast.step} kernel's {@code StepSemantics#nextIndex} hook - no
  * dedicated branch node exists in this vocabulary.
  *
- * <p><b>Reserved, unimplemented this leg</b> (design 9.3/9.5): {@code "Stamp"} (the anvil's
- * enhance-commit step, full shape lands with the {@code EnhanceStamper} api registry, phase-2 leg
- * E) and {@code "Mount"} (a mid-sequence pose swap). Both {@link #type} strings decode fine (no
- * dedicated nested group exists for either yet); {@code station.step.StationStepRegistry}
- * registers no handler for them, so a program authoring one FAILS at dispatch with a clear log -
- * {@code StationValidator}'s {@code UNIMPLEMENTED_STEP_TYPE} finding catches the authoring
- * mistake ahead of runtime, per the design's binding note.
+ * <p><b>{@code "Stamp"} lands this leg</b> (design 9.5, phase-2 leg E): the anvil's enhance-commit
+ * step - see {@link Stamp}'s own javadoc for the compute-then-commit contract (M5's binding fix).
+ * <b>{@code "Mount"} stays reserved, unimplemented</b> (a mid-sequence pose swap): the {@link #type}
+ * string decodes fine (no dedicated nested group exists for it), but
+ * {@code station.step.StationStepRegistry} registers no handler for it, so a program authoring one
+ * FAILS at dispatch with a clear log - {@code StationValidator}'s {@code UNIMPLEMENTED_STEP_TYPE}
+ * finding catches the authoring mistake ahead of runtime, per the design's binding note.
  */
 public final class StationStep {
 
-    /** The six step types this leg's engine actually EXECUTES (see the class javadoc for the two reserved ids). */
+    /** The seven step types this leg's engine actually EXECUTES (see the class javadoc for the one reserved id). */
     public static final String TYPE_CONSUME = "Consume";
     public static final String TYPE_PRODUCE = "Produce";
     public static final String TYPE_WAIT = "Wait";
     public static final String TYPE_ROLL = "Roll";
     public static final String TYPE_COMMAND = "Command";
     public static final String TYPE_PRESENT = "Present";
-    /** Schema-reserved, unimplemented this leg (see the class javadoc). */
     public static final String TYPE_STAMP = "Stamp";
     /** Schema-reserved, unimplemented this leg (see the class javadoc). */
     public static final String TYPE_MOUNT = "Mount";
@@ -54,6 +57,7 @@ public final class StationStep {
     @Nullable protected Wait wait;
     @Nullable protected RollGroup roll;
     @Nullable protected CommandGroup command;
+    @Nullable protected Stamp stamp;
 
     public static final BuilderCodec<StationStep> CODEC = BuilderCodec.builder(StationStep.class, StationStep::new)
             .appendInherited(new KeyedCodec<>("Id", Codec.STRING, false),
@@ -77,6 +81,8 @@ public final class StationStep {
                     (o, v) -> o.roll = v, o -> o.roll, (o, p) -> o.roll = p.roll).add()
             .appendInherited(new KeyedCodec<>("Command", CommandGroup.CODEC, false),
                     (o, v) -> o.command = v, o -> o.command, (o, p) -> o.command = p.command).add()
+            .appendInherited(new KeyedCodec<>("Stamp", Stamp.CODEC, false),
+                    (o, v) -> o.stamp = v, o -> o.stamp, (o, p) -> o.stamp = p.stamp).add()
             .build();
 
     public StationStep() {
@@ -177,15 +183,26 @@ public final class StationStep {
         return this;
     }
 
+    @Nullable
+    public Stamp getStamp() {
+        return stamp;
+    }
+
+    @Nonnull
+    public StationStep withStamp(@Nonnull Stamp v) {
+        this.stamp = v;
+        return this;
+    }
+
     @Nonnull
     public StationStep withPresentation(@Nullable Presentation v) {
         this.presentation = v;
         return this;
     }
 
-    /** True when {@link #type} is one of the two design-reserved, not-yet-executable ids. */
+    /** True when {@link #type} is the one design-reserved, not-yet-executable id. */
     public boolean isReservedUnimplemented() {
-        return TYPE_STAMP.equalsIgnoreCase(type) || TYPE_MOUNT.equalsIgnoreCase(type);
+        return TYPE_MOUNT.equalsIgnoreCase(type);
     }
 
     /**
@@ -455,6 +472,394 @@ public final class StationStep {
         @Nullable
         public String[] getCommands() {
             return commands;
+        }
+    }
+
+    /**
+     * The anvil's enhance-commit step (design section 9.5): the ONE transaction commit, compute-
+     * then-commit by construction (critique M5's binding fix, enforced by
+     * {@code station.StationStepHandlers.StampHandler}, NOT by this codec - a codec cannot enforce
+     * an execution order, only carry the data). Two ORTHOGONAL payload leaves, any combination:
+     * {@link #durability} (RpgStations-native, real without any progression mod) and
+     * {@link #stats} (delegated to the api {@code EnhanceStamperRegistry}; a Stats leaf with no
+     * registered stamper no-ops with a runtime-audit warning while Durability still lands).
+     * {@link #reagents} are consumed FROM THE PLAYER'S INVENTORY (never a second custody claim -
+     * the design's "reagents stay in custody until this step" describes them staying UNTOUCHED in
+     * the player's own inventory until this step's commit phase, in contrast to draining them
+     * earlier via a separate {@code Consume} step; the actual placed-input custody this leg's
+     * anvil uses is reserved for the single item BEING enhanced, capped at
+     * {@code Custody.MaxQuantity: 1}).
+     */
+    public static final class Stamp {
+        @Nullable protected Reagent[] reagents;
+        @Nullable protected Durability durability;
+        @Nullable protected Stats stats;
+
+        public static final BuilderCodec<Stamp> CODEC = BuilderCodec.builder(Stamp.class, Stamp::new)
+                .appendInherited(new KeyedCodec<>("Reagents", new ArrayCodec<>(Reagent.CODEC, Reagent[]::new), false),
+                        (o, v) -> o.reagents = v, o -> o.reagents, (o, p) -> o.reagents = p.reagents).add()
+                .appendInherited(new KeyedCodec<>("Durability", Durability.CODEC, false),
+                        (o, v) -> o.durability = v, o -> o.durability, (o, p) -> o.durability = p.durability).add()
+                .appendInherited(new KeyedCodec<>("Stats", Stats.CODEC, false),
+                        (o, v) -> o.stats = v, o -> o.stats, (o, p) -> o.stats = p.stats).add()
+                .build();
+
+        @Nonnull
+        public static Stamp of(@Nullable Reagent[] reagents, @Nullable Durability durability, @Nullable Stats stats) {
+            Stamp s = new Stamp();
+            s.reagents = reagents;
+            s.durability = durability;
+            s.stats = stats;
+            return s;
+        }
+
+        @Nullable
+        public Reagent[] getReagents() {
+            return reagents;
+        }
+
+        @Nullable
+        public Durability getDurability() {
+            return durability;
+        }
+
+        @Nullable
+        public Stats getStats() {
+            return stats;
+        }
+
+        /**
+         * ONE Stamp reagent cost line: {@code Quantity} of {@code ItemId} or {@code ResourceTypeId}
+         * (exactly one route, matching {@link Consume}'s convention), consumed from the player's
+         * inventory (storage-first, then the combined view). {@link Stats.Caps.Economics} scales
+         * the EFFECTIVE quantity per prior stamp count when authored; this leaf's {@link #quantity}
+         * is always the BASE (unscaled) amount.
+         */
+        public static final class Reagent {
+            @Nullable protected String itemId;
+            @Nullable protected String resourceTypeId;
+            @Nullable protected Integer quantity;
+
+            public static final BuilderCodec<Reagent> CODEC = BuilderCodec.builder(Reagent.class, Reagent::new)
+                    .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
+                            (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId).add()
+                    .appendInherited(new KeyedCodec<>("ResourceTypeId", Codec.STRING, false),
+                            (o, v) -> o.resourceTypeId = v, o -> o.resourceTypeId,
+                            (o, p) -> o.resourceTypeId = p.resourceTypeId).add()
+                    .appendInherited(new KeyedCodec<>("Quantity", Codec.INTEGER, false),
+                            (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity).add()
+                    .build();
+
+            @Nonnull
+            public static Reagent of(@Nullable String itemId, @Nullable String resourceTypeId,
+                    @Nullable Integer quantity) {
+                Reagent r = new Reagent();
+                r.itemId = itemId;
+                r.resourceTypeId = resourceTypeId;
+                r.quantity = quantity;
+                return r;
+            }
+
+            @Nullable
+            public String getItemId() {
+                return itemId;
+            }
+
+            @Nullable
+            public String getResourceTypeId() {
+                return resourceTypeId;
+            }
+
+            @Nullable
+            public Integer getQuantity() {
+                return quantity;
+            }
+
+            /** {@link #quantity}, reader-defaulted to 1 when null/non-positive. */
+            public int effectiveQuantity() {
+                return quantity != null && quantity > 0 ? quantity : 1;
+            }
+        }
+
+        /**
+         * RpgStations-NATIVE durability stamp (design 9.5): {@link #addMax} raises the stack's own
+         * {@code MaxDurability} (real, per-stack, independent of any progression mod - the
+         * standalone anvil's own value-add without the MMO). The engine also adds the SAME delta
+         * to the stack's current durability (a genuine upgrade, not a relative nerf against the
+         * new higher max).
+         */
+        public static final class Durability {
+            @Nullable protected Double addMax;
+
+            public static final BuilderCodec<Durability> CODEC =
+                    BuilderCodec.builder(Durability.class, Durability::new)
+                            .appendInherited(new KeyedCodec<>("AddMax", Codec.DOUBLE, false),
+                                    (o, v) -> o.addMax = v, o -> o.addMax, (o, p) -> o.addMax = p.addMax).add()
+                            .build();
+
+            @Nonnull
+            public static Durability of(@Nullable Double addMax) {
+                Durability d = new Durability();
+                d.addMax = addMax;
+                return d;
+            }
+
+            @Nullable
+            public Double getAddMax() {
+                return addMax;
+            }
+        }
+
+        /**
+         * The composable stat-roll + cap model (design 9.5, critique M2's binding fixes): roll
+         * selection is EITHER {@link #pool} (a reusable {@code RollPool} asset id) or inline
+         * {@link #entries} (or both - both resolve, same convention as {@code RollGroup}), picked
+         * through {@link #picks} + {@link #unique}, then clamped by {@link #caps} - resolved end to
+         * end by the PURE, unit-tested {@code station.StampCapEngine} before the Stamp step ever
+         * touches the api {@code EnhanceStamper}.
+         */
+        public static final class Stats {
+            @Nullable protected String pool;
+            @Nullable protected StatRollEntry[] entries;
+            @Nullable protected Picks picks;
+            @Nullable protected Boolean unique;
+            @Nullable protected Caps caps;
+
+            public static final BuilderCodec<Stats> CODEC = BuilderCodec.builder(Stats.class, Stats::new)
+                    .appendInherited(new KeyedCodec<>("Pool", Codec.STRING, false),
+                            (o, v) -> o.pool = v, o -> o.pool, (o, p) -> o.pool = p.pool).add()
+                    .appendInherited(new KeyedCodec<>("Entries", new ArrayCodec<>(StatRollEntry.CODEC, StatRollEntry[]::new), false),
+                            (o, v) -> o.entries = v, o -> o.entries, (o, p) -> o.entries = p.entries).add()
+                    .appendInherited(new KeyedCodec<>("Picks", Picks.CODEC, false),
+                            (o, v) -> o.picks = v, o -> o.picks, (o, p) -> o.picks = p.picks).add()
+                    .appendInherited(new KeyedCodec<>("Unique", Codec.BOOLEAN, false),
+                            (o, v) -> o.unique = v, o -> o.unique, (o, p) -> o.unique = p.unique).add()
+                    .appendInherited(new KeyedCodec<>("Caps", Caps.CODEC, false),
+                            (o, v) -> o.caps = v, o -> o.caps, (o, p) -> o.caps = p.caps).add()
+                    .build();
+
+            @Nonnull
+            public static Stats of(@Nullable String pool, @Nullable StatRollEntry[] entries, @Nullable Picks picks,
+                    @Nullable Boolean unique, @Nullable Caps caps) {
+                Stats s = new Stats();
+                s.pool = pool;
+                s.entries = entries;
+                s.picks = picks;
+                s.unique = unique;
+                s.caps = caps;
+                return s;
+            }
+
+            @Nullable
+            public String getPool() {
+                return pool;
+            }
+
+            @Nullable
+            public StatRollEntry[] getEntries() {
+                return entries;
+            }
+
+            @Nullable
+            public Picks getPicks() {
+                return picks;
+            }
+
+            /** {@link #unique}, reader-defaulted to false (duplicate stat picks allowed) when null. */
+            public boolean isUnique() {
+                return unique != null && unique;
+            }
+
+            @Nullable
+            public Caps getCaps() {
+                return caps;
+            }
+
+            /** How many pool entries a Stamp attempt picks (weighted route only - {@code Always} entries are extra). */
+            public static final class Picks {
+                @Nullable protected Integer min;
+                @Nullable protected Integer max;
+
+                public static final BuilderCodec<Picks> CODEC = BuilderCodec.builder(Picks.class, Picks::new)
+                        .appendInherited(new KeyedCodec<>("Min", Codec.INTEGER, false),
+                                (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min).add()
+                        .appendInherited(new KeyedCodec<>("Max", Codec.INTEGER, false),
+                                (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max).add()
+                        .build();
+
+                @Nonnull
+                public static Picks of(@Nullable Integer min, @Nullable Integer max) {
+                    Picks p = new Picks();
+                    p.min = min;
+                    p.max = max;
+                    return p;
+                }
+
+                @Nullable
+                public Integer getMin() {
+                    return min;
+                }
+
+                @Nullable
+                public Integer getMax() {
+                    return max;
+                }
+
+                /** {@link #min}, reader-defaulted to 1 when null/non-positive. */
+                public int effectiveMin() {
+                    return min != null && min > 0 ? min : 1;
+                }
+
+                /** {@link #max}, reader-defaulted to {@link #effectiveMin()} when null/less than it. */
+                public int effectiveMax() {
+                    int lo = effectiveMin();
+                    return max != null && max >= lo ? max : lo;
+                }
+            }
+
+            /**
+             * Every cap leaf is nullable and independently composable - "alone or in ANY
+             * combination" (maintainer directive 3). <b>M2's binding composition rule (documented
+             * here, the ONE place a sonnet implementer needs to read it):</b> when more than one
+             * TOTAL-BUDGET cap is authored ({@link #perItemBudget} and/or {@link #skillScaledBudget}),
+             * the EFFECTIVE budget is the MIN of every authored one - never the max, never a sum.
+             * {@link #perStat} is a SEPARATE, additional per-stat-id ceiling layered on top of
+             * (not instead of) the total budget. {@link #economics} does not affect the point
+             * budget at all - it scales REAGENT cost per prior stamp count.
+             */
+            public static final class Caps {
+                @Nullable protected Double perItemBudget;
+                @Nullable protected Map<String, Double> perStat;
+                @Nullable protected SkillScaledBudget skillScaledBudget;
+                @Nullable protected Economics economics;
+
+                public static final BuilderCodec<Caps> CODEC = BuilderCodec.builder(Caps.class, Caps::new)
+                        .appendInherited(new KeyedCodec<>("PerItemBudget", Codec.DOUBLE, false),
+                                (o, v) -> o.perItemBudget = v, o -> o.perItemBudget,
+                                (o, p) -> o.perItemBudget = p.perItemBudget).add()
+                        .appendInherited(new KeyedCodec<>("PerStat", new MapCodec<>(Codec.DOUBLE, LinkedHashMap::new), false),
+                                (o, v) -> o.perStat = v, o -> o.perStat, (o, p) -> o.perStat = p.perStat).add()
+                        .appendInherited(new KeyedCodec<>("SkillScaledBudget", SkillScaledBudget.CODEC, false),
+                                (o, v) -> o.skillScaledBudget = v, o -> o.skillScaledBudget,
+                                (o, p) -> o.skillScaledBudget = p.skillScaledBudget).add()
+                        .appendInherited(new KeyedCodec<>("Economics", Economics.CODEC, false),
+                                (o, v) -> o.economics = v, o -> o.economics, (o, p) -> o.economics = p.economics).add()
+                        .build();
+
+                @Nonnull
+                public static Caps of(@Nullable Double perItemBudget, @Nullable Map<String, Double> perStat,
+                        @Nullable SkillScaledBudget skillScaledBudget, @Nullable Economics economics) {
+                    Caps c = new Caps();
+                    c.perItemBudget = perItemBudget;
+                    c.perStat = perStat;
+                    c.skillScaledBudget = skillScaledBudget;
+                    c.economics = economics;
+                    return c;
+                }
+
+                @Nullable
+                public Double getPerItemBudget() {
+                    return perItemBudget;
+                }
+
+                @Nullable
+                public Map<String, Double> getPerStat() {
+                    return perStat;
+                }
+
+                @Nullable
+                public SkillScaledBudget getSkillScaledBudget() {
+                    return skillScaledBudget;
+                }
+
+                @Nullable
+                public Economics getEconomics() {
+                    return economics;
+                }
+            }
+
+            /**
+             * A total-point budget that GROWS with a factor (design 9.5's "budget grows with a
+             * factor, the skill-scaled model" - factor-based so ANY registered {@code FactorProvider}
+             * can back it, not just a skill level): {@code effective = PointsPerLevel * resolve(Factor, Param)}.
+             * The anvil's shipped example reads {@code mmoskilltree:skill_level} with
+             * {@code Param: "SMITHING"} - an EXISTING registered factor (leg 5's
+             * {@code StationFactorProviders}), zero new factor plumbing needed. An unresolvable
+             * factor contributes 0 (fails closed, matching every other factor consumer in this mod).
+             */
+            public static final class SkillScaledBudget {
+                @Nullable protected String factor;
+                @Nullable protected String param;
+                @Nullable protected Double pointsPerLevel;
+
+                public static final BuilderCodec<SkillScaledBudget> CODEC =
+                        BuilderCodec.builder(SkillScaledBudget.class, SkillScaledBudget::new)
+                                .appendInherited(new KeyedCodec<>("Factor", Codec.STRING, false),
+                                        (o, v) -> o.factor = v, o -> o.factor, (o, p) -> o.factor = p.factor).add()
+                                .appendInherited(new KeyedCodec<>("Param", Codec.STRING, false),
+                                        (o, v) -> o.param = v, o -> o.param, (o, p) -> o.param = p.param).add()
+                                .appendInherited(new KeyedCodec<>("PointsPerLevel", Codec.DOUBLE, false),
+                                        (o, v) -> o.pointsPerLevel = v, o -> o.pointsPerLevel,
+                                        (o, p) -> o.pointsPerLevel = p.pointsPerLevel).add()
+                                .build();
+
+                @Nonnull
+                public static SkillScaledBudget of(@Nullable String factor, @Nullable String param,
+                        @Nullable Double pointsPerLevel) {
+                    SkillScaledBudget b = new SkillScaledBudget();
+                    b.factor = factor;
+                    b.param = param;
+                    b.pointsPerLevel = pointsPerLevel;
+                    return b;
+                }
+
+                @Nullable
+                public String getFactor() {
+                    return factor;
+                }
+
+                @Nullable
+                public String getParam() {
+                    return param;
+                }
+
+                @Nullable
+                public Double getPointsPerLevel() {
+                    return pointsPerLevel;
+                }
+            }
+
+            /**
+             * The reagent-cost-scaling model (design 9.5, critique M2 fix (b)): EFFECTIVE reagent
+             * quantity for a Stamp attempt = {@code ceil(baseQuantity * (1 + RepeatCostMultiplier *
+             * stampCount))}, {@code stampCount} read off the registered stamper's own
+             * {@link com.ziggfreed.rpgstations.api.StampInspection#stampCount()} (the M2 (b) leaf -
+             * a per-stack stamp count now exists on the MMO's item metadata seam specifically so
+             * this is computable). Absent {@code Economics} = flat cost every attempt (the
+             * multiplier contributes nothing).
+             */
+            public static final class Economics {
+                @Nullable protected Double repeatCostMultiplier;
+
+                public static final BuilderCodec<Economics> CODEC =
+                        BuilderCodec.builder(Economics.class, Economics::new)
+                                .appendInherited(new KeyedCodec<>("RepeatCostMultiplier", Codec.DOUBLE, false),
+                                        (o, v) -> o.repeatCostMultiplier = v, o -> o.repeatCostMultiplier,
+                                        (o, p) -> o.repeatCostMultiplier = p.repeatCostMultiplier).add()
+                                .build();
+
+                @Nonnull
+                public static Economics of(@Nullable Double repeatCostMultiplier) {
+                    Economics e = new Economics();
+                    e.repeatCostMultiplier = repeatCostMultiplier;
+                    return e;
+                }
+
+                @Nullable
+                public Double getRepeatCostMultiplier() {
+                    return repeatCostMultiplier;
+                }
+            }
         }
     }
 }

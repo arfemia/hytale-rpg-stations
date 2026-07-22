@@ -47,6 +47,15 @@ final class StationSession {
     Ref<EntityStore> ref;
     PlayerRef playerRef;
     String stationId;
+    /**
+     * The action id this session resolved at engage (design section 9.1, phase 2 leg E):
+     * {@link ActionResolver#ACTION_WORK} for a single-action station (unchanged behavior); a
+     * multi-action station's diegetic input-matched selection otherwise. Fixed for the WHOLE
+     * session (re-selected only on the next fresh engage, never mid-session) - every
+     * {@code ActionResolver.resolve(asset, ...)} call this session's own code paths make MUST use
+     * this field, never the bare {@code ACTION_WORK} constant, once a session exists.
+     */
+    String actionId;
     /** Occupancy key: {@code "<worldUuid>:<x>:<y>:<z>"} (enforces {@code Work.Exclusive}). */
     String blockKey;
     int blockX;

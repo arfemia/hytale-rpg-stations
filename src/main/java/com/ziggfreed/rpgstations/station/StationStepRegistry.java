@@ -11,8 +11,8 @@ import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * The production {@code station.step} handler registry: registers the six executable handlers
- * (design 9.3), each wrapped in TWO layers every registrant goes through, never bypassed by a
+ * The production {@code station.step} handler registry: registers the seven executable handlers
+ * (design 9.3/9.5), each wrapped in TWO layers every registrant goes through, never bypassed by a
  * handler body:
  *
  * <ol>
@@ -53,10 +53,12 @@ final class StationStepRegistry extends StepRegistry<String, StationStepContext,
                 guard(new StationStepHandlers.CommandHandler()));
         registry.register(StationStep.TYPE_PRESENT.toLowerCase(Locale.ROOT),
                 guard(new StationStepHandlers.PresentHandler()));
-        // TYPE_STAMP / TYPE_MOUNT deliberately unregistered - reserved, unimplemented this leg
-        // (StationStep's javadoc); an authored program using either fails at the kernel's own
-        // missing-handler path (StationStepSemantics#onMissingHandler), which logs + degrades to
-        // a clean STEP_FAILED stop - the same outcome the guard produces for a handler throw.
+        registry.register(StationStep.TYPE_STAMP.toLowerCase(Locale.ROOT),
+                guard(new StationStepHandlers.StampHandler()));
+        // TYPE_MOUNT deliberately unregistered - reserved, unimplemented this leg (StationStep's
+        // javadoc); an authored program using it fails at the kernel's own missing-handler path
+        // (StationStepSemantics#onMissingHandler), which logs + degrades to a clean STEP_FAILED
+        // stop - the same outcome the guard produces for a handler throw.
         return registry;
     }
 

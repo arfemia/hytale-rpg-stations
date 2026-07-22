@@ -5,6 +5,7 @@ import java.util.Collection;
 
 import javax.annotation.Nonnull;
 
+import com.ziggfreed.rpgstations.api.EnhanceStamperRegistry;
 import com.ziggfreed.rpgstations.api.FactorRegistry;
 import com.ziggfreed.rpgstations.api.FlairUnlockRegistry;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
@@ -47,6 +48,12 @@ public final class RpgStationsApiImpl implements RpgStationsApi {
     @Nonnull
     public SummaryEnricherRegistry summaryEnrichers() {
         return SummaryEnricherRegistryImpl.getInstance();
+    }
+
+    @Override
+    @Nonnull
+    public EnhanceStamperRegistry enhanceStampers() {
+        return EnhanceStamperRegistryImpl.getInstance();
     }
 
     @Override

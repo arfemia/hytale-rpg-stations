@@ -461,9 +461,9 @@ public class StationValidatorTest {
                 null, oakRecipe(),
                 null, null, null, null, null, null,
                 StationAsset.Loot.of(new String[]{"ghost_table"}, null));
-        assertFalse(codes(StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, ANY_FACTOR, id -> true))
+        assertFalse(codes(StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, ANY_FACTOR, id -> true, id -> true))
                 .contains("LOOT_UNKNOWN_TABLE"), "a lootableKnown fixture that always answers true never flags");
-        assertTrue(codes(StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, ANY_FACTOR, id -> false))
+        assertTrue(codes(StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, ANY_FACTOR, id -> false, id -> true))
                 .contains("LOOT_UNKNOWN_TABLE"));
     }
 
@@ -743,10 +743,11 @@ public class StationValidatorTest {
 
     @Test
     void reservedStepType_flaggedUnimplemented() {
-        StationStep stamp = StationStep.of("stamp", StationStep.TYPE_STAMP);
+        // Stamp lands phase 2 leg E (design 9.5); Mount is the one type still schema-reserved.
+        StationStep mount = StationStep.of("pose", StationStep.TYPE_MOUNT);
         Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
         actions.put("anvil", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
-                null, null, null, null, null, null, new StationStep[]{stamp}));
+                null, null, null, null, null, null, new StationStep[]{mount}));
         assertTrue(codes(validate(stationWithActions(actions))).contains("UNIMPLEMENTED_STEP_TYPE"));
     }
 
