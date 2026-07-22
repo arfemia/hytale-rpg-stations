@@ -120,7 +120,7 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   (id = lowercased filename), body `{Rolls: [Roll, ...]}`, referenced by a station's
   `Loot.Tables`. The standalone `SawmillFinds` lootable ships in this jar's resources, alive with
   RpgStations alone (built-in `rpgstations:` factors only).
-- **[`SettingsAsset`](SettingsAsset.java)** - `Server/RpgStations/Settings/Settings.json`, a
+- **[`RpgStationsSettingsAsset`](RpgStationsSettingsAsset.java)** - `Server/RpgStations/Settings/Settings.json`, a
   single id (`settings`), jar default + pack-overridable: `{Enabled, SummaryHud:{Enabled,
   Position, OffsetY, TtlMs}}`. Folded into `station.SettingsCatalog`.
 

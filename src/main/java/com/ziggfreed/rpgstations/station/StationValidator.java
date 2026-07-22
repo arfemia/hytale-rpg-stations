@@ -67,7 +67,7 @@ public final class StationValidator {
     public static List<Finding> validate() {
         try {
             List<Finding> out = new ArrayList<>(validate(StationCatalog.getInstance().all().values(),
-                    RpgStationsLangKeys::isKnown,
+                    StationValidator::langKeyKnownLive,
                     StationValidator::dropListKnownLive,
                     FactorRegistryImpl.getInstance()::isKnown,
                     id -> LootableCatalog.getInstance().get(id) != null,
@@ -83,12 +83,68 @@ public final class StationValidator {
         }
     }
 
+    /**
+     * The STRUCTURAL-only pass (D4 fix - timing, not checks): every per-station/per-action check
+     * EXCEPT the cross-layer reference-existence ones (lang key / native {@code ItemDropList} id /
+     * this mod's own {@code Lootable}/{@code RollPool}/station-id references). Those depend on
+     * OTHER asset stores or the merged i18n lang map that may not have finished folding for a
+     * LATER pack layer yet at the moment THIS layer's Station/Flair fold callback fires (the
+     * boot-log evidence: {@code STAMP_UNKNOWN_POOL} for a RollPool folded one line later,
+     * {@code LOOT_UNKNOWN_DROPLIST}/{@code MISSING_*_LANG} for a pack layer's own Drops/lang that
+     * had not loaded yet relative to that SAME layer's Station fold). Safe to run at EVERY
+     * per-fold event (never a false positive from an incomplete later layer); {@link #validate()}
+     * (still the full set) now only runs from {@code /rpgstations validate} (already post-load)
+     * and the ONE deferred post-load audit ({@code RpgStationsPlugin}'s first-{@code
+     * PlayerReadyEvent} hook, mirroring the MMO's own {@code ContentAudit} startup-audit timing).
+     */
+    @Nonnull
+    public static List<Finding> validateStructural() {
+        try {
+            List<Finding> out = new ArrayList<>(validate(StationCatalog.getInstance().all().values(),
+                    ALWAYS_KNOWN, ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown, ALWAYS_KNOWN, ALWAYS_KNOWN));
+            out.addAll(validateLootables(LootableCatalog.getInstance().all().values(),
+                    ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown));
+            out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), ALWAYS_KNOWN));
+            return out;
+        } catch (Throwable t) {
+            Log.warn("Station validation (structural) aborted: " + t.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /** A cross-layer reference check deferred out of the per-fold structural pass - always passes. */
+    private static final Predicate<String> ALWAYS_KNOWN = id -> true;
+
     /** Live {@code ItemDropList} existence check (asset-map lookup - never throws). */
     private static boolean dropListKnownLive(@Nonnull String dropListId) {
         try {
             return ItemDropList.getAssetMap().getAsset(dropListId) != null;
         } catch (Throwable t) {
             return true; // a lookup failure is not evidence the id is wrong - don't flag it
+        }
+    }
+
+    /**
+     * Lang-key-known check (design 4.8/critique m10), MERGED view (D5 fix): a
+     * {@link RpgStationsLangKeys} hit answers fast for the jar's own shipped keys, but a pack
+     * (e.g. the anvil's {@code station.anvil.name}/{@code .desc}) can additively author its OWN
+     * {@code rpgstations.lang} overlay this hand-maintained jar-only set never knows about - so a
+     * miss falls through to a LIVE query against the engine's actual merged i18n store
+     * ({@code I18nModule.getMessage}, the same lookup a client's own message resolution uses),
+     * which sees every loaded layer (jar defaults AND every pack overlay), not just the jar's.
+     * Fails OPEN on a lookup error (module not up yet, etc.) - matching
+     * {@link #dropListKnownLive}'s own "a lookup failure is not evidence the key is wrong" stance.
+     */
+    private static boolean langKeyKnownLive(@Nonnull String fullKey) {
+        if (RpgStationsLangKeys.isKnown(fullKey)) {
+            return true;
+        }
+        try {
+            var i18n = com.hypixel.hytale.server.core.modules.i18n.I18nModule.get();
+            return i18n != null && i18n.getMessage(
+                    com.hypixel.hytale.server.core.modules.i18n.I18nModule.DEFAULT_LANGUAGE, fullKey) != null;
+        } catch (Throwable t) {
+            return true; // a lookup failure is not evidence the key is missing - don't flag it
         }
     }
 
@@ -468,7 +524,10 @@ public final class StationValidator {
         StationAsset.Conversion[] conversions = recipe != null ? recipe.getConversions() : null;
         StationAsset.FromCrafting fromCrafting = recipe != null ? recipe.getFromCrafting() : null;
         boolean hasConversions = conversions != null && conversions.length > 0;
-        if (!hasConversions && fromCrafting == null) {
+        if (!hasConversions && fromCrafting == null && !anyActionProvidesRunSource(a.getActions())) {
+            // Multi-action stations (design 9.1) author per-action Recipe/Steps instead of a
+            // station-level one - this is only a real dead-station bug when NEITHER the station
+            // level NOR any authored action can ever run a cycle.
             out.add(Finding.error(DOMAIN, "EMPTY_CONVERSIONS",
                     label + " has neither Recipe.Conversions nor Recipe.FromCrafting - the work loop can never run a cycle", id));
             return;
@@ -479,6 +538,36 @@ public final class StationValidator {
         if (hasConversions) {
             checkConversions(conversions, id, label, out);
         }
+    }
+
+    /**
+     * True when at least one authored {@code Actions} entry supplies its OWN runnable recipe/
+     * program source - either a per-action {@code Recipe} (Conversions or FromCrafting) or a
+     * {@code Steps} program (the anvil's {@code enhance} action runs entirely off a Stamp-step
+     * ritual, no Recipe at all). Mirrors {@link #checkActions}'s {@code ACTION_NO_BODY} per-action
+     * check, but answers the station-wide question {@link #checkRecipe} needs: "can THIS station
+     * ever run a cycle through ANY route".
+     */
+    private static boolean anyActionProvidesRunSource(@Nullable Map<String, ActionDef> actions) {
+        if (actions == null || actions.isEmpty()) {
+            return false;
+        }
+        for (ActionDef def : actions.values()) {
+            if (def == null) {
+                continue;
+            }
+            if (def.getSteps() != null && def.getSteps().length > 0) {
+                return true;
+            }
+            StationAsset.Recipe actionRecipe = def.getRecipe();
+            if (actionRecipe != null) {
+                StationAsset.Conversion[] actionConversions = actionRecipe.getConversions();
+                if ((actionConversions != null && actionConversions.length > 0) || actionRecipe.getFromCrafting() != null) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static void checkFromCrafting(@Nonnull StationAsset.FromCrafting fc, @Nonnull String id,
@@ -1118,8 +1207,23 @@ public final class StationValidator {
         return Report.problemCount(findings);
     }
 
-    /** Validate the live catalog and log a summary (+ per-finding detail). Never throws. */
+    /**
+     * Validate the live catalog (full set, incl. cross-layer reference checks) and log a summary
+     * (+ per-finding detail). Never throws. Callers: {@code /rpgstations validate} (on-demand,
+     * already post-load) and {@code RpgStationsPlugin}'s ONE deferred post-load audit (first
+     * {@code PlayerReadyEvent}, D4 fix). Per-fold auto-logging uses {@link #runStructuralAndLog}
+     * instead - see {@link #validateStructural}'s javadoc for why.
+     */
     public static void runAndLog() {
         Report.logTo(DOMAIN, "Station validation", validate());
+    }
+
+    /**
+     * Validate the live catalog (STRUCTURAL-only, D4 fix) and log a summary (+ per-finding
+     * detail). Never throws. Safe to call from every per-fold {@code LoadedAssetsEvent} handler -
+     * see {@link #validateStructural}'s javadoc.
+     */
+    public static void runStructuralAndLog() {
+        Report.logTo(DOMAIN, "Station validation", validateStructural());
     }
 }

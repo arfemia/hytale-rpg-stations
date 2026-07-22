@@ -21,7 +21,7 @@ Router for `ui/`.
   `SummaryEnricherRegistry.rows(...)` results are PREPENDED before this panel's own item rows.
 - **Auto-hide**: a scheduled-clear-with-generation-token TTL, copying (not reusing) the MMO's
   `ToastController` TTL pattern - `KeyedCustomHud`'s own contract, not reimplemented here.
-- **`SettingsAsset.SummaryHud`** (`Enabled`/`Position`/`OffsetY`/`TtlMs`, via
+- **`RpgStationsSettingsAsset.SummaryHud`** (`Enabled`/`Position`/`OffsetY`/`TtlMs`, via
   `station.SettingsCatalog`) governs whether/where this panel shows; a disabled setting is this
   mod's OWN fallback path (unlike the MMO's classic-toast fallback, which is MMO-policy and lives
   in the bridge, not here).

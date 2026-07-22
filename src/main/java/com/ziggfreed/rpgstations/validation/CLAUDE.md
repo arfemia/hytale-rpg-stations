@@ -13,6 +13,13 @@ just logs its own findings at fold time).
 
 The one real validator, `station.StationValidator`, lives in `../station/` (not here) because it
 is entangled with `StationCatalog`/`StationAsset` internals; this package holds only the shared
-result shapes it (and any future validator) returns. `RpgStationsPlugin.onStationAssetsLoaded`
-calls `StationValidator.runAndLog()` at every fold, logging the same findings
-[`/rpgstations validate`](../command/CLAUDE.md) (leg P0) chats on demand (see `../station/CLAUDE.md`).
+result shapes it (and any future validator) returns. **Two passes (fix-wave D4, timing not
+checks)**: `RpgStationsPlugin.onStationAssetsLoaded`/`onFlairAssetsLoaded` call
+`StationValidator.runStructuralAndLog()` at EVERY fold (every check except a cross-layer
+reference-existence one - a later pack layer folding its own drop lists/roll pools/lang overlay
+AFTER this layer's Station/Flair fold otherwise false-positives); the FULL
+`StationValidator.runAndLog()` (every check, incl. reference existence) runs ONCE, post-load, from
+`RpgStationsPlugin`'s first-`PlayerReadyEvent` hook (mirrors the MMO's own `ContentAudit`
+first-PlayerReady startup-audit timing) - and on demand from
+[`/rpgstations validate`](../command/CLAUDE.md) (leg P0), which was already post-load. See
+`../station/CLAUDE.md`.

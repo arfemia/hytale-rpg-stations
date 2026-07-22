@@ -78,7 +78,7 @@ src/main/java/com/ziggfreed/rpgstations/
                              the rpg_station_use interaction, the frame-drain + damage-interrupt
                              systems, the death/disconnect teardown hooks; shutdown() -> stopAll
   api/impl/                  see api/impl/CLAUDE.md - the concrete registry/event-dispatch impl
-  asset/                     see asset/CLAUDE.md - StationAsset/LootableAsset/SettingsAsset/Presentation/Requires/Roll/Condition codecs
+  asset/                     see asset/CLAUDE.md - StationAsset/LootableAsset/RpgStationsSettingsAsset/Presentation/Requires/Roll/Condition codecs
   station/                   see station/CLAUDE.md - the session engine (THE big package; the hard-won engine rules live here)
   loot/                      see loot/CLAUDE.md - LootEngine/RollEvaluator/FactorSnapshot/CommandRewardExecutor/LootableCatalog
   command/                    see command/CLAUDE.md - RpgStationsCommand (/rpgstations camera|validate, admin-gated)

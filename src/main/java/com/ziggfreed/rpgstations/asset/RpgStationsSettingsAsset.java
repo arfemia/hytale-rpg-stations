@@ -28,8 +28,8 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
  * }
  * }</pre>
  */
-public final class SettingsAsset
-        implements JsonAssetWithMap<String, DefaultAssetMap<String, SettingsAsset>> {
+public final class RpgStationsSettingsAsset
+        implements JsonAssetWithMap<String, DefaultAssetMap<String, RpgStationsSettingsAsset>> {
 
     /** The one fixed id every {@code Settings.json} decodes to, regardless of authored filename casing. */
     public static final String ID = "settings";
@@ -40,9 +40,9 @@ public final class SettingsAsset
     @Nullable private Boolean enabled;
     @Nullable private SummaryHud summaryHud;
 
-    public static final AssetBuilderCodec<String, SettingsAsset> CODEC = AssetBuilderCodec.builder(
-                    SettingsAsset.class,
-                    SettingsAsset::new,
+    public static final AssetBuilderCodec<String, RpgStationsSettingsAsset> CODEC = AssetBuilderCodec.builder(
+                    RpgStationsSettingsAsset.class,
+                    RpgStationsSettingsAsset::new,
                     Codec.STRING,
                     (a, id) -> a.id = id == null ? ID : id.toLowerCase(Locale.ROOT),
                     a -> a.id,
@@ -60,13 +60,13 @@ public final class SettingsAsset
             .add()
             .build();
 
-    public SettingsAsset() {
+    public RpgStationsSettingsAsset() {
     }
 
     /** Java-side construction path; sets the same fields the codec fills. */
     @Nonnull
-    public static SettingsAsset of(@Nullable Boolean enabled, @Nullable SummaryHud summaryHud) {
-        SettingsAsset a = new SettingsAsset();
+    public static RpgStationsSettingsAsset of(@Nullable Boolean enabled, @Nullable SummaryHud summaryHud) {
+        RpgStationsSettingsAsset a = new RpgStationsSettingsAsset();
         a.id = ID;
         a.enabled = enabled;
         a.summaryHud = summaryHud;
@@ -75,7 +75,7 @@ public final class SettingsAsset
 
     /** The built-in, zero-authoring default (every leaf reader-defaulted, used before any asset loads). */
     @Nonnull
-    public static SettingsAsset defaults() {
+    public static RpgStationsSettingsAsset defaults() {
         return of(true, SummaryHud.of(true, null, null, null));
     }
 

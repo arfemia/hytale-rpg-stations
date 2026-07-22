@@ -274,13 +274,24 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   id warns `FLAIR_ASSET_UNKNOWN_STATION`. See `../loot/CLAUDE.md` for the conditional-lootable
   roll layer this package calls into per cycle.
 - **Engine settings**: [`SettingsCatalog`](SettingsCatalog.java) holds the folded
-  `asset.SettingsAsset` singleton (`Enabled`, `SummaryHud.{Enabled,Position,OffsetY,TtlMs}`) -
+  `asset.RpgStationsSettingsAsset` singleton (`Enabled`, `SummaryHud.{Enabled,Position,OffsetY,TtlMs}`) -
   `Enabled` backs the heartbeat's engine-wide feature-toggle terminate check.
-- **Validation**: [`StationValidator`](StationValidator.java) (750 lines) runs at every asset-load
-  fold (`RpgStationsPlugin.onStationAssetsLoaded` calls `StationValidator.runAndLog()`); the pure
-  `validate(...)` core is unit-tested. [`/rpgstations validate`](../command/CLAUDE.md) (leg P0) runs
-  the same live validator and chats the aggregate (summary + every finding), matching what the
-  boot-log audit prints.
+- **Validation**: [`StationValidator`](StationValidator.java) runs TWO passes (fix-wave D4, timing
+  not checks - the boot-log evidence was a false `STAMP_UNKNOWN_POOL`/`LOOT_UNKNOWN_DROPLIST`/
+  `MISSING_*_LANG` from a later pack layer's RollPool/Drops/lang overlay not having folded yet at
+  an EARLIER layer's Station-fold callback). `validateStructural()`/`runStructuralAndLog()` runs at
+  EVERY asset-load fold (`RpgStationsPlugin.onStationAssetsLoaded`/`onFlairAssetsLoaded`) - every
+  check except the cross-layer reference-existence ones (native `ItemDropList` id, this mod's own
+  `Lootable`/`RollPool`/station-id references, lang key). `validate()`/`runAndLog()` (the FULL set)
+  runs ONCE, post-load, from `RpgStationsPlugin`'s first-`PlayerReadyEvent` hook (mirrors the MMO's
+  own `ContentAudit` first-PlayerReady startup-audit timing - by then every asset pack has finished
+  merging) and on demand from [`/rpgstations validate`](../command/CLAUDE.md) (leg P0, already
+  post-load) - both chat/log the same aggregate (summary + every finding). The lang-key check
+  itself (`langKeyKnownLive`) is a MERGED-view check (D5 fix): a miss against the jar's own
+  hand-maintained `i18n.RpgStationsLangKeys` set falls through to a LIVE `I18nModule.getMessage`
+  query, so a pack's own additive `rpgstations.lang` overlay (e.g. the anvil's
+  `station.anvil.name`/`.desc`) resolves correctly instead of false-warning
+  `MISSING_NAME_LANG`/`MISSING_DESC_LANG`. The pure `validate(...)` core is unit-tested.
 - **Multi-action stations + the step engine** (design section 9.1/9.3, phase 2 leg B, LANDED):
   [`ActionResolver`](ActionResolver.java) is the PURE whole-group-override choke point
   (`resolve(asset, actionId)` - an action's own group REPLACES the station-level default

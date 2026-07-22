@@ -3,6 +3,7 @@ package com.ziggfreed.rpgstations;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.annotation.Nonnull;
 
@@ -10,6 +11,7 @@ import com.hypixel.hytale.assetstore.event.LoadedAssetsEvent;
 import com.hypixel.hytale.assetstore.map.DefaultAssetMap;
 import com.hypixel.hytale.logger.HytaleLogger;
 import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
+import com.hypixel.hytale.server.core.event.events.player.PlayerReadyEvent;
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.Interaction;
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
@@ -20,7 +22,7 @@ import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.RollPool;
-import com.ziggfreed.rpgstations.asset.SettingsAsset;
+import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.command.RpgStationsCommand;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
@@ -47,7 +49,7 @@ import com.ziggfreed.rpgstations.util.Log;
  * <p><b>Leg 4 (api artifact + wiring) stage:</b> registers the station engine (asset store,
  * catalog fold, the {@code rpg_station_use} interaction, the frame-drain system, the
  * damage-interrupt system) and the conditional-lootable layer ({@link LootableAsset} store), the
- * engine {@link SettingsAsset} store - AND installs the real extension surface: {@link
+ * engine {@link RpgStationsSettingsAsset} store - AND installs the real extension surface: {@link
  * RpgStationsApi#set} injects {@link RpgStationsApiImpl} before anything else runs, then {@link
  * FactorRegistryImpl#registerBuiltins} registers the four {@code rpgstations:} built-ins through
  * that SAME api-backed registry (design section 3.2, dogfooded). The engine now fires its four
@@ -66,6 +68,13 @@ public class RpgStationsPlugin extends JavaPlugin {
     public static final HytaleLogger LOGGER = HytaleLogger.forEnclosingClass();
 
     private static RpgStationsPlugin instance;
+
+    /**
+     * One-shot gate for {@link #registerPostLoadAudit}'s deferred FULL {@link StationValidator}
+     * pass (D4 fix) - mirrors the MMO's own {@code ContentAudit.runAndLogAll()} first-{@code
+     * PlayerReadyEvent} gate ({@code MMOSkillTreePlugin}'s {@code contentAuditLogged}).
+     */
+    private static final AtomicBoolean postLoadAuditLogged = new AtomicBoolean(false);
 
     @Nonnull
     public static RpgStationsPlugin getInstance() {
@@ -90,9 +99,37 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerStationInteraction();
         registerStationSystems();
         registerTeardownHooks();
+        registerPostLoadAudit();
         getCommandRegistry().registerCommand(new RpgStationsCommand());
         Log.info("RpgStations setup complete (leg 4 - the api artifact is live: events fire, "
                 + "the factor/flair-unlock/summary-enricher registries are wired into the engine).");
+    }
+
+    /**
+     * The ONE deferred full {@link StationValidator} audit (D4 fix - "fix the timing, not the
+     * checks"): every per-fold {@code LoadedAssetsEvent} handler below now logs only the
+     * STRUCTURAL pass ({@link StationValidator#runStructuralAndLog}), because a cross-layer
+     * reference check (native {@code ItemDropList} id, this mod's own {@code Lootable}/{@code
+     * RollPool} id, or a lang key resolved through a pack's OWN {@code rpgstations.lang} overlay)
+     * can false-positive when it runs before a LATER pack layer has folded the asset it points at
+     * (the boot-log evidence: {@code STAMP_UNKNOWN_POOL} for a RollPool that folded one line
+     * later, {@code LOOT_UNKNOWN_DROPLIST}/{@code MISSING_*_LANG} for a pack layer's own
+     * Drops/lang that had not settled yet relative to that SAME layer's Station fold). By the
+     * first {@link PlayerReadyEvent} every asset pack (RpgStations' own AND every installed
+     * content pack) has finished merging, so the FULL {@link StationValidator#runAndLog} pass is
+     * race-free here - the EXACT same timing guarantee {@code MMOSkillTreePlugin}'s {@code
+     * ContentAudit.runAndLogAll()} relies on for its own first-PlayerReady startup audit.
+     */
+    private void registerPostLoadAudit() {
+        getEventRegistry().registerGlobal(PlayerReadyEvent.class, event -> {
+            if (postLoadAuditLogged.compareAndSet(false, true)) {
+                try {
+                    StationValidator.runAndLog();
+                } catch (Throwable t) {
+                    Log.warn("Deferred post-load station validation failed: " + t.getMessage());
+                }
+            }
+        });
     }
 
     /**
@@ -146,7 +183,9 @@ public class RpgStationsPlugin extends JavaPlugin {
         StationCatalog.getInstance().fold(layer, false);
         Log.info("Station asset layer: folded " + layer.size()
                 + " station asset(s) into StationCatalog: " + layer.keySet());
-        StationValidator.runAndLog();
+        // Structural-only at fold time (D4 fix) - the FULL pass (incl. cross-layer reference
+        // checks) runs once, post-load, from registerPostLoadAudit().
+        StationValidator.runStructuralAndLog();
     }
 
     /**
@@ -209,9 +248,10 @@ public class RpgStationsPlugin extends JavaPlugin {
     /**
      * Registers the {@link FlairAsset} Pattern-A store at {@code Server/RpgStations/Flairs}
      * (design section 9.6, phase 2 leg F - the open flair/moment vocabulary's asset-driven half)
-     * and folds every loaded entry into {@link FlairCatalog}; {@link StationValidator#runAndLog}
-     * re-runs on THIS fold too (unlike Lootable/RollPool) since a {@code FlairAsset} carries its
-     * own {@code Stations}-references-a-known-id check.
+     * and folds every loaded entry into {@link FlairCatalog}; {@link StationValidator#runStructuralAndLog}
+     * re-runs on THIS fold too (unlike Lootable/RollPool) for the same structural per-station/
+     * per-flair coverage - its own {@code Stations}-references-a-known-id check is a cross-layer
+     * reference check now deferred to the post-load audit (D4 fix), like every other one.
      */
     private void registerFlairAssetStore() {
         AssetStoreRegistrar.registerStore(
@@ -235,30 +275,32 @@ public class RpgStationsPlugin extends JavaPlugin {
         FlairCatalog.getInstance().fold(layer, false);
         Log.info("FlairAsset layer: folded " + layer.size() + " flair asset(s) into FlairCatalog: "
                 + layer.keySet());
-        StationValidator.runAndLog();
+        // Structural-only at fold time (D4 fix) - the FULL pass (incl. cross-layer reference
+        // checks) runs once, post-load, from registerPostLoadAudit().
+        StationValidator.runStructuralAndLog();
     }
 
     /**
-     * Registers the {@link SettingsAsset} Pattern-A store at {@code Server/RpgStations/Settings}
+     * Registers the {@link RpgStationsSettingsAsset} Pattern-A store at {@code Server/RpgStations/Settings}
      * and folds the resolved instance into {@link SettingsCatalog} (design section 4.6).
      */
     private void registerSettingsAssetStore() {
         AssetStoreRegistrar.registerStore(
-                SettingsAsset.class,
-                new DefaultAssetMap<String, SettingsAsset>(),
+                RpgStationsSettingsAsset.class,
+                new DefaultAssetMap<String, RpgStationsSettingsAsset>(),
                 "RpgStations/Settings",
-                SettingsAsset::getId,
-                SettingsAsset.CODEC,
+                RpgStationsSettingsAsset::getId,
+                RpgStationsSettingsAsset.CODEC,
                 null);
-        getEventRegistry().register(LoadedAssetsEvent.class, SettingsAsset.class,
+        getEventRegistry().register(LoadedAssetsEvent.class, RpgStationsSettingsAsset.class,
                 RpgStationsPlugin::onSettingsAssetsLoaded);
     }
 
     private static void onSettingsAssetsLoaded(
-            LoadedAssetsEvent<String, SettingsAsset, DefaultAssetMap<String, SettingsAsset>> event) {
-        DefaultAssetMap<String, SettingsAsset> assetMap = event.getAssetMap();
-        Map<String, SettingsAsset> layer = new LinkedHashMap<>();
-        for (Map.Entry<String, SettingsAsset> entry : assetMap.getAssetMap().entrySet()) {
+            LoadedAssetsEvent<String, RpgStationsSettingsAsset, DefaultAssetMap<String, RpgStationsSettingsAsset>> event) {
+        DefaultAssetMap<String, RpgStationsSettingsAsset> assetMap = event.getAssetMap();
+        Map<String, RpgStationsSettingsAsset> layer = new LinkedHashMap<>();
+        for (Map.Entry<String, RpgStationsSettingsAsset> entry : assetMap.getAssetMap().entrySet()) {
             layer.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
         }
         SettingsCatalog.getInstance().fold(layer, false);

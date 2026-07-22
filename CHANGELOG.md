@@ -15,7 +15,7 @@ package reference and the origin story.
 
 ### Phase 1: extraction + the engine
 
-- Adds the station engine itself: `StationAsset`/`LootableAsset`/`SettingsAsset` Pattern A codecs
+- Adds the station engine itself: `StationAsset`/`LootableAsset`/`RpgStationsSettingsAsset` Pattern A codecs
   (native `Parent` inheritance, every leaf `appendInherited`), a per-player session state machine
   (`StationService`/`StationSession`), packet-camera third-person pull with a curated recipe
   vocabulary (`Camera.Recipe`, an admin-iterable preset switch for the free-camera-vs-locked-body
@@ -84,6 +84,35 @@ package reference and the origin story.
 See `station/CLAUDE.md`, `asset/CLAUDE.md`, `api/CLAUDE.md`, and `api/impl/CLAUDE.md` for the full
 file-by-file detail behind every bullet above, including the handful of documented deviations from
 the original design doc's literal prose (each grounded in the real shared source, never invented).
+
+### Fix wave: first-boot defects (post phase 2)
+
+The maintainer's first real boot log after phase 2 landed surfaced a handful of first-boot
+defects, all fixed with no design change:
+
+- Fixes a native `AssetStoreTypeHandler` id collision: `SettingsAsset` (this mod's own engine-
+  settings singleton) collided with another loaded plugin's asset class of the same simple name
+  (the id key is the CLASS SIMPLE NAME, not the fully-qualified name). Renamed to
+  `RpgStationsSettingsAsset` throughout (class, codec, tests, docs).
+- Fixes a false `EMPTY_CONVERSIONS` validator ERROR on a multi-action station whose station-level
+  `Recipe` is absent but every action supplies its OWN recipe/program source (the anvil's
+  `enhance` action runs entirely off a `Stamp`-step ritual, no `Recipe` at all) - the check is now
+  action-aware, erroring only when NEITHER the station level NOR any authored action can ever run
+  a cycle.
+- Fixes validation-ordering false positives (`STAMP_UNKNOWN_POOL`/`LOOT_UNKNOWN_DROPLIST`/
+  `MISSING_*_LANG`): the per-fold validator ran before a LATER asset layer (RollPool/Drops/lang)
+  had folded the very reference it was checking. `StationValidator` now runs two passes: a
+  structural-only pass at every fold (`validateStructural`/`runStructuralAndLog`, safe regardless
+  of load order), and the FULL pass (incl. every cross-layer reference-existence check) ONCE,
+  post-load, from a new first-`PlayerReadyEvent` hook (`RpgStationsPlugin.registerPostLoadAudit`,
+  mirroring the MMO's own `ContentAudit` startup-audit timing) - `/rpgstations validate` (already
+  post-load) is unaffected. The lang-key check itself is now a MERGED view: a miss against the
+  jar's own hand-maintained key set falls through to a live `I18nModule.getMessage` query, so a
+  pack's own additive `rpgstations.lang` overlay resolves correctly.
+
+See `station/CLAUDE.md`'s Validation bullet for the full detail; the sibling pack fixes (the
+anvil's redundant `Camera.FaceBlock`, the missing `MMO_Sharpened_Bar` `ResourceType` asset) and
+the MMO-side bridge presence-check hardening live in their own repos' history.
 
 Status: build-green throughout (Java + tests); the phase-1 parity gate and the phase-2 smoke round
 (design doc section 11; the mod-root `CLAUDE.md`'s Phase 2 section) are both maintainer in-game

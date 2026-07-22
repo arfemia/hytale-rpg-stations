@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
  * (which throws at {@code AssetBuilderCodec}/{@code BuilderCodec} class-init) is caught by the
  * build, not the running server. Ported from the MMO's {@code AssetCodecInitTest} convention
  * (RPG Stations extraction leg 2, extended leg 3 with the three asset-store types this jar now
- * registers - {@link StationAsset}, {@link LootableAsset}, {@link SettingsAsset} - plus the
+ * registers - {@link StationAsset}, {@link LootableAsset}, {@link RpgStationsSettingsAsset} - plus the
  * {@link Roll} value type shared by the loot layer's two asset-store consumers).
  */
 public class AssetCodecInitTest {
@@ -48,8 +48,8 @@ public class AssetCodecInitTest {
 
     @Test
     void settingsAssetCodec_initializesWithoutThrowing() {
-        assertDoesNotThrow(() -> assertNotNull(SettingsAsset.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(SettingsAsset.SummaryHud.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(RpgStationsSettingsAsset.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(RpgStationsSettingsAsset.SummaryHud.CODEC));
     }
 
     /**

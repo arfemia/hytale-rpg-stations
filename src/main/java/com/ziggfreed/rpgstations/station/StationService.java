@@ -2155,7 +2155,7 @@ public final class StationService {
         };
     }
 
-    /** Engine feature toggle, backed by {@code SettingsAsset.Enabled} (design section 4.6). */
+    /** Engine feature toggle, backed by {@code RpgStationsSettingsAsset.Enabled} (design section 4.6). */
     private static boolean stationsEnabled() {
         return SettingsCatalog.getInstance().current().isEnabled();
     }

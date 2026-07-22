@@ -23,7 +23,7 @@ import com.ziggfreed.common.ui.hud.HudPosition;
 import com.ziggfreed.common.ui.hud.KeyedCustomHud;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.common.ui.rows.SummaryRowRenderer;
-import com.ziggfreed.rpgstations.asset.SettingsAsset;
+import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -140,11 +140,11 @@ public final class StationSummaryHud extends KeyedCustomHud {
         return UPDATE_INTERVAL_MS;
     }
 
-    /** Reads {@code SettingsAsset.SummaryHud.Position}/{@code OffsetY}; falls back to {@link #defaultPosition()}. */
+    /** Reads {@code RpgStationsSettingsAsset.SummaryHud.Position}/{@code OffsetY}; falls back to {@link #defaultPosition()}. */
     @Nonnull
     @Override
     protected HudPosition configuredPosition() {
-        SettingsAsset.SummaryHud hud = SettingsCatalog.getInstance().current().getSummaryHud();
+        RpgStationsSettingsAsset.SummaryHud hud = SettingsCatalog.getInstance().current().getSummaryHud();
         if (hud == null || hud.getPosition() == null) {
             return defaultPosition();
         }
@@ -259,7 +259,7 @@ public final class StationSummaryHud extends KeyedCustomHud {
     public static boolean tryShow(@Nonnull PlayerRef playerRef, @Nonnull Message title, @Nonnull Message body,
             @Nullable String stationIconItemId, @Nonnull List<SummaryRow> extraRows,
             @Nonnull List<LedgerRow> ledgerRows, @Nullable Consumer<UICommandBuilder> decorateHook) {
-        SettingsAsset.SummaryHud settings = SettingsCatalog.getInstance().current().getSummaryHud();
+        RpgStationsSettingsAsset.SummaryHud settings = SettingsCatalog.getInstance().current().getSummaryHud();
         if (settings != null && !settings.isEnabled()) {
             return false;
         }
