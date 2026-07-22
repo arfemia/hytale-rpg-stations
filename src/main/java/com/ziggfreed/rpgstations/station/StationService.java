@@ -39,12 +39,19 @@ import com.ziggfreed.common.camera.CameraShakeService;
 import com.ziggfreed.common.cast.ModelParticleService;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.cast.WorldKeyedQueues;
+import com.ziggfreed.common.i18n.Msg;
 import com.ziggfreed.common.sound.Sound3D;
+import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
+import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
+import com.ziggfreed.rpgstations.loot.FactorContext;
+import com.ziggfreed.rpgstations.loot.FactorSnapshot;
+import com.ziggfreed.rpgstations.loot.LootEngine;
+import com.ziggfreed.rpgstations.ui.StationSummaryHud;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -56,16 +63,17 @@ import com.ziggfreed.rpgstations.util.Log;
  * one idempotent exit funnel ({@link #stop}). Every start-denial is a localized toast, never
  * an interaction {@code Failed}.
  *
- * <p><b>CRITICAL SCOPE NOTE (leg 2, per the extraction brief's critical-scope-rule):</b> this
- * port keeps the ENGINE mechanics fully functional (session machine, toggle/stop funnel,
- * heartbeat, the Convert cycle transaction, swing/impact scheduling, idle mode, the
- * {@link #emitMoment} presentation choke point, durability drain, seat mount calls) but
- * SEVERS every MMO-specific progression call the original made ({@code SkillService}-driven
- * XP awards, {@code SkillTreeService}/{@code MasteryService}-driven luck aggregation,
- * {@code ProgressEvents.fire}, {@code FeedbackService.emit}, the MMO's session-summary HUD) -
- * those become event firing (leg 4's api artifact) and the loot engine (leg 3), left here as
- * clearly-marked no-op seams: {@link #onCycleCompleted}, {@link #rollLootAndBonuses},
- * {@link #showSessionSummary}. The MMO is NOT touched by this leg; its own copy of this class
+ * <p><b>SCOPE NOTE (leg 2 engine move, leg 3 loot + summary):</b> the port keeps the ENGINE
+ * mechanics fully functional (session machine, toggle/stop funnel, heartbeat, the Convert cycle
+ * transaction, swing/impact scheduling, idle mode, the {@link #emitMoment} presentation choke
+ * point, durability drain, seat mount calls) and SEVERS every MMO-specific progression call the
+ * original made ({@code SkillService}-driven XP awards, {@code SkillTreeService}/{@code
+ * MasteryService}-driven luck aggregation, {@code ProgressEvents.fire}, {@code
+ * FeedbackService.emit}, the MMO's session-summary HUD) - those become event firing (leg 4's api
+ * artifact, still a no-op seam here: {@link #onCycleCompleted}) and the conditional-lootable
+ * engine + the standalone-rich summary panel, LANDED this leg ({@link #rollLootAndBonuses},
+ * {@link #rollCompletionLoot}, {@link #showSessionSummary} over {@code loot.LootEngine} /
+ * {@code ui.StationSummaryHud}). The MMO is NOT touched by this leg; its own copy of this class
  * (registered interaction id {@code mmo_station_use}) coexists unchanged until leg 5.
  */
 public final class StationService {
@@ -77,6 +85,9 @@ public final class StationService {
     private static final long DEFAULT_MAX_DURATION_MS = 600_000L;
     private static final double DEFAULT_MAX_MOVE_METERS = 1.5;
     private static final String DEFAULT_HOLD_EFFECT = "RPG_Station_Hold";
+
+    /** The one action id phase 1 ever forwards (design section 3.1); phase 2 adds multi-action ids. */
+    private static final String ACTION_WORK = "work";
 
     /**
      * Every station moment fired through {@link #emitMoment} is a ONE-SHOT beat, so its
@@ -610,28 +621,172 @@ public final class StationService {
     }
 
     /**
-     * TODO(leg 3): the conditional-lootable loot engine (design section 4.5) replaces this
-     * seam - Roll evaluation over {@code Loot.Tables}/{@code Loot.Rolls}, keyed off a per-cycle
-     * {@code FactorSnapshot}. The MMO-specific per-skill luck aggregation the original engine
-     * inlined here ({@code StationLuck} + {@code SkillTreeService} + {@code MasteryService})
-     * becomes the MMO bridge's OWN {@code mmoskilltree:station_luck} factor provider, consumed
-     * generically by the loot engine - no MMO call belongs in this file again.
-     * {@code StationAsset.Luck} is still decoded (unchanged schema this leg) but unread until
-     * leg 3 lands the {@code Loot} group that supersedes it.
+     * The conditional-lootable loot engine (design section 4.5): resolves the station's
+     * effective {@code Cycle}-trigger rolls ({@code Loot.Tables} + inline {@code Loot.Rolls},
+     * {@link LootEngine#resolveRolls}), evaluates + applies them against ONE {@link
+     * FactorSnapshot} for this cycle ({@link #buildFactorContext}), and folds the result into
+     * the session's item ledger + notifications ({@link #applyGrantResult}). The MMO-specific
+     * per-skill luck aggregation the original MMO engine inlined here becomes the MMO bridge's
+     * OWN {@code mmoskilltree:station_luck} factor provider (leg 5), consumed generically by
+     * this engine through the SAME factor lookup {@link Requires} already uses - no MMO call
+     * belongs in this file, ever.
      */
     private void rollLootAndBonuses(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull StationAsset asset, @Nonnull Player player, @Nonnull ConversionCheck check) {
-        // intentionally empty - see the javadoc above
+        List<Roll> rolls = LootEngine.resolveRolls(asset.getLoot());
+        if (rolls.isEmpty()) {
+            return;
+        }
+        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, player, asset));
+        ItemStack cycleOutput = check.outputItem != null
+                ? new ItemStack(check.outputItem, check.outputCount) : null;
+        LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, snapshot, player,
+                cycleOutput, s.playerRef, s.stationId, ACTION_WORK, s.cyclesDone);
+        applyGrantResult(s, store, result);
     }
 
     /**
-     * TODO(leg 3): {@code ui.StationSummaryHud} (design section 10, leg 3) replaces this seam
-     * with the standalone-rich item-ledger summary panel; the MMO's per-skill XP rows become
-     * its OWN {@code StationSummaryEnricher} (leg 5), reached through the api
-     * {@code SummaryEnricherRegistry}. No-op for now - the stop-reason toast still fires.
+     * The Completion-trigger loot pass (design section 4.5.1's {@code "Completion"} trigger,
+     * non-silent, {@code cyclesDone >= 1}): runs BEFORE {@link #showSessionSummary} in {@link
+     * #stop} so any items it grants still appear in the session's item ledger. No live cycle
+     * output exists here ({@code cycleOutput} null), so a {@code Grants.BonusOutputCopies}
+     * authored under a Completion roll is silently inert (the validator warns at author time,
+     * M3 fix 5).
+     */
+    private void rollCompletionLoot(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
+        StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
+        if (asset == null) {
+            return;
+        }
+        List<Roll> rolls = LootEngine.resolveRolls(asset.getLoot());
+        if (rolls.isEmpty()) {
+            return;
+        }
+        Player player = store.getComponent(s.ref, Player.getComponentType());
+        if (player == null) {
+            return;
+        }
+        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, player, asset));
+        LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_COMPLETION, snapshot, player,
+                null, s.playerRef, s.stationId, ACTION_WORK, s.cyclesDone);
+        applyGrantResult(s, store, result);
+    }
+
+    /**
+     * Folds a {@link LootEngine.GrantResult} into the session's item ledger, plays every
+     * reached floor's {@code Presentation} through {@link #emitMoment} on {@link
+     * StationFlairs.Slot#RARE_FIND}, and fires the two keyed notifications (design 4.5.1):
+     * bonus-copy grants -> {@code ui.station.lucky}, droplist grants -> {@code
+     * ui.station.rare_find}. Both may fire on the same pass (independent grant kinds).
+     */
+    private void applyGrantResult(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nonnull LootEngine.GrantResult result) {
+        if (!result.anyGranted()) {
+            return;
+        }
+        for (Map.Entry<String, Integer> e : result.getBonusCopyItems().entrySet()) {
+            s.luckItems.merge(e.getKey(), e.getValue(), Integer::sum);
+        }
+        for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
+            s.luckItems.merge(e.getKey(), e.getValue(), Integer::sum);
+        }
+        Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
+        for (Presentation p : result.getFloorPresentations()) {
+            emitMoment(store, s, StationFlairs.Slot.RARE_FIND, p, blockPos);
+        }
+        if (s.playerRef != null) {
+            if (!result.getBonusCopyItems().isEmpty()) {
+                toast(s.playerRef, RpgMsg.tr("ui.station.lucky"));
+            }
+            if (!result.getDropListItems().isEmpty()) {
+                toast(s.playerRef, RpgMsg.tr("ui.station.rare_find"));
+            }
+        }
+    }
+
+    /**
+     * Per-cycle numeric context for the built-in {@code rpgstations:} factors ({@code
+     * loot.StationFactorRegistry#registerBuiltins}): session seconds elapsed, the CURRENT
+     * (already-incremented) cycle index, and the currently-held item's tool power / durability
+     * percent - read fresh, mirroring {@link #resolveXpMultiplier}'s no-snapshot convention.
+     */
+    @Nonnull
+    private static FactorContext buildFactorContext(@Nonnull StationSession s, @Nonnull Player player,
+            @Nonnull StationAsset asset) {
+        long sessionSeconds = Math.max(0L, (System.currentTimeMillis() - s.startedAtMs) / 1000L);
+        return FactorContext.of(sessionSeconds, s.cyclesDone,
+                resolveHeldToolPower(player, asset.getTool()), resolveHeldToolDurabilityPercent(player));
+    }
+
+    /**
+     * The held tool's power for the station's effective gather type ({@code Tool.Gather.GatherType}
+     * only - unlike {@link #resolveXpMultiplier}, this reads regardless of whether {@code
+     * Tool.XpScale} is authored, since {@code rpgstations:tool_power} is a general-purpose
+     * factor, not an XP multiplier). 0 when no gather type resolves or no matching spec is held.
+     */
+    private static double resolveHeldToolPower(@Nonnull Player player, @Nullable StationAsset.Tool tool) {
+        StationAsset.Tool.Gather gather = tool != null ? tool.getGather() : null;
+        String gatherType = gather != null ? gather.getGatherType() : null;
+        if (gatherType == null || gatherType.isBlank()) {
+            return 0.0;
+        }
+        ItemStack held = player.getInventory().getActiveHotbarItem();
+        Item item = held != null ? held.getItem() : null;
+        ItemTool itemTool = item != null ? item.getTool() : null;
+        ItemToolSpec[] specs = itemTool != null ? itemTool.getSpecs() : null;
+        return StationToolScaling.heldPowerFor(toolPowers(specs), gatherType);
+    }
+
+    /** The active hotbar item's durability percent [0,100]; 100 when no item held or it tracks no durability. */
+    private static double resolveHeldToolDurabilityPercent(@Nonnull Player player) {
+        ItemStack held = player.getInventory().getActiveHotbarItem();
+        if (held == null || held.isEmpty() || held.getMaxDurability() <= 0) {
+            return 100.0;
+        }
+        return Math.max(0.0, Math.min(100.0, (held.getDurability() / held.getMaxDurability()) * 100.0));
+    }
+
+    /**
+     * The standalone-rich end-of-session summary panel ({@code ui.StationSummaryHud}, design
+     * section 4.1/4.3): title + a cycles-only body (no per-skill XP breakdown this leg - that
+     * is the MMO bridge's OWN enricher, leg 5) + the item ledger. Falls back to the classic
+     * {@code NotificationUtil} toast (cycles-only body, no ledger rows - a text toast has no
+     * icon slot) on a settings-disabled HUD, an unregistered instance, or a push failure.
      */
     private void showSessionSummary(@Nonnull StationSession s) {
-        // intentionally empty - see the javadoc above
+        if (s.playerRef == null) {
+            return;
+        }
+        Message title = RpgMsg.tr("ui.station.summary.title");
+        Message body = RpgMsg.tr("ui.station.summary.cycles", s.cyclesDone);
+        if (!StationSummaryHud.tryShow(s.playerRef, title, body, s.stationIconItemId, ledgerRows(s))) {
+            toast(s.playerRef, body);
+        }
+    }
+
+    /**
+     * The item ledger for the summary panel: consumed items first, then produced, then luck
+     * grants (bonus-copy + droplist), each carrying the native client-resolved item name
+     * ({@link #itemNameMsg}).
+     */
+    @Nonnull
+    private static List<StationSummaryHud.LedgerRow> ledgerRows(@Nonnull StationSession s) {
+        List<StationSummaryHud.LedgerRow> rows = new ArrayList<>();
+        for (Map.Entry<String, Integer> e : s.consumedItems.entrySet()) {
+            Message line = RpgMsg.tr("ui.station.summary.item_consumed", itemNameMsg(e.getKey()), e.getValue());
+            rows.add(new StationSummaryHud.LedgerRow(e.getKey(), e.getValue(), line, SummaryRow.Kind.CONSUMED));
+        }
+        for (Map.Entry<String, Integer> e : s.producedItems.entrySet()) {
+            Message line = RpgMsg.tr("ui.station.summary.item_produced", itemNameMsg(e.getKey()), e.getValue());
+            rows.add(new StationSummaryHud.LedgerRow(e.getKey(), e.getValue(), line, SummaryRow.Kind.PRODUCED));
+        }
+        for (Map.Entry<String, Integer> e : s.luckItems.entrySet()) {
+            Message line = Msg.cat(
+                    RpgMsg.tr("ui.station.summary.item_produced", itemNameMsg(e.getKey()), e.getValue()),
+                    RpgMsg.tr("ui.station.summary.lucky"));
+            rows.add(new StationSummaryHud.LedgerRow(e.getKey(), e.getValue(), line, SummaryRow.Kind.LUCKY));
+        }
+        return rows;
     }
 
     /**
@@ -827,6 +982,11 @@ public final class StationService {
                 String reasonKey = stopReasonKey(reason);
                 if (reasonKey != null) {
                     toast(s.playerRef, RpgMsg.tr(reasonKey));
+                }
+                // The Completion-trigger loot pass runs BEFORE the summary so anything it grants
+                // still lands in the item ledger the summary renders (design section 4.5.1).
+                if (entityAlive && s.cyclesDone >= 1) {
+                    rollCompletionLoot(s, store);
                 }
                 if (s.cyclesDone > 0) {
                     showSessionSummary(s);
@@ -1044,7 +1204,13 @@ public final class StationService {
         String key = asset.getIdentity() != null && asset.getIdentity().getNameKey() != null
                 ? asset.getIdentity().getNameKey()
                 : "rpgstations.station." + asset.getId() + ".name";
-        return com.ziggfreed.common.i18n.Msg.key(key);
+        return Msg.key(key);
+    }
+
+    /** Native item/block name as a client-resolved {@link Message} ({@code items.<id>.name} convention). */
+    @Nonnull
+    private static Message itemNameMsg(@Nonnull String itemId) {
+        return Msg.key("items." + itemId + ".name");
     }
 
     private static void toast(@Nonnull PlayerRef playerRef, @Nonnull Message message) {
@@ -1073,12 +1239,9 @@ public final class StationService {
         };
     }
 
-    /**
-     * Engine feature toggle. TODO(leg 3): wire {@code SettingsAsset.Enabled} once the settings
-     * asset lands (design section 4.6); always-enabled seam for now.
-     */
+    /** Engine feature toggle, backed by {@code SettingsAsset.Enabled} (design section 4.6). */
     private static boolean stationsEnabled() {
-        return true;
+        return SettingsCatalog.getInstance().current().isEnabled();
     }
 
     /**

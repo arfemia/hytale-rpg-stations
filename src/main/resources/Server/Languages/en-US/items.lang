@@ -1,0 +1,3 @@
+RPG_Station_Sawmill.name = Sawmill
+RPG_Station_Sawmill.description = A work station that saws logs into planks. Press use to start working.
+RPG_Station_Sawmill.hint = Press [{key}] to work

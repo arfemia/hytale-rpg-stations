@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
+import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.validation.Finding;
 
@@ -23,8 +24,10 @@ import com.ziggfreed.rpgstations.validation.Finding;
  * MMO's {@code StationValidatorTest} (RPG Stations extraction leg 2): the skill-registry
  * tests ({@code UNKNOWN_XP_SKILL}/{@code UNKNOWN_LUCK_SKILL}/{@code UNKNOWN_SKILLTIER_SKILL})
  * are DROPPED (skill ids are not this engine's business, see {@link StationValidator}'s
- * javadoc); a new {@code UNKNOWN_FACTOR} test covers the Requires/Condition gate this leg
- * introduces.
+ * javadoc); a new {@code UNKNOWN_FACTOR} test covers the Requires/Condition gate leg 2
+ * introduces. Leg 3 replaces the old Luck.Tiers section with the {@link Roll}-based Loot
+ * section (the M3 critique fixes' validator coverage: floor-Grants-only, duplicate floors,
+ * empty rolls, {@code BonusOutputCopies} under a non-Cycle trigger, unknown ladder factors).
  */
 public class StationValidatorTest {
 
@@ -335,57 +338,50 @@ public class StationValidatorTest {
         assertFalse(codes.contains("DURABILITY_PERSWING_ADVISORY"));
     }
 
-    // ==================== Luck.Tiers (skill checks dropped this leg) ====================
+    // ==================== Loot (leg 3, REPLACES the Luck.Tiers section) ====================
 
-    private static StationAsset.Luck.Tier tier(Double minLuck, String dropList) {
-        return StationAsset.Luck.Tier.of(minLuck, dropList);
+    private static StationAsset.Loot loot(Roll... rolls) {
+        return StationAsset.Loot.of(null, rolls);
+    }
+
+    private static Roll.Ladder.Floor floor(Double min, String dropList) {
+        return Roll.Ladder.Floor.of(min, Roll.Grants.of(null, dropList, null), null);
+    }
+
+    private static Roll ladderRoll(Roll.Ladder.Floor... floors) {
+        return Roll.of(null, null, null,
+                Roll.Ladder.of(Condition.of("rpgstations:cycle_count", null, null, null), floors), null);
     }
 
     @Test
-    void tierMissingFloor_flagged() {
+    void ladderFloorMissingMin_flagged() {
         StationAsset a = StationAsset.of("badtierfloor",
                 StationAsset.Identity.of("rpgstations.station.badtierfloor.name", null, null),
                 null, oakRecipe(),
                 null, null, null, null, null, null,
-                StationAsset.Luck.of(null, new StationAsset.Luck.Tier[]{tier(null, "T1")}, null));
-        assertTrue(codes(validate(a)).contains("TIER_MISSING_FLOOR"));
+                loot(ladderRoll(floor(null, "T1"))));
+        assertTrue(codes(validate(a)).contains("LOOT_LADDER_FLOOR_MISSING_MIN"));
     }
 
     @Test
-    void tierMissingDropList_flagged() {
+    void ladderFloorEmptyGrants_flagged() {
+        // M3 fix 2: a floor's ONLY reward path is its own Grants - null Grants is an error.
         StationAsset a = StationAsset.of("badtierdrop",
                 StationAsset.Identity.of("rpgstations.station.badtierdrop.name", null, null),
                 null, oakRecipe(),
                 null, null, null, null, null, null,
-                StationAsset.Luck.of(null, new StationAsset.Luck.Tier[]{tier(50.0, "")}, null));
-        assertTrue(codes(validate(a)).contains("TIER_MISSING_DROPLIST"));
+                loot(ladderRoll(Roll.Ladder.Floor.of(50.0, null, null))));
+        assertTrue(codes(validate(a)).contains("LOOT_LADDER_FLOOR_EMPTY_GRANTS"));
     }
 
     @Test
-    void tierDuplicateFloor_flagged() {
+    void ladderDuplicateFloor_flagged() {
         StationAsset a = StationAsset.of("dupefloor",
                 StationAsset.Identity.of("rpgstations.station.dupefloor.name", null, null),
                 null, oakRecipe(),
                 null, null, null, null, null, null,
-                StationAsset.Luck.of(null, new StationAsset.Luck.Tier[]{
-                        tier(50.0, "T1"), tier(50.0, "T1b")}, null));
-        assertTrue(codes(validate(a)).contains("TIER_DUPLICATE_FLOOR"));
-    }
-
-    @Test
-    void skillTierNotALuckSkill_stillFlagged_structuralCheckSurvivesTheReshape() {
-        // The station's luck skills default to Work.Xp = MINING only; WOODCUTTING's ladder
-        // can never roll for this station - a pure station-shape check, no skill registry needed.
-        Map<String, StationAsset.Luck.Tier[]> skillTiers = Map.of(
-                "WOODCUTTING", new StationAsset.Luck.Tier[]{tier(50.0, "T1")});
-        StationAsset a = StationAsset.of("notluckskill",
-                StationAsset.Identity.of("rpgstations.station.notluckskill.name", null, null),
-                StationAsset.Work.of(5000L, null, null, null, new StationAsset.WorkXp[]{
-                        StationAsset.WorkXp.of("MINING", 8.0)}),
-                oakRecipe(),
-                null, null, null, null, null, null,
-                StationAsset.Luck.of(null, null, skillTiers));
-        assertTrue(codes(validate(a)).contains("SKILLTIER_NOT_A_LUCK_SKILL"));
+                loot(ladderRoll(floor(50.0, "T1"), floor(50.0, "T1b"))));
+        assertTrue(codes(validate(a)).contains("LOOT_LADDER_DUPLICATE_FLOOR"));
     }
 
     @Test
@@ -394,21 +390,97 @@ public class StationValidatorTest {
                 StationAsset.Identity.of("rpgstations.station.unknowndrop.name", null, null),
                 null, oakRecipe(),
                 null, null, null, null, null, null,
-                StationAsset.Luck.of(null, new StationAsset.Luck.Tier[]{tier(50.0, "Ghost_Drop")}, null));
-        assertFalse(codes(validate(a)).contains("UNKNOWN_DROPLIST"), "the ANY_DROP fixture never flags");
+                loot(ladderRoll(floor(50.0, "Ghost_Drop"))));
+        assertFalse(codes(validate(a)).contains("LOOT_UNKNOWN_DROPLIST"), "the ANY_DROP fixture never flags");
         Set<String> unrelatedDrops = Set.of("Real_Drop");
         assertTrue(codes(StationValidator.validate(List.of(a), ANY_LANG, unrelatedDrops::contains, ANY_FACTOR))
-                .contains("UNKNOWN_DROPLIST"));
+                .contains("LOOT_UNKNOWN_DROPLIST"));
     }
 
     @Test
-    void tiersAuthored_addsTheEconomyAdvisory() {
-        StationAsset a = StationAsset.of("advisorytiers",
-                StationAsset.Identity.of("rpgstations.station.advisorytiers.name", null, null),
+    void rollWithNeitherGrantsNorLadder_flaggedEmpty() {
+        StationAsset a = StationAsset.of("emptyroll",
+                StationAsset.Identity.of("rpgstations.station.emptyroll.name", null, null),
                 null, oakRecipe(),
                 null, null, null, null, null, null,
-                StationAsset.Luck.of(null, new StationAsset.Luck.Tier[]{tier(50.0, "T1")}, null));
-        assertTrue(codes(validate(a)).contains("TIERS_ECONOMY_ADVISORY"));
+                loot(Roll.of("Cycle", null, null, null, null)));
+        assertTrue(codes(validate(a)).contains("LOOT_ROLL_EMPTY"));
+    }
+
+    @Test
+    void bonusOutputCopiesUnderCompletionTrigger_flagged() {
+        // M3 fix 5: BonusOutputCopies makes sense only under a Cycle-trigger roll.
+        StationAsset a = StationAsset.of("badbonustrigger",
+                StationAsset.Identity.of("rpgstations.station.badbonustrigger.name", null, null),
+                null, oakRecipe(),
+                null, null, null, null, null, null,
+                loot(Roll.of("Completion", null, null, null, Roll.Grants.of(1, null, null))));
+        assertTrue(codes(validate(a)).contains("LOOT_BONUS_COPIES_WRONG_TRIGGER"));
+    }
+
+    @Test
+    void bonusOutputCopiesUnderCycleTrigger_notFlagged() {
+        StationAsset a = StationAsset.of("goodbonustrigger",
+                StationAsset.Identity.of("rpgstations.station.goodbonustrigger.name", null, null),
+                null, oakRecipe(),
+                null, null, null, null, null, null,
+                loot(Roll.of("Cycle", null, null, null, Roll.Grants.of(1, null, null))));
+        assertFalse(codes(validate(a)).contains("LOOT_BONUS_COPIES_WRONG_TRIGGER"));
+    }
+
+    @Test
+    void ladderValueUnknownFactor_flagged() {
+        StationAsset a = StationAsset.of("badladderfactor",
+                StationAsset.Identity.of("rpgstations.station.badladderfactor.name", null, null),
+                null, oakRecipe(),
+                null, null, null, null, null, null,
+                loot(ladderRoll(floor(50.0, "T1"))));
+        assertTrue(codes(StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, NO_FACTOR))
+                .contains("UNKNOWN_FACTOR"));
+    }
+
+    @Test
+    void validLoot_producesNoLootFindings() {
+        StationAsset a = StationAsset.of("goodloot",
+                StationAsset.Identity.of("rpgstations.station.goodloot.name", null, null),
+                null, oakRecipe(),
+                null, null, null, null, null, null,
+                loot(Roll.of("Cycle", null,
+                        Roll.Chance.of(2.0, new Condition[]{Condition.of("rpgstations:tool_power", null, null, null)}, 25.0),
+                        null, Roll.Grants.of(1, null, null))));
+        assertTrue(validate(a).isEmpty(), "a fully valid Loot roll is clean, got: " + codes(validate(a)));
+    }
+
+    @Test
+    void unknownLootTable_onlyFlaggedByTheInjectedLootableLookup() {
+        StationAsset a = StationAsset.of("unknowntable",
+                StationAsset.Identity.of("rpgstations.station.unknowntable.name", null, null),
+                null, oakRecipe(),
+                null, null, null, null, null, null,
+                StationAsset.Loot.of(new String[]{"ghost_table"}, null));
+        assertFalse(codes(StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, ANY_FACTOR, id -> true))
+                .contains("LOOT_UNKNOWN_TABLE"), "a lootableKnown fixture that always answers true never flags");
+        assertTrue(codes(StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, ANY_FACTOR, id -> false))
+                .contains("LOOT_UNKNOWN_TABLE"));
+    }
+
+    // ==================== validateLootables (standalone LootableAsset content) ====================
+
+    @Test
+    void validateLootables_emptyTable_flagged() {
+        com.ziggfreed.rpgstations.asset.LootableAsset table =
+                com.ziggfreed.rpgstations.asset.LootableAsset.of("sawmillfinds", null);
+        List<Finding> findings = StationValidator.validateLootables(List.of(table), ANY_DROP, ANY_FACTOR);
+        assertTrue(findings.stream().map(Finding::code).anyMatch("LOOT_EMPTY_TABLE"::equals));
+    }
+
+    @Test
+    void validateLootables_validRolls_producesNoFindings() {
+        com.ziggfreed.rpgstations.asset.LootableAsset table = com.ziggfreed.rpgstations.asset.LootableAsset.of(
+                "sawmillfinds", new Roll[]{Roll.of("Cycle", null,
+                        Roll.Chance.of(2.0, new Condition[]{Condition.of("rpgstations:tool_power", null, null, null)}, 25.0),
+                        null, Roll.Grants.of(1, null, null))});
+        assertTrue(StationValidator.validateLootables(List.of(table), ANY_DROP, ANY_FACTOR).isEmpty());
     }
 
     // ==================== Requires.Conditions (new this leg) ====================

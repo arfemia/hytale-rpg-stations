@@ -1,0 +1,60 @@
+{
+  "$Comment": "The standalone RpgStations Sawmill work station block. Model reuses the vanilla Lumbermill bench. BlockType.Seats is the seat hold mode's mount anchor (StationAsset.Hold.Seat.Enabled); Offset stands the player back at working distance rather than seated inside the bench. Yaw 180: the engine adds a hard +180deg to the authored seat yaw, so 180 lands the worker facing the work surface (the landed facing fix, pack 224f2c6 / root 9ce5d81). SHARED id with the pack's own block (maintainer decision): a pack renames its own block and overrides this jar default via load order.",
+  "TranslationProperties": {
+    "Name": "items.RPG_Station_Sawmill.name",
+    "Description": "items.RPG_Station_Sawmill.description"
+  },
+  "PlayerAnimationsId": "Block",
+  "Categories": ["Furniture.Furniture"],
+  "Icon": "Icons/ItemsGenerated/Bench_Lumbermill.png",
+  "MaxStack": 1,
+  "Interactions": {
+    "Primary": "Block_Primary",
+    "Secondary": "Block_Secondary"
+  },
+
+  "BlockType": {
+    "BlockParticleSetId": "Wood",
+    "BlockSoundSetId": "Wood",
+    "PhysicalMaterialId": "Wood",
+    "CustomModel": "Blocks/Benches/Lumbermill.blockymodel",
+    "CustomModelTexture": [
+      {
+        "Texture": "Blocks/Benches/Lumbermill_Texture.png",
+        "Weight": 1
+      }
+    ],
+    "DrawType": "Model",
+    "Flags": {
+      "IsUsable": true
+    },
+    "Gathering": {
+      "Soft": {
+        "IsWeaponBreakable": false
+      }
+    },
+    "HitboxType": "Bench_Lumbermill",
+    "Material": "Solid",
+    "Opacity": "Transparent",
+    "Support": {
+      "Down": [
+        {
+          "FaceType": "Full"
+        }
+      ]
+    },
+    "VariantRotation": "NESW",
+    "InteractionHint": "items.RPG_Station_Sawmill.hint",
+    "Interactions": {
+      "Use": "RPG_Station_Sawmill_Use"
+    },
+    "Seats": [
+      { "Offset": { "X": 0, "Y": 0, "Z": 0.6 }, "Yaw": 180 }
+    ]
+  },
+  "Tags": {
+    "Type": ["Furniture"],
+    "Family": ["RpgStations"]
+  },
+  "ItemSoundSetId": "ISS_Blocks_Wood"
+}

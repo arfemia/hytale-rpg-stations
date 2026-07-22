@@ -1,0 +1,180 @@
+// RpgStations end-of-session summary HUD (design section 4.1/4.3). Ships hidden and is
+// shown/hidden entirely by StationSummaryHud.showSummary via partial updates - there is no
+// ticking system for this document.
+//
+// LAYOUT (copies the MMO SessionSummaryHud's hard-won fixes verbatim - see its own .ui header
+// comment for the failure history): a HUD document's outermost appended element is an
+// unanchored full-viewport coordinate space; the ACTUAL sized/backgrounded/positioned panel
+// MUST be a named CHILD one level in, which is what StationSummaryHud.rootSelector() addresses.
+// #RpgStationSummaryHudCanvas is that outer transparent canvas; #RpgStationSummaryRoot is the
+// real panel (content-height sized - StationSummaryHud#usesContentHeight - so it hugs exactly
+// its crest/title/text/however-many ledger rows are showing this session).
+//
+// FRAME: the neutral common $F.@ZigDecoratedFrame (ZigFrames.ui) - RpgStations has no MMO
+// dependency, so it never reaches for @MmoDecoratedFrame. #Content (inside the frame invocation)
+// is the FROZEN root selector a future MMO-bridge SummaryEnricherRegistry.decorate hook themes
+// through (design section 3.2 / the critique's binding note) - do not rename it casually.
+//
+// WIDTH: the frame invocation itself carries the explicit Anchor Width (not just its #Content
+// children) - the MMO panel's root-cause fix: an Anchor-less frame Group fills the nearest sized
+// ancestor (the full-viewport canvas), so #Content's own background rendered full width even
+// after every label got its own width cap. Every #Content child below also carries an explicit
+// Width, matching the panelWidth() (480) the Java side reads.
+//
+// Document path + top-level ids are mod-namespaced (RpgStationSummary.ui / #RpgStationSummary*)
+// so a co-installed mod's HUD document cannot clobber this one on the client's flat namespace.
+
+$F = "../Common/ZigFrames.ui";
+
+@SummaryTitleStyle = (FontSize: 20, RenderBold: true, RenderUppercase: true, TextColor: #ffd24a, LetterSpacing: 1, HorizontalAlignment: Center, VerticalAlignment: Center);
+
+@SummaryBodyStyle = (FontSize: 15, TextColor: #eef3fa, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
+
+@LedgerIconGridStyle = ItemGridStyle(
+  SlotSize: 24,
+  SlotIconSize: 20,
+  SlotSpacing: 0,
+  SlotBackground: "../Common/ContainerPanelPatch.png",
+  QuantityPopupSlotOverlay: "../Common/ContainerPanelPatch.png",
+  BrokenSlotBackgroundOverlay: "../Common/ContainerPanelPatch.png",
+  BrokenSlotIconOverlay: "../Common/ContainerPanelPatch.png",
+  DefaultItemIcon: "../Common/ContainerPanelPatch.png",
+  DurabilityBar: "../Common/ContainerPanelPatch.png",
+  DurabilityBarBackground: "../Common/ContainerPanelPatch.png",
+  DurabilityBarAnchor: (Bottom: 0, Left: 0, Width: 0, Height: 0),
+  DurabilityBarColorStart: #a63232,
+  DurabilityBarColorEnd: #63b649,
+  CursedIconPatch: "../Common/ContainerPanelPatch.png",
+  CursedIconAnchor: (Bottom: 0, Left: 0, Width: 0, Height: 0)
+);
+
+@StationCrestGridStyle = ItemGridStyle(
+  SlotSize: 30,
+  SlotIconSize: 26,
+  SlotSpacing: 0,
+  SlotBackground: "../Common/ContainerPanelPatch.png",
+  QuantityPopupSlotOverlay: "../Common/ContainerPanelPatch.png",
+  BrokenSlotBackgroundOverlay: "../Common/ContainerPanelPatch.png",
+  BrokenSlotIconOverlay: "../Common/ContainerPanelPatch.png",
+  DefaultItemIcon: "../Common/ContainerPanelPatch.png",
+  DurabilityBar: "../Common/ContainerPanelPatch.png",
+  DurabilityBarBackground: "../Common/ContainerPanelPatch.png",
+  DurabilityBarAnchor: (Bottom: 0, Left: 0, Width: 0, Height: 0),
+  DurabilityBarColorStart: #a63232,
+  DurabilityBarColorEnd: #63b649,
+  CursedIconPatch: "../Common/ContainerPanelPatch.png",
+  CursedIconAnchor: (Bottom: 0, Left: 0, Width: 0, Height: 0)
+);
+
+@LedgerRowStyle = (FontSize: 15, TextColor: #eef3fa, VerticalAlignment: Center, Wrap: true);
+
+@LedgerMoreStyle = (FontSize: 12, TextColor: #9fb0c4, HorizontalAlignment: Center, VerticalAlignment: Center);
+
+Group #RpgStationSummaryHudCanvas {
+  // Transparent full-viewport coordinate space only - no Anchor, no Background.
+  LayoutMode: Top;
+
+  Group #RpgStationSummaryRoot {
+    // Static fallback anchor only; the runtime applyConfiguredPosition always wins. NO Height:
+    // content-height sized. Width MUST match StationSummaryHud.panelWidth() (480).
+    Anchor: (Width: 480, Horizontal: 0, Top: 72);
+    LayoutMode: Top;
+    Visible: false;
+
+    $F.@ZigDecoratedFrame {
+      @Ornaments = false;
+      Anchor: (Width: 480);
+
+      #Content {
+        Group #RpgStationSummaryTitleRow {
+          Anchor: (Height: 32, Top: 4, Width: 444);
+          LayoutMode: Left;
+
+          Group #RpgStationSummaryStationIcon {
+            Anchor: (Width: 30, Height: 30);
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 30, Height: 30); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @StationCrestGridStyle; }
+          }
+          Group { Anchor: (Width: 8); }
+
+          Label #RpgStationSummaryTitle {
+            Text: "";
+            FlexWeight: 1;
+            Anchor: (Height: 28);
+            Style: @SummaryTitleStyle;
+          }
+        }
+
+        Label #RpgStationSummaryText {
+          Text: "";
+          Anchor: (Top: 6, Width: 444);
+          Style: @SummaryBodyStyle;
+        }
+
+        // Fixed ledger row slots (never appended); StationSummaryHud.renderLedger populates +
+        // shows/hides them. Capped at MAX_LEDGER_ROWS (6, #RpgStationSummaryItem0..5) plus one
+        // keyed "+N more" overflow row.
+        Group #RpgStationSummaryLedger {
+          Anchor: (Top: 8);
+          LayoutMode: Top;
+
+          Group #RpgStationSummaryItem0 {
+            Anchor: (Height: 28, Top: 4, Width: 444);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+          }
+          Group #RpgStationSummaryItem1 {
+            Anchor: (Height: 28, Top: 4, Width: 444);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+          }
+          Group #RpgStationSummaryItem2 {
+            Anchor: (Height: 28, Top: 4, Width: 444);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+          }
+          Group #RpgStationSummaryItem3 {
+            Anchor: (Height: 28, Top: 4, Width: 444);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+          }
+          Group #RpgStationSummaryItem4 {
+            Anchor: (Height: 28, Top: 4, Width: 444);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+          }
+          Group #RpgStationSummaryItem5 {
+            Anchor: (Height: 28, Top: 4, Width: 444);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+          }
+
+          Label #RpgStationSummaryItemMore {
+            Text: "";
+            Anchor: (Height: 20, Top: 4, Width: 444);
+            Visible: false;
+            Style: @LedgerMoreStyle;
+          }
+        }
+      }
+    }
+  }
+}

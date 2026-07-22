@@ -1,0 +1,10 @@
+{
+  "Cooldown": {
+    "Id": "BlockInteraction",
+    "Cooldown": 0.278,
+    "ClickBypass": true
+  },
+  "Interactions": [
+    { "Type": "rpg_station_use", "Station": "sawmill" }
+  ]
+}

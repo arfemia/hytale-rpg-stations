@@ -1,0 +1,29 @@
+{
+  "Rolls": [
+    {
+      "Trigger": "Cycle",
+      "Chance": {
+        "BasePercent": 2,
+        "AddFactors": [ { "Factor": "rpgstations:tool_power" } ],
+        "CapPercent": 25
+      },
+      "Grants": { "BonusOutputCopies": 1 }
+    },
+    {
+      "Trigger": "Cycle",
+      "Conditions": [ { "Factor": "rpgstations:cycle_count", "Min": 10 } ],
+      "Chance": { "BasePercent": 15 },
+      "Ladder": {
+        "Value": { "Factor": "rpgstations:cycle_count" },
+        "Floors": [
+          { "Min": 10, "Grants": { "DropList": "RPG_Station_Sawmill_T1" } },
+          {
+            "Min": 25,
+            "Grants": { "DropList": "RPG_Station_Sawmill_T2" },
+            "Presentation": { "Sound": "SFX_Coins_Land", "Particles": "Block_Gem_Sparks" }
+          }
+        ]
+      }
+    }
+  ]
+}

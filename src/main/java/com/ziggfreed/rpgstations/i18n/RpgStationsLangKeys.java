@@ -13,12 +13,11 @@ import javax.annotation.Nonnull;
  * against RpgStations' own lang loading; do not silently drop it").
  *
  * <p>Keep this set in lockstep with {@code src/main/resources/Server/Languages/en-US/
- * rpgstations.lang} whenever a key is added or removed - both the fixed engine keys below
- * AND every per-station content key ({@code rpgstations.station.<id>.name}/{@code .desc})
- * once a leg ships one (leg 2 ships the engine only, no station content, so only the fixed
- * engine keys are listed here today; leg 3's standalone sawmill adds its own two entries when
- * it lands). A mismatch means either a shipped key the validator doesn't know about
- * (harmless) or a validator entry for a retired key (also harmless, but stale).
+ * rpgstations.lang} whenever a key is added or removed. Leg 3 adds the {@code rare_find}/
+ * {@code lucky} loot-notification keys, the summary-panel keys, and the shipped sawmill's own
+ * content keys ({@code station.sawmill.name}/{@code .desc}). A mismatch means either a shipped
+ * key the validator doesn't know about (harmless) or a validator entry for a retired key (also
+ * harmless, but stale).
  */
 public final class RpgStationsLangKeys {
 
@@ -31,6 +30,8 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.wrong_tool",
             "rpgstations.ui.station.seat_unavailable",
             "rpgstations.ui.station.practice",
+            "rpgstations.ui.station.rare_find",
+            "rpgstations.ui.station.lucky",
             "rpgstations.ui.station.stop.player",
             "rpgstations.ui.station.stop.moved",
             "rpgstations.ui.station.stop.damaged",
@@ -39,7 +40,15 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.stop.session_cap",
             "rpgstations.ui.station.stop.station_gone",
             "rpgstations.ui.station.stop.tool_changed",
-            "rpgstations.ui.station.stop.tool_broke");
+            "rpgstations.ui.station.stop.tool_broke",
+            "rpgstations.ui.station.summary.title",
+            "rpgstations.ui.station.summary.cycles",
+            "rpgstations.ui.station.summary.item_consumed",
+            "rpgstations.ui.station.summary.item_produced",
+            "rpgstations.ui.station.summary.lucky",
+            "rpgstations.ui.station.summary.items_more",
+            "rpgstations.station.sawmill.name",
+            "rpgstations.station.sawmill.desc");
 
     private RpgStationsLangKeys() {
     }

@@ -22,10 +22,9 @@ import java.util.Map;
  * {@code asset.type.StationAsset} (RPG Stations extraction phase 1, leg 2 - engine move);
  * see the design doc's section 4.4 for the phase-1 schema deltas from the MMO original
  * (this class's {@link #requires} is RpgStations' OWN {@link Requires} codec, severing the
- * MMO's {@code content.gate.Requirements} dependency - the ONE structural change this leg
- * makes to the schema. {@code Luck} stays UNCHANGED for now; it is replaced by a {@code Loot}
- * group when the conditional-lootable engine lands in leg 3, per the critical-scope-rule
- * seam this leg leaves).
+ * MMO's {@code content.gate.Requirements} dependency). Leg 3 lands the second schema delta:
+ * {@code Luck} is REPLACED by {@link #loot} (design section 4.4.3/4.5), the conditional-lootable
+ * {@code Loot: { Tables, Rolls }} group over the shared {@link Roll} codec.
  *
  * <p><b>Pattern A - full structured asset, the runtime authority.</b> {@link #CODEC} is the
  * single decode schema for this type; every decoded instance folds into
@@ -44,7 +43,7 @@ public final class StationAsset
     @Nullable private Recipe recipe;
     @Nullable private Hold hold;
     @Nullable private Tool tool;
-    @Nullable private Luck luck;
+    @Nullable private Loot loot;
     @Nullable private Camera camera;
     @Nullable private Animation animation;
     /** The CYCLE-complete presentation moment (sound/particles at the block per finished cycle). */
@@ -88,8 +87,8 @@ public final class StationAsset
             .appendInherited(new KeyedCodec<>("Tool", Tool.CODEC, false),
                     (a, v) -> a.tool = v, a -> a.tool, (a, parent) -> a.tool = parent.tool)
             .add()
-            .appendInherited(new KeyedCodec<>("Luck", Luck.CODEC, false),
-                    (a, v) -> a.luck = v, a -> a.luck, (a, parent) -> a.luck = parent.luck)
+            .appendInherited(new KeyedCodec<>("Loot", Loot.CODEC, false),
+                    (a, v) -> a.loot = v, a -> a.loot, (a, parent) -> a.loot = parent.loot)
             .add()
             .appendInherited(new KeyedCodec<>("Camera", Camera.CODEC, false),
                     (a, v) -> a.camera = v, a -> a.camera, (a, parent) -> a.camera = parent.camera)
@@ -123,21 +122,21 @@ public final class StationAsset
         return of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires, null);
     }
 
-    /** Java-side construction path with the optional {@link Luck} override. */
+    /** Java-side construction path with the optional {@link Loot} override. */
     @Nonnull
     public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
             @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
             @Nullable Animation animation, @Nullable Presentation presentation,
-            @Nullable Requires requires, @Nullable Luck luck) {
-        return of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires, luck, null);
+            @Nullable Requires requires, @Nullable Loot loot) {
+        return of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires, loot, null);
     }
 
-    /** Java-side construction path with the optional {@link Luck} AND {@link Flair} map override. */
+    /** Java-side construction path with the optional {@link Loot} AND {@link Flair} map override. */
     @Nonnull
     public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
             @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
             @Nullable Animation animation, @Nullable Presentation presentation,
-            @Nullable Requires requires, @Nullable Luck luck, @Nullable Map<String, Flair> flairs) {
+            @Nullable Requires requires, @Nullable Loot loot, @Nullable Map<String, Flair> flairs) {
         StationAsset a = new StationAsset();
         a.id = id;
         a.identity = identity;
@@ -145,7 +144,7 @@ public final class StationAsset
         a.recipe = recipe;
         a.hold = hold;
         a.tool = tool;
-        a.luck = luck;
+        a.loot = loot;
         a.camera = camera;
         a.animation = animation;
         a.presentation = presentation;
@@ -154,15 +153,15 @@ public final class StationAsset
         return a;
     }
 
-    /** Java-side construction path with the optional {@link Luck}, {@link Flair} map, AND {@link #completion}. */
+    /** Java-side construction path with the optional {@link Loot}, {@link Flair} map, AND {@link #completion}. */
     @Nonnull
     public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
             @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
             @Nullable Animation animation, @Nullable Presentation presentation,
-            @Nullable Requires requires, @Nullable Luck luck, @Nullable Map<String, Flair> flairs,
+            @Nullable Requires requires, @Nullable Loot loot, @Nullable Map<String, Flair> flairs,
             @Nullable Presentation completion) {
         StationAsset a = of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires,
-                luck, flairs);
+                loot, flairs);
         a.completion = completion;
         return a;
     }
@@ -224,8 +223,8 @@ public final class StationAsset
     }
 
     @Nullable
-    public Luck getLuck() {
-        return luck;
+    public Loot getLoot() {
+        return loot;
     }
 
     @Nullable
@@ -933,102 +932,41 @@ public final class StationAsset
     }
 
     /**
-     * Customizable per-station luck (UNCHANGED from the MMO original this leg - the loot
-     * engine that supersedes this with a {@code Loot} group lands in leg 3; see this class's
-     * javadoc). Each work cycle rolls the player's per-skill luck for ONE bonus copy of that
-     * cycle's output. OMIT this group and the station's luck skills DEFAULT to the skills
-     * already listed in {@code Work.Xp}. An authored EMPTY {@code Skills} array DISABLES luck.
+     * The conditional-lootable declaration (design section 4.4.3/4.5, REPLACES the MMO's
+     * {@code Luck} group this leg): references to shared {@link LootableAsset} tables and/or
+     * inline {@link Roll}s, both optional and independently composable (a station may combine
+     * any number of tables with its own inline rolls). See {@code loot.LootEngine} for
+     * resolution + evaluation.
      */
-    public static final class Luck {
-        @Nullable protected String[] skills;
-        @Nullable protected Tier[] tiers;
-        @Nullable protected Map<String, Tier[]> skillTiers;
+    public static final class Loot {
+        @Nullable protected String[] tables;
+        @Nullable protected Roll[] rolls;
 
-        public static final BuilderCodec<Luck> CODEC = BuilderCodec.builder(Luck.class, Luck::new)
-                .appendInherited(new KeyedCodec<>("Skills", new ArrayCodec<>(Codec.STRING, String[]::new), false),
-                        (o, v) -> o.skills = v, o -> o.skills, (o, p) -> o.skills = p.skills).add()
-                .appendInherited(new KeyedCodec<>("Tiers", new ArrayCodec<>(Tier.CODEC, Tier[]::new), false),
-                        (o, v) -> o.tiers = v, o -> o.tiers, (o, p) -> o.tiers = p.tiers).add()
-                .appendInherited(new KeyedCodec<>("SkillTiers",
-                                new MapCodec<>(new ArrayCodec<>(Tier.CODEC, Tier[]::new), LinkedHashMap::new), false),
-                        (o, v) -> o.skillTiers = v, o -> o.skillTiers, (o, p) -> o.skillTiers = p.skillTiers).add()
+        public static final BuilderCodec<Loot> CODEC = BuilderCodec.builder(Loot.class, Loot::new)
+                .appendInherited(new KeyedCodec<>("Tables", new ArrayCodec<>(Codec.STRING, String[]::new), false),
+                        (o, v) -> o.tables = v, o -> o.tables, (o, p) -> o.tables = p.tables).add()
+                .appendInherited(new KeyedCodec<>("Rolls", new ArrayCodec<>(Roll.CODEC, Roll[]::new), false),
+                        (o, v) -> o.rolls = v, o -> o.rolls, (o, p) -> o.rolls = p.rolls).add()
                 .build();
 
         @Nonnull
-        public static Luck of(@Nullable String[] skills) {
-            return of(skills, null, null);
-        }
-
-        @Nonnull
-        public static Luck of(@Nullable String[] skills, @Nullable Tier[] tiers,
-                @Nullable Map<String, Tier[]> skillTiers) {
-            Luck l = new Luck();
-            l.skills = skills;
-            l.tiers = tiers;
-            l.skillTiers = skillTiers;
+        public static Loot of(@Nullable String[] tables, @Nullable Roll[] rolls) {
+            Loot l = new Loot();
+            l.tables = tables;
+            l.rolls = rolls;
             return l;
         }
 
+        /** Referenced {@link LootableAsset} ids (case-insensitive at resolve). */
         @Nullable
-        public String[] getSkills() {
-            return skills;
+        public String[] getTables() {
+            return tables;
         }
 
+        /** Inline rolls authored directly on this station (in addition to any {@link #tables}). */
         @Nullable
-        public Tier[] getTiers() {
-            return tiers;
-        }
-
-        @Nullable
-        public Map<String, Tier[]> getSkillTiers() {
-            return skillTiers;
-        }
-
-        /** One {@code {MinLuck, DropList}} floor in a loot-tier ladder. */
-        public static final class Tier {
-            @Nullable protected Double minLuck;
-            @Nullable protected String dropList;
-            @Nullable protected Presentation presentation;
-
-            public static final BuilderCodec<Tier> CODEC = BuilderCodec.builder(Tier.class, Tier::new)
-                    .appendInherited(new KeyedCodec<>("MinLuck", Codec.DOUBLE, false),
-                            (o, v) -> o.minLuck = v, o -> o.minLuck, (o, p) -> o.minLuck = p.minLuck).add()
-                    .appendInherited(new KeyedCodec<>("DropList", Codec.STRING, false),
-                            (o, v) -> o.dropList = v, o -> o.dropList, (o, p) -> o.dropList = p.dropList).add()
-                    .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
-                            (o, v) -> o.presentation = v, o -> o.presentation,
-                            (o, p) -> o.presentation = p.presentation).add()
-                    .build();
-
-            @Nonnull
-            public static Tier of(@Nullable Double minLuck, @Nullable String dropList) {
-                return of(minLuck, dropList, null);
-            }
-
-            @Nonnull
-            public static Tier of(@Nullable Double minLuck, @Nullable String dropList,
-                    @Nullable Presentation presentation) {
-                Tier t = new Tier();
-                t.minLuck = minLuck;
-                t.dropList = dropList;
-                t.presentation = presentation;
-                return t;
-            }
-
-            @Nullable
-            public Double getMinLuck() {
-                return minLuck;
-            }
-
-            @Nullable
-            public String getDropList() {
-                return dropList;
-            }
-
-            @Nullable
-            public Presentation getPresentation() {
-                return presentation;
-            }
+        public Roll[] getRolls() {
+            return rolls;
         }
     }
 

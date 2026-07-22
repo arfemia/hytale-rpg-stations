@@ -16,10 +16,10 @@ import com.hypixel.hytale.codec.util.RawJsonReader;
  * top-level inherit-on-omit + sibling-leaf inherit inside a partially-overridden group), the
  * schema deltas this leg introduces ({@link Requires}/{@link Condition} replacing the MMO's
  * {@code content.gate.Requirements}, {@link Presentation}'s {@link Presentation.Shake} leaf
- * replacing {@code Feedback}), and that {@code Luck} decodes unchanged (its schema does not
- * change until leg 3's loot engine). Ported (trimmed to the representative cases; the codec
- * class itself is a mechanical, vetted copy - see {@link StationAsset}'s javadoc) from the
- * MMO's {@code StationAssetCodecTest}.
+ * replacing {@code Feedback}), and (leg 3) {@code Loot} replacing {@code Luck} entirely - see
+ * {@link Roll}'s javadoc for the M3-critique-fixed schema. Ported (trimmed to the
+ * representative cases; the codec class itself is a mechanical, vetted copy - see
+ * {@link StationAsset}'s javadoc) from the MMO's {@code StationAssetCodecTest}.
  */
 public class StationAssetCodecTest {
 
@@ -185,19 +185,41 @@ public class StationAssetCodecTest {
         assertEquals(2, child.getRecipe().getFromCrafting().getOutputPerInput());
     }
 
-    // ==================== Luck (UNCHANGED schema this leg) ====================
+    // ==================== Loot (leg 3, REPLACES the MMO's Luck group) ====================
 
     @Test
-    void luck_decodesTiersUnchanged() throws Exception {
-        StationAsset a = decodeAsset("{ \"Luck\": { \"Tiers\": ["
-                + " { \"MinLuck\": 50, \"DropList\": \"RPG_Station_Sawmill_T1\" },"
-                + " { \"MinLuck\": 100, \"DropList\": \"RPG_Station_Sawmill_T2\","
-                + "   \"Presentation\": { \"Sound\": \"SFX_Coins_Land\" } } ] } }");
-        assertNotNull(a.getLuck());
-        assertEquals(2, a.getLuck().getTiers().length);
-        assertEquals(50.0, a.getLuck().getTiers()[0].getMinLuck());
-        assertEquals("RPG_Station_Sawmill_T2", a.getLuck().getTiers()[1].getDropList());
-        assertEquals("SFX_Coins_Land", a.getLuck().getTiers()[1].getPresentation().getSound());
+    void loot_decodesTablesAndInlineRolls() throws Exception {
+        StationAsset a = decodeAsset("{ \"Loot\": { \"Tables\": [\"sawmillfinds\"],"
+                + " \"Rolls\": [ { \"Trigger\": \"Cycle\","
+                + "   \"Chance\": { \"BasePercent\": 2, \"AddFactors\": [ { \"Factor\": \"rpgstations:tool_power\" } ],"
+                + "     \"CapPercent\": 25 }, \"Grants\": { \"BonusOutputCopies\": 1 } } ] } }");
+        assertNotNull(a.getLoot());
+        assertEquals("sawmillfinds", a.getLoot().getTables()[0]);
+        assertEquals(1, a.getLoot().getRolls().length);
+        Roll roll = a.getLoot().getRolls()[0];
+        assertEquals("Cycle", roll.getTrigger());
+        assertEquals(2.0, roll.getChance().getBasePercent());
+        assertEquals("rpgstations:tool_power", roll.getChance().getAddFactors()[0].getFactor());
+        assertEquals(25.0, roll.getChance().getCapPercent());
+        assertEquals(1, roll.getGrants().getBonusOutputCopies());
+        assertNull(roll.getLadder());
+    }
+
+    @Test
+    void loot_ladderFloorRoutesThroughGrants_noDirectDropListLeaf() throws Exception {
+        // M3 fix 2: a Ladder floor's ONLY reward path is its own Grants (no sibling DropList leaf).
+        StationAsset a = decodeAsset("{ \"Loot\": { \"Rolls\": [ { \"Ladder\": {"
+                + " \"Value\": { \"Factor\": \"rpgstations:cycle_count\" },"
+                + " \"Floors\": [ { \"Min\": 10, \"Grants\": { \"DropList\": \"RPG_Station_Sawmill_T1\" } } ] } } ] } }");
+        Roll.Ladder.Floor floor = a.getLoot().getRolls()[0].getLadder().getFloors()[0];
+        assertEquals(10.0, floor.getMin());
+        assertEquals("RPG_Station_Sawmill_T1", floor.getGrants().getDropList());
+    }
+
+    @Test
+    void loot_omitted_decodesNull() throws Exception {
+        StationAsset a = decodeAsset("{ \"Identity\": { \"NameKey\": \"rpgstations.station.x.name\" } }");
+        assertNull(a.getLoot());
     }
 
     // ==================== Hold.Seat / Tool.XpScale / Work.Idle (unchanged, sibling-leaf inherit) ====================

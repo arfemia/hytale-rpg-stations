@@ -1,0 +1,4 @@
+{
+  "Enabled": true,
+  "SummaryHud": { "Enabled": true, "Position": "top_center", "OffsetY": 72, "TtlMs": 6000 }
+}

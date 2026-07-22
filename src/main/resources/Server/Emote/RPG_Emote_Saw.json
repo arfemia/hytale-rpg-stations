@@ -1,0 +1,7 @@
+{
+  "Name": "avatarCustomization.emotes.RPG_Emote_Saw.name",
+  "Animation": "Characters/Animations/Items/Main_Handed/Hatchet/Attacks/Chop/Chop.blockyanim",
+  "Icon": "Icons/Emotes/Wave@2x.png",
+  "IsLooping": false,
+  "HideItemInHand": false
+}

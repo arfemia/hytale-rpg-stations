@@ -14,10 +14,14 @@ import javax.annotation.Nullable;
 
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemDropList;
 import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
+import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.i18n.RpgStationsLangKeys;
+import com.ziggfreed.rpgstations.loot.LootableCatalog;
+import com.ziggfreed.rpgstations.loot.StationFactorRegistry;
 import com.ziggfreed.rpgstations.util.Log;
 import com.ziggfreed.rpgstations.validation.Finding;
 import com.ziggfreed.rpgstations.validation.Report;
@@ -45,17 +49,24 @@ public final class StationValidator {
 
     // ==================== Entry points ====================
 
-    /** Validate the live catalog. Never throws; returns an empty list on failure. */
+    /**
+     * Validate the live catalog (stations AND named lootable tables, design section 4.8's
+     * "validator coverage"). Never throws; returns an empty list on failure. {@code factorKnown}
+     * is backed by the LIVE {@code loot.StationFactorRegistry} (the built-in {@code rpgstations:}
+     * factors are always registered by plugin {@code setup()}, so this is a real check now,
+     * unlike the leg-2 fail-open placeholder).
+     */
     @Nonnull
     public static List<Finding> validate() {
         try {
-            return validate(StationCatalog.getInstance().all().values(),
+            List<Finding> out = new ArrayList<>(validate(StationCatalog.getInstance().all().values(),
                     RpgStationsLangKeys::isKnown,
                     StationValidator::dropListKnownLive,
-                    // TODO(leg 4): the real api FactorRegistry replaces this fail-open default
-                    // once it exists; nothing is registered yet, so warning on every authored
-                    // factor id would be noise, not signal.
-                    id -> true);
+                    StationFactorRegistry::isKnown,
+                    id -> LootableCatalog.getInstance().get(id) != null));
+            out.addAll(validateLootables(LootableCatalog.getInstance().all().values(),
+                    StationValidator::dropListKnownLive, StationFactorRegistry::isKnown));
+            return out;
         } catch (Throwable t) {
             Log.warn("Station validation aborted: " + t.getMessage());
             return new ArrayList<>();
@@ -72,18 +83,28 @@ public final class StationValidator {
     }
 
     /**
-     * Singleton-free core. {@code langKeyKnown} answers "does this rpgstations lang key
+     * Singleton-free core (4-arg convenience: {@code lootableKnown} defaults to always-known,
+     * for a caller that does not care about {@code Loot.Tables} reference checks - e.g. every
+     * pre-leg-3 test fixture). {@code langKeyKnown} answers "does this rpgstations lang key
      * exist"; {@code dropListKnown} answers "does this native ItemDropList asset id exist";
-     * {@code factorKnown} answers "is this Requires.Condition factor id registered" (the
-     * design's "factor-id known-check against the registry" - fail-OPEN by default since no
-     * registry exists this leg, warn-not-error either way per the design's stated posture:
-     * "providers may register later, so warn not error").
+     * {@code factorKnown} answers "is this factor id registered" (warn-not-error either way -
+     * "providers may register later").
      */
     @Nonnull
     public static List<Finding> validate(@Nonnull Collection<StationAsset> stations,
                                          @Nonnull Predicate<String> langKeyKnown,
                                          @Nonnull Predicate<String> dropListKnown,
                                          @Nonnull Predicate<String> factorKnown) {
+        return validate(stations, langKeyKnown, dropListKnown, factorKnown, id -> true);
+    }
+
+    /** Singleton-free core, full form - {@code lootableKnown} answers "does this LootableAsset id exist". */
+    @Nonnull
+    public static List<Finding> validate(@Nonnull Collection<StationAsset> stations,
+                                         @Nonnull Predicate<String> langKeyKnown,
+                                         @Nonnull Predicate<String> dropListKnown,
+                                         @Nonnull Predicate<String> factorKnown,
+                                         @Nonnull Predicate<String> lootableKnown) {
         List<Finding> out = new ArrayList<>();
         for (StationAsset a : stations) {
             if (a == null) {
@@ -96,13 +117,37 @@ public final class StationValidator {
             checkRecipe(a, id, label, out);
             checkWork(a, id, label, out);
             checkTool(a, id, label, out);
-            checkLuck(a, id, label, dropListKnown, out);
+            checkLoot(a, id, label, dropListKnown, factorKnown, lootableKnown, out);
             checkRequires(a, id, label, factorKnown, out);
             checkAnimation(a, id, label, out);
             checkPresentationRefs(a, id, label, out);
             checkCamera(a, id, label, out);
             checkCompletion(a, id, label, out);
             checkFlairs(a, id, label, out);
+        }
+        return out;
+    }
+
+    /** Validates every standalone {@link LootableAsset}'s {@code Rolls} (the same {@link #checkRoll} core). */
+    @Nonnull
+    public static List<Finding> validateLootables(@Nonnull Collection<LootableAsset> lootables,
+                                                   @Nonnull Predicate<String> dropListKnown,
+                                                   @Nonnull Predicate<String> factorKnown) {
+        List<Finding> out = new ArrayList<>();
+        for (LootableAsset l : lootables) {
+            if (l == null) {
+                continue;
+            }
+            String id = l.getId() == null || l.getId().isBlank() ? "(unnamed)" : l.getId();
+            String label = "Lootable '" + id + "'";
+            Roll[] rolls = l.getRolls();
+            if (rolls == null || rolls.length == 0) {
+                out.add(Finding.warning(DOMAIN, "LOOT_EMPTY_TABLE", label + " has no Rolls", id));
+                continue;
+            }
+            for (int i = 0; i < rolls.length; i++) {
+                checkRoll(rolls[i], label + ".Rolls[" + i + "]", id, dropListKnown, factorKnown, out);
+            }
         }
         return out;
     }
@@ -198,114 +243,161 @@ public final class StationValidator {
     }
 
     /**
-     * Luck gate (UNCHANGED schema this leg - {@code StationAsset.Luck}, see that class's
-     * javadoc): the skill-existence checks the MMO original ran here are DROPPED (skill ids
-     * are not this engine's business); the tier-ladder STRUCTURAL checks stay (they are pure
-     * station-shape checks, not skill-registry-dependent).
+     * The conditional-lootable declaration (design section 4.4.3/4.5, REPLACES the leg-2
+     * {@code checkLuck}): validates {@code Loot.Tables} references, then every inline {@code
+     * Loot.Rolls} entry via the shared {@link #checkRoll} core (also used by {@link
+     * #validateLootables} for a standalone {@link LootableAsset}'s own Rolls).
      */
-    private static void checkLuck(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
-                                  @Nonnull Predicate<String> dropListKnown, @Nonnull List<Finding> out) {
-        StationAsset.Luck luck = a.getLuck();
-        if (luck == null) {
+    private static void checkLoot(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
+                                  @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
+                                  @Nonnull Predicate<String> lootableKnown, @Nonnull List<Finding> out) {
+        StationAsset.Loot loot = a.getLoot();
+        if (loot == null) {
             return;
         }
-        StationAsset.Luck.Tier[] tiers = luck.getTiers();
-        Map<String, StationAsset.Luck.Tier[]> skillTiers = luck.getSkillTiers();
-        boolean hasTiers = tiers != null && tiers.length > 0;
-        boolean hasSkillTiers = skillTiers != null && !skillTiers.isEmpty();
-        if (!hasTiers && !hasSkillTiers) {
-            return;
-        }
-
-        checkTierLadder(tiers, label + " Luck.Tiers", id, dropListKnown, out);
-        if (hasSkillTiers) {
-            List<String> effectiveLuckSkills = luckSkillsFallback(luck, a.getWork());
-            for (Map.Entry<String, StationAsset.Luck.Tier[]> entry : skillTiers.entrySet()) {
-                String skillId = entry.getKey();
-                String ladderLabel = label + " Luck.SkillTiers['" + skillId + "']";
-                if (skillId == null || skillId.isBlank()) {
-                    out.add(Finding.warning(DOMAIN, "BLANK_SKILLTIER_KEY",
-                            label + " Luck.SkillTiers has a blank skill key", id));
-                } else if (!effectiveLuckSkills.contains(skillId)) {
-                    out.add(Finding.warning(DOMAIN, "SKILLTIER_NOT_A_LUCK_SKILL",
-                            ladderLabel + " is not one of the station's effective luck skills "
-                                    + effectiveLuckSkills + " - this ladder can never roll", id));
+        String[] tables = loot.getTables();
+        if (tables != null) {
+            for (String t : tables) {
+                if (t == null || t.isBlank()) {
+                    out.add(Finding.warning(DOMAIN, "LOOT_BLANK_TABLE", label + " Loot.Tables has a blank entry", id));
+                } else if (!lootableKnown.test(t.toLowerCase(Locale.ROOT))) {
+                    out.add(Finding.warning(DOMAIN, "LOOT_UNKNOWN_TABLE",
+                            label + " Loot.Tables references unknown lootable '" + t + "'", id));
                 }
-                checkTierLadder(entry.getValue(), ladderLabel, id, dropListKnown, out);
             }
         }
-
-        out.add(Finding.info(DOMAIN, "TIERS_ECONOMY_ADVISORY",
-                label + " authors loot Tiers/SkillTiers: the aggregate is UNCAPPED (a floor above 100% is"
-                        + " reachable), so frequency control lives entirely in the droplist's own Empty"
-                        + " weights - a rich table can net-multiply materials; balance is the author's"
-                        + " responsibility", id));
+        Roll[] rolls = loot.getRolls();
+        if (rolls != null) {
+            for (int i = 0; i < rolls.length; i++) {
+                checkRoll(rolls[i], label + " Loot.Rolls[" + i + "]", id, dropListKnown, factorKnown, out);
+            }
+        }
     }
 
     /**
-     * The station's effective luck skills for the {@code SKILLTIER_NOT_A_LUCK_SKILL} check
-     * only (mirrors the MMO's {@code StationLuck.luckSkills} pure resolution - not a live
-     * call, since {@code StationLuck} did not move this leg; see this class's javadoc).
+     * The shared {@link Roll} structural core (design 4.8's "validator coverage" + the M3
+     * critique fix 5): {@code Conditions}/{@code Chance.AddFactors}/{@code Ladder.Value} factor
+     * ids run through {@code factorKnown} (the {@code UNKNOWN_FACTOR} code {@link #checkRequires}
+     * already uses - one code, one meaning, across every factor-reference site); every {@code
+     * Grants.DropList} (top-level or per-floor) runs through {@code dropListKnown}; a {@code
+     * Grants.BonusOutputCopies} authored under a non-{@code Cycle} {@link Roll#effectiveTrigger()}
+     * is flagged {@code LOOT_BONUS_COPIES_WRONG_TRIGGER} (M3 fix 5 - there is no live cycle
+     * output for a Completion-trigger roll to copy).
      */
-    @Nonnull
-    private static List<String> luckSkillsFallback(@Nullable StationAsset.Luck luck, @Nullable StationAsset.Work work) {
-        if (luck != null && luck.getSkills() != null) {
-            List<String> out = new ArrayList<>();
-            for (String s : luck.getSkills()) {
-                if (s != null && !s.isBlank() && !out.contains(s)) {
-                    out.add(s);
-                }
-            }
-            return out;
-        }
-        List<String> out = new ArrayList<>();
-        if (work != null && work.getXp() != null) {
-            for (StationAsset.WorkXp xp : work.getXp()) {
-                if (xp != null && xp.getSkill() != null && !xp.getSkill().isBlank() && !out.contains(xp.getSkill())) {
-                    out.add(xp.getSkill());
-                }
-            }
-        }
-        return out;
-    }
-
-    private static void checkTierLadder(@Nullable StationAsset.Luck.Tier[] tiers, @Nonnull String ladderLabel,
-                                        @Nonnull String id, @Nonnull Predicate<String> dropListKnown,
-                                        @Nonnull List<Finding> out) {
-        if (tiers == null || tiers.length == 0) {
+    static void checkRoll(@Nullable Roll roll, @Nonnull String label, @Nonnull String id,
+                          @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
+                          @Nonnull List<Finding> out) {
+        if (roll == null) {
             return;
         }
+        String trigger = roll.effectiveTrigger();
+        checkConditionFactors(roll.getConditions(), label + ".Conditions", id, factorKnown, out);
+
+        Roll.Chance chance = roll.getChance();
+        if (chance != null) {
+            checkConditionFactors(chance.getAddFactors(), label + ".Chance.AddFactors", id, factorKnown, out);
+            if (chance.getBasePercent() != null && chance.getBasePercent() < 0) {
+                out.add(Finding.warning(DOMAIN, "LOOT_NEGATIVE_BASE_PERCENT",
+                        label + ".Chance has a negative BasePercent", id));
+            }
+            if (chance.getCapPercent() != null && chance.getCapPercent() <= 0) {
+                out.add(Finding.warning(DOMAIN, "LOOT_NONPOSITIVE_CAP_PERCENT",
+                        label + ".Chance has a nonpositive CapPercent - the roll can never hit", id));
+            }
+        }
+
+        Roll.Grants topGrants = roll.getGrants();
+        checkGrants(topGrants, label + ".Grants", id, trigger, dropListKnown, out);
+        boolean hasAnything = topGrants != null && !topGrants.isEmpty();
+
+        Roll.Ladder ladder = roll.getLadder();
+        if (ladder != null) {
+            hasAnything = true;
+            Condition value = ladder.getValue();
+            if (value == null || value.getFactor() == null || value.getFactor().isBlank()) {
+                out.add(Finding.error(DOMAIN, "LOOT_LADDER_MISSING_VALUE",
+                        label + ".Ladder has no Value.Factor - it can never resolve a floor", id));
+            } else if (!factorKnown.test(value.getFactor())) {
+                out.add(Finding.warning(DOMAIN, "UNKNOWN_FACTOR",
+                        label + ".Ladder.Value references unknown factor '" + value.getFactor() + "'", id));
+            }
+            Roll.Ladder.Floor[] floors = ladder.getFloors();
+            if (floors == null || floors.length == 0) {
+                out.add(Finding.warning(DOMAIN, "LOOT_LADDER_EMPTY", label + ".Ladder has no Floors", id));
+            } else {
+                checkFloors(floors, label, id, trigger, dropListKnown, out);
+            }
+        }
+
+        if (!hasAnything) {
+            out.add(Finding.warning(DOMAIN, "LOOT_ROLL_EMPTY",
+                    label + " authors neither Grants nor a Ladder - it can never grant anything", id));
+        }
+    }
+
+    private static void checkFloors(@Nonnull Roll.Ladder.Floor[] floors, @Nonnull String rollLabel,
+                                    @Nonnull String id, @Nonnull String trigger,
+                                    @Nonnull Predicate<String> dropListKnown, @Nonnull List<Finding> out) {
         Set<Double> seenFloors = new HashSet<>();
-        for (int i = 0; i < tiers.length; i++) {
-            StationAsset.Luck.Tier t = tiers[i];
-            String tLabel = ladderLabel + "[" + i + "]";
-            if (t == null) {
+        for (int i = 0; i < floors.length; i++) {
+            Roll.Ladder.Floor f = floors[i];
+            String fLabel = rollLabel + ".Ladder.Floors[" + i + "]";
+            if (f == null) {
                 continue;
             }
-            Double minLuck = t.getMinLuck();
-            if (minLuck == null || minLuck <= 0.0) {
-                out.add(Finding.error(DOMAIN, "TIER_MISSING_FLOOR",
-                        tLabel + " has a null or nonpositive MinLuck - this tier can never be reached", id));
+            Double min = f.getMin();
+            if (min == null || min <= 0.0) {
+                out.add(Finding.error(DOMAIN, "LOOT_LADDER_FLOOR_MISSING_MIN",
+                        fLabel + " has a null or nonpositive Min - this floor can never be reached", id));
+            } else if (!seenFloors.add(min)) {
+                out.add(Finding.warning(DOMAIN, "LOOT_LADDER_DUPLICATE_FLOOR",
+                        fLabel + " repeats Min " + min + " (the later entry is unreachable)", id));
             }
-            String dropList = t.getDropList();
-            if (dropList == null || dropList.isBlank()) {
-                out.add(Finding.error(DOMAIN, "TIER_MISSING_DROPLIST",
-                        tLabel + " has no DropList - this tier rolls nothing even if reached", id));
-            } else if (!dropListKnown.test(dropList)) {
-                out.add(Finding.warning(DOMAIN, "UNKNOWN_DROPLIST",
-                        tLabel + " references unknown ItemDropList '" + dropList + "'", id));
+            if (f.getGrants() == null) {
+                // M3 fix 2: a floor's ONLY reward path is its own Grants - no direct DropList leaf.
+                out.add(Finding.error(DOMAIN, "LOOT_LADDER_FLOOR_EMPTY_GRANTS",
+                        fLabel + " has no Grants - this floor rolls nothing even if reached", id));
+            } else {
+                checkGrants(f.getGrants(), fLabel + ".Grants", id, trigger, dropListKnown, out);
             }
-            if (minLuck != null && minLuck > 0.0 && minLuck < 5.0) {
-                out.add(Finding.warning(DOMAIN, "TIER_SUSPECT_FRACTION",
-                        tLabel + " has MinLuck " + minLuck
-                                + " (did you author a fraction? MinLuck is a percent, e.g. 50 not 0.5)", id));
+            warnUnplayedPresentationLeaves(f.getPresentation(), fLabel + ".Presentation", id,
+                    "LOOT_FLOOR_UNPLAYED_LEAVES", out);
+        }
+    }
+
+    private static void checkConditionFactors(@Nullable Condition[] conditions, @Nonnull String label,
+                                              @Nonnull String id, @Nonnull Predicate<String> factorKnown,
+                                              @Nonnull List<Finding> out) {
+        if (conditions == null) {
+            return;
+        }
+        for (Condition c : conditions) {
+            if (c == null || c.getFactor() == null || c.getFactor().isBlank()) {
+                continue;
             }
-            if (minLuck != null && minLuck > 0.0 && !seenFloors.add(minLuck)) {
-                out.add(Finding.warning(DOMAIN, "TIER_DUPLICATE_FLOOR",
-                        tLabel + " repeats MinLuck " + minLuck + " (the later entry is unreachable)", id));
+            if (!factorKnown.test(c.getFactor())) {
+                out.add(Finding.warning(DOMAIN, "UNKNOWN_FACTOR",
+                        label + " references unknown factor '" + c.getFactor() + "'", id));
             }
-            warnUnplayedPresentationLeaves(t.getPresentation(), tLabel + ".Presentation", id,
-                    "TIER_UNPLAYED_LEAVES", out);
+        }
+    }
+
+    private static void checkGrants(@Nullable Roll.Grants grants, @Nonnull String label, @Nonnull String id,
+                                    @Nonnull String trigger, @Nonnull Predicate<String> dropListKnown,
+                                    @Nonnull List<Finding> out) {
+        if (grants == null) {
+            return;
+        }
+        if (grants.getBonusOutputCopies() != null && grants.getBonusOutputCopies() > 0
+                && !Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
+            out.add(Finding.warning(DOMAIN, "LOOT_BONUS_COPIES_WRONG_TRIGGER",
+                    label + " authors BonusOutputCopies under a non-Cycle Trigger ('" + trigger
+                            + "') - there is no live cycle output to copy there", id));
+        }
+        String dropListId = grants.getDropList();
+        if (dropListId != null && !dropListId.isBlank() && !dropListKnown.test(dropListId)) {
+            out.add(Finding.warning(DOMAIN, "LOOT_UNKNOWN_DROPLIST",
+                    label + " references unknown ItemDropList '" + dropListId + "'", id));
         }
     }
 
