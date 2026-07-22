@@ -62,14 +62,24 @@ import com.ziggfreed.rpgstations.util.Log;
  * StationService#toggle} AFTER the existing mount attach - the puppet layers on WHATEVER hold/
  * mount the real player already has, never replacing it); reveal + despawn in the ONE idempotent
  * {@code stop()} funnel ({@link #revealAndDespawn}, EVERY exit path - re-press, walk-off, damage,
- * death, disconnect, shutdown), resolving its OWN store off {@code s.ref.getStore()} (falling back
- * to {@code s.puppetRef.getStore()}) rather than trusting the possibly-{@code null} {@code store}
- * parameter {@code stop()} may have been handed, mirroring {@code returnCustody}'s exact pattern -
- * so a disconnect/shutdown stop still reveals the real player and despawns the puppet cleanly.
+ * death, disconnect, shutdown). Every player/puppet component + entity MUTATION (the spawn, the
+ * {@code Scale} hide/reveal, the despawn, and the per-swing prop sync) routes through the
+ * {@code CommandBuffer} the caller threads through, never a live {@code Store} - {@code toggle}
+ * (an interaction handler) and the heartbeat frame-drain both run inside the store's own
+ * write-processing lock, where a direct {@code store.putComponent}/{@code removeEntity} throws
+ * (accessor-bug fix, fix round; see each method's own javadoc). {@code teardownStore} (resolved
+ * off {@code s.ref.getStore()}, falling back to {@code s.puppetRef.getStore()}) still backs
+ * {@link #revealAndDespawn}'s entity-still-resolvable validity gate, mirroring {@code
+ * returnCustody}'s exact resolution pattern; the mutation itself uses the passed-in {@code
+ * commandBuffer}, which is {@code null} on the same damage/death/disconnect/shutdown sweeps
+ * {@code returnCustody} already accepts a {@code null} commandBuffer for.
  * {@link #reassertOnReady} is the belt-and-suspenders {@code PlayerReadyEvent} safety net (design
  * 4.4/leg P5): unconditional, not gated on any remembered session (a restart wipes every
- * in-memory {@code StationSession} by construction) - the only residual risk is a PERSISTED
- * {@link EntityScaleComponent} on the player's own entity from an unclean shutdown mid-hide.
+ * in-memory {@code StationSession} by construction), it also catches the residual case of a
+ * {@code null}-commandBuffer exit leaving a hidden player un-revealed for the rest of that
+ * session - the only OTHER residual risk is a PERSISTED {@link EntityScaleComponent} on the
+ * player's own entity from an unclean shutdown mid-hide. {@link #reassertOnReady} itself runs via
+ * {@code world.execute}, outside processing, so it correctly stays on {@code store}.
  */
 final class StationPuppetController {
 
@@ -84,9 +94,18 @@ final class StationPuppetController {
      * false (the classic in-body worker). A spawn failure is NON-FATAL: logs, leaves every {@code
      * StationSession} puppet field at its default, the session continues in-body - matching {@link
      * StationEntityMountController}'s own graceful-degradation contract.
+     *
+     * <p><b>Accessor-bug fix (fix round):</b> both the spawn AND the {@code Scale} hide route
+     * through {@code commandBuffer}, never {@code store} - this call runs from {@code
+     * StationService#toggle}, inside the store's write-processing lock (an interaction-handler
+     * call site), where a direct {@code store.putComponent} throws {@code IllegalStateException(
+     * "Store is currently processing!")} (verified in {@code hytale-shared-source}'s {@code
+     * Store#putComponent}/{@code assertWriteProcessing}). The prior {@code store}-routed hide
+     * silently swallowed that throw into the method's own catch, so the real player was NEVER
+     * actually hidden even though every shipped station authors {@code Hide.Route:"Scale"}.
      */
     static void spawnAndHide(@Nonnull StationSession s, @Nonnull CommandBuffer<EntityStore> commandBuffer,
-            @Nonnull Store<EntityStore> store, @Nullable Puppet puppet, @Nullable Player player) {
+            @Nullable Puppet puppet, @Nullable Player player) {
         if (puppet == null || !puppet.effectiveEnabled() || s.ref == null) {
             return;
         }
@@ -128,7 +147,7 @@ final class StationPuppetController {
             Puppet.Hide hide = puppet.getHide();
             s.puppetHideRoute = hide != null ? hide.effectiveRoute() : Puppet.HIDE_ROUTE_SCALE;
             if (Puppet.HIDE_ROUTE_SCALE.equals(s.puppetHideRoute)) {
-                s.puppetSavedScale = PlayerPuppetService.hideByScale(store, s.ref);
+                s.puppetSavedScale = PlayerPuppetService.hideByScale(commandBuffer, s.ref);
             }
             // "Effect" (schema-reserved future work) and "None" (the deliberate degraded
             // fallback) apply NO hide this leg - the puppet still spawns and animates, the real
@@ -143,21 +162,36 @@ final class StationPuppetController {
     /**
      * Reveal the real player (undo the hide) + despawn the puppet - the {@code stop()} funnel's
      * ONE puppet-teardown call, every exit path. No-op when {@link StationSession#puppetActive}
-     * is false. Resolves its own store off {@code s.ref.getStore()} (falling back to {@code
-     * s.puppetRef.getStore()} when the player ref itself is gone) rather than trusting a
-     * possibly-{@code null} parameter, mirroring {@code StationService#returnCustody}'s exact
-     * pattern - so a disconnect ({@code stop(..., null, null)}) still tears down cleanly.
+     * is false. {@code teardownStore} (resolved off {@code s.ref.getStore()}, falling back to
+     * {@code s.puppetRef.getStore()} when the player ref itself is gone) is used ONLY as an
+     * entity-still-resolvable validity gate now - the actual reveal/despawn mutations route
+     * through {@code commandBuffer}.
+     *
+     * <p><b>Accessor-bug fix (fix round):</b> {@code revealByScale}/{@code despawn} now take the
+     * {@code commandBuffer} {@code stop()} threads through (the SAME nullable parameter it already
+     * passes to {@code returnCustody} and the mount-anchor despawn), never {@code teardownStore} -
+     * the prior store-routed calls threw {@code IllegalStateException("Store is currently
+     * processing!")} on every common exit path (re-press F via {@code toggle}, walk-off/
+     * tool-changed/out-of-inputs/RITUAL_COMPLETE via the heartbeat), silently swallowed into a
+     * fine log, leaving a ghost puppet untracked in the world and (whenever the hide itself HAD
+     * applied) the real player stuck invisible. A {@code null} commandBuffer (the damage/death/
+     * disconnect/shutdown sweeps, which pass {@code null} through {@code stop()} exactly like
+     * {@code returnCustody}'s own accepted tradeoff) leaves the reveal/despawn un-applied for THIS
+     * exit - the puppet is {@code NonSerialized} so a leftover despawn is harmless past a restart,
+     * and a leftover hidden-player scale self-heals on the player's NEXT {@code PlayerReadyEvent}
+     * via {@link #reassertOnReady}.
      */
-    static void revealAndDespawn(@Nonnull StationSession s) {
+    static void revealAndDespawn(@Nonnull StationSession s, @Nullable CommandBuffer<EntityStore> commandBuffer) {
         if (!s.puppetActive) {
             return;
         }
         Store<EntityStore> teardownStore = resolveTeardownStore(s);
         if (teardownStore != null) {
-            if (Puppet.HIDE_ROUTE_SCALE.equals(s.puppetHideRoute) && s.ref != null && s.ref.isValid()) {
-                PlayerPuppetService.revealByScale(teardownStore, s.ref, s.puppetSavedScale);
+            if (Puppet.HIDE_ROUTE_SCALE.equals(s.puppetHideRoute) && s.ref != null && s.ref.isValid()
+                    && commandBuffer != null) {
+                PlayerPuppetService.revealByScale(commandBuffer, s.ref, s.puppetSavedScale);
             }
-            PlayerPuppetService.despawn(s.puppetRef, teardownStore);
+            PlayerPuppetService.despawn(s.puppetRef, commandBuffer);
         } else {
             // Both the player ref and the puppet ref are gone/unresolvable - nothing left to
             // reveal or despawn via any store. Harmless: the puppet is NonSerialized (never
@@ -213,9 +247,13 @@ final class StationPuppetController {
      * prop. Both the clip and the prop prefer the currently-suspended step's own {@code
      * StationStep.Puppet} override when one is in flight, else fall back to the resolved action's
      * defaults ({@code s.emoteId}/{@code s.puppetDefaultProp}) - design 3.1's "absent = inherit
-     * the action's default clip/prop".
+     * the action's default clip/prop". The animation packet itself still routes through {@code
+     * store} ({@link PlayerPuppetService#playAnimation} sends a network packet, not a component
+     * mutation - not part of the accessor-bug fix); the prop sync (a real {@code Hotbar} component
+     * mutation) routes through {@code commandBuffer} - see {@link #syncProp}.
      */
-    static void playSwing(@Nonnull StationSession s, @Nonnull Store<EntityStore> store, @Nullable Player player) {
+    static void playSwing(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nullable Player player) {
         if (!s.puppetActive) {
             return;
         }
@@ -224,10 +262,19 @@ final class StationPuppetController {
         if (clip != null && !clip.isBlank()) {
             PlayerPuppetService.playAnimation(store, s.puppetRef, AnimationSlot.Emote, null, clip, true);
         }
-        syncProp(s, store, player, override);
+        syncProp(s, commandBuffer, player, override);
     }
 
-    private static void syncProp(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+    /**
+     * Accessor-bug fix (fix round): routes the {@code Hotbar} component swap through {@code
+     * commandBuffer}, never {@code store} - this runs from {@link #playSwing}, reached via {@code
+     * StationService#runSwing} on the heartbeat frame-drain's swing-beat timer, a processing
+     * context (the same class as {@code toggle}). The prior store-routed put/remove threw {@code
+     * IllegalStateException("Store is currently processing!")}, silently swallowed, so a per-step
+     * {@code Puppet.Prop} override (e.g. the anvil's stamp beat swapping to empty-handed) never
+     * actually applied.
+     */
+    private static void syncProp(@Nonnull StationSession s, @Nonnull CommandBuffer<EntityStore> commandBuffer,
             @Nullable Player player, @Nullable StationStep.PuppetOverride override) {
         if (s.puppetRef == null || !s.puppetRef.isValid()) {
             return;
@@ -237,12 +284,12 @@ final class StationPuppetController {
         String itemId = resolveEffectivePropItemId(heldItemIdOf(player), effectiveProp);
         try {
             if (itemId == null || itemId.isBlank()) {
-                store.removeComponentIfExists(s.puppetRef, InventoryComponent.Hotbar.getComponentType());
+                commandBuffer.tryRemoveComponent(s.puppetRef, InventoryComponent.Hotbar.getComponentType());
                 return;
             }
             SimpleItemContainer container = new SimpleItemContainer((short) 1);
             container.setItemStackForSlot((short) 0, new ItemStack(itemId, 1));
-            store.putComponent(s.puppetRef, InventoryComponent.Hotbar.getComponentType(),
+            commandBuffer.putComponent(s.puppetRef, InventoryComponent.Hotbar.getComponentType(),
                     new InventoryComponent.Hotbar(container, (byte) 0));
         } catch (Throwable t) {
             Log.fine("STATION puppet prop sync failed: " + t.getMessage());

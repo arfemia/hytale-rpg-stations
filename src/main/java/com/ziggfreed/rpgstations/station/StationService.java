@@ -462,11 +462,21 @@ public final class StationService {
         s.movementLock = (!effectivelyMounted && (hold == null || hold.getMovementLock() == null || hold.getMovementLock()))
                 || (s.entityMountMode && !s.entitySteerable);
 
+        // Animation fields (s.emoteId in particular) MUST be assigned before the puppet
+        // spawn+hide call below - StationPuppetController#spawnAndHide reads s.emoteId to
+        // pre-seed the puppet's initial ActiveAnimationComponent (the render-guaranteed catch-up
+        // mechanism for a viewer not yet tracking the puppet at spawn time). Assigning it AFTER
+        // that call (the fix-round defect) left every fresh session's puppet with no initial
+        // animation component at all.
+        StationAsset.Animation animation = action.getAnimation();
+        s.emoteId = animation != null ? animation.getEmoteId() : null;
+        s.actionClip = animation != null ? animation.getActionClip() : null;
+
         // Puppet presentation (round-4 design, doc section 4.2): spawn + hide AFTER the mount
         // attach above - the puppet layers on WHATEVER hold/mount the real player already has
         // (seat, standing mount, or effect-mode movement lock), never replacing it. Non-fatal on
         // failure: s.puppetActive stays false and the session continues in-body.
-        StationPuppetController.spawnAndHide(s, commandBuffer, store, action.getPuppet(), player);
+        StationPuppetController.spawnAndHide(s, commandBuffer, action.getPuppet(), player);
 
         StationAsset.Camera camera = action.getCamera();
         String cameraMode = camera != null && camera.getMode() != null ? camera.getMode() : "ThirdPerson";
@@ -475,10 +485,6 @@ public final class StationService {
         s.cameraLocked = camera == null || camera.getLocked() == null || camera.getLocked();
         s.faceBlock = s.cameraApplied && camera != null && camera.getFaceBlock() != null && camera.getFaceBlock();
         s.cameraRecipe = camera != null ? camera.getRecipe() : null;
-
-        StationAsset.Animation animation = action.getAnimation();
-        s.emoteId = animation != null ? animation.getEmoteId() : null;
-        s.actionClip = animation != null ? animation.getActionClip() : null;
         s.toolReq = action.getTool();
 
         StationAsset.Tool.Durability durability = s.toolReq != null ? s.toolReq.getDurability() : null;
@@ -601,7 +607,7 @@ public final class StationService {
                     Log.info("[SMOKEDIAG] beat-fired station=" + s.stationId + " nextSwingAtMs(was)="
                             + wasDueSmokediag + " now=" + now + " swingIntervalMs=" + s.swingIntervalMs
                             + " seatMode=" + s.seatMode);
-                    runSwing(s, store);
+                    runSwing(s, store, commandBuffer);
                 }
                 if (impactDue(now, s.pendingImpactAtMs)) {
                     s.pendingImpactAtMs = 0L;
@@ -1352,7 +1358,8 @@ public final class StationService {
      * session's snapshotted {@link StationSession#swingPresentation} at the block. The clip
      * re-fire routes by {@link StationSession#seatMode}.
      */
-    private void runSwing(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
+    private void runSwing(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+                          @Nonnull CommandBuffer<EntityStore> commandBuffer) {
         if (StationCatalog.getInstance().getStation(s.stationId) == null) {
             return;
         }
@@ -1363,7 +1370,7 @@ public final class StationService {
             // (its own default, or the currently-suspended step's Puppet.Clip override) and syncs
             // its held prop, instead of routing anything onto the (now possibly hidden) real
             // player.
-            StationPuppetController.playSwing(s, store, swingPlayer);
+            StationPuppetController.playSwing(s, store, commandBuffer, swingPlayer);
         } else {
             boolean useActionSlotSmokediag = useActionSlotForSwing(s.seatMode);
             // [SMOKEDIAG] R2 seated-swing diagnosis: confirms the seat route is taken. If it shows
@@ -1523,11 +1530,11 @@ public final class StationService {
         returnCustody(s, stopCustody, commandBuffer);
 
         // Puppet reveal + despawn (round-4 design, doc section 4.4): the SAME unconditional-on-
-        // every-exit-path posture as returnCustody above, resolving its OWN store off
-        // s.ref.getStore() (never the possibly-null store parameter) so a disconnect/shutdown
-        // stop still reveals the real player and despawns the puppet cleanly - see
-        // StationPuppetController#revealAndDespawn for the full store-fallback chain.
-        StationPuppetController.revealAndDespawn(s);
+        // every-exit-path posture as returnCustody above, threading the SAME nullable
+        // commandBuffer (accessor-bug fix, fix round: the mutation itself must go through the
+        // tick-safe commandBuffer, never a live store, from a processing context like toggle/the
+        // heartbeat) - see StationPuppetController#revealAndDespawn for the full contract.
+        StationPuppetController.revealAndDespawn(s, commandBuffer);
 
         boolean entityAlive = store != null && s.ref != null && s.ref.isValid() && s.ref.getStore() == store;
         boolean silent = reason == StopReason.DISCONNECTED || reason == StopReason.SERVER_STOP

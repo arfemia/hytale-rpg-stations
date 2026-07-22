@@ -375,16 +375,24 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   pickup-immune, physics-free prop entity rendering the claim's placed item at the station's
   block-top anchor (the SAME point every cycle/swing/impact/rare-find moment already targets),
   gated on a new nullable `asset.Custody.Display` group (`{Offset{X,Y,Z}, Scale, Rotation}`, every
-  leaf `appendInherited`, null = no visual - the leg-C default). Mechanism copied verbatim from the
-  engine's own sanctioned exemplar, the admin "Entity Spawn Page" Items tab
-  (`hytale-shared-source/HytaleServer/NPC/.../pages/EntitySpawnPage.java`): a block-shaped
+  leaf `appendInherited`, null = no visual - the leg-C default). **Mechanism (fix round: delegated
+  to `ziggfreed-common`'s `entity.ItemPropEntityService`, lifted config-free out of this class's
+  own prior verbatim copy)**: originally copied verbatim from the engine's own sanctioned exemplar,
+  the admin "Entity Spawn Page" Items tab
+  (`hytale-shared-source/HytaleServer/NPC/.../pages/EntitySpawnPage.java`) - a block-shaped
   representative item (`Item#hasBlockType()`, e.g. the sawmill's placed logs) spawns a real
   `BlockEntity` (renders the actual block model, not a flat icon); everything else (most
   weapons/tools - no entity-atlas `ModelAsset`, e.g. the anvil's placed weapon) spawns a bare
   `ItemComponent` prop with `setOverrideDroppedItemAnimation(true)` - the generic "dropped item
   minus physics" shape. The THIRD exemplar route (`ModelAsset`-backed items) is NOT implemented
   (rare in practice, out of this leg's scope). Pickup-disable is `PreventPickup.INSTANCE` +
-  `PropComponent` (both routes carry both). **Never-persisted, by construction**: both routes
+  `PropComponent` (both routes carry both). `StationCustodyDisplay#spawn` now calls
+  `ItemPropEntityService.buildHolder` for the un-added `Holder`, adds its own press-F retrieve
+  interaction onto it (`#addRetrieveInteraction`), then commits via `ItemPropEntityService.spawn`;
+  `#despawn` delegates straight through to `ItemPropEntityService.despawn`. This class now owns
+  only station-specific policy (block-top-anchor offset/yaw/scale resolution + the retrieve
+  interaction), the spawn/despawn mechanism itself lives in common (see its own `entity/CLAUDE.md`).
+  **Never-persisted, by construction**: both routes
   `ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType())` - the same native
   `NonSerialized` marker `ItemComponent.generatePickedUpItem`/Teleport/Projectile/Deployables use
   for a transient plugin-owned entity - so a display entity CANNOT survive a server restart,
@@ -638,3 +646,33 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   (the group adds no UI text, per the design doc's own P6 note). The `puppetspike/` harness itself
   is UNTOUCHED beyond that one delegation - still the maintainer's live diagnostic tool, still
   scheduled for deletion once content authoring (P6) and smoke (P7) supersede it.
+  - **Puppet fix round (LANDED, this leg)**: two defects the maintainer's fix-round review found
+    against the puppet engine above, both source-verified in `hytale-shared-source`'s `Store.java`
+    (`putComponent`/`addComponent`/`removeComponent`/`removeComponentIfExists`/`removeEntity` all
+    call `assertWriteProcessing()` and throw `IllegalStateException("Store is currently
+    processing!")` when the store's processing lock is held).
+    - **Accessor bug**: `spawnAndHide`'s `Scale` hide (`hideByScale`), `revealAndDespawn`'s reveal
+      (`revealByScale`) and despawn (`PlayerPuppetService.despawn`), and `syncProp`'s `Hotbar`
+      component swap ALL used to mutate through the live `store` on code paths that run inside the
+      store's own processing lock (`toggle` - an interaction handler - and the heartbeat frame-drain
+      via `runSwing`/`stop`) - every throw was silently swallowed by each method's own
+      `catch (Throwable)`, so (a) the real player was NEVER actually hidden despite every shipped
+      station authoring `Hide.Route:"Scale"` (masked by the SAME bug - the hide itself never
+      applied), (b) `stop()`'s common exit paths (re-press, walk-off, tool-changed, out-of-inputs,
+      `RITUAL_COMPLETE`) left a GHOST PUPPET untracked in the world, and (c) a per-step
+      `Puppet.Prop` override (e.g. an anvil stamp beat swapping to empty-handed) never applied.
+      Fixed by threading `commandBuffer` through all four sites instead - `spawnAndHide` (which
+      already received it for the spawn itself) now also hides through it; `revealAndDespawn`
+      gained a `@Nullable CommandBuffer` parameter `stop()` threads through (the SAME nullable
+      value `returnCustody`/the mount-anchor despawn already accept, with the SAME accepted
+      null-degrades-to-"leave it, self-heals via `reassertOnReady`/restart" tradeoff on the
+      damage/death/disconnect/shutdown sweeps); `playSwing`/`syncProp` gained a `commandBuffer`
+      parameter `StationService#runSwing` now threads from the heartbeat's own. `spawnAndHide` no
+      longer takes a `store` parameter at all (unused once the hide moved off it).
+    - **Render-evidence route was dead**: `StationService#toggle` called `spawnAndHide` (which
+      reads `s.emoteId` to pre-seed the puppet's render-guaranteed initial
+      `ActiveAnimationComponent`) BEFORE `s.emoteId` itself was assigned a few lines later - so
+      every fresh puppet spawned with NO initial animation component, and a viewer who started
+      tracking the puppet between swing beats saw it frozen until the next swing. Fixed by moving
+      the `Animation` group's field assignment (`s.emoteId`/`s.actionClip`) to run BEFORE the
+      `spawnAndHide` call.
