@@ -61,10 +61,11 @@ import com.ziggfreed.rpgstations.util.Log;
  * hidden}):</b> (1) spawns a skinned PUPPET ~2 blocks in front of the caller - a bare networked
  * entity carrying a COPY of the caller's live {@link PlayerSkin} (the copy ctor, the proven
  * {@code /npc spawn --randommodel} shape - {@code
- * hytale-shared-source/HytaleServer/NPC/.../commands/NPCSpawnCommand.java}), playing the
- * Hatchet-family {@code "Chop"} swing clip once on the {@code Action} slot (mirroring {@code
- * station.StationHoldController#playActionSwing}'s exact resolution - it only plays if the
- * caller is holding a Hatchet-family tool; see this class's report for the caveat), and holding
+ * hytale-shared-source/HytaleServer/NPC/.../commands/NPCSpawnCommand.java}), repeating the
+ * Hatchet-family {@code "Chop"} swing clip on a beat loop on the {@code Action} slot (mirroring
+ * {@code station.StationHoldController#playActionSwing}'s exact resolution - it only plays if
+ * the caller is holding a Hatchet-family tool; see {@link #startAnimationBeat}'s own javadoc for
+ * the round-4 fix that made this observable at all), and holding
  * a copy of the caller's held item via a bare {@link InventoryComponent.Hotbar} (the generic
  * "any entity carrying Hotbar/Armor/Utility + Visible gets networked equipment" mechanism -
  * {@code InventorySystems.SyncEquipmentSystem}'s query is component-only, no player-type gate).
