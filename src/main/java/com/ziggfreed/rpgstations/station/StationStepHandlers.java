@@ -2,7 +2,9 @@ package com.ziggfreed.rpgstations.station;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import javax.annotation.Nonnull;
 
@@ -36,7 +38,11 @@ final class StationStepHandlers {
     private StationStepHandlers() {
     }
 
-    /** Removes {@code Consume.Quantity} of the item/resource-type from the player's inventory (storage-first). */
+    /**
+     * Removes {@code Consume.Quantity} of the item/resource-type either from the player's
+     * inventory (storage-first) or from the station's placed-input custody claim (design section
+     * 9.4, phase-2 leg C - {@code From:"Custody"}, the sawmill migration's route).
+     */
     static final class ConsumeHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
         @Override
         public StationStepResult execute(StationStepContext ctx, StationStep step) {
@@ -44,12 +50,6 @@ final class StationStepHandlers {
             if (consume == null) {
                 return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
                         "Consume step '" + step.getId() + "' has no Consume group");
-            }
-            if (!StationStep.Consume.FROM_INVENTORY.equalsIgnoreCase(consume.effectiveFrom())) {
-                Log.warn("STATION Consume step '" + step.getId() + "' authors From '" + consume.effectiveFrom()
-                        + "' which has no handler yet (only 'Inventory' is implemented this leg)");
-                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                        "Consume.From '" + consume.effectiveFrom() + "' is not yet implemented");
             }
             int quantity = consume.getQuantity() != null && consume.getQuantity() > 0 ? consume.getQuantity() : 1;
             String resourceTypeId = consume.getResourceTypeId();
@@ -59,6 +59,15 @@ final class StationStepHandlers {
             if (inputRef == null || inputRef.isBlank()) {
                 return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
                         "Consume step '" + step.getId() + "' has neither ItemId nor ResourceTypeId");
+            }
+            if (StationStep.Consume.FROM_CUSTODY.equalsIgnoreCase(consume.effectiveFrom())) {
+                return consumeFromCustody(ctx, step, isResource, resourceTypeId, itemId, quantity);
+            }
+            if (!StationStep.Consume.FROM_INVENTORY.equalsIgnoreCase(consume.effectiveFrom())) {
+                Log.warn("STATION Consume step '" + step.getId() + "' authors From '" + consume.effectiveFrom()
+                        + "' which has no handler yet (only 'Inventory'/'Custody' are implemented)");
+                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                        "Consume.From '" + consume.effectiveFrom() + "' is not yet implemented");
             }
             try {
                 if (isResource) {
@@ -79,6 +88,32 @@ final class StationStepHandlers {
             } catch (Throwable t) {
                 Log.warn("STATION Consume step failed for '" + ctx.session.stationId + "': " + t.getMessage());
                 return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL, t.getMessage());
+            }
+            return StationStepResult.SUCCESS;
+        }
+
+        /**
+         * Drains {@code quantity} of {@code itemId}/{@code resourceTypeId} from the block's live
+         * claim ({@link StationService#custodyClaimFor}), tallying the REAL drained item ids into
+         * the session ledger ({@code StationCustody.drain}'s {@code drainedOut} parameter, mirroring
+         * {@code StationService#tallyResourceConsumption}). A short drain (the claim ran out
+         * mid-cycle - should not normally happen since {@code firstRunnableConversionFromCustody}
+         * pre-checks, but a mid-session drain-by-another-source is not otherwise excluded) fails
+         * {@code OUT_OF_INPUTS}, the same reason an empty custody station denies at engage.
+         */
+        private static StationStepResult consumeFromCustody(StationStepContext ctx, StationStep step,
+                boolean isResource, String resourceTypeId, String itemId, int quantity) {
+            StationCustodyClaim claim = StationService.getInstance().custodyClaimFor(ctx.session.blockKey);
+            Map<String, Integer> drainedOut = new LinkedHashMap<>();
+            int drained = StationCustody.drain(claim, isResource ? null : itemId, isResource ? resourceTypeId : null,
+                    quantity, StationService::liveResourceTypeIdsOf, drainedOut);
+            if (drained < quantity) {
+                return StationStepResult.fail(StationService.StopReason.OUT_OF_INPUTS,
+                        "Consume step '" + step.getId() + "' custody ran short ("
+                                + drained + "/" + quantity + " of '" + (isResource ? resourceTypeId : itemId) + "')");
+            }
+            for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
+                ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
             }
             return StationStepResult.SUCCESS;
         }

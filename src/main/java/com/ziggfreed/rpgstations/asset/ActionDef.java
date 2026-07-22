@@ -31,6 +31,7 @@ public final class ActionDef {
 
     @Nullable protected String label;
     @Nullable protected ActionInput input;
+    @Nullable protected Custody custody;
     @Nullable protected StationAsset.Work work;
     @Nullable protected StationAsset.Recipe recipe;
     @Nullable protected StationAsset.Tool tool;
@@ -48,6 +49,8 @@ public final class ActionDef {
                     (o, v) -> o.label = v, o -> o.label, (o, p) -> o.label = p.label).add()
             .appendInherited(new KeyedCodec<>("Input", ActionInput.CODEC, false),
                     (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input).add()
+            .appendInherited(new KeyedCodec<>("Custody", Custody.CODEC, false),
+                    (o, v) -> o.custody = v, o -> o.custody, (o, p) -> o.custody = p.custody).add()
             .appendInherited(new KeyedCodec<>("Work", StationAsset.Work.CODEC, false),
                     (o, v) -> o.work = v, o -> o.work, (o, p) -> o.work = p.work).add()
             .appendInherited(new KeyedCodec<>("Recipe", StationAsset.Recipe.CODEC, false),
@@ -108,6 +111,11 @@ public final class ActionDef {
     @Nullable
     public ActionInput getInput() {
         return input;
+    }
+
+    @Nullable
+    public Custody getCustody() {
+        return custody;
     }
 
     @Nullable

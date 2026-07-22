@@ -239,9 +239,10 @@ public final class StationStep {
     /**
      * Consume {@link #quantity} of {@link #itemId} or {@link #resourceTypeId} (exactly one route,
      * matching {@code StationAsset.Ingredient}'s convention) {@link #from}. {@code From:
-     * "Inventory"} (the default when omitted) is the ONLY route this leg's engine EXECUTES;
-     * {@code "Custody"} decodes (forward-compat with phase-2 leg C's placed-input custody) but has
-     * no handler yet - {@code StationValidator}'s {@code UNIMPLEMENTED_CONSUME_SOURCE} flags it.
+     * "Inventory"} (the default when omitted) and {@code From: "Custody"} (phase-2 leg C,
+     * design 9.4 - drains the block's placed-input claim, the sawmill migration's route) are BOTH
+     * executable; any other value fails cleanly at dispatch - {@code StationValidator}'s
+     * {@code UNIMPLEMENTED_CONSUME_SOURCE} flags an authoring mistake ahead of runtime.
      */
     public static final class Consume {
         public static final String FROM_INVENTORY = "Inventory";
@@ -305,7 +306,8 @@ public final class StationStep {
     /**
      * Produce {@link #quantity} of {@link #itemId} {@link #to}. {@code To: "Inventory"} (default
      * when omitted) is the ONLY route this leg's engine EXECUTES; {@code "Custody"} decodes
-     * (forward-compat) but has no handler yet - {@code UNIMPLEMENTED_PRODUCE_DEST} flags it.
+     * (schema-reserved for a future leg's output-stays-in-custody shape, e.g. the anvil holding
+     * the weapon being enhanced) but has no handler yet - {@code UNIMPLEMENTED_PRODUCE_DEST} flags it.
      */
     public static final class Produce {
         public static final String TO_INVENTORY = "Inventory";

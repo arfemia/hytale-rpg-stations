@@ -14,12 +14,17 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.joml.Vector3d;
+import org.joml.Vector3i;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
+import com.hypixel.hytale.component.AddReason;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.math.vector.Rotation3f;
+import com.hypixel.hytale.protocol.ItemResourceType;
 import com.hypixel.hytale.server.core.Message;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemTool;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemToolSpec;
@@ -32,6 +37,7 @@ import com.hypixel.hytale.server.core.inventory.ResourceQuantity;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransaction;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
+import com.hypixel.hytale.server.core.modules.entity.item.ItemComponent;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
@@ -53,6 +59,7 @@ import com.ziggfreed.rpgstations.api.XpAsk;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.SummaryEnricherRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.Roll;
@@ -137,6 +144,14 @@ public final class StationService {
     private final ConcurrentHashMap<String, UUID> byBlock = new ConcurrentHashMap<>();
 
     /**
+     * Live placed-input custody claims (design section 9.4, phase-2 leg C), keyed by the SAME
+     * {@code "<worldUuid>:<x>:<y>:<z>"} block key {@link #byBlock} uses - one per-block claim,
+     * never persisted (session-scoped by ruling; a restart/crash loses it, self-healed at the
+     * block-state layer on the next interaction - see {@link #toggle}).
+     */
+    private final ConcurrentHashMap<String, StationCustodyClaim> custodyByBlock = new ConcurrentHashMap<>();
+
+    /**
      * A single-shot {@code (factorId, param) -> value} lookup, pure/testable independent of the
      * live api registry (used by {@link #conditionPasses}). {@link #checkRequires} builds one
      * inline against {@link FactorRegistryImpl} + a fresh {@link FactorContext} (leg 4 - replaces
@@ -204,11 +219,53 @@ public final class StationService {
             return;
         }
 
+        UUID worldUuid = playerRef.getWorldUuid();
+        String blockKey = worldUuid + ":" + blockX + ":" + blockY + ":" + blockZ;
+        World world;
+        try {
+            world = WorldEvictors.worldOf(ref);
+        } catch (Throwable t) {
+            Log.warn("STATION could not resolve world for session start: " + t.getMessage());
+            return;
+        }
+
+        // 2.5) Placed-input custody (design section 9.4): a state-dependent F BEFORE the classic
+        // engage flow - empty + a matching held stack places (or tops up); loaded + owner F falls
+        // through to engage, sourcing the convert check from the claim instead of live inventory.
+        ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, ACTION_WORK);
+        Custody custody = action.getCustody();
+        if (custody != null) {
+            StationCustodyClaim claim = custodyByBlock.get(blockKey);
+            if (claim != null && !claim.ownerId.equals(playerUuid)) {
+                toast(playerRef, RpgMsg.tr("ui.station.occupied"));
+                return;
+            }
+            boolean loadedBefore = claim != null && claim.totalQuantity() > 0;
+            if (!loadedBefore) {
+                // Restart-reconcile self-heal (design 9.4): a Loaded block-state surviving a
+                // restart with no live claim behind it resets to Empty here, idempotently.
+                flipCustodyState(world, blockX, blockY, blockZ, custody, false);
+            }
+            ItemStack heldForPlacement = player.getInventory().getActiveHotbarItem();
+            boolean roomLeft = claim == null || claim.totalQuantity() < custody.effectiveMaxQuantity();
+            if (roomLeft && custodyAccepts(custody, asset, heldForPlacement)) {
+                int moved = placeIntoCustody(store, ref, blockKey, playerUuid, asset.getId(),
+                        action.getActionId(), heldForPlacement, custody);
+                if (moved > 0) {
+                    if (!loadedBefore) {
+                        flipCustodyState(world, blockX, blockY, blockZ, custody, true);
+                    }
+                    toast(playerRef, RpgMsg.tr(loadedBefore
+                            ? "ui.station.custody.topped_up" : "ui.station.custody.placed"));
+                    return;
+                }
+            }
+            // Nothing placed (no match, or already full): fall through to engage below.
+        }
+
         // 3) Exclusive occupancy.
         StationAsset.Work work = asset.getWork();
         boolean exclusive = work == null || work.getExclusive() == null || work.getExclusive();
-        UUID worldUuid = playerRef.getWorldUuid();
-        String blockKey = worldUuid + ":" + blockX + ":" + blockY + ":" + blockZ;
         if (exclusive) {
             UUID occupant = byBlock.get(blockKey);
             if (occupant != null && !occupant.equals(playerUuid)) {
@@ -223,10 +280,13 @@ public final class StationService {
             return;
         }
 
-        // 5) Convert viability, or idle practice when the station opts in.
+        // 5) Convert viability (custody-sourced when Custody governs), or idle practice when the
+        // station opts in.
         StationAsset.Work.Idle idleGroup = work != null ? work.getIdle() : null;
         boolean idleEnabled = idleGroup != null && idleGroup.getEnabled() != null && idleGroup.getEnabled();
-        ConversionCheck check = firstRunnableConversion(player, asset);
+        ConversionCheck check = custody != null
+                ? firstRunnableConversionFromCustody(custodyByBlock.get(blockKey), player, asset)
+                : firstRunnableConversion(player, asset);
         boolean startIdle = false;
         if (check.state == ConversionState.NO_INPUTS) {
             if (!idleEnabled) {
@@ -246,13 +306,6 @@ public final class StationService {
             return;
         }
         Vector3d pos = transform.getPosition();
-        World world;
-        try {
-            world = WorldEvictors.worldOf(ref);
-        } catch (Throwable t) {
-            Log.warn("STATION could not resolve world for session start: " + t.getMessage());
-            return;
-        }
 
         StationSession s = new StationSession();
         s.playerUuid = playerUuid;
@@ -502,7 +555,10 @@ public final class StationService {
             return false;
         }
 
-        ConversionCheck check = firstRunnableConversion(player, asset);
+        Custody custody = ActionResolver.resolve(asset, ACTION_WORK).getCustody();
+        ConversionCheck check = custody != null
+                ? firstRunnableConversionFromCustody(custodyByBlock.get(s.blockKey), player, asset)
+                : firstRunnableConversion(player, asset);
         if (check.state == ConversionState.RUNNABLE) {
             if (s.idleMode) {
                 s.idleMode = false;
@@ -541,10 +597,15 @@ public final class StationService {
                                  @Nonnull Player player, @Nonnull ConversionCheck check) {
         ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, ACTION_WORK);
         int attemptCycleIndex = s.cyclesDone + 1;
+        // Sawmill migration (design 9.4): an action authoring Custody ALWAYS draws its implicit
+        // Consume from the claim, never the live inventory - the backpack drain the pre-leg-C
+        // engine ran per cycle is retired for any station custody governs.
+        String consumeFrom = action.getCustody() != null
+                ? StationStep.Consume.FROM_CUSTODY : StationStep.Consume.FROM_INVENTORY;
         StationStep.Consume consumeStep = StationStep.Consume.of(
                 check.inputIsResource ? null : check.inputRef,
                 check.inputIsResource ? check.inputRef : null,
-                check.inputCount, StationStep.Consume.FROM_INVENTORY);
+                check.inputCount, consumeFrom);
         StationStep.Produce produceStep = StationStep.Produce.of(check.outputItem, check.outputCount,
                 StationStep.Produce.TO_INVENTORY);
         Roll[] resolvedRolls = LootEngine.resolveRolls(action.getLoot()).toArray(new Roll[0]);
@@ -1155,6 +1216,15 @@ public final class StationService {
         }
         s.pendingImpactAtMs = 0L;
 
+        // Placed-input custody auto-return (design 9.4): EVERY exit path, silent included - the
+        // design's own binding list (re-press, walk-off, damage, death, disconnect, tool-changed,
+        // out-of-inputs, inventory-full, session-cap, feature-disabled, step-failed, server-stop)
+        // funnels through this ONE call, unconditionally, before any of the notification logic
+        // below runs.
+        StationAsset stopAsset = StationCatalog.getInstance().getStation(s.stationId);
+        Custody stopCustody = stopAsset != null ? ActionResolver.resolve(stopAsset, ACTION_WORK).getCustody() : null;
+        returnCustody(s, stopCustody);
+
         boolean entityAlive = store != null && s.ref != null && s.ref.isValid() && s.ref.getStore() == store;
         boolean silent = reason == StopReason.DISCONNECTED || reason == StopReason.SERVER_STOP
                 || reason == StopReason.DIED || reason == StopReason.WORLD_CHANGED;
@@ -1320,6 +1390,306 @@ public final class StationService {
         return new ConversionCheck(
                 sawInputWithoutRoom ? ConversionState.NO_ROOM : ConversionState.NO_INPUTS,
                 false, null, 0, null, 0);
+    }
+
+    /**
+     * The custody-sourced sibling of {@link #firstRunnableConversion} (design section 9.4): the
+     * SAME {@code Recipe.Conversions} scan, but availability reads {@code claim} (the placed-input
+     * pouch) instead of the player's live inventory - output room is STILL checked against the
+     * player's real inventory (only the input side moved into custody at placement; {@code Produce}
+     * always writes {@code To: Inventory}). A null/empty {@code claim} always yields
+     * {@code NO_INPUTS} (an empty custody station behaves exactly like an out-of-materials one, so
+     * the existing idle-practice fallback in {@link #toggle}/{@link #runCycle} applies unchanged).
+     */
+    @Nonnull
+    private ConversionCheck firstRunnableConversionFromCustody(@Nullable StationCustodyClaim claim,
+            @Nonnull Player player, @Nonnull StationAsset asset) {
+        StationAsset.Conversion[] conversions = StationCatalog.getInstance().resolvedConversions(asset);
+        if (conversions == null || conversions.length == 0 || claim == null) {
+            return new ConversionCheck(ConversionState.NO_INPUTS, false, null, 0, null, 0);
+        }
+        boolean sawInputWithoutRoom = false;
+        try {
+            var backpack = player.getInventory().getStorage();
+            for (StationAsset.Conversion c : conversions) {
+                if (c == null || c.getInput() == null || c.getOutput() == null) {
+                    continue;
+                }
+                StationAsset.Ingredient in = c.getInput();
+                StationAsset.Ingredient out = c.getOutput();
+                String outItem = out.getItemId();
+                if (outItem == null || outItem.isBlank()) {
+                    continue;
+                }
+                String resourceId = in.getResourceTypeId();
+                boolean isResource = resourceId != null && !resourceId.isBlank();
+                String inputRef = isResource ? resourceId : in.getItemId();
+                if (inputRef == null || inputRef.isBlank()) {
+                    continue;
+                }
+                int inCount = in.getQuantity() != null && in.getQuantity() > 0 ? in.getQuantity() : 1;
+                int outCount = out.getQuantity() != null && out.getQuantity() > 0 ? out.getQuantity() : 1;
+                int have = StationCustody.available(claim, isResource ? null : inputRef,
+                        isResource ? inputRef : null, StationService::liveResourceTypeIdsOf);
+                if (have < inCount) {
+                    continue;
+                }
+                if (!backpack.canAddItemStacks(List.of(new ItemStack(outItem, outCount)))) {
+                    sawInputWithoutRoom = true;
+                    continue;
+                }
+                return new ConversionCheck(ConversionState.RUNNABLE, isResource, inputRef, inCount,
+                        outItem, outCount);
+            }
+        } catch (Throwable t) {
+            Log.warn("STATION custody check failed: " + t.getMessage());
+        }
+        return new ConversionCheck(
+                sawInputWithoutRoom ? ConversionState.NO_ROOM : ConversionState.NO_INPUTS,
+                false, null, 0, null, 0);
+    }
+
+    // ==================== Placed-input custody (design section 9.4) ====================
+
+    /** Package-private accessor for {@code StationStepHandlers}' {@code Consume From:"Custody"} route. */
+    @Nullable
+    StationCustodyClaim custodyClaimFor(@Nullable String blockKey) {
+        return blockKey != null ? custodyByBlock.get(blockKey) : null;
+    }
+
+    /**
+     * True when {@code held} satisfies the station's custody placement matcher: an explicit
+     * {@link Custody#getInput()} when authored, else ANY resolved {@code Recipe.Conversions}
+     * input (the sawmill's "logs by ResourceTypeId family" - zero extra authoring).
+     */
+    private static boolean custodyAccepts(@Nonnull Custody custody, @Nonnull StationAsset asset,
+            @Nullable ItemStack held) {
+        if (held == null || held.isEmpty()) {
+            return false;
+        }
+        String heldItemId = held.getItemId();
+        String[] heldResourceTypeIds = liveResourceTypeIdsOf(heldItemId);
+        var matcher = custody.getInput();
+        if (matcher != null) {
+            return StationCustody.matchesInput(matcher, heldItemId, heldResourceTypeIds, liveRawTagsOf(heldItemId));
+        }
+        StationAsset.Conversion[] conversions = StationCatalog.getInstance().resolvedConversions(asset);
+        return conversions != null && conversions.length > 0
+                && StationCustody.matchesAnyConversionInput(conversions, heldItemId, heldResourceTypeIds);
+    }
+
+    /**
+     * Moves up to {@code custody.effectiveMaxQuantity() - currentTotal} of {@code held}'s ACTIVE
+     * HOTBAR SLOT into the block's claim (creating it, owned by {@code playerUuid}, on first
+     * placement), removing exactly that amount from the slot. Returns the amount actually moved
+     * (0 = nothing eligible / no room / the slot removal failed).
+     */
+    private int placeIntoCustody(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
+            @Nonnull String blockKey, @Nonnull UUID playerUuid, @Nonnull String stationId,
+            @Nonnull String actionId, @Nonnull ItemStack held, @Nonnull Custody custody) {
+        String itemId = held.getItemId();
+        if (itemId == null || itemId.isBlank()) {
+            return 0;
+        }
+        StationCustodyClaim claim = custodyByBlock.get(blockKey);
+        int currentTotal = claim != null ? claim.totalQuantity() : 0;
+        int moveCount = StationCustody.placeableQuantity(currentTotal, held.getQuantity(),
+                custody.effectiveMaxQuantity());
+        if (moveCount <= 0) {
+            return 0;
+        }
+        InventoryComponent.Hotbar hotbar = store.getComponent(ref, InventoryComponent.Hotbar.getComponentType());
+        if (hotbar == null || hotbar.getActiveSlot() == InventoryComponent.INACTIVE_SLOT_INDEX) {
+            return 0;
+        }
+        try {
+            hotbar.getInventory().removeItemStackFromSlot(hotbar.getActiveSlot(), moveCount);
+        } catch (Throwable t) {
+            Log.warn("STATION custody placement removal failed: " + t.getMessage());
+            return 0;
+        }
+        if (claim == null) {
+            claim = new StationCustodyClaim(playerUuid, stationId, actionId);
+            custodyByBlock.put(blockKey, claim);
+        }
+        claim.add(itemId, moveCount);
+        return moveCount;
+    }
+
+    /**
+     * Every custody auto-return path (design section 9.4: "unconsumed input auto-returns on
+     * EVERY exit path") funnels here from {@link #stop}: removes the block's claim (if any owned
+     * by THIS session's player), returns its items to the owner's inventory when reachable and
+     * there is room ({@link StationCustody#shouldReturnToInventory}), else drops them at the
+     * block once, then flips the block back to its Empty custody state.
+     *
+     * <p>{@code s.ref.getStore()} (not the {@code store} parameter {@link #stop} may have been
+     * handed as {@code null}, e.g. on {@code stopAll}'s shutdown sweep) is the store source here -
+     * a valid ref always knows its own owning store, so this covers the shutdown case too as long
+     * as the ref has not actually been removed yet.
+     */
+    private void returnCustody(@Nonnull StationSession s, @Nullable Custody custody) {
+        if (s.blockKey == null) {
+            return;
+        }
+        StationCustodyClaim claim = custodyByBlock.remove(s.blockKey);
+        if (claim == null) {
+            return;
+        }
+        if (!claim.ownerId.equals(s.playerUuid)) {
+            // Not this session's claim to touch (should not happen - custody ownership gates
+            // session start - but never silently swallow another player's placed items).
+            custodyByBlock.putIfAbsent(s.blockKey, claim);
+            return;
+        }
+        Store<EntityStore> ownerStore = null;
+        if (s.ref != null && s.ref.isValid()) {
+            try {
+                ownerStore = s.ref.getStore();
+            } catch (Throwable ignored) {
+                ownerStore = null;
+            }
+        }
+        if (!claim.isEmpty()) {
+            List<ItemStack> stacks = claim.toItemStacks();
+            Player player = ownerStore != null ? ownerStore.getComponent(s.ref, Player.getComponentType()) : null;
+            boolean hasRoom = player != null;
+            if (hasRoom) {
+                try {
+                    hasRoom = player.getInventory().getStorage().canAddItemStacks(stacks);
+                } catch (Throwable t) {
+                    hasRoom = false;
+                }
+            }
+            if (StationCustody.shouldReturnToInventory(player != null, hasRoom)) {
+                try {
+                    for (ItemStack stack : stacks) {
+                        player.getInventory().getStorage().addItemStack(stack);
+                    }
+                } catch (Throwable t) {
+                    Log.warn("STATION custody return to inventory failed: " + t.getMessage());
+                    dropCustodyAtBlock(ownerStore, s.blockX, s.blockY, s.blockZ, stacks);
+                }
+            } else {
+                dropCustodyAtBlock(ownerStore, s.blockX, s.blockY, s.blockZ, stacks);
+            }
+        }
+        if (custody != null) {
+            World world = null;
+            if (s.ref != null && s.ref.isValid()) {
+                try {
+                    world = WorldEvictors.worldOf(s.ref);
+                } catch (Throwable ignored) {
+                    world = null;
+                }
+            }
+            if (world != null) {
+                flipCustodyState(world, s.blockX, s.blockY, s.blockZ, custody, false);
+            }
+        }
+    }
+
+    /**
+     * The "block broken" custody auto-return path ({@link StationCustodyBreakSystem}, no session
+     * required - a player can place input then walk away before ever pressing F again). Drops
+     * everything at the block once; no-ops when nothing is claimed there (including the common
+     * case where a session's own {@link #stop} already handled it via its heartbeat's block-gone
+     * check on the same or a following tick - no double drop, {@link ConcurrentHashMap#remove}
+     * is the idempotency gate).
+     */
+    void onCustodyBlockBroken(@Nonnull Store<EntityStore> store, @Nonnull String blockKey, int x, int y, int z) {
+        StationCustodyClaim claim = custodyByBlock.remove(blockKey);
+        if (claim == null || claim.isEmpty()) {
+            return;
+        }
+        dropCustodyAtBlock(store, x, y, z, claim.toItemStacks());
+    }
+
+    /** Drops {@code stacks} at the block's center via the native dropped-item spawn. */
+    private static void dropCustodyAtBlock(@Nullable Store<EntityStore> store, int x, int y, int z,
+            @Nonnull List<ItemStack> stacks) {
+        if (store == null || stacks.isEmpty()) {
+            if (!stacks.isEmpty()) {
+                Log.warn("STATION custody items lost - no store available to drop at (" + x + "," + y + "," + z + ")");
+            }
+            return;
+        }
+        try {
+            Vector3d pos = new Vector3d(x + 0.5, y + 1.0, z + 0.5);
+            var holders = ItemComponent.generateItemDrops(store, stacks, pos, Rotation3f.IDENTITY);
+            for (var holder : holders) {
+                store.addEntity(holder, AddReason.SPAWN);
+            }
+        } catch (Throwable t) {
+            Log.warn("STATION custody drop-at-block failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Flips the block at {@code (x,y,z)} to {@code custody}'s Empty/Loaded state (design 9.4's
+     * hint-only state pair; a nullable {@link Custody#getStates()} means "no visual/hint flip,
+     * custody still works mechanically" - a no-op here). Guarded exactly like the kweebec shrine
+     * precedent: a block that is gone, or that never authored the named state, no-ops (retried
+     * naturally on the next interaction).
+     */
+    private static void flipCustodyState(@Nonnull World world, int x, int y, int z, @Nonnull Custody custody,
+            boolean toLoaded) {
+        Custody.States states = custody.getStates();
+        if (states == null) {
+            return;
+        }
+        String stateName = toLoaded ? states.getLoaded() : states.getEmpty();
+        if (stateName == null || stateName.isBlank()) {
+            return;
+        }
+        try {
+            BlockType bt = world.getBlockType(x, y, z);
+            if (bt == null || bt.getData() == null || bt.getBlockForState(stateName) == null) {
+                return;
+            }
+            world.setBlockInteractionState(new Vector3i(x, y, z), bt, stateName);
+        } catch (Throwable t) {
+            Log.fine("STATION custody state flip failed: " + t.getMessage());
+        }
+    }
+
+    /** Live {@code ItemResourceType} family ids for {@code itemId} ({@code []} when unresolvable). */
+    @Nonnull
+    static String[] liveResourceTypeIdsOf(@Nullable String itemId) {
+        if (itemId == null || itemId.isBlank()) {
+            return new String[0];
+        }
+        Item item = Item.getAssetMap().getAsset(itemId);
+        if (item == null) {
+            return new String[0];
+        }
+        ItemResourceType[] types = item.getResourceTypes();
+        if (types == null || types.length == 0) {
+            return new String[0];
+        }
+        String[] out = new String[types.length];
+        for (int i = 0; i < types.length; i++) {
+            out[i] = types[i] != null ? types[i].id : null;
+        }
+        return out;
+    }
+
+    /** Live raw tags for {@code itemId} (the SAME route {@link #tagsMatch} reads), empty when unresolvable. */
+    @Nonnull
+    private static Map<String, String[]> liveRawTagsOf(@Nullable String itemId) {
+        if (itemId == null || itemId.isBlank()) {
+            return Map.of();
+        }
+        Item item = Item.getAssetMap().getAsset(itemId);
+        if (item == null) {
+            return Map.of();
+        }
+        AssetExtraInfo.Data data = item.getData();
+        if (data == null) {
+            return Map.of();
+        }
+        Map<String, String[]> raw = data.getRawTags();
+        return raw != null ? raw : Map.of();
     }
 
     // ==================== Requires gate (design section 4.4.2) ====================

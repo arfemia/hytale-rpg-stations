@@ -17,6 +17,10 @@
   "Recipe": {
     "FromCrafting": { "Categories": ["WoodPlanks"] }
   },
+  "Custody": {
+    "MaxQuantity": 100,
+    "States": { "Empty": "Default", "Loaded": "Loaded" }
+  },
   "Loot": {
     "Tables": ["sawmillfinds"]
   },

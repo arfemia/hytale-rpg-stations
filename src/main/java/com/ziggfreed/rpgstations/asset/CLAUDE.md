@@ -16,7 +16,8 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   `StationCycleCompletedEvent.xpAsks`; optional `Idle` practice mode; `Repeat` - phase 2 leg B,
   read only by the `station.step` engine's program-completion handling, unused by any shipped
   content yet), `Recipe` (authored `Conversions` or `FromCrafting` derivation), `Hold` (the
-  movement-lock effect / seat mount), `Tool` (the held-tool gate + `XpScale`), `Loot`
+  movement-lock effect / seat mount), `Tool` (the held-tool gate + `XpScale`), `Custody` (phase 2
+  leg C - session-scoped placed-input custody, see [`Custody`](Custody.java) below), `Loot`
   (`Tables`/`Rolls`), `Camera` (third-person pull + `FaceBlock`/`Recipe`), `Animation` (`EmoteId` +
   `Swing`/`Impact`/`ActionClip`), `Presentation` (per-cycle moment), `Completion` (session-end
   moment, a second `Presentation` instance), `Requires` (permission + factor-`Condition` gate),
@@ -26,10 +27,22 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   single implicit `"work"` action built from this asset's own groups. See `../station/CLAUDE.md`
   for how every group drives the engine (`station.ActionResolver` is the resolution choke point).
 - **[`ActionDef`](ActionDef.java)** (design 9.1) - one `Actions` map entry: nullable overrides of
-  every `StationAsset` group (`Input`/`Work`/`Recipe`/`Tool`/`Hold`/`Camera`/`Animation`/
+  every `StationAsset` group (`Input`/`Custody`/`Work`/`Recipe`/`Tool`/`Hold`/`Camera`/`Animation`/
   `Presentation`/`Completion`/`Loot`/`Requires`) PLUS `Label` (an advisory display key) and
   `Steps` (an authored [`StationStep`](StationStep.java) program; absent means "build the
   implicit program" - see `../station/CLAUDE.md`'s `ImplicitProgram`).
+- **[`Custody`](Custody.java)** (design 9.4, phase 2 leg C) - session-scoped placed-input custody:
+  `{MaxQuantity?, Input?, States?}`. `MaxQuantity` defaults to **100** (maintainer decision,
+  overriding the design doc's draft 64 - `DEFAULT_MAX_QUANTITY`). `Input` (reusing
+  [`ActionInput`](ActionInput.java)'s ItemId/ResourceTypeId/Tags routes) is the explicit
+  placement-acceptance matcher; when absent, `station.StationCustody.matchesAnyConversionInput`
+  derives acceptance from the resolved action's own `Recipe.Conversions` inputs instead (the
+  sawmill's "logs by ResourceTypeId family" - zero extra authoring on top of an existing `Recipe`
+  group; `station.StationValidator`'s `CUSTODY_NO_INPUT_MATCHER` flags authoring neither). `States`
+  (`{Empty?, Loaded?}`) names the block's own `State.Definitions` entries the engine flips between
+  (`world.setBlockInteractionState`); null = custody works mechanically with no visual/hint flip.
+  Whole-GROUP overridable on `ActionDef` same as every other group. See `../station/CLAUDE.md` for
+  the full engine-side behavior (`StationCustody`/`StationCustodyClaim`/`StationCustodyBreakSystem`).
 - **[`ActionInput`](ActionInput.java)** (design 9.1) - the diegetic action-selection matcher:
   `{ItemId?, ResourceTypeId?, Tags?, Function?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, the new
   functional route; its live resolution against the held item is phase-2 leg E scope, unimplemented
@@ -40,9 +53,11 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   leg via `station.StationStepKernel`; `Stamp`/`Mount` - schema-reserved, decode fine, no handler
   yet) + base fields every type shares (`Id`, `Conditions`, `OnConditionFail{Result,Goto}` - the
   "Branch is NOT a step type" branch mechanism, `Presentation`) + ONE per-type nested group.
-  `Consume`/`Produce` support only `From`/`To` `"Inventory"` this leg (`"Custody"` decodes,
-  forward-compat with phase-2 leg C, fails cleanly at runtime until then). `Roll` shares the SAME
-  `Roll`/`LootableAsset` vocabulary a station's own `Loot` group uses (DRY, one roll engine).
+  `Consume` supports `From` `"Inventory"` OR `"Custody"` (phase 2 leg C - drains the block's placed-
+  input claim); `Produce` supports only `To` `"Inventory"` this leg (`"Custody"` decodes,
+  schema-reserved for a future output-stays-in-custody leg, fails cleanly at runtime until then).
+  `Roll` shares the SAME `Roll`/`LootableAsset` vocabulary a station's own `Loot` group uses (DRY,
+  one roll engine).
 - **[`Presentation`](Presentation.java)** - RpgStations' OWN codec (design section 4.1: a
   deliberate small divergence from the MMO's copy of the same shape, not a `ziggfreed-common`
   lift - the two authoring-side vocabularies diverge, this one drops the MMO's `Feedback` leaf

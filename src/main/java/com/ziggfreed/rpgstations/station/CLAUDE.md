@@ -241,7 +241,48 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   two-tick suspend/resume simulation. `Camera.FaceBlockMode` is RENAMED `Camera.Recipe` this leg
   (design 9.7) - `StationSession.cameraRecipe` / `StationCameraPreset.resolve`'s
   `assetRecipeId` param, no deprecated alias (unreleased, no shipped JSON used the old key).
-- **Not yet landed** (design scope, not started): phase 2 legs C-H - placed-input custody +
-  block-state visuals, the `Hold.Mount` knob family, the anvil (Convert + Enhance, the `Stamp`
-  step), the open flair/moment vocabulary, the art leg, and the phase-2 smoke round (see the
-  mod-root `CLAUDE.md`'s Phase 2 section).
+- **Placed-input custody + block states** (design section 9.4, phase 2 leg C, LANDED):
+  [`StationCustodyClaim`](StationCustodyClaim.java) is one block's live claim (owner uuid +
+  `itemId -> quantity` tally, insertion-ordered oldest-first - never persisted, the same
+  no-per-player-persistence constraint every session type here honors); `StationService` owns the
+  `custodyByBlock` map (keyed the SAME `"<worldUuid>:<x>:<y>:<z>"` blockKey `byBlock` uses).
+  [`StationCustody`](StationCustody.java) is the PURE decision core (mirrors `StationToolScaling`'s
+  injected-live-resolver pattern so nothing here constructs a live `Item`): `placeableQuantity`
+  (whole-stack-then-top-up-then-cap math), `available`/`drain` (family-matched over an injected
+  `itemId -> resourceTypeId[]` resolver, oldest-placed-first, tallying REAL drained ids into the
+  session ledger), `matchesInput`/`matchesAnyConversionInput` (the placement-acceptance matchers -
+  an explicit `asset.Custody.getInput()` OR, absent, ANY of the resolved `Recipe.Conversions`
+  inputs, the sawmill's zero-extra-authoring "logs by ResourceTypeId family" fallback), and
+  `shouldReturnToInventory` (the auto-return branch decision, exhaustively unit-tested). `toggle`
+  gates a `Custody`-governing station behind ONE state-dependent F: not-loaded (no live claim, or
+  an empty one) + a matching held stack places/tops-up (`placeIntoCustody`, removing exactly the
+  moved amount off the ACTIVE HOTBAR SLOT via `ItemContainer.removeItemStackFromSlot`) and returns
+  before reaching the classic engage flow; loaded + a non-owner denies `ui.station.occupied`;
+  otherwise (loaded-by-owner-with-nothing-to-place, or empty-with-nothing-held) falls through to
+  the classic engage flow, now sourcing `Convert` viability from the claim
+  (`firstRunnableConversionFromCustody`, the inventory-sourced `firstRunnableConversion`'s
+  custody-reading sibling - output room is STILL checked against the live inventory, only the
+  INPUT side moved into custody). `runRealCycle` builds its implicit `Consume` step with
+  `From: "Custody"` whenever the resolved action authors `Custody` (never `Inventory` - one
+  coherent per-station choice, not a per-cycle one); `StationStepHandlers.ConsumeHandler` gained
+  the matching drain branch (`Produce` stays `To: "Inventory"` always this leg - custody governs
+  input only). **Auto-return, every exit path**: `stop()`'s new `returnCustody` call is
+  UNCONDITIONAL and near the very top (before the silent/non-silent notification branching), so
+  every `StopReason` returns unconsumed custody to the owner's inventory (room-checked) or drops
+  it at the block once (`ItemComponent.generateItemDrops` + `store.addEntity`) - it resolves its
+  store off `s.ref.getStore()` (NOT the `store` parameter `stop()` may have been handed `null`,
+  e.g. `stopAll`'s shutdown sweep) specifically so a valid ref still covers that sweep.
+  [`StationCustodyBreakSystem`](StationCustodyBreakSystem.java) (`BreakBlockEvent`, registered in
+  `RpgStationsPlugin`) covers the complementary no-active-session case (input placed, block broken
+  before a session ever starts) - the two paths cannot double-drop (`ConcurrentHashMap.remove` is
+  the idempotency gate). **Block-state flip** (`flipCustodyState`, the kweebec shrine-furnace
+  precedent - `world.setBlockInteractionState` guarded by `bt.getBlockForState(name) != null`) is
+  HINT-ONLY this leg (mechanism-first maintainer ruling; the display-entity visual layer is a later
+  Visuals leg) and self-heals: `toggle` re-asserts the Empty state on every not-loaded interaction,
+  so a Loaded block-state surviving a restart with no live claim behind it (custody is memory-only,
+  the design's accepted crash-loses-it ruling) resets on the next press, no dupe risk. The shipped
+  sawmill (jar default AND the pack's MMO-bridged copy) migrated to placed input this leg - see
+  `asset/CLAUDE.md`'s `Custody` entry and the pack's own `CLAUDE.md`.
+- **Not yet landed** (design scope, not started): phase 2 legs D-H - the `Hold.Mount` knob family,
+  the anvil (Convert + Enhance, the `Stamp` step), the open flair/moment vocabulary, the art leg,
+  and the phase-2 smoke round (see the mod-root `CLAUDE.md`'s Phase 2 section).

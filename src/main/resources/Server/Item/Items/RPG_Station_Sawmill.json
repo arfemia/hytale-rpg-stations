@@ -44,13 +44,23 @@
       ]
     },
     "VariantRotation": "NESW",
-    "InteractionHint": "items.RPG_Station_Sawmill.hint",
+    "InteractionHint": "items.RPG_Station_Sawmill.hint.empty",
     "Interactions": {
       "Use": "RPG_Station_Sawmill_Use"
     },
     "Seats": [
       { "Offset": { "X": 0, "Y": 0, "Z": 0.6 }, "Yaw": 180 }
-    ]
+    ],
+    "State": {
+      "Definitions": {
+        "Default": {
+          "InteractionHint": "items.RPG_Station_Sawmill.hint.empty"
+        },
+        "Loaded": {
+          "InteractionHint": "items.RPG_Station_Sawmill.hint.loaded"
+        }
+      }
+    }
   },
   "Tags": {
     "Type": ["Furniture"],

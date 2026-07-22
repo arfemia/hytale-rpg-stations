@@ -54,6 +54,12 @@ public final class StationAsset
      */
     @Nullable private Presentation completion;
     @Nullable private Requires requires;
+    /**
+     * Session-scoped placed-input custody (design section 9.4, phase-2 leg C): absent means the
+     * classic direct-inventory Consume/Produce flow (phase-1 behavior byte-parity); authored opts
+     * the state-dependent F interaction in - see {@code station.StationService#toggle}.
+     */
+    @Nullable private Custody custody;
     /** Named cosmetic flair overrides, keyed by flair id. */
     @Nullable private Map<String, Flair> flairs;
     /**
@@ -112,6 +118,9 @@ public final class StationAsset
             .add()
             .appendInherited(new KeyedCodec<>("Requires", Requires.CODEC, false),
                     (a, v) -> a.requires = v, a -> a.requires, (a, parent) -> a.requires = parent.requires)
+            .add()
+            .appendInherited(new KeyedCodec<>("Custody", Custody.CODEC, false),
+                    (a, v) -> a.custody = v, a -> a.custody, (a, parent) -> a.custody = parent.custody)
             .add()
             .appendInherited(new KeyedCodec<>("Flairs",
                             new MapCodec<>(Flair.CODEC, LinkedHashMap::new), false),
@@ -266,6 +275,12 @@ public final class StationAsset
         return requires;
     }
 
+    /** Session-scoped placed-input custody (design 9.4); null = classic direct-inventory flow. */
+    @Nullable
+    public Custody getCustody() {
+        return custody;
+    }
+
     /** Named cosmetic flair overrides, keyed by flair id; null = none authored. */
     @Nullable
     public Map<String, Flair> getFlairs() {
@@ -285,6 +300,13 @@ public final class StationAsset
     @Nonnull
     public StationAsset withActions(@Nullable Map<String, ActionDef> actions) {
         this.actions = actions;
+        return this;
+    }
+
+    /** Java-side test/fixture helper; not part of any codec fold. */
+    @Nonnull
+    public StationAsset withCustody(@Nullable Custody custody) {
+        this.custody = custody;
         return this;
     }
 

@@ -17,6 +17,7 @@ import javax.annotation.Nonnull;
  * {@code lucky} loot-notification keys, the summary-panel keys, and the shipped sawmill's own
  * content keys ({@code station.sawmill.name}/{@code .desc}). Leg P0 (phase-1 closeout) adds the
  * {@code command.*} keys backing {@code RpgStationsCommand} ({@code /rpgstations camera|validate}).
+ * Phase-2 leg C adds the {@code ui.station.custody.*} placed-input toast keys (design 9.4).
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -27,6 +28,8 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.locked",
             "rpgstations.ui.station.occupied",
             "rpgstations.ui.station.no_materials",
+            "rpgstations.ui.station.custody.placed",
+            "rpgstations.ui.station.custody.topped_up",
             "rpgstations.ui.station.inventory_full",
             "rpgstations.ui.station.wrong_tool",
             "rpgstations.ui.station.seat_unavailable",

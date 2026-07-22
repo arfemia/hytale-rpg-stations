@@ -25,6 +25,7 @@ import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.station.StationCatalog;
+import com.ziggfreed.rpgstations.station.StationCustodyBreakSystem;
 import com.ziggfreed.rpgstations.station.StationDeathSystem;
 import com.ziggfreed.rpgstations.station.StationFrameSystem;
 import com.ziggfreed.rpgstations.station.StationInterruptDamageSystem;
@@ -211,10 +212,16 @@ public class RpgStationsPlugin extends JavaPlugin {
         }
     }
 
-    /** Registers the per-world frame drain + the damage-interrupt reader (Inspect group, read-only). */
+    /**
+     * Registers the per-world frame drain, the damage-interrupt reader (Inspect group,
+     * read-only), and the placed-input custody block-break auto-return reader (design section
+     * 9.4, phase-2 leg C - {@link StationCustodyBreakSystem}, the no-active-session case
+     * {@code StationService#stop}'s own return path can never reach).
+     */
     private void registerStationSystems() {
         getEntityStoreRegistry().registerSystem(new StationFrameSystem());
         getEntityStoreRegistry().registerSystem(new StationInterruptDamageSystem());
+        getEntityStoreRegistry().registerSystem(new StationCustodyBreakSystem());
     }
 
     @Override

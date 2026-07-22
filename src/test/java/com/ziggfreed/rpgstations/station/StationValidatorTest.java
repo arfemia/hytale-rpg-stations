@@ -12,7 +12,9 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
+import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.Roll;
@@ -692,12 +694,26 @@ public class StationValidatorTest {
 
     @Test
     void consumeStepUnimplementedSource_flagged() {
+        // "Custody" landed phase-2 leg C (design 9.4) and is no longer an unimplemented route -
+        // use a genuinely unrecognized value to keep exercising the "unknown From" finding.
+        StationStep consume = StationStep.of("c", StationStep.TYPE_CONSUME)
+                .withConsume(StationStep.Consume.of("X", null, 1, "Bench"));
+        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
+        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
+                null, null, null, null, null, null, new StationStep[]{consume}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("UNIMPLEMENTED_CONSUME_SOURCE"));
+    }
+
+    @Test
+    void consumeStepFromCustody_notFlagged() {
+        // Custody is now an implemented route (design 9.4, phase-2 leg C) - it must NOT trip
+        // UNIMPLEMENTED_CONSUME_SOURCE.
         StationStep consume = StationStep.of("c", StationStep.TYPE_CONSUME)
                 .withConsume(StationStep.Consume.of("X", null, 1, "Custody"));
         Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
         actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
                 null, null, null, null, null, null, new StationStep[]{consume}));
-        assertTrue(codes(validate(stationWithActions(actions))).contains("UNIMPLEMENTED_CONSUME_SOURCE"));
+        assertFalse(codes(validate(stationWithActions(actions))).contains("UNIMPLEMENTED_CONSUME_SOURCE"));
     }
 
     @Test
@@ -730,5 +746,46 @@ public class StationValidatorTest {
         actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
                 null, null, null, null, null, null, new StationStep[]{step, target}));
         assertFalse(codes(validate(stationWithActions(actions))).contains("UNKNOWN_GOTO_TARGET"));
+    }
+
+    // ==================== Custody (design section 9.4, phase-2 leg C) ====================
+
+    @Test
+    void custodyWithRecipeAndNoInput_notFlagged() {
+        // The sawmill's own shape: Custody authors no explicit Input, but a Recipe exists to
+        // derive placement acceptance from (the "logs by ResourceTypeId family" fallback).
+        StationAsset a = validStation().withCustody(Custody.of(100, null, null));
+        assertFalse(codes(validate(a)).contains("CUSTODY_NO_INPUT_MATCHER"));
+    }
+
+    @Test
+    void custodyWithExplicitInputAndNoRecipe_notFlagged() {
+        StationAsset a = StationAsset.of("anvil",
+                        StationAsset.Identity.of("rpgstations.station.anvil.name", null, null),
+                        StationAsset.Work.of(3000L, 600000L, 1.5, true, null),
+                        null, null, null, null, null, null, null)
+                .withCustody(Custody.of(1, ActionInput.of(null, null, null, "Weapon"), null));
+        assertFalse(codes(validate(a)).contains("CUSTODY_NO_INPUT_MATCHER"));
+    }
+
+    @Test
+    void custodyWithNoInputAndNoRecipe_flagged() {
+        StationAsset a = StationAsset.of("anvil",
+                        StationAsset.Identity.of("rpgstations.station.anvil.name", null, null),
+                        StationAsset.Work.of(3000L, 600000L, 1.5, true, null),
+                        null, null, null, null, null, null, null)
+                .withCustody(Custody.of(1, null, null));
+        assertTrue(codes(validate(a)).contains("CUSTODY_NO_INPUT_MATCHER"));
+    }
+
+    @Test
+    void custodyNonPositiveMaxQuantity_flagged() {
+        StationAsset a = validStation().withCustody(Custody.of(0, null, null));
+        assertTrue(codes(validate(a)).contains("CUSTODY_NON_POSITIVE_MAX"));
+    }
+
+    @Test
+    void noCustody_neverFlagsCustodyFindings() {
+        assertFalse(codes(validate(validStation())).contains("CUSTODY_NO_INPUT_MATCHER"));
     }
 }

@@ -17,6 +17,7 @@ import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
@@ -127,9 +128,34 @@ public final class StationValidator {
             checkCamera(a, id, label, out);
             checkCompletion(a, id, label, out);
             checkFlairs(a, id, label, out);
+            checkCustody(a.getCustody(), a.getRecipe(), label, id, out);
             checkActions(a, id, label, dropListKnown, factorKnown, lootableKnown, out);
         }
         return out;
+    }
+
+    /**
+     * Placed-input custody (design section 9.4, phase-2 leg C): a {@link Custody} group with
+     * neither an explicit {@link Custody#getInput()} NOR an {@code effectiveRecipe} to derive
+     * placement acceptance from has no way to ever accept a held stack - the state-dependent F
+     * interaction can never place anything (a silent dead-content trap, not merely cosmetic).
+     */
+    private static void checkCustody(@Nullable Custody custody, @Nullable StationAsset.Recipe effectiveRecipe,
+            @Nonnull String label, @Nonnull String id, @Nonnull List<Finding> out) {
+        if (custody == null) {
+            return;
+        }
+        if (custody.getInput() == null && effectiveRecipe == null) {
+            out.add(Finding.warning(DOMAIN, "CUSTODY_NO_INPUT_MATCHER",
+                    label + " authors a Custody group with no Input matcher AND no Recipe to derive"
+                            + " placement acceptance from - nothing can ever be placed", id));
+        }
+        Integer maxQuantity = custody.getMaxQuantity();
+        if (maxQuantity != null && maxQuantity <= 0) {
+            out.add(Finding.warning(DOMAIN, "CUSTODY_NON_POSITIVE_MAX",
+                    label + " Custody.MaxQuantity is non-positive (" + maxQuantity + ") - falls back to the "
+                            + Custody.DEFAULT_MAX_QUANTITY + " default", id));
+        }
     }
 
     /** Validates every standalone {@link LootableAsset}'s {@code Rolls} (the same {@link #checkRoll} core). */
@@ -778,6 +804,10 @@ public final class StationValidator {
                         actionLabel + " authors neither Recipe (for the implicit convert-loop program) nor"
                                 + " Steps - this action can never run a cycle", id));
             }
+            if (def.getCustody() != null) {
+                StationAsset.Recipe effectiveRecipe = def.getRecipe() != null ? def.getRecipe() : a.getRecipe();
+                checkCustody(def.getCustody(), effectiveRecipe, actionLabel, id, out);
+            }
             StationStep[] steps = def.getSteps();
             if (steps != null && steps.length > 0) {
                 checkSteps(steps, actionLabel, id, dropListKnown, factorKnown, lootableKnown, out);
@@ -840,10 +870,11 @@ public final class StationValidator {
                 StationStep.Consume consume = step.getConsume();
                 if (consume == null) {
                     out.add(Finding.warning(DOMAIN, "CONSUME_STEP_EMPTY", stepLabel + " has no Consume group", id));
-                } else if (!StationStep.Consume.FROM_INVENTORY.equalsIgnoreCase(consume.effectiveFrom())) {
+                } else if (!StationStep.Consume.FROM_INVENTORY.equalsIgnoreCase(consume.effectiveFrom())
+                        && !StationStep.Consume.FROM_CUSTODY.equalsIgnoreCase(consume.effectiveFrom())) {
                     out.add(Finding.warning(DOMAIN, "UNIMPLEMENTED_CONSUME_SOURCE",
                             stepLabel + " authors From '" + consume.effectiveFrom()
-                                    + "' which has no handler yet (only 'Inventory' is implemented)", id));
+                                    + "' which has no handler yet (only 'Inventory'/'Custody' are implemented)", id));
                 }
             } else if (StationStep.TYPE_PRODUCE.equalsIgnoreCase(step.getType())) {
                 StationStep.Produce produce = step.getProduce();

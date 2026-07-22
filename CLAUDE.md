@@ -10,9 +10,10 @@ command rewards) with zero progression. Package root `com.ziggfreed.rpgstations`
 phase 1 (extraction) legs 0-6 landed** (scaffold, common lift, engine move, lootables, api
 artifact, MMO bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
 camera <preset>|list` + `/rpgstations validate`, the design 4.1 scope the phase-1 legs had left
-unimplemented); **phase 2 leg A (common kernel reshape) and leg B (multi-action schema + step
-engine) are LANDED** - see the "Phase 2" section below; legs C-H (custody/block-states, the Mount
-knob family, the anvil, open flair vocabulary, art, smoke) remain design-only. Design
+unimplemented); **phase 2 leg A (common kernel reshape), leg B (multi-action schema + step
+engine), and leg C (placed-input custody + block states + sawmill migration) are LANDED** - see
+the "Phase 2" section below; legs D-H (the Mount knob family, the anvil, open flair vocabulary,
+art, smoke) remain design-only. Design
 authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
 (grounded by the decision log `../../.claude/research/rpg-stations-extraction-design.md` and the
 adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-2026-07-21.md`, ALL
@@ -136,7 +137,7 @@ extensible numeric vocabulary conditional lootables/`Requires` gates evaluate ov
 See `api/CLAUDE.md` for the full type-by-type reference and `api/impl/CLAUDE.md` for the concrete
 implementation this mod installs at `setup()`.
 
-## Phase 2 (legs A-B landed; C-H design-only)
+## Phase 2 (legs A-C landed; D-H design-only)
 
 Full spec: design doc sections 9 + 10 (leg sequence A-H) + 12 (risks) + 13 (decision points).
 Phase 2 work started ahead of the maintainer's in-game phase-1 parity gate smoke (design section
@@ -167,7 +168,38 @@ fix layers on cleanly.
   covers per-action structure (warn-only, never blocks) - see `station/CLAUDE.md` for the full
   file-by-file detail (`ActionResolver`, `StationStepContext`/`Result`/`Semantics`/`Registry`/
   `Handlers`/`Decisions`, `ImplicitProgram`, `StationStepKernel`).
-- **Legs C-H (design-only)**: session-scoped placed-input custody + block-state visuals, the
-  `Hold.Mount` knob family (`Surface: Block|Entity` - a standing work mount via a spawned anchor
-  entity), the anvil (Convert + Enhance, the flagship step-sequence exemplar with the `Stamp`
-  step), the open flair/moment vocabulary, the art leg, and the phase-2 smoke round.
+- **Leg C (LANDED, this mod)**: session-scoped placed-input custody + block states (design 9.4) -
+  a new `asset.Custody` group (`{MaxQuantity, Input?, States?}`, whole-group-overridable on
+  `ActionDef` same as `Hold`/`Tool`; `MaxQuantity` defaults to **100**, the maintainer decision
+  overriding the design doc's draft 64) opts a station into a state-dependent F interaction:
+  empty + a held matching stack places (or a repeat press tops up) into a per-block in-memory
+  claim (`station.StationCustodyClaim`, keyed the SAME `"<worldUuid>:<x>:<y>:<z>"` blockKey
+  `StationService` already used for session exclusivity), loaded + owner F engages sourcing the
+  convert check from the claim instead of live inventory (`firstRunnableConversionFromCustody`).
+  The implicit program's `Consume` step switches `From: "Custody"` whenever the resolved action
+  authors `Custody` (`station.StationStepHandlers.ConsumeHandler`'s new drain branch, family-
+  matched via a live `Item.getResourceTypes()` resolver injected the SAME way
+  `StationToolScaling` avoids the `ItemToolSpec` construction trap - `StationCustody`, the pure
+  decision core, unit-tested without a live server). Custody-Input acceptance is EITHER an
+  explicit `Custody.Input` (reusing `ActionInput`'s ItemId/ResourceTypeId/Tags routes, `Function`
+  still deferred to leg E) OR, when absent, derived from the resolved action's `Recipe.Conversions`
+  inputs (the sawmill's "logs by ResourceTypeId family" - zero extra authoring). Unconsumed
+  custody auto-returns on EVERY session stop reason (`StationService.stop`'s `returnCustody`,
+  unconditional, resolving the store off `s.ref.getStore()` so it covers `stopAll`'s shutdown
+  sweep too) - to the owner's inventory when reachable with room, else dropped at the block once
+  via the native `ItemComponent.generateItemDrops` spawn (`StationCustody.shouldReturnToInventory`
+  is the pure branch decision); a NEW `StationCustodyBreakSystem` (`BreakBlockEvent`) covers the
+  no-active-session case (placed input, block broken before a session ever starts). Block-state
+  flips (`world.setBlockInteractionState`, the kweebec shrine-furnace precedent) are HINT-ONLY
+  this leg (mechanism-first ruling; visuals land in a later leg) and self-heal: a Loaded state
+  surviving a restart with no live claim behind it resets to Empty on the next interaction (custody
+  is never persisted - a crash loses it, documented/accepted). The shipped sawmill (both the jar
+  default and the pack's MMO-bridged copy) MIGRATED to placed input in this leg - `Custody:
+  {"MaxQuantity":100,"States":{"Empty":"Default","Loaded":"Loaded"}}` in `Sawmill.json`, the block
+  JSON gained `State.Definitions.Default/Loaded` with per-state `InteractionHint`, the backpack
+  drain per real cycle is retired. See `station/CLAUDE.md` for the file-by-file detail
+  (`StationCustody`/`StationCustodyClaim`/`StationCustodyBreakSystem`).
+- **Legs D-H (design-only)**: the `Hold.Mount` knob family (`Surface: Block|Entity` - a standing
+  work mount via a spawned anchor entity), the anvil (Convert + Enhance, the flagship step-sequence
+  exemplar with the `Stamp` step), the open flair/moment vocabulary, the art leg (including custody's
+  own display-entity visual layer), and the phase-2 smoke round.

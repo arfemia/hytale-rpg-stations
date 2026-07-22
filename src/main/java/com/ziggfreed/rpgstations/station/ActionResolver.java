@@ -9,6 +9,7 @@ import javax.annotation.Nullable;
 
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
+import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StationAsset;
@@ -60,6 +61,7 @@ public final class ActionResolver {
         return new ResolvedAction(
                 actionId,
                 def != null && def.getInput() != null ? def.getInput() : null,
+                def != null && def.getCustody() != null ? def.getCustody() : asset.getCustody(),
                 def != null && def.getWork() != null ? def.getWork() : asset.getWork(),
                 def != null && def.getRecipe() != null ? def.getRecipe() : asset.getRecipe(),
                 def != null && def.getTool() != null ? def.getTool() : asset.getTool(),
@@ -140,6 +142,7 @@ public final class ActionResolver {
     public static final class ResolvedAction {
         private final String actionId;
         @Nullable private final ActionInput input;
+        @Nullable private final Custody custody;
         @Nullable private final StationAsset.Work work;
         @Nullable private final StationAsset.Recipe recipe;
         @Nullable private final StationAsset.Tool tool;
@@ -152,7 +155,8 @@ public final class ActionResolver {
         @Nullable private final Requires requires;
         @Nullable private final com.ziggfreed.rpgstations.asset.StationStep[] steps;
 
-        ResolvedAction(@Nonnull String actionId, @Nullable ActionInput input, @Nullable StationAsset.Work work,
+        ResolvedAction(@Nonnull String actionId, @Nullable ActionInput input, @Nullable Custody custody,
+                @Nullable StationAsset.Work work,
                 @Nullable StationAsset.Recipe recipe, @Nullable StationAsset.Tool tool,
                 @Nullable StationAsset.Hold hold, @Nullable StationAsset.Camera camera,
                 @Nullable StationAsset.Animation animation, @Nullable Presentation presentation,
@@ -160,6 +164,7 @@ public final class ActionResolver {
                 @Nullable com.ziggfreed.rpgstations.asset.StationStep[] steps) {
             this.actionId = actionId;
             this.input = input;
+            this.custody = custody;
             this.work = work;
             this.recipe = recipe;
             this.tool = tool;
@@ -181,6 +186,12 @@ public final class ActionResolver {
         @Nullable
         public ActionInput getInput() {
             return input;
+        }
+
+        /** Session-scoped placed-input custody (design 9.4); null = classic direct-inventory flow. */
+        @Nullable
+        public Custody getCustody() {
+            return custody;
         }
 
         @Nullable
