@@ -8,23 +8,27 @@ import java.util.UUID;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.ziggfreed.rpgstations.api.impl.FlairUnlockRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
  * The achievement/reward flair override seam. A station may author NAMED cosmetic flair
  * layers ({@link StationAsset#getFlairs}); a grantor (any run-a-command reward system)
- * unlocks a flair id for a player at a station, and {@link #effective} overlays every
- * unlocked flair's non-null leaves onto the station's base moment presentation, per LEAF.
- * Ported verbatim from the MMO's {@code station.StationFlairs} (RPG Stations extraction leg
- * 2); {@code asset.type.Presentation} severed to RpgStations' own {@link Presentation} (which
- * drops {@code Feedback} and gains {@link Presentation.Shake} - the overlay now folds
- * {@code Shake} instead of {@code Feedback}).
+ * unlocks a flair id for a player, and {@link #effective} overlays every unlocked flair's
+ * non-null leaves onto the station's base moment presentation, per LEAF. Ported verbatim from
+ * the MMO's {@code station.StationFlairs} (RPG Stations extraction leg 2); {@code
+ * asset.type.Presentation} severed to RpgStations' own {@link Presentation} (which drops
+ * {@code Feedback} and gains {@link Presentation.Shake} - the overlay now folds {@code Shake}
+ * instead of {@code Feedback}).
  *
- * <p>This class ships the resolver + the injectable {@link UnlockProvider} seam with NO live
- * grantor by default (design section 9.6: "the unlock-provider seam is unchanged" -
- * RpgStations' default provider unlocks nothing for anyone; the api's
- * {@code FlairUnlockRegistry} union, wired in a later leg, replaces the default).
+ * <p><b>Leg 4:</b> the single-provider {@code UnlockProvider}/{@code setProvider} seam is
+ * RETIRED (design section 3.2/9.6) in favor of the api's {@link FlairUnlockRegistryImpl} UNION -
+ * every registered {@code FlairUnlockProvider} answers "which flair ids has this player
+ * unlocked, across every station"; THIS class does the per-station filtering by checking each
+ * unlocked id against the station's own authored {@code Flairs} map (unchanged). No provider
+ * registered = empty union = base presentations only, the same zero-content starting state the
+ * old default provider gave.
  *
  * <p><b>Overlay semantics:</b> per LEAF, an unlocked flair's non-null value replaces the
  * current value; a leaf the flair omits falls through untouched. A flair on a slot with NO
@@ -37,26 +41,7 @@ public final class StationFlairs {
     /** The station moments a flair can overlay. */
     public enum Slot { CYCLE, SWING, RARE_FIND, COMPLETION }
 
-    /**
-     * Answers "which flair ids has this player unlocked at this station". Must never throw
-     * and must never return {@code null} (an empty {@link Set} is the "nothing unlocked"
-     * answer).
-     */
-    @FunctionalInterface
-    public interface UnlockProvider {
-        @Nonnull
-        Set<String> unlockedFlairIds(@Nonnull UUID playerUuid, @Nonnull String stationId);
-    }
-
-    /** Default: nothing unlocked for anyone - the zero-content, zero-risk starting state. */
-    private static volatile UnlockProvider provider = (playerUuid, stationId) -> Set.of();
-
     private StationFlairs() {
-    }
-
-    /** Install the live unlock provider (wired by a later leg's api registry). */
-    public static void setProvider(@Nonnull UnlockProvider p) {
-        provider = p;
     }
 
     /**
@@ -71,7 +56,7 @@ public final class StationFlairs {
         if (flairs == null || flairs.isEmpty()) {
             return base;
         }
-        Set<String> unlockedIds = provider.unlockedFlairIds(playerUuid, stationId);
+        Set<String> unlockedIds = FlairUnlockRegistryImpl.getInstance().unlockedFlairIds(playerUuid);
         if (unlockedIds == null || unlockedIds.isEmpty()) {
             return base;
         }

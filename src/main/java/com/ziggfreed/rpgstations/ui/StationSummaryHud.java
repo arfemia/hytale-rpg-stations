@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -47,15 +48,24 @@ import com.ziggfreed.rpgstations.util.Log;
  * TTL pattern: a monotonic {@link #generation} counter stamped by every {@link #showSummary}
  * guards a stale scheduled hide from clearing a NEWER summary that re-armed in the meantime.
  *
- * <p><b>Neutral frame, no theming this leg.</b> The {@code .ui} uses the common {@code
- * ZigFrames.ui}'s {@code @ZigDecoratedFrame} (never the MMO's {@code @MmoDecoratedFrame|} - this
- * mod has no MMO dependency); {@code #Content} is the FROZEN root selector a future
- * {@code SummaryEnricherRegistry.decorate} hook (leg 4/5) will theme through, per the critique's
- * binding note that this selector must not silently drift once an enricher depends on it.
+ * <p><b>Neutral frame; leg 4 wires the theming hook.</b> The {@code .ui} uses the common {@code
+ * ZigFrames.ui}'s {@code @ZigDecoratedFrame} (never the MMO's {@code @MmoDecoratedFrame} - this
+ * mod has no MMO dependency); {@link #ROOT_SELECTOR} is the FROZEN api contract (critique m5,
+ * binding) a registered {@code SummaryEnricher.decorate} (via {@code
+ * api.SummaryDecorateContext#rootSelector()}) writes theming commands against cross-jar - see
+ * that class's javadoc.
  */
 public final class StationSummaryHud extends KeyedCustomHud {
 
     public static final String HUD_KEY = "rpgstations:station_summary";
+
+    /**
+     * FROZEN api contract (critique m5, binding): a registered {@code SummaryEnricher.decorate}
+     * writes {@code UICommandBuilder} commands against this exact selector cross-jar (via {@code
+     * api.SummaryDecorateContext#rootSelector()}) - a {@code .ui} restructure MUST keep this
+     * stable. Must match the {@code .ui}'s {@code #RpgStationSummaryRoot} element id.
+     */
+    public static final String ROOT_SELECTOR = "#RpgStationSummaryRoot";
 
     /** Must match the {@code .ui}'s {@code #RpgStationSummaryRoot} static-fallback Width. */
     private static final int PANEL_WIDTH_PX = 480;
@@ -106,7 +116,7 @@ public final class StationSummaryHud extends KeyedCustomHud {
     @Nonnull
     @Override
     protected String rootSelector() {
-        return "#RpgStationSummaryRoot";
+        return ROOT_SELECTOR;
     }
 
     @Override
@@ -151,12 +161,15 @@ public final class StationSummaryHud extends KeyedCustomHud {
     }
 
     /**
-     * Show {@code title}/{@code body}/{@code ledgerRows} now (a partial update), then schedule
+     * Show {@code title}/{@code body}/{@code extraRows}+{@code ledgerRows} now (a partial
+     * update), run {@code decorateHook} (if any) against the SAME command builder before it
+     * pushes (a registered {@code SummaryEnricher.decorate}, design section 3.2), then schedule
      * the auto-hide at {@code durationMs}. A second call before the first hide fires bumps
      * {@link #generation}, so the STALE scheduled hide from the first call becomes a no-op.
      */
     public void showSummary(@Nonnull Message title, @Nonnull Message body, @Nullable String stationIconItemId,
-            @Nonnull List<LedgerRow> ledgerRows, long durationMs) {
+            @Nonnull List<SummaryRow> extraRows, @Nonnull List<LedgerRow> ledgerRows, long durationMs,
+            @Nullable Consumer<UICommandBuilder> decorateHook) {
         long gen = generation.incrementAndGet();
 
         UICommandBuilder cmd = new UICommandBuilder();
@@ -164,7 +177,14 @@ public final class StationSummaryHud extends KeyedCustomHud {
         cmd.set(TITLE_SEL + ".TextSpans", title);
         cmd.set(TEXT_SEL + ".TextSpans", body);
         renderStationIcon(cmd, stationIconItemId);
-        renderLedger(cmd, ledgerRows);
+        renderLedger(cmd, extraRows, ledgerRows);
+        if (decorateHook != null) {
+            try {
+                decorateHook.accept(cmd);
+            } catch (Throwable t) {
+                Log.fine(HUD_KEY + ": summary decorate hook failed: " + t.getMessage());
+            }
+        }
         update(false, cmd);
 
         long ttl = durationMs > 0 ? durationMs : DEFAULT_DURATION_MS;
@@ -174,13 +194,17 @@ public final class StationSummaryHud extends KeyedCustomHud {
     /**
      * Populate the fixed ledger row slots via the shared, mod-agnostic {@link SummaryRowRenderer}
      * (hiding any unused slot), plus the keyed overflow row when the row count exceeds {@link
-     * #MAX_LEDGER_ROWS}. Each row's color is baked into its {@link Message} via {@link
-     * Message#color} (never a separate style command) - the rich-text convention every other
-     * ledger surface in this codebase follows.
+     * #MAX_LEDGER_ROWS}. {@code extraRows} (a registered {@code SummaryEnricher}'s own rows,
+     * design section 3.2) are PREPENDED before the engine's own item rows, in registration
+     * order. Each row's color is baked into its {@link Message} via {@link Message#color} (never
+     * a separate style command) - the rich-text convention every other ledger surface in this
+     * codebase follows.
      */
-    private static void renderLedger(@Nonnull UICommandBuilder cmd, @Nonnull List<LedgerRow> rows) {
-        List<SummaryRow> summaryRows = new ArrayList<>(rows.size());
-        for (LedgerRow row : rows) {
+    private static void renderLedger(@Nonnull UICommandBuilder cmd, @Nonnull List<SummaryRow> extraRows,
+            @Nonnull List<LedgerRow> ledgerRows) {
+        List<SummaryRow> summaryRows = new ArrayList<>(extraRows.size() + ledgerRows.size());
+        summaryRows.addAll(extraRows);
+        for (LedgerRow row : ledgerRows) {
             summaryRows.add(buildItemRow(row));
         }
         int overflow = SummaryRowRenderer.render(cmd, "#RpgStationSummaryItem", MAX_LEDGER_ROWS, summaryRows);
@@ -228,10 +252,13 @@ public final class StationSummaryHud extends KeyedCustomHud {
      * Resolve {@code playerRef}'s registered instance and push a summary, returning {@code
      * false} (never throwing) when the surface is settings-disabled, unregistered, or the push
      * fails. MUST run on the WORLD THREAD (mirrors {@code MmoHud}'s contract - the native
-     * {@code HudManager} map is not concurrent).
+     * {@code HudManager} map is not concurrent). {@code extraRows} and {@code decorateHook} are
+     * the {@code SummaryEnricher} plumbing (design section 3.2) - pass {@code List.of()}/{@code
+     * null} when nothing is registered.
      */
     public static boolean tryShow(@Nonnull PlayerRef playerRef, @Nonnull Message title, @Nonnull Message body,
-            @Nullable String stationIconItemId, @Nonnull List<LedgerRow> ledgerRows) {
+            @Nullable String stationIconItemId, @Nonnull List<SummaryRow> extraRows,
+            @Nonnull List<LedgerRow> ledgerRows, @Nullable Consumer<UICommandBuilder> decorateHook) {
         SettingsAsset.SummaryHud settings = SettingsCatalog.getInstance().current().getSummaryHud();
         if (settings != null && !settings.isEnabled()) {
             return false;
@@ -251,7 +278,7 @@ public final class StationSummaryHud extends KeyedCustomHud {
             }
             long durationMs = settings != null && settings.getTtlMs() != null && settings.getTtlMs() > 0
                     ? settings.getTtlMs() : DEFAULT_DURATION_MS;
-            hud.showSummary(title, body, stationIconItemId, ledgerRows, durationMs);
+            hud.showSummary(title, body, stationIconItemId, extraRows, ledgerRows, durationMs, decorateHook);
             return true;
         } catch (Throwable t) {
             Log.fine(HUD_KEY + ": tryShow failed: " + t.getMessage());

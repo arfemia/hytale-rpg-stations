@@ -13,6 +13,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemDropList;
+import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
@@ -21,7 +22,6 @@ import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.i18n.RpgStationsLangKeys;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
-import com.ziggfreed.rpgstations.loot.StationFactorRegistry;
 import com.ziggfreed.rpgstations.util.Log;
 import com.ziggfreed.rpgstations.validation.Finding;
 import com.ziggfreed.rpgstations.validation.Report;
@@ -52,9 +52,9 @@ public final class StationValidator {
     /**
      * Validate the live catalog (stations AND named lootable tables, design section 4.8's
      * "validator coverage"). Never throws; returns an empty list on failure. {@code factorKnown}
-     * is backed by the LIVE {@code loot.StationFactorRegistry} (the built-in {@code rpgstations:}
-     * factors are always registered by plugin {@code setup()}, so this is a real check now,
-     * unlike the leg-2 fail-open placeholder).
+     * is backed by the LIVE api-facing {@link FactorRegistryImpl} (the built-in {@code
+     * rpgstations:} factors are always registered by plugin {@code setup()}, so this is a real
+     * check now, unlike the leg-2 fail-open placeholder).
      */
     @Nonnull
     public static List<Finding> validate() {
@@ -62,10 +62,10 @@ public final class StationValidator {
             List<Finding> out = new ArrayList<>(validate(StationCatalog.getInstance().all().values(),
                     RpgStationsLangKeys::isKnown,
                     StationValidator::dropListKnownLive,
-                    StationFactorRegistry::isKnown,
+                    FactorRegistryImpl.getInstance()::isKnown,
                     id -> LootableCatalog.getInstance().get(id) != null));
             out.addAll(validateLootables(LootableCatalog.getInstance().all().values(),
-                    StationValidator::dropListKnownLive, StationFactorRegistry::isKnown));
+                    StationValidator::dropListKnownLive, FactorRegistryImpl.getInstance()::isKnown));
             return out;
         } catch (Throwable t) {
             Log.warn("Station validation aborted: " + t.getMessage());

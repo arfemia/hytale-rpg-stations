@@ -13,12 +13,14 @@ import com.hypixel.hytale.server.core.modules.interaction.interaction.config.Int
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
 import com.ziggfreed.common.asset.AssetStoreRegistrar;
+import com.ziggfreed.rpgstations.api.RpgStationsApi;
+import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
+import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.SettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
-import com.ziggfreed.rpgstations.loot.StationFactorRegistry;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.station.StationCatalog;
 import com.ziggfreed.rpgstations.station.StationFrameSystem;
@@ -34,14 +36,18 @@ import com.ziggfreed.rpgstations.util.Log;
  * progression and reaches the station engine exclusively through a soft extension surface
  * (native events + the {@code api} artifact, leg 4); neither mod hard-deps the other.
  *
- * <p><b>Leg 3 (loot + settings + standalone content) stage:</b> registers the station engine
- * (asset store, catalog fold, the {@code rpg_station_use} interaction, the frame-drain system,
- * the damage-interrupt system), the conditional-lootable layer ({@link LootableAsset} store +
- * {@link StationFactorRegistry}'s built-in {@code rpgstations:} factors), and the engine
- * {@link SettingsAsset} store - the standalone loop (a real station block a player can press F
- * on, work, and get loot from) is now complete with THIS JAR ALONE (the standalone sawmill jar
- * content). The api artifact + event firing (leg 4) and the MMO bridge (leg 5) land in later
- * legs; see {@code .claude/research/raw/rpg-stations-unified-design-2026-07-21.md}.
+ * <p><b>Leg 4 (api artifact + wiring) stage:</b> registers the station engine (asset store,
+ * catalog fold, the {@code rpg_station_use} interaction, the frame-drain system, the
+ * damage-interrupt system) and the conditional-lootable layer ({@link LootableAsset} store), the
+ * engine {@link SettingsAsset} store - AND installs the real extension surface: {@link
+ * RpgStationsApi#set} injects {@link RpgStationsApiImpl} before anything else runs, then {@link
+ * FactorRegistryImpl#registerBuiltins} registers the four {@code rpgstations:} built-ins through
+ * that SAME api-backed registry (design section 3.2, dogfooded). The engine now fires its four
+ * lifecycle events ({@code StationSessionStartedEvent}/{@code StationCycleCompletedEvent}/{@code
+ * StationSessionCompletedEvent}/{@code StationToolBrokeEvent}) and consults the {@code
+ * FlairUnlockRegistry}/{@code SummaryEnricherRegistry} unions from {@code StationService}/{@code
+ * StationFlairs} - see {@code .claude/research/raw/rpg-stations-unified-design-2026-07-21.md}
+ * section 3. The MMO bridge (leg 5) is the first real external consumer.
  */
 public class RpgStationsPlugin extends JavaPlugin {
 
@@ -62,14 +68,15 @@ public class RpgStationsPlugin extends JavaPlugin {
 
     @Override
     protected void setup() {
-        StationFactorRegistry.registerBuiltins();
+        RpgStationsApi.set(RpgStationsApiImpl.getInstance());
+        FactorRegistryImpl.getInstance().registerBuiltins();
         registerStationAssetStore();
         registerLootableAssetStore();
         registerSettingsAssetStore();
         registerStationInteraction();
         registerStationSystems();
-        Log.info("RpgStations setup complete (leg 3 - the loot engine, engine settings, and the "
-                + "standalone sawmill content are live).");
+        Log.info("RpgStations setup complete (leg 4 - the api artifact is live: events fire, "
+                + "the factor/flair-unlock/summary-enricher registries are wired into the engine).");
     }
 
     /**

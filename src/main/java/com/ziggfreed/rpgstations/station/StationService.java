@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Consumer;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -31,6 +32,7 @@ import com.hypixel.hytale.server.core.inventory.ResourceQuantity;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransaction;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
+import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
@@ -42,13 +44,19 @@ import com.ziggfreed.common.cast.WorldKeyedQueues;
 import com.ziggfreed.common.i18n.Msg;
 import com.ziggfreed.common.sound.Sound3D;
 import com.ziggfreed.common.ui.rows.SummaryRow;
+import com.ziggfreed.rpgstations.api.FactorContext;
+import com.ziggfreed.rpgstations.api.SummaryContext;
+import com.ziggfreed.rpgstations.api.SummaryDecorateContext;
+import com.ziggfreed.rpgstations.api.SummaryEnricher;
+import com.ziggfreed.rpgstations.api.XpAsk;
+import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
+import com.ziggfreed.rpgstations.api.impl.SummaryEnricherRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
-import com.ziggfreed.rpgstations.loot.FactorContext;
 import com.ziggfreed.rpgstations.loot.FactorSnapshot;
 import com.ziggfreed.rpgstations.loot.LootEngine;
 import com.ziggfreed.rpgstations.ui.StationSummaryHud;
@@ -63,18 +71,21 @@ import com.ziggfreed.rpgstations.util.Log;
  * one idempotent exit funnel ({@link #stop}). Every start-denial is a localized toast, never
  * an interaction {@code Failed}.
  *
- * <p><b>SCOPE NOTE (leg 2 engine move, leg 3 loot + summary):</b> the port keeps the ENGINE
- * mechanics fully functional (session machine, toggle/stop funnel, heartbeat, the Convert cycle
- * transaction, swing/impact scheduling, idle mode, the {@link #emitMoment} presentation choke
- * point, durability drain, seat mount calls) and SEVERS every MMO-specific progression call the
- * original made ({@code SkillService}-driven XP awards, {@code SkillTreeService}/{@code
- * MasteryService}-driven luck aggregation, {@code ProgressEvents.fire}, {@code
- * FeedbackService.emit}, the MMO's session-summary HUD) - those become event firing (leg 4's api
- * artifact, still a no-op seam here: {@link #onCycleCompleted}) and the conditional-lootable
- * engine + the standalone-rich summary panel, LANDED this leg ({@link #rollLootAndBonuses},
- * {@link #rollCompletionLoot}, {@link #showSessionSummary} over {@code loot.LootEngine} /
- * {@code ui.StationSummaryHud}). The MMO is NOT touched by this leg; its own copy of this class
- * (registered interaction id {@code mmo_station_use}) coexists unchanged until leg 5.
+ * <p><b>SCOPE NOTE (leg 2 engine move, leg 3 loot + summary, leg 4 api artifact):</b> the port
+ * keeps the ENGINE mechanics fully functional (session machine, toggle/stop funnel, heartbeat,
+ * the Convert cycle transaction, swing/impact scheduling, idle mode, the {@link #emitMoment}
+ * presentation choke point, durability drain, seat mount calls) and SEVERS every MMO-specific
+ * progression call the original made ({@code SkillService}-driven XP awards, {@code
+ * SkillTreeService}/{@code MasteryService}-driven luck aggregation, {@code ProgressEvents.fire},
+ * {@code FeedbackService.emit}, the MMO's session-summary HUD) - those become event firing
+ * (LANDED this leg via {@link StationEvents}: {@link #onCycleCompleted} fires {@code
+ * StationCycleCompletedEvent} with the station's forwarded {@code Work.Xp} asks + resolved tool
+ * multiplier) and the conditional-lootable engine + the standalone-rich summary panel, landed
+ * leg 3 ({@link #rollLootAndBonuses}, {@link #rollCompletionLoot}, {@link #showSessionSummary}
+ * over {@code loot.LootEngine} / {@code ui.StationSummaryHud}), now ALSO consulting the api's
+ * {@code SummaryEnricherRegistry} union for extra rows/theming (leg 4). The MMO is NOT touched by
+ * this leg; its own copy of this class (registered interaction id {@code mmo_station_use})
+ * coexists unchanged until leg 5's bridge.
  */
 public final class StationService {
 
@@ -111,10 +122,10 @@ public final class StationService {
     private final ConcurrentHashMap<String, UUID> byBlock = new ConcurrentHashMap<>();
 
     /**
-     * The Requires-condition factor lookup (design section 3.2's api {@code FactorRegistry},
-     * pre-wired seam): TODO(leg 4) - the real registry replaces this default. Nothing
-     * registered = every factor unknown = every condition FAILS CLOSED (a gate never silently
-     * opens because a provider has not registered yet).
+     * A single-shot {@code (factorId, param) -> value} lookup, pure/testable independent of the
+     * live api registry (used by {@link #conditionPasses}). {@link #checkRequires} builds one
+     * inline against {@link FactorRegistryImpl} + a fresh {@link FactorContext} (leg 4 - replaces
+     * the leg-3 stand-in static {@code factorLookup} field).
      */
     @FunctionalInterface
     interface FactorLookup {
@@ -122,19 +133,12 @@ public final class StationService {
         Double resolve(@Nonnull String factorId, @Nullable String param);
     }
 
-    private static volatile FactorLookup factorLookup = (factorId, param) -> null;
-
     private StationService() {
     }
 
     @Nonnull
     public static StationService getInstance() {
         return INSTANCE;
-    }
-
-    /** Install the live Requires-condition factor lookup (wired by a later leg's api registry). */
-    public static void setFactorLookup(@Nonnull FactorLookup lookup) {
-        factorLookup = lookup;
     }
 
     /** Called once by the drain system when it registers, so the no-drainer warning stays silent. */
@@ -180,7 +184,7 @@ public final class StationService {
         }
 
         // 2) Requires gate (RpgStations' own Permission + Conditions, design section 4.4.2).
-        if (!checkRequires(asset.getRequires(), playerRef)) {
+        if (!checkRequires(asset.getRequires(), playerRef, asset)) {
             toast(playerRef, RpgMsg.tr("ui.station.locked"));
             return;
         }
@@ -331,6 +335,9 @@ public final class StationService {
             StationHoldController.playEmote(s, store);
         }
 
+        StationEvents.fireSessionStarted(store, s.playerRef, s.playerUuid, s.sessionId, s.stationId,
+                ACTION_WORK, s.blockX, s.blockY, s.blockZ, s.idleMode);
+
         toast(playerRef, RpgMsg.tr("ui.station.start", stationNameMsg(asset)).color(Color.WHITE));
 
         if (s.idleMode) {
@@ -430,6 +437,12 @@ public final class StationService {
             boolean broken = heldStack != null && heldStack.isBroken();
             StopReason toolStop = toolGateStopReason(matches, broken);
             if (toolStop != null) {
+                if (toolStop == StopReason.TOOL_BROKEN) {
+                    String heldItemId = heldStack != null && heldStack.getItemId() != null
+                            ? heldStack.getItemId() : "";
+                    StationEvents.fireToolBroke(store, s.playerRef, s.playerUuid, s.sessionId, s.stationId,
+                            heldItemId);
+                }
                 stop(s, toolStop, store);
                 return false;
             }
@@ -476,7 +489,7 @@ public final class StationService {
                 toast(s.playerRef, RpgMsg.tr("ui.station.practice"));
             }
             s.nextCycleAtMs = System.currentTimeMillis() + s.idleCycleMs;
-            return runIdleCycle(s, store, asset);
+            return runIdleCycle(s, store, commandBuffer, asset);
         } else if (check.state == ConversionState.NO_INPUTS) {
             stop(s, StopReason.OUT_OF_INPUTS, store);
             return false;
@@ -527,13 +540,9 @@ public final class StationService {
 
         double xpMult = resolveXpMultiplier(player, asset);
 
-        // Leg 3 seam: the conditional-lootable loot engine replaces this with real Roll
-        // evaluation over Loot.Tables/Loot.Rolls (see this class's javadoc + StationAsset's).
         rollLootAndBonuses(s, store, asset, player, check);
 
-        // Leg 4 seam: fires StationCycleCompletedEvent once the api artifact lands (XpAsks
-        // forwarded from asset.getWork().getXp(), toolMultiplier = xpMult).
-        onCycleCompleted(s, asset, xpMult, false, s.cyclesDone);
+        onCycleCompleted(s, store, commandBuffer, asset, xpMult, false, s.cyclesDone);
 
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
         emitMoment(store, s, StationFlairs.Slot.CYCLE, asset.getPresentation(), blockPos);
@@ -596,11 +605,11 @@ public final class StationService {
 
     /**
      * Opt-in idle practice cycle: NO conversion, NO loot roll, NO progress fire - just the
-     * cycle presentation + the leg-4 XP-ask seam at the idle fraction/multiplier.
+     * cycle presentation + the (idle-scaled) XP-ask forwarding.
      */
     private boolean runIdleCycle(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
-                                 @Nonnull StationAsset asset) {
-        onCycleCompleted(s, asset, 1.0, true, s.cyclesDone);
+                                 @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset) {
+        onCycleCompleted(s, store, commandBuffer, asset, 1.0, true, s.cyclesDone);
 
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
         emitMoment(store, s, StationFlairs.Slot.CYCLE, asset.getPresentation(), blockPos);
@@ -609,15 +618,66 @@ public final class StationService {
     }
 
     /**
-     * TODO(leg 4): forwards this cycle's {@code Work.Xp} asks + the resolved tool multiplier
-     * as a {@code StationCycleCompletedEvent} once the api artifact + event firing land (design
-     * section 3.1/7.2). No-op for now - the engine computes {@code toolMultiplier} (pure,
-     * MMO-free) but has nowhere to send it yet; a listening progression mod (the MMO bridge)
-     * reads {@code asset.getWork().getXp()} off the event to know what an ask means.
+     * Fires {@code StationCycleCompletedEvent} (design section 3.1/7.2): forwards this cycle's
+     * {@code Work.Xp} asks (idle-scaled by {@code Work.Idle.XpFraction} when {@code idle}) plus
+     * the resolved tool multiplier (forced {@code 1.0} for an idle cycle). A listening
+     * progression mod (the MMO bridge) reads {@code asset.getWork().getXp()} semantics off the
+     * event's {@code XpAsk} list to know what an ask means; this engine never interprets it.
+     *
+     * <p>{@code commandBuffer} is GUARANTEED non-null here: both call sites (the real-cycle path
+     * in {@link #runRealCycle} and the idle-cycle path in {@link #runIdleCycle}) run inside the
+     * per-world frame drain ({@link #tickFrameOnce}), which always holds a live {@code
+     * CommandBuffer} for the current tick (critique fix, binding - see the event's own javadoc).
      */
-    private static void onCycleCompleted(@Nonnull StationSession s, @Nonnull StationAsset asset,
+    private static void onCycleCompleted(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             double toolMultiplier, boolean idle, int cycleIndex) {
-        // intentionally empty - see the javadoc above
+        List<XpAsk> asks = xpAsks(asset, idle, s.idleXpFraction);
+        StationEvents.fireCycleCompleted(store, commandBuffer, s.playerRef, s.playerUuid, s.sessionId,
+                s.stationId, ACTION_WORK, cycleIndex, idle, asks, toolMultiplier);
+    }
+
+    /**
+     * The station's forwarded {@code Work.Xp} asks for one cycle-completed event (design section
+     * 4.4.1): a real cycle forwards the RAW authored {@code PerCycle} (the listener multiplies
+     * by {@link StationCycleCompletedEvent#toolMultiplier()}); an idle cycle pre-scales each ask
+     * by {@code idleXpFraction} and the caller forces {@code toolMultiplier} to {@code 1.0}
+     * (matching today's idle semantics: fractional XP, no progress). A blank/missing skill id
+     * entry is skipped (the validator's {@code MISSING_XP_SKILL} catches the authoring mistake).
+     */
+    @Nonnull
+    private static List<XpAsk> xpAsks(@Nonnull StationAsset asset, boolean idle, double idleXpFraction) {
+        StationAsset.Work work = asset.getWork();
+        StationAsset.WorkXp[] xp = work != null ? work.getXp() : null;
+        if (xp == null || xp.length == 0) {
+            return List.of();
+        }
+        List<XpAsk> out = new ArrayList<>(xp.length);
+        for (StationAsset.WorkXp x : xp) {
+            if (x == null || x.getSkill() == null || x.getSkill().isBlank()) {
+                continue;
+            }
+            double perCycle = x.getPerCycle() != null ? x.getPerCycle() : 0.0;
+            out.add(new XpAsk(x.getSkill(), idle ? perCycle * idleXpFraction : perCycle));
+        }
+        return out;
+    }
+
+    /** The station's authored {@code Work.Xp} skill ids, in authoring order (for {@link FactorContext#progressionSkills()}). */
+    @Nonnull
+    private static List<String> progressionSkills(@Nonnull StationAsset asset) {
+        StationAsset.Work work = asset.getWork();
+        StationAsset.WorkXp[] xp = work != null ? work.getXp() : null;
+        if (xp == null || xp.length == 0) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>(xp.length);
+        for (StationAsset.WorkXp x : xp) {
+            if (x != null && x.getSkill() != null && !x.getSkill().isBlank()) {
+                out.add(x.getSkill());
+            }
+        }
+        return out;
     }
 
     /**
@@ -637,7 +697,7 @@ public final class StationService {
         if (rolls.isEmpty()) {
             return;
         }
-        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, player, asset));
+        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, asset));
         ItemStack cycleOutput = check.outputItem != null
                 ? new ItemStack(check.outputItem, check.outputCount) : null;
         LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, snapshot, player,
@@ -666,7 +726,7 @@ public final class StationService {
         if (player == null) {
             return;
         }
-        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, player, asset));
+        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, asset));
         LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_COMPLETION, snapshot, player,
                 null, s.playerRef, s.stationId, ACTION_WORK, s.cyclesDone);
         applyGrantResult(s, store, result);
@@ -705,17 +765,28 @@ public final class StationService {
     }
 
     /**
-     * Per-cycle numeric context for the built-in {@code rpgstations:} factors ({@code
-     * loot.StationFactorRegistry#registerBuiltins}): session seconds elapsed, the CURRENT
-     * (already-incremented) cycle index, and the currently-held item's tool power / durability
-     * percent - read fresh, mirroring {@link #resolveXpMultiplier}'s no-snapshot convention.
+     * Per-cycle api {@link FactorContext} for the built-in {@code rpgstations:} factors ({@code
+     * api.impl.FactorRegistryImpl#registerBuiltins}) plus every other registered provider:
+     * session seconds elapsed, the CURRENT (already-incremented) cycle index, and the
+     * currently-held item's tool power / durability percent - read fresh, mirroring {@link
+     * #resolveXpMultiplier}'s no-snapshot convention.
      */
     @Nonnull
-    private static FactorContext buildFactorContext(@Nonnull StationSession s, @Nonnull Player player,
-            @Nonnull StationAsset asset) {
+    private static FactorContext buildFactorContext(@Nonnull StationSession s, @Nullable Store<EntityStore> store,
+            @Nonnull Player player, @Nonnull StationAsset asset) {
         long sessionSeconds = Math.max(0L, (System.currentTimeMillis() - s.startedAtMs) / 1000L);
-        return FactorContext.of(sessionSeconds, s.cyclesDone,
-                resolveHeldToolPower(player, asset.getTool()), resolveHeldToolDurabilityPercent(player));
+        return FactorContext.builder()
+                .store(store)
+                .playerRef(s.playerRef)
+                .playerId(s.playerUuid)
+                .stationId(s.stationId)
+                .actionId(ACTION_WORK)
+                .sessionSeconds(sessionSeconds)
+                .cycleIndex(s.cyclesDone)
+                .toolPower(resolveHeldToolPower(player, asset.getTool()))
+                .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
+                .progressionSkills(progressionSkills(asset))
+                .build();
     }
 
     /**
@@ -748,19 +819,69 @@ public final class StationService {
 
     /**
      * The standalone-rich end-of-session summary panel ({@code ui.StationSummaryHud}, design
-     * section 4.1/4.3): title + a cycles-only body (no per-skill XP breakdown this leg - that
-     * is the MMO bridge's OWN enricher, leg 5) + the item ledger. Falls back to the classic
-     * {@code NotificationUtil} toast (cycles-only body, no ledger rows - a text toast has no
-     * icon slot) on a settings-disabled HUD, an unregistered instance, or a push failure.
+     * section 4.1/4.3): title + a cycles-only body + every registered {@code SummaryEnricher}'s
+     * extra rows PREPENDED before the engine's own item ledger (design section 3.2/7.2-7.3 - the
+     * MMO bridge's per-skill XP rows land here, leg 5) + a post-build {@code decorate} pass for
+     * cross-jar theming. Falls back to the classic {@code NotificationUtil} toast (cycles-only
+     * body, no ledger rows - a text toast has no icon slot) on a settings-disabled HUD, an
+     * unregistered instance, or a push failure.
      */
-    private void showSessionSummary(@Nonnull StationSession s) {
+    private void showSessionSummary(@Nonnull StationSession s, @Nullable Store<EntityStore> store) {
         if (s.playerRef == null) {
             return;
         }
         Message title = RpgMsg.tr("ui.station.summary.title");
         Message body = RpgMsg.tr("ui.station.summary.cycles", s.cyclesDone);
-        if (!StationSummaryHud.tryShow(s.playerRef, title, body, s.stationIconItemId, ledgerRows(s))) {
+        List<SummaryEnricher> enrichers = SummaryEnricherRegistryImpl.getInstance().enrichers();
+        List<SummaryRow> extraRows = enricherRows(s, store, enrichers);
+        Consumer<UICommandBuilder> decorateHook = enrichers.isEmpty() ? null : cmd -> decorate(s, cmd, enrichers);
+        if (!StationSummaryHud.tryShow(s.playerRef, title, body, s.stationIconItemId, extraRows, ledgerRows(s),
+                decorateHook)) {
             toast(s.playerRef, body);
+        }
+    }
+
+    /**
+     * Every registered {@link SummaryEnricher}'s {@code rows()}, concatenated in registration
+     * order. Never throws; a throwing enricher is skipped so the rest of the summary still
+     * renders. Empty (zero-cost) when no enricher is registered.
+     */
+    @Nonnull
+    private static List<SummaryRow> enricherRows(@Nonnull StationSession s, @Nullable Store<EntityStore> store,
+            @Nonnull List<SummaryEnricher> enrichers) {
+        if (enrichers.isEmpty()) {
+            return List.of();
+        }
+        SummaryContext ctx = new SummaryContext(s.playerUuid, s.sessionId, s.stationId, s.cyclesDone,
+                System.currentTimeMillis() - s.startedAtMs, store, s.playerRef);
+        List<SummaryRow> out = new ArrayList<>();
+        for (SummaryEnricher e : enrichers) {
+            try {
+                List<SummaryRow> rows = e.rows(ctx);
+                if (rows != null) {
+                    out.addAll(rows);
+                }
+            } catch (Throwable t) {
+                Log.fine("STATION summary enricher rows() threw: " + t.getMessage());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The summary panel's post-build theming pass (design section 3.2): {@link
+     * StationSummaryHud#ROOT_SELECTOR} is the FROZEN root selector every enricher's {@code
+     * decorate} writes against. Never throws; a throwing enricher is skipped.
+     */
+    private static void decorate(@Nonnull StationSession s, @Nonnull UICommandBuilder cmd,
+            @Nonnull List<SummaryEnricher> enrichers) {
+        SummaryDecorateContext ctx = new SummaryDecorateContext(cmd, StationSummaryHud.ROOT_SELECTOR, s.playerRef);
+        for (SummaryEnricher e : enrichers) {
+            try {
+                e.decorate(ctx);
+            } catch (Throwable t) {
+                Log.fine("STATION summary enricher decorate() threw: " + t.getMessage());
+            }
         }
     }
 
@@ -989,7 +1110,9 @@ public final class StationService {
                     rollCompletionLoot(s, store);
                 }
                 if (s.cyclesDone > 0) {
-                    showSessionSummary(s);
+                    // Summary enrichers (design section 7.2/7.3) run INSIDE this call, before the
+                    // unconditional StationSessionCompletedEvent fires below.
+                    showSessionSummary(s, store);
                 }
                 if (entityAlive && shouldPlayCompletion(silent, s.cyclesDone)) {
                     playCompletionMoment(s, store);
@@ -998,6 +1121,11 @@ public final class StationService {
                 Log.fine("STATION stop notification failed: " + t.getMessage());
             }
         }
+        // The ONE unconditional cleanup signal (design section 3.1/7.3): fires for EVERY stop,
+        // silent included, AFTER the non-silent summary (enrichers included) + completion moment
+        // above - a listener always sees its enricher state before this clears it session-side.
+        StationEvents.fireSessionCompleted(store, s.playerRef, s.playerUuid, s.sessionId, s.stationId,
+                reason.name(), silent, s.cyclesDone, System.currentTimeMillis() - s.startedAtMs);
         Log.fine("STATION session ended (" + reason + ") for " + s.playerUuid
                 + " at " + s.stationId + " after " + s.cyclesDone + " cycle(s)");
     }
@@ -1126,9 +1254,15 @@ public final class StationService {
     /**
      * Checks {@code reqs} against {@code playerRef}: a blank/absent {@link Requires#getPermission()}
      * always passes; a null/empty {@link Requires#getConditions()} always passes. Every
-     * condition must pass (see {@link #conditionPasses}). A null {@code reqs} always passes.
+     * condition must pass (see {@link #conditionPasses}), resolved against a fresh pre-session
+     * {@link FactorContext} (design section 3.2's api {@link FactorRegistryImpl}, leg 4 - a
+     * degenerate context since no session exists yet: {@code sessionSeconds}/{@code cycleIndex}
+     * 0, held-tool power/durability not read here since the station's own {@code Requires}
+     * shipped station never authors a tool-power condition; a skill-level-style condition needs
+     * only {@code playerId}). A null {@code reqs} always passes.
      */
-    private static boolean checkRequires(@Nullable Requires reqs, @Nonnull PlayerRef playerRef) {
+    private static boolean checkRequires(@Nullable Requires reqs, @Nonnull PlayerRef playerRef,
+            @Nonnull StationAsset asset) {
         if (reqs == null || reqs.isEmpty()) {
             return true;
         }
@@ -1137,14 +1271,29 @@ public final class StationService {
             return false;
         }
         Condition[] conditions = reqs.getConditions();
-        if (conditions != null) {
-            for (Condition c : conditions) {
-                if (c == null) {
-                    continue;
-                }
-                if (!conditionPasses(c, factorLookup)) {
-                    return false;
-                }
+        if (conditions == null || conditions.length == 0) {
+            return true;
+        }
+        UUID playerId = playerRef.getUuid();
+        if (playerId == null) {
+            return false;
+        }
+        FactorContext ctx = FactorContext.builder()
+                .playerRef(playerRef)
+                .playerId(playerId)
+                .stationId(asset.getId())
+                .actionId(ACTION_WORK)
+                .sessionSeconds(0L)
+                .cycleIndex(0)
+                .progressionSkills(progressionSkills(asset))
+                .build();
+        FactorLookup lookup = (factorId, param) -> FactorRegistryImpl.getInstance().resolve(factorId, param, ctx);
+        for (Condition c : conditions) {
+            if (c == null) {
+                continue;
+            }
+            if (!conditionPasses(c, lookup)) {
+                return false;
             }
         }
         return true;

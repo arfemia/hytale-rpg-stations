@@ -12,6 +12,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import com.ziggfreed.rpgstations.api.impl.FlairUnlockRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
@@ -20,6 +21,11 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
  * from the MMO's {@code StationFlairsTest} (RPG Stations extraction leg 2); adapted for
  * RpgStations' own {@link Presentation} (7-arg factory ends in a nullable {@link
  * Presentation.Shake} instead of a Feedback string - unexercised here since no test needs it).
+ *
+ * <p>Leg 4: the single-provider {@code StationFlairs.setProvider} seam is retired; "grant a
+ * flair to a player" is now registering a {@code FlairUnlockProvider} on the api-facing {@link
+ * FlairUnlockRegistryImpl} (its production accumulate-only union), reset between tests via the
+ * test-only {@link FlairUnlockRegistryImpl#resetForTests()}.
  */
 public class StationFlairsTest {
 
@@ -27,18 +33,22 @@ public class StationFlairsTest {
     private static final String STATION_ID = "sawmill";
 
     @AfterEach
-    void restoreDefaultProvider() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of());
+    void resetRegistry() {
+        FlairUnlockRegistryImpl.getInstance().resetForTests();
+    }
+
+    private static void grant(Set<String> flairIds) {
+        FlairUnlockRegistryImpl.getInstance().register(playerId -> flairIds);
     }
 
     private static StationAsset.Flair flair(Presentation swing, Presentation cycle) {
         return StationAsset.Flair.of(swing, cycle);
     }
 
-    // ==================== Default provider = identity pass-through ====================
+    // ==================== No provider registered = identity pass-through ====================
 
     @Test
-    void defaultProvider_isIdentityPassThrough_evenWithFlairsAuthored() {
+    void noProviderRegistered_isIdentityPassThrough_evenWithFlairsAuthored() {
         Presentation base = Presentation.of("SFX_Base", "Particles_Base");
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
                 flair(Presentation.ofSound("SFX_Golden"), Presentation.ofSound("SFX_Golden_Cycle")));
@@ -49,7 +59,7 @@ public class StationFlairsTest {
     }
 
     @Test
-    void defaultProvider_nullBase_staysNull() {
+    void noProviderRegistered_nullBase_staysNull() {
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
                 flair(null, Presentation.ofSound("SFX_Golden_Cycle")));
 
@@ -60,7 +70,7 @@ public class StationFlairsTest {
 
     @Test
     void noFlairsAuthored_isIdentityPassThrough_evenIfSomethingIsUnlocked() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("golden_saw"));
+        grant(Set.of("golden_saw"));
         Presentation base = Presentation.of("SFX_Base", "Particles_Base");
 
         Presentation result = StationFlairs.effective(base, null, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
@@ -72,7 +82,7 @@ public class StationFlairsTest {
 
     @Test
     void singleFlair_overridesSound_inheritsParticles() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("golden_saw"));
+        grant(Set.of("golden_saw"));
         Presentation base = Presentation.of("SFX_Base", "Particles_Base");
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
                 flair(null, Presentation.ofSound("SFX_Golden")));
@@ -88,7 +98,7 @@ public class StationFlairsTest {
 
     @Test
     void singleFlair_addsOntoANullBase() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("golden_saw"));
+        grant(Set.of("golden_saw"));
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
                 flair(null, Presentation.of("SFX_Golden", "Particles_Golden")));
 
@@ -103,7 +113,7 @@ public class StationFlairsTest {
 
     @Test
     void twoFlairs_stackInSortedOrder_laterIdWinsPerLeaf() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("zulu_saw", "alpha_saw"));
+        grant(Set.of("zulu_saw", "alpha_saw"));
         Map<String, StationAsset.Flair> flairs = Map.of(
                 "alpha_saw", flair(null, Presentation.of("SFX_Alpha", "Particles_Alpha")),
                 "zulu_saw", flair(null, Presentation.ofSound("SFX_Zulu")));
@@ -119,7 +129,7 @@ public class StationFlairsTest {
 
     @Test
     void unlockedIdAbsentFromMap_isIgnored() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("retired_flair"));
+        grant(Set.of("retired_flair"));
         Presentation base = Presentation.of("SFX_Base", "Particles_Base");
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
                 flair(null, Presentation.ofSound("SFX_Golden")));
@@ -133,7 +143,7 @@ public class StationFlairsTest {
 
     @Test
     void cycleOnlyFlair_neverTouchesSwing() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("golden_saw"));
+        grant(Set.of("golden_saw"));
         Presentation swingBase = Presentation.ofSound("SFX_Swing_Base");
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
                 flair(null, Presentation.ofSound("SFX_Golden_Cycle")));
@@ -145,7 +155,7 @@ public class StationFlairsTest {
 
     @Test
     void swingOnlyFlair_overlaysSwing_neverTouchesCycle() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("golden_saw"));
+        grant(Set.of("golden_saw"));
         Presentation swingBase = Presentation.ofSound("SFX_Swing_Base");
         Presentation cycleBase = Presentation.ofSound("SFX_Cycle_Base");
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
@@ -161,7 +171,7 @@ public class StationFlairsTest {
     // ==================== RARE_FIND slot ====================
 
     @Test
-    void defaultProvider_rareFindSlot_isIdentityPassThrough() {
+    void noProviderRegistered_rareFindSlot_isIdentityPassThrough() {
         Presentation base = Presentation.of("SFX_T3_Base", "Particles_T3_Base");
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
                 StationAsset.Flair.of(null, null, Presentation.ofSound("SFX_Golden_Rare")));
@@ -173,7 +183,7 @@ public class StationFlairsTest {
 
     @Test
     void rareFindOnlyFlair_overlaysRareFind_neverTouchesSwingOrCycle() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("golden_saw"));
+        grant(Set.of("golden_saw"));
         Presentation swingBase = Presentation.ofSound("SFX_Swing_Base");
         Presentation cycleBase = Presentation.ofSound("SFX_Cycle_Base");
         Presentation rareFindBase = Presentation.ofSound("SFX_RareFind_Base");
@@ -191,7 +201,7 @@ public class StationFlairsTest {
 
     @Test
     void rareFindFlair_addsOntoANullBase() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("golden_saw"));
+        grant(Set.of("golden_saw"));
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
                 StationAsset.Flair.of(null, null, Presentation.of("SFX_Golden_Rare", "Particles_Golden_Rare")));
 
@@ -205,7 +215,7 @@ public class StationFlairsTest {
     // ==================== COMPLETION slot ====================
 
     @Test
-    void defaultProvider_completionSlot_isIdentityPassThrough() {
+    void noProviderRegistered_completionSlot_isIdentityPassThrough() {
         Presentation base = Presentation.of("SFX_Complete_Base", "Particles_Complete_Base");
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
                 StationAsset.Flair.of(null, null, null, Presentation.ofSound("SFX_Golden_Complete")));
@@ -217,7 +227,7 @@ public class StationFlairsTest {
 
     @Test
     void completionOnlyFlair_overlaysCompletion_neverTouchesOtherSlots() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("golden_saw"));
+        grant(Set.of("golden_saw"));
         Presentation swingBase = Presentation.ofSound("SFX_Swing_Base");
         Presentation cycleBase = Presentation.ofSound("SFX_Cycle_Base");
         Presentation rareFindBase = Presentation.ofSound("SFX_RareFind_Base");
@@ -238,7 +248,7 @@ public class StationFlairsTest {
 
     @Test
     void completionFlair_addsOntoANullBase() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("golden_saw"));
+        grant(Set.of("golden_saw"));
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
                 StationAsset.Flair.of(null, null, null,
                         Presentation.of("SFX_Golden_Complete", "Particles_Golden_Complete")));
@@ -254,7 +264,7 @@ public class StationFlairsTest {
 
     @Test
     void shakeLeaf_overlaysIndependentlyOfSoundAndParticles() {
-        StationFlairs.setProvider((playerUuid, stationId) -> Set.of("golden_saw"));
+        grant(Set.of("golden_saw"));
         Presentation base = Presentation.of("SFX_Base", "Particles_Base");
         Presentation.Shake shake = Presentation.Shake.of("Damage_Shake", 0.5);
         Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
@@ -265,5 +275,37 @@ public class StationFlairsTest {
         assertNotNull(result);
         assertEquals("SFX_Base", result.getSound(), "the flair leaves Sound null - the base survives");
         assertSame(shake, result.getShake());
+    }
+
+    // ==================== Union across providers (new this leg) ====================
+
+    @Test
+    void unionAcrossTwoProviders_bothContribute() {
+        FlairUnlockRegistryImpl.getInstance().register(playerId -> Set.of("alpha_saw"));
+        FlairUnlockRegistryImpl.getInstance().register(playerId -> Set.of("zulu_saw"));
+        Map<String, StationAsset.Flair> flairs = Map.of(
+                "alpha_saw", flair(null, Presentation.of("SFX_Alpha", "Particles_Alpha")),
+                "zulu_saw", flair(null, Presentation.ofSound("SFX_Zulu")));
+
+        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+
+        assertNotNull(result);
+        assertEquals("SFX_Zulu", result.getSound());
+        assertEquals("Particles_Alpha", result.getParticles());
+    }
+
+    @Test
+    void aThrowingProvider_isSkipped_othersStillApply() {
+        FlairUnlockRegistryImpl.getInstance().register(playerId -> {
+            throw new IllegalStateException("boom");
+        });
+        grant(Set.of("golden_saw"));
+        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
+                flair(null, Presentation.ofSound("SFX_Golden")));
+
+        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+
+        assertNotNull(result);
+        assertEquals("SFX_Golden", result.getSound());
     }
 }
