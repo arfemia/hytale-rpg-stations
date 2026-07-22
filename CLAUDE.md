@@ -10,14 +10,16 @@ command rewards) with zero progression. Package root `com.ziggfreed.rpgstations`
 phase 1 (extraction) legs 0-6 landed** (scaffold, common lift, engine move, lootables, api
 artifact, MMO bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
 camera <preset>|list` + `/rpgstations validate`, the design 4.1 scope the phase-1 legs had left
-unimplemented); **phase 2 legs A-E are LANDED**: leg A (common kernel reshape), leg B
+unimplemented); **phase 2 legs A-F are LANDED**: leg A (common kernel reshape), leg B
 (multi-action schema + step engine), leg C (placed-input custody + block states + sawmill
 migration), leg D (the `Hold.Mount` knob family - the Block/Entity surface discriminator, the
-standing work mount), and **leg E (the anvil arc - the `Stamp` step, composable roll+cap models,
+standing work mount), leg E (the anvil arc - the `Stamp` step, composable roll+cap models,
 the `EnhanceStamperRegistry` api registry, AND the live wiring that makes multi-action stations
 actually run: diegetic action selection at engage, an authored-`Steps` program dispatch path,
-`Work.Repeat` session completion - see the "Phase 2" section below); legs F-H (open flair
-vocabulary, art, smoke) remain design-only. Design
+`Work.Repeat` session completion), and **leg F (the open flair/moment vocabulary - the fixed
+`Slot` enum retired for open string moment ids, a new standalone `FlairAsset` type ANY mod can
+ship, `FlairCatalog` as the ONE merge point) - see the "Phase 2" section below); legs G-H (art,
+smoke) remain design-only. Design
 authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
 (grounded by the decision log `../../.claude/research/rpg-stations-extraction-design.md` and the
 adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-2026-07-21.md`, ALL
@@ -141,7 +143,7 @@ extensible numeric vocabulary conditional lootables/`Requires` gates evaluate ov
 See `api/CLAUDE.md` for the full type-by-type reference and `api/impl/CLAUDE.md` for the concrete
 implementation this mod installs at `setup()`.
 
-## Phase 2 (legs A-E landed; F-H design-only)
+## Phase 2 (legs A-F landed; G-H design-only)
 
 Full spec: design doc sections 9 + 10 (leg sequence A-H) + 12 (risks) + 13 (decision points).
 Phase 2 work started ahead of the maintainer's in-game phase-1 parity gate smoke (design section
@@ -271,6 +273,27 @@ fix layers on cleanly.
   `BUILTIN_SKILL_DATA` entry in the MMO's `skill.SkillRegistry`; leg E promotes it to `BUILTIN_SKILL_NAMES`
   with `requiresFeatures: ["stations"]` - the EXACT TAMING precedent (a built-in, feature-gated on
   the owning integration's presence), a small MMO-jar code change, not pack content.
-- **Legs F-H (design-only)**: the open flair/moment vocabulary, the art leg (including custody's
-  own display-entity visual layer, the Anvil's texture-path verification), and the phase-2 smoke
-  round (the FIRST item: confirm the Entity-surface standing render).
+- **Leg F (LANDED, this mod)**: the open flair/moment vocabulary (design section 9.6) - the fixed
+  `station.StationFlairs.Slot` enum (`CYCLE`/`SWING`/`RARE_FIND`/`COMPLETION`) is RETIRED for an
+  open STRING moment id (`StationFlairs.MOMENT_CYCLE`/`MOMENT_SWING`/`MOMENT_IMPACT`/
+  `MOMENT_RARE_FIND`/`MOMENT_COMPLETION` well-known constants, plus
+  `stepMomentId(actionId, stepId)` building a per-step `step:<actionId>:<stepId>` id a `Present`
+  step resolves against). `MOMENT_IMPACT` is a NEW id split off `MOMENT_SWING` this leg (the
+  delayed swing-impact cue previously reused the swing slot verbatim - a flair author can now
+  target either cue independently; no shipped content depended on the fused behavior). A new
+  `asset.FlairAsset` Pattern-A type (`Server/RpgStations/Flairs/<Name>.json`, `{Stations?[],
+  Moments}`) lets ANY installed mod/pack ship a flair layer without touching a station's own JSON;
+  `station.FlairCatalog.effectiveFlairsFor` is the ONE merge point (a station's inline `Flairs` -
+  reshaped to the SAME open `{Moments}` shape as `FlairAsset`, no more fixed leaves - UNIONED with
+  every applicable `FlairAsset`, folded ONTO it for a same-id collision). `StationValidator` warns
+  (never blocks) on an empty `Moments` map, an unrecognized moment id (typo detection - a
+  `step:`-prefixed id or one of the 5 well-known ids always passes, so a FUTURE engine moment
+  never breaks an OLDER pack), and a `FlairAsset.Stations` entry naming an unknown station.
+  `api.impl.StationViewImpl.flairIds()` and `station.StationCatalog.allFlairIds()` both reuse the
+  merge point rather than an inline-only view that would now be incomplete. The MMO bridge's
+  `FlairUnlockRegistry`/`StationComponent` provider is UNTOUCHED (it already answers "which ids
+  has this player unlocked" and was always vocabulary-agnostic). See `station/CLAUDE.md`'s "Loot +
+  flairs" bullet for the full file-by-file detail.
+- **Legs G-H (design-only)**: the art leg (including custody's own display-entity visual layer,
+  the Anvil's texture-path verification), and the phase-2 smoke round (the FIRST item: confirm the
+  Entity-surface standing render).

@@ -1419,65 +1419,37 @@ public final class StationAsset
     /**
      * One NAMED cosmetic flair layer: a grantor (any run-a-command reward system) unlocks a
      * flair id for a player, and {@code StationFlairs.effective} overlays its non-null leaves
-     * onto the station's base moment presentation, per LEAF.
+     * onto the station's base moment presentation, per LEAF, per MOMENT ID.
+     *
+     * <p><b>Leg F (design section 9.6):</b> the old fixed {@code Swing}/{@code Cycle}/
+     * {@code RareFind}/{@code Completion} leaves are REPLACED by an open {@link #moments} map
+     * keyed by an arbitrary STRING moment id (engine-emitted well-known ids
+     * {@code cycle}/{@code swing}/{@code impact}/{@code rare_find}/{@code completion}, plus a
+     * per-step {@code step:<actionId>:<stepId>} - see {@code station.StationFlairs}'s constants)
+     * - unreleased, no back-compat alias, the same shape a standalone {@link FlairAsset} uses for
+     * its own {@code Moments} leaf (shared vocabulary, one flair-content shape whether authored
+     * inline or in a separate file).
      */
     public static final class Flair {
-        @Nullable protected Presentation swing;
-        @Nullable protected Presentation cycle;
-        @Nullable protected Presentation rareFind;
-        @Nullable protected Presentation completion;
+        @Nullable protected Map<String, Presentation> moments;
 
         public static final BuilderCodec<Flair> CODEC = BuilderCodec.builder(Flair.class, Flair::new)
-                .appendInherited(new KeyedCodec<>("Swing", Presentation.CODEC, false),
-                        (o, v) -> o.swing = v, o -> o.swing, (o, p) -> o.swing = p.swing).add()
-                .appendInherited(new KeyedCodec<>("Cycle", Presentation.CODEC, false),
-                        (o, v) -> o.cycle = v, o -> o.cycle, (o, p) -> o.cycle = p.cycle).add()
-                .appendInherited(new KeyedCodec<>("RareFind", Presentation.CODEC, false),
-                        (o, v) -> o.rareFind = v, o -> o.rareFind, (o, p) -> o.rareFind = p.rareFind).add()
-                .appendInherited(new KeyedCodec<>("Completion", Presentation.CODEC, false),
-                        (o, v) -> o.completion = v, o -> o.completion, (o, p) -> o.completion = p.completion).add()
+                .appendInherited(new KeyedCodec<>("Moments",
+                                new MapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
+                        (o, v) -> o.moments = v, o -> o.moments, (o, p) -> o.moments = p.moments).add()
                 .build();
 
         @Nonnull
-        public static Flair of(@Nullable Presentation swing, @Nullable Presentation cycle) {
-            return of(swing, cycle, null);
-        }
-
-        @Nonnull
-        public static Flair of(@Nullable Presentation swing, @Nullable Presentation cycle,
-                @Nullable Presentation rareFind) {
-            return of(swing, cycle, rareFind, null);
-        }
-
-        @Nonnull
-        public static Flair of(@Nullable Presentation swing, @Nullable Presentation cycle,
-                @Nullable Presentation rareFind, @Nullable Presentation completion) {
+        public static Flair of(@Nullable Map<String, Presentation> moments) {
             Flair f = new Flair();
-            f.swing = swing;
-            f.cycle = cycle;
-            f.rareFind = rareFind;
-            f.completion = completion;
+            f.moments = moments;
             return f;
         }
 
+        /** Moment id ({@code cycle}/{@code swing}/.../{@code step:<actionId>:<stepId>}) -> Presentation. */
         @Nullable
-        public Presentation getSwing() {
-            return swing;
-        }
-
-        @Nullable
-        public Presentation getCycle() {
-            return cycle;
-        }
-
-        @Nullable
-        public Presentation getRareFind() {
-            return rareFind;
-        }
-
-        @Nullable
-        public Presentation getCompletion() {
-            return completion;
+        public Map<String, Presentation> getMoments() {
+            return moments;
         }
     }
 }

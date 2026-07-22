@@ -241,7 +241,13 @@ final class StationStepHandlers {
         }
     }
 
-    /** Plays this step's OWN {@code Presentation} at the block through the {@code CYCLE} moment slot. */
+    /**
+     * Plays this step's OWN {@code Presentation} at the block through the per-step moment id
+     * (design section 9.6, leg F): {@code step:<actionId>:<stepId>} when this step authors an
+     * {@code Id}, else falls back to the well-known {@link StationFlairs#MOMENT_CYCLE} id (the
+     * pre-leg-F behavior every implicit-program Present step still exercises, since the implicit
+     * program's own steps author no {@code Id}).
+     */
     static final class PresentHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
         @Override
         public StationStepResult execute(StationStepContext ctx, StationStep step) {
@@ -250,9 +256,19 @@ final class StationStepHandlers {
             }
             Vector3d blockPos = new Vector3d(ctx.session.blockX + 0.5, ctx.session.blockY + 0.5,
                     ctx.session.blockZ + 0.5);
-            StationService.emitMoment(ctx.store, ctx.session, StationFlairs.Slot.CYCLE, step.getPresentation(), blockPos);
+            StationService.emitMoment(ctx.store, ctx.session, presentMomentId(ctx, step), step.getPresentation(), blockPos);
             return StationStepResult.SUCCESS;
         }
+    }
+
+    /** The pure per-step moment id decision {@link PresentHandler} resolves against. */
+    @Nonnull
+    static String presentMomentId(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        String stepId = step.getId();
+        if (stepId != null && !stepId.isBlank()) {
+            return StationFlairs.stepMomentId(ctx.action.getActionId(), stepId);
+        }
+        return StationFlairs.MOMENT_CYCLE;
     }
 
     /**

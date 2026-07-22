@@ -875,7 +875,7 @@ public final class StationService {
         onCycleCompleted(s, store, commandBuffer, asset, 1.0, true, s.cyclesDone);
 
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
-        emitMoment(store, s, StationFlairs.Slot.CYCLE, asset.getPresentation(), blockPos);
+        emitMoment(store, s, StationFlairs.MOMENT_CYCLE, asset.getPresentation(), blockPos);
         s.cyclesDone++;
         return true;
     }
@@ -973,7 +973,7 @@ public final class StationService {
     /**
      * Folds a {@link LootEngine.GrantResult} into the session's item ledger, plays every
      * reached floor's {@code Presentation} through {@link #emitMoment} on {@link
-     * StationFlairs.Slot#RARE_FIND}, and fires the two keyed notifications (design 4.5.1):
+     * StationFlairs#MOMENT_RARE_FIND}, and fires the two keyed notifications (design 4.5.1):
      * bonus-copy grants -> {@code ui.station.lucky}, droplist grants -> {@code
      * ui.station.rare_find}. Both may fire on the same pass (independent grant kinds).
      */
@@ -990,7 +990,7 @@ public final class StationService {
         }
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
         for (Presentation p : result.getFloorPresentations()) {
-            emitMoment(store, s, StationFlairs.Slot.RARE_FIND, p, blockPos);
+            emitMoment(store, s, StationFlairs.MOMENT_RARE_FIND, p, blockPos);
         }
         if (s.playerRef != null) {
             if (!result.getBonusCopyItems().isEmpty()) {
@@ -1167,11 +1167,16 @@ public final class StationService {
      * shape this leaf was verified against (critique m6 binding fix). Shake needs the player
      * SPECIFICALLY (not "nearby players" like Sound3D/ModelParticleService), so it reads
      * {@code s.playerRef} rather than {@code targetPos}.
+     *
+     * <p><b>Leg F (design section 9.6):</b> {@code momentId} is an open STRING (see {@link
+     * StationFlairs}'s well-known constants + {@link StationFlairs#stepMomentId}), and the flair
+     * map resolved against is the UNION of the station's own inline {@code Flairs} with every
+     * applicable standalone {@code asset.FlairAsset} ({@link #effectiveFlairs}).
      */
     static void emitMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
-                                   @Nonnull StationFlairs.Slot slot, @Nullable Presentation base,
+                                   @Nonnull String momentId, @Nullable Presentation base,
                                    @Nonnull Vector3d targetPos) {
-        Presentation p = StationFlairs.effective(base, cachedFlairs(s), slot, s.playerUuid, s.stationId);
+        Presentation p = StationFlairs.effective(base, effectiveFlairs(s), momentId, s.playerUuid, s.stationId);
         if (p == null) {
             return;
         }
@@ -1189,13 +1194,17 @@ public final class StationService {
     }
 
     /**
-     * The station's authored {@code Flairs} map, or {@code null} when the station authors none
-     * OR a mid-session catalog re-fold has dropped the station entirely.
+     * The station's EFFECTIVE {@code flairId -> momentId -> Presentation} map (design 9.6's
+     * open vocabulary, {@link FlairCatalog#effectiveFlairsFor}), or {@code null} when the
+     * station itself is gone (a mid-session catalog re-fold has dropped it entirely).
      */
     @Nullable
-    private static Map<String, StationAsset.Flair> cachedFlairs(@Nonnull StationSession s) {
+    private static Map<String, Map<String, Presentation>> effectiveFlairs(@Nonnull StationSession s) {
         StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
-        return asset != null ? asset.getFlairs() : null;
+        if (asset == null) {
+            return null;
+        }
+        return FlairCatalog.getInstance().effectiveFlairsFor(s.stationId, asset);
     }
 
     /**
@@ -1214,7 +1223,7 @@ public final class StationService {
             StationHoldController.playEmote(s, store);
         }
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
-        emitMoment(store, s, StationFlairs.Slot.SWING, s.swingPresentation, blockPos);
+        emitMoment(store, s, StationFlairs.MOMENT_SWING, s.swingPresentation, blockPos);
 
         if (s.impactDelayMs > 0 && s.impactPresentation != null) {
             s.pendingImpactAtMs = scheduleImpactAt(System.currentTimeMillis(), s.impactDelayMs);
@@ -1230,10 +1239,14 @@ public final class StationService {
         return seatMode;
     }
 
-    /** The delayed swing-impact cue itself, on the SAME {@code Slot.SWING} resolution the swing cue uses. */
+    /**
+     * The delayed swing-impact cue itself, on its OWN {@link StationFlairs#MOMENT_IMPACT} moment
+     * id (design 9.6 - split off {@link StationFlairs#MOMENT_SWING} this leg; a flair author can
+     * now target the impact cue independently of the swing cue that scheduled it).
+     */
     private static void runImpact(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
-        emitMoment(store, s, StationFlairs.Slot.SWING, s.impactPresentation, blockPos);
+        emitMoment(store, s, StationFlairs.MOMENT_IMPACT, s.impactPresentation, blockPos);
     }
 
     /** Pure due-time scheduling for the delayed swing-impact cue. */
@@ -1300,8 +1313,8 @@ public final class StationService {
     /**
      * The session-completion presentation moment itself: plays the station's
      * {@link StationAsset#getCompletion} through the SAME {@link #emitMoment} choke point, on
-     * the {@code StationFlairs.Slot#COMPLETION} slot. Plays at the PLAYER's position, not the
-     * block (completion celebrates the player).
+     * the {@link StationFlairs#MOMENT_COMPLETION} moment id. Plays at the PLAYER's position, not
+     * the block (completion celebrates the player).
      */
     private static void playCompletionMoment(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
         StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
@@ -1313,7 +1326,7 @@ public final class StationService {
             return;
         }
         Vector3d playerPos = transform.getPosition();
-        emitMoment(store, s, StationFlairs.Slot.COMPLETION, asset.getCompletion(), playerPos);
+        emitMoment(store, s, StationFlairs.MOMENT_COMPLETION, asset.getCompletion(), playerPos);
     }
 
     /**

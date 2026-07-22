@@ -1,15 +1,14 @@
 package com.ziggfreed.rpgstations.api.impl;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import javax.annotation.Nonnull;
 
 import com.ziggfreed.rpgstations.api.StationView;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.rpgstations.station.FlairCatalog;
 
 /** Read-only {@link StationView} adapter over a live {@link StationAsset}. */
 final class StationViewImpl implements StationView {
@@ -37,12 +36,11 @@ final class StationViewImpl implements StationView {
         }
         this.xpSkills = List.copyOf(skills);
 
-        Set<String> flairs = new LinkedHashSet<>();
-        Map<String, StationAsset.Flair> flairMap = asset.getFlairs();
-        if (flairMap != null) {
-            flairs.addAll(flairMap.keySet());
-        }
-        this.flairIds = Set.copyOf(flairs);
+        // Leg F (design section 9.6): the effective flair-id set for a station is the SAME union
+        // FlairCatalog#effectiveFlairsFor resolves at moment-playback time (inline Flairs UNIONED
+        // with every applicable standalone FlairAsset) - reused here rather than re-deriving a
+        // second, narrower "inline-only" view that would silently miss third-party flair content.
+        this.flairIds = Set.copyOf(FlairCatalog.getInstance().effectiveFlairsFor(id, asset).keySet());
     }
 
     @Override

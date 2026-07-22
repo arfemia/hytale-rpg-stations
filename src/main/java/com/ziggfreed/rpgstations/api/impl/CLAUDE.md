@@ -26,7 +26,10 @@ is used.
   the union-of-all shape the other three registries use). Read by
   `station.StationStepHandlers.StampHandler` directly (not back through `RpgStationsApi`).
 - **[`StationViewImpl`](StationViewImpl.java)** - the read-only per-station projection built from
-  the live `station.StationCatalog` entry at query time (never cached/stale).
+  the live `station.StationCatalog` entry at query time (never cached/stale). `flairIds()` (design
+  9.6, phase 2 leg F) reuses `station.FlairCatalog.effectiveFlairsFor` - the SAME inline-`Flairs`-
+  UNION-`FlairAsset` merge `StationFlairs` resolves at moment-playback time - rather than a
+  narrower inline-only view.
 
 All four registries follow the same guard discipline as `RpgStationsApi.get()`'s own contract:
 cheap, side-effect-free reads/registrations; nothing here retains a live world-thread object past

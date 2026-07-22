@@ -241,12 +241,33 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   `stop()` is the ONE idempotent exit funnel: it fires `StationSessionCompletedEvent`
   UNCONDITIONALLY (every stop, silent included - the api's one guaranteed cleanup signal for a
   progression listener's per-session accumulator).
-- **Loot + flairs**: [`StationFlairs`](StationFlairs.java) resolves the per-player cosmetic
-  overlay for a moment slot (`enum Slot { CYCLE, SWING, RARE_FIND, COMPLETION }`) against the
-  UNION of every registered api `FlairUnlockProvider` (the MMO's `StationComponent`-backed
-  provider is the only one registered today - persistence stays MMO-side by maintainer ruling, an
-  unlock is a per-player fact this session-scoped mod never stores). See `../loot/CLAUDE.md` for
-  the conditional-lootable roll layer this package calls into per cycle.
+- **Loot + flairs, the OPEN vocabulary (design 9.6, phase 2 leg F, LANDED)**:
+  [`StationFlairs`](StationFlairs.java) resolves the per-player cosmetic overlay for a moment id
+  against the UNION of every registered api `FlairUnlockProvider` (the MMO's
+  `StationComponent`-backed provider is the only one registered today - persistence stays
+  MMO-side by maintainer ruling, an unlock is a per-player fact this session-scoped mod never
+  stores). The old fixed `Slot` enum (`CYCLE`/`SWING`/`RARE_FIND`/`COMPLETION`) is RETIRED in
+  favor of an open STRING moment id: `StationFlairs.MOMENT_CYCLE`/`MOMENT_SWING`/`MOMENT_IMPACT`/
+  `MOMENT_RARE_FIND`/`MOMENT_COMPLETION` are the engine's own well-known constants (`impact` is
+  NEW this leg, split off `swing` - the delayed swing-impact cue used to reuse the swing slot
+  verbatim; a flair author can now target either cue independently), plus
+  `StationFlairs.stepMomentId(actionId, stepId)` builds a per-step `step:<actionId>:<stepId>` id a
+  `Present`-typed `StationStep` resolves against (`StationStepHandlers.presentMomentId`, falling
+  back to `MOMENT_CYCLE` when the step authors no `Id`). The flair map itself is now the merge of
+  TWO sources ([`FlairCatalog`](FlairCatalog.java)`.effectiveFlairsFor`): a station's own inline
+  `Flairs` (an authoring convenience, `asset.StationAsset.Flair` reshaped this leg to a single
+  open `Moments` map instead of 4 fixed leaves) UNIONED with every folded `asset.FlairAsset`
+  (`Server/RpgStations/Flairs/*.json`, Pattern A, ANY mod can ship one) whose `Stations` list
+  applies (null = every station) - a same-flair-id `FlairAsset` entry wins ("folds ONTO" the
+  inline map). `StationService.emitMoment`/`effectiveFlairs` resolve this merged map fresh per
+  moment (no caching - flair playback is not a hot per-tick path); `api.impl.StationViewImpl
+  .flairIds()` and `StationCatalog.allFlairIds()` both reuse the SAME merge point rather than a
+  narrower inline-only view. `StationValidator.checkFlairs`/`validateFlairAssets` share one
+  `checkFlairMoments` core: an empty `Moments` map warns `EMPTY_FLAIR`, an unrecognized moment id
+  warns `UNKNOWN_FLAIR_MOMENT_ID` (never blocks - "a future engine moment must not break an older
+  pack", design's own binding note), and a `FlairAsset.Stations` entry naming an unknown station
+  id warns `FLAIR_ASSET_UNKNOWN_STATION`. See `../loot/CLAUDE.md` for the conditional-lootable
+  roll layer this package calls into per cycle.
 - **Engine settings**: [`SettingsCatalog`](SettingsCatalog.java) holds the folded
   `asset.SettingsAsset` singleton (`Enabled`, `SummaryHud.{Enabled,Position,OffsetY,TtlMs}`) -
   `Enabled` backs the heartbeat's engine-wide feature-toggle terminate check.
@@ -351,6 +372,6 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   `Recipe` override needs its OWN derived-conversion cache entry). `StationService.dispatchProgram`
   reads the resolved action's `Work.effectiveRepeat()` and calls `stop(..., StopReason.RITUAL_COMPLETE, ...)`
   on a completed non-repeating program.
-- **Not yet landed** (design scope, not started): phase 2 legs F-H - the open flair/moment
-  vocabulary, the art leg, and the phase-2 smoke round (see the mod-root `CLAUDE.md`'s Phase 2
-  section).
+- **Not yet landed** (design scope, not started): phase 2 legs G-H - the art leg and the phase-2
+  smoke round (see the mod-root `CLAUDE.md`'s Phase 2 section). Leg F (the open flair/moment
+  vocabulary) is LANDED - see the "Loot + flairs" bullet above.

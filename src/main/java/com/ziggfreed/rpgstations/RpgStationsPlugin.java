@@ -17,6 +17,7 @@ import com.ziggfreed.common.asset.AssetStoreRegistrar;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
+import com.ziggfreed.rpgstations.asset.FlairAsset;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.RollPool;
 import com.ziggfreed.rpgstations.asset.SettingsAsset;
@@ -25,6 +26,7 @@ import com.ziggfreed.rpgstations.command.RpgStationsCommand;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
+import com.ziggfreed.rpgstations.station.FlairCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.station.StationCatalog;
 import com.ziggfreed.rpgstations.station.StationCustodyBreakSystem;
@@ -83,6 +85,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerStationAssetStore();
         registerLootableAssetStore();
         registerRollPoolAssetStore();
+        registerFlairAssetStore();
         registerSettingsAssetStore();
         registerStationInteraction();
         registerStationSystems();
@@ -201,6 +204,38 @@ public class RpgStationsPlugin extends JavaPlugin {
         RollPoolCatalog.getInstance().fold(layer, false);
         Log.info("RollPool asset layer: folded " + layer.size() + " roll pool(s) into RollPoolCatalog: "
                 + layer.keySet());
+    }
+
+    /**
+     * Registers the {@link FlairAsset} Pattern-A store at {@code Server/RpgStations/Flairs}
+     * (design section 9.6, phase 2 leg F - the open flair/moment vocabulary's asset-driven half)
+     * and folds every loaded entry into {@link FlairCatalog}; {@link StationValidator#runAndLog}
+     * re-runs on THIS fold too (unlike Lootable/RollPool) since a {@code FlairAsset} carries its
+     * own {@code Stations}-references-a-known-id check.
+     */
+    private void registerFlairAssetStore() {
+        AssetStoreRegistrar.registerStore(
+                FlairAsset.class,
+                new DefaultAssetMap<String, FlairAsset>(),
+                "RpgStations/Flairs",
+                FlairAsset::getId,
+                FlairAsset.CODEC,
+                null);
+        getEventRegistry().register(LoadedAssetsEvent.class, FlairAsset.class,
+                RpgStationsPlugin::onFlairAssetsLoaded);
+    }
+
+    private static void onFlairAssetsLoaded(
+            LoadedAssetsEvent<String, FlairAsset, DefaultAssetMap<String, FlairAsset>> event) {
+        DefaultAssetMap<String, FlairAsset> assetMap = event.getAssetMap();
+        Map<String, FlairAsset> layer = new LinkedHashMap<>();
+        for (Map.Entry<String, FlairAsset> entry : assetMap.getAssetMap().entrySet()) {
+            layer.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
+        }
+        FlairCatalog.getInstance().fold(layer, false);
+        Log.info("FlairAsset layer: folded " + layer.size() + " flair asset(s) into FlairCatalog: "
+                + layer.keySet());
+        StationValidator.runAndLog();
     }
 
     /**

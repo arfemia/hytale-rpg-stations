@@ -689,8 +689,80 @@ public class StationValidatorTest {
         StationAsset a = StationAsset.of("emptyflair",
                 StationAsset.Identity.of("rpgstations.station.emptyflair.name", null, null),
                 null, oakRecipe(), null, null, null, null, null, null, null,
-                Map.of("dead_flair", StationAsset.Flair.of(null, null)));
+                Map.of("dead_flair", StationAsset.Flair.of(null)));
         assertTrue(codes(validate(a)).contains("EMPTY_FLAIR"));
+    }
+
+    @Test
+    void flair_unknownMomentId_warned() {
+        StationAsset a = StationAsset.of("unknownmoment",
+                StationAsset.Identity.of("rpgstations.station.unknownmoment.name", null, null),
+                null, oakRecipe(), null, null, null, null, null, null, null,
+                Map.of("golden_saw", StationAsset.Flair.of(Map.of("cycel", Presentation.ofSound("SFX_Golden")))));
+        assertTrue(codes(validate(a)).contains("UNKNOWN_FLAIR_MOMENT_ID"));
+    }
+
+    @Test
+    void flair_knownMomentId_notWarned() {
+        StationAsset a = StationAsset.of("knownmoment",
+                StationAsset.Identity.of("rpgstations.station.knownmoment.name", null, null),
+                null, oakRecipe(), null, null, null, null, null, null, null,
+                Map.of("golden_saw", StationAsset.Flair.of(Map.of("swing", Presentation.ofSound("SFX_Golden")))));
+        assertFalse(codes(validate(a)).contains("UNKNOWN_FLAIR_MOMENT_ID"));
+    }
+
+    @Test
+    void flair_perStepMomentId_notWarned() {
+        StationAsset a = StationAsset.of("stepmoment",
+                StationAsset.Identity.of("rpgstations.station.stepmoment.name", null, null),
+                null, oakRecipe(), null, null, null, null, null, null, null,
+                Map.of("golden_saw", StationAsset.Flair.of(
+                        Map.of("step:enhance:stamp", Presentation.ofSound("SFX_Golden")))));
+        assertFalse(codes(validate(a)).contains("UNKNOWN_FLAIR_MOMENT_ID"));
+    }
+
+    // ==================== FlairAssets (design 9.6, phase 2 leg F) ====================
+
+    @Test
+    void flairAsset_emptyMoments_flagged() {
+        com.ziggfreed.rpgstations.asset.FlairAsset fa =
+                com.ziggfreed.rpgstations.asset.FlairAsset.of("dead_flair", null, null);
+        List<Finding> findings = StationValidator.validateFlairAssets(List.of(fa), id -> true);
+        assertTrue(codes(findings).contains("EMPTY_FLAIR"));
+    }
+
+    @Test
+    void flairAsset_unknownMomentId_warned() {
+        com.ziggfreed.rpgstations.asset.FlairAsset fa = com.ziggfreed.rpgstations.asset.FlairAsset.of(
+                "golden_saw", null, Map.of("cycel", Presentation.ofSound("SFX_Golden")));
+        List<Finding> findings = StationValidator.validateFlairAssets(List.of(fa), id -> true);
+        assertTrue(codes(findings).contains("UNKNOWN_FLAIR_MOMENT_ID"));
+    }
+
+    @Test
+    void flairAsset_unknownStation_warned() {
+        com.ziggfreed.rpgstations.asset.FlairAsset fa = com.ziggfreed.rpgstations.asset.FlairAsset.of(
+                "golden_saw", new String[]{"nonexistent_station"},
+                Map.of("swing", Presentation.ofSound("SFX_Golden")));
+        List<Finding> findings = StationValidator.validateFlairAssets(List.of(fa), id -> false);
+        assertTrue(codes(findings).contains("FLAIR_ASSET_UNKNOWN_STATION"));
+    }
+
+    @Test
+    void flairAsset_knownStation_notWarned() {
+        com.ziggfreed.rpgstations.asset.FlairAsset fa = com.ziggfreed.rpgstations.asset.FlairAsset.of(
+                "golden_saw", new String[]{"sawmill"},
+                Map.of("swing", Presentation.ofSound("SFX_Golden")));
+        List<Finding> findings = StationValidator.validateFlairAssets(List.of(fa), id -> true);
+        assertFalse(codes(findings).contains("FLAIR_ASSET_UNKNOWN_STATION"));
+    }
+
+    @Test
+    void flairAsset_nullStations_neverFlagged() {
+        com.ziggfreed.rpgstations.asset.FlairAsset fa = com.ziggfreed.rpgstations.asset.FlairAsset.of(
+                "golden_saw", null, Map.of("swing", Presentation.ofSound("SFX_Golden")));
+        List<Finding> findings = StationValidator.validateFlairAssets(List.of(fa), id -> false);
+        assertFalse(codes(findings).contains("FLAIR_ASSET_UNKNOWN_STATION"));
     }
 
     // ==================== Actions (design 9.1/9.3, phase 2 leg B - "never block") ====================

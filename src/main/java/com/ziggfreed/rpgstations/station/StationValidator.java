@@ -18,6 +18,7 @@ import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.rpgstations.asset.FlairAsset;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
@@ -55,11 +56,12 @@ public final class StationValidator {
     // ==================== Entry points ====================
 
     /**
-     * Validate the live catalog (stations AND named lootable tables, design section 4.8's
-     * "validator coverage"). Never throws; returns an empty list on failure. {@code factorKnown}
-     * is backed by the LIVE api-facing {@link FactorRegistryImpl} (the built-in {@code
-     * rpgstations:} factors are always registered by plugin {@code setup()}, so this is a real
-     * check now, unlike the leg-2 fail-open placeholder).
+     * Validate the live catalog (stations, named lootable tables, AND (leg F, design section 9.6)
+     * standalone {@link FlairAsset}s - design section 4.8's "validator coverage"). Never throws;
+     * returns an empty list on failure. {@code factorKnown} is backed by the LIVE api-facing
+     * {@link FactorRegistryImpl} (the built-in {@code rpgstations:} factors are always registered
+     * by plugin {@code setup()}, so this is a real check now, unlike the leg-2 fail-open
+     * placeholder).
      */
     @Nonnull
     public static List<Finding> validate() {
@@ -72,6 +74,8 @@ public final class StationValidator {
                     id -> RollPoolCatalog.getInstance().get(id) != null));
             out.addAll(validateLootables(LootableCatalog.getInstance().all().values(),
                     StationValidator::dropListKnownLive, FactorRegistryImpl.getInstance()::isKnown));
+            out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(),
+                    id -> StationCatalog.getInstance().getStation(id) != null));
             return out;
         } catch (Throwable t) {
             Log.warn("Station validation aborted: " + t.getMessage());
@@ -747,6 +751,12 @@ public final class StationValidator {
                 "COMPLETION_UNPLAYED_LEAVES", out);
     }
 
+    /**
+     * Station-inline {@code Flairs} coverage (design section 9.6, leg F reshape - the old fixed
+     * {@code Swing}/{@code Cycle}/{@code RareFind}/{@code Completion} leaf check is replaced by
+     * an open {@code Moments} map walk). {@link #checkFlairMoments} is the shared core also used
+     * by {@link #validateFlairAssets} for a standalone {@code FlairAsset}'s own {@code Moments}.
+     */
     private static void checkFlairs(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
                                     @Nonnull List<Finding> out) {
         Map<String, StationAsset.Flair> flairs = a.getFlairs();
@@ -764,21 +774,71 @@ public final class StationValidator {
             if (flair == null) {
                 continue;
             }
-            String flairLabel = label + " Flairs['" + flairId + "']";
-            if (flair.getSwing() == null && flair.getCycle() == null && flair.getRareFind() == null
-                    && flair.getCompletion() == null) {
-                out.add(Finding.warning(DOMAIN, "EMPTY_FLAIR",
-                        flairLabel + " authors neither Swing, Cycle, RareFind, nor Completion - it can never overlay anything", id));
+            checkFlairMoments(flair.getMoments(), label + " Flairs['" + flairId + "']", id, out);
+        }
+    }
+
+    /**
+     * Shared {@code Moments} map coverage (design section 9.6, leg F): an empty/absent map can
+     * never overlay anything ({@code EMPTY_FLAIR}), each authored Presentation still gets the
+     * existing unplayed-leaves check, and an unrecognized moment id (typo'd against the 5
+     * well-known ids / the {@code step:} prefix - {@link StationFlairs#isKnownMomentId}) warns
+     * ONLY - per the design's own binding note, a future engine moment must never fail an older
+     * pack's validation.
+     */
+    private static void checkFlairMoments(@Nullable Map<String, Presentation> moments, @Nonnull String label,
+                                          @Nonnull String id, @Nonnull List<Finding> out) {
+        if (moments == null || moments.isEmpty()) {
+            out.add(Finding.warning(DOMAIN, "EMPTY_FLAIR",
+                    label + " authors no Moments - it can never overlay anything", id));
+            return;
+        }
+        for (Map.Entry<String, Presentation> entry : moments.entrySet()) {
+            String momentId = entry.getKey();
+            if (momentId == null || momentId.isBlank()) {
+                out.add(Finding.warning(DOMAIN, "BLANK_FLAIR_MOMENT_ID",
+                        label + " Moments has a blank moment id", id));
+                continue;
             }
-            warnUnplayedPresentationLeaves(flair.getSwing(), flairLabel + ".Swing", id,
-                    "FLAIR_UNPLAYED_LEAVES", out);
-            warnUnplayedPresentationLeaves(flair.getCycle(), flairLabel + ".Cycle", id,
-                    "FLAIR_UNPLAYED_LEAVES", out);
-            warnUnplayedPresentationLeaves(flair.getRareFind(), flairLabel + ".RareFind", id,
-                    "FLAIR_UNPLAYED_LEAVES", out);
-            warnUnplayedPresentationLeaves(flair.getCompletion(), flairLabel + ".Completion", id,
+            if (!StationFlairs.isKnownMomentId(momentId)) {
+                out.add(Finding.warning(DOMAIN, "UNKNOWN_FLAIR_MOMENT_ID",
+                        label + " Moments['" + momentId + "'] is not a recognized moment id (cycle/swing/impact/"
+                                + "rare_find/completion, or a step:<actionId>:<stepId> id) - check for a typo", id));
+            }
+            warnUnplayedPresentationLeaves(entry.getValue(), label + ".Moments['" + momentId + "']", id,
                     "FLAIR_UNPLAYED_LEAVES", out);
         }
+    }
+
+    /**
+     * Standalone {@link FlairAsset} coverage (design section 9.6, leg F): the SAME
+     * {@link #checkFlairMoments} core the station-inline path uses, plus a
+     * {@code Stations}-references-an-unknown-station check ({@code stationKnown} is the caller's
+     * predicate - the singleton {@link #validate()} entry backs it with the live
+     * {@link StationCatalog}). Never blocks; every finding here is a warning.
+     */
+    @Nonnull
+    public static List<Finding> validateFlairAssets(@Nonnull Collection<FlairAsset> flairAssets,
+                                                     @Nonnull Predicate<String> stationKnown) {
+        List<Finding> out = new ArrayList<>();
+        for (FlairAsset fa : flairAssets) {
+            if (fa == null) {
+                continue;
+            }
+            String id = fa.getId() == null || fa.getId().isBlank() ? "(unnamed)" : fa.getId();
+            String label = "FlairAsset '" + id + "'";
+            String[] stations = fa.getStations();
+            if (stations != null) {
+                for (String stationId : stations) {
+                    if (stationId != null && !stationId.isBlank() && !stationKnown.test(stationId.toLowerCase(Locale.ROOT))) {
+                        out.add(Finding.warning(DOMAIN, "FLAIR_ASSET_UNKNOWN_STATION",
+                                label + " Stations references unknown station '" + stationId + "'", id));
+                    }
+                }
+            }
+            checkFlairMoments(fa.getMoments(), label, id, out);
+        }
+        return out;
     }
 
     /**

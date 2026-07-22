@@ -261,7 +261,7 @@ public final class Roll {
                 return grants;
             }
 
-            /** Played on {@code StationFlairs.Slot.RARE_FIND} when this floor is reached and grants something. */
+            /** Played on the {@code station.StationFlairs#MOMENT_RARE_FIND} moment id when this floor is reached and grants something. */
             @Nullable
             public Presentation getPresentation() {
                 return presentation;

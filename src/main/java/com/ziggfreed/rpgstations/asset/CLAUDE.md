@@ -24,7 +24,9 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   (`Tables`/`Rolls`), `Camera` (third-person pull + `FaceBlock`/`Recipe`), `Animation` (`EmoteId` +
   `Swing`/`Impact`/`ActionClip`), `Presentation` (per-cycle moment), `Completion` (session-end
   moment, a second `Presentation` instance), `Requires` (permission + factor-`Condition` gate),
-  `Flairs` (per-flair-id cosmetic overrides), and (phase 2 leg B) `Actions` - a named,
+  `Flairs` (per-flair-id cosmetic overrides, an authoring convenience - see
+  [`FlairAsset`](FlairAsset.java) below for the standalone, third-party-authorable route), and
+  (phase 2 leg B) `Actions` - a named,
   authored-order map of [`ActionDef`](ActionDef.java) whole-GROUP overrides (design 9.1; native
   `Parent` inherits the WHOLE map, same as `Flairs` - no per-key merge), absent/empty meaning the
   single implicit `"work"` action built from this asset's own groups. See `../station/CLAUDE.md`
@@ -83,8 +85,21 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   deliberate small divergence from the MMO's copy of the same shape, not a `ziggfreed-common`
   lift - the two authoring-side vocabularies diverge, this one drops the MMO's `Feedback` leaf
   since there is no `FeedbackService` indirection here). Leaves: `Sound`, `Particles`,
-  `Animation`, `AnimationItem`, `AnimationSlot`, `Camera`. The design's planned `Shake` leaf
-  (common `CameraShakeService`) is NOT yet landed as of leg 7A.
+  `Animation`, `AnimationItem`, `AnimationSlot`, `Camera`, `Shake` (nested `{EffectId, Intensity}`,
+  landed - critique m6's verified `CameraShakeService` shape; corrects this doc's earlier
+  "not yet landed as of leg 7A" note, which was stale).
+- **[`FlairAsset`](FlairAsset.java)** (design 9.6, phase 2 leg F) - a standalone, ANY-mod-authorable
+  cosmetic flair layer, `Server/RpgStations/Flairs/<Name>.json` (Pattern A, id = lowercased
+  filename, mirrors `LootableAsset`/`RollPool`'s exact shape): `{Stations?[], Moments}`. `Stations`
+  null/empty = applies to every station; `Moments` is an OPEN `Map<String, Presentation>` keyed by
+  an arbitrary moment id (the engine's well-known ids - `cycle`/`swing`/`impact`/`rare_find`/
+  `completion` - plus a per-step `step:<actionId>:<stepId>` id, see `station.StationFlairs`'s
+  constants) - nothing hardcodes the vocabulary in Java. Folded into `station.FlairCatalog`, which
+  UNIONS every applicable `FlairAsset` ONTO a station's own inline `Flairs` map at
+  `effectiveFlairsFor` (a same-id `FlairAsset` wins over an inline entry). `StationAsset.Flair`
+  (the inline map's value type) mirrors this EXACT shape (`{Moments}`, no more fixed
+  `Swing`/`Cycle`/`RareFind`/`Completion` leaves) - one flair-content schema, whether authored
+  inline or in a standalone file.
 - **[`Requires`](Requires.java)** - `{Permission?, Conditions?[]}`, evaluated at station start;
   any failing `Condition` denies with `ui.station.locked`. An unregistered factor id fails CLOSED
   (a gate on a server without the referencing progression mod stays locked, never silently open).

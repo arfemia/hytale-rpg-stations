@@ -104,9 +104,12 @@ public final class StationCatalog {
     }
 
     /**
-     * Every flair id authored across every folded station's {@code Flairs} map, lowercased.
-     * Used by the flair-grant command soft-warn (any consumer that grants a flair, e.g. the
-     * MMO bridge's {@code /mmostation flair grant}).
+     * Every KNOWN flair id, lowercased: every station's inline {@code Flairs} map, UNIONED with
+     * every registered standalone {@code asset.FlairAsset} id (design section 9.6, leg F - the
+     * open vocabulary; a {@code FlairAsset} id counts here regardless of its own {@code Stations}
+     * restriction, since this method answers "is this id valid to grant at all", not "does it
+     * apply to THIS station"). Used by the flair-grant command soft-warn (any consumer that
+     * grants a flair, e.g. the MMO bridge's {@code /mmostation flair grant}).
      */
     @Nonnull
     public Set<String> allFlairIds() {
@@ -120,6 +123,11 @@ public final class StationCatalog {
                 if (id != null && !id.isBlank()) {
                     ids.add(id.toLowerCase(Locale.ROOT));
                 }
+            }
+        }
+        for (String id : FlairCatalog.getInstance().all().keySet()) {
+            if (id != null && !id.isBlank()) {
+                ids.add(id.toLowerCase(Locale.ROOT));
             }
         }
         return ids;

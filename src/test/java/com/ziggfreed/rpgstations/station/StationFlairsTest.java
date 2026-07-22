@@ -1,9 +1,11 @@
 package com.ziggfreed.rpgstations.station;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Map;
 import java.util.Set;
@@ -14,7 +16,6 @@ import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.rpgstations.api.impl.FlairUnlockRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Presentation;
-import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
  * Exercises the PURE overlay core of the flair seam ({@link StationFlairs#effective}). Ported
@@ -26,6 +27,15 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
  * flair to a player" is now registering a {@code FlairUnlockProvider} on the api-facing {@link
  * FlairUnlockRegistryImpl} (its production accumulate-only union), reset between tests via the
  * test-only {@link FlairUnlockRegistryImpl#resetForTests()}.
+ *
+ * <p>Leg F (design section 9.6): the fixed {@code Slot} enum is retired in favor of an open
+ * STRING moment id - every test below builds its own {@code flairId -> momentId -> Presentation}
+ * map directly (what used to be {@code StationAsset.Flair.of(swing, cycle, ...)} against the
+ * fixed leaves) and resolves against {@link StationFlairs#MOMENT_CYCLE}/{@link
+ * StationFlairs#MOMENT_SWING}/{@link StationFlairs#MOMENT_RARE_FIND}/{@link
+ * StationFlairs#MOMENT_COMPLETION} (plus a new {@link StationFlairs#MOMENT_IMPACT} coverage test
+ * and a {@link StationFlairs#stepMomentId} coverage test) instead of the retired {@code Slot}
+ * constants - the overlay-MERGE semantics under test are UNCHANGED.
  */
 public class StationFlairsTest {
 
@@ -41,8 +51,8 @@ public class StationFlairsTest {
         FlairUnlockRegistryImpl.getInstance().register(playerId -> flairIds);
     }
 
-    private static StationAsset.Flair flair(Presentation swing, Presentation cycle) {
-        return StationAsset.Flair.of(swing, cycle);
+    private static Map<String, Presentation> moments(String momentId, Presentation p) {
+        return Map.of(momentId, p);
     }
 
     // ==================== No provider registered = identity pass-through ====================
@@ -50,20 +60,20 @@ public class StationFlairsTest {
     @Test
     void noProviderRegistered_isIdentityPassThrough_evenWithFlairsAuthored() {
         Presentation base = Presentation.of("SFX_Base", "Particles_Base");
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                flair(Presentation.ofSound("SFX_Golden"), Presentation.ofSound("SFX_Golden_Cycle")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_CYCLE, Presentation.ofSound("SFX_Golden_Cycle")));
 
-        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertSame(base, result);
     }
 
     @Test
     void noProviderRegistered_nullBase_staysNull() {
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                flair(null, Presentation.ofSound("SFX_Golden_Cycle")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_CYCLE, Presentation.ofSound("SFX_Golden_Cycle")));
 
-        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNull(result);
     }
@@ -73,7 +83,7 @@ public class StationFlairsTest {
         grant(Set.of("golden_saw"));
         Presentation base = Presentation.of("SFX_Base", "Particles_Base");
 
-        Presentation result = StationFlairs.effective(base, null, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(base, null, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertSame(base, result);
     }
@@ -84,10 +94,10 @@ public class StationFlairsTest {
     void singleFlair_overridesSound_inheritsParticles() {
         grant(Set.of("golden_saw"));
         Presentation base = Presentation.of("SFX_Base", "Particles_Base");
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                flair(null, Presentation.ofSound("SFX_Golden")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_CYCLE, Presentation.ofSound("SFX_Golden")));
 
-        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
         assertEquals("SFX_Golden", result.getSound());
@@ -99,10 +109,10 @@ public class StationFlairsTest {
     @Test
     void singleFlair_addsOntoANullBase() {
         grant(Set.of("golden_saw"));
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                flair(null, Presentation.of("SFX_Golden", "Particles_Golden")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_CYCLE, Presentation.of("SFX_Golden", "Particles_Golden")));
 
-        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
         assertEquals("SFX_Golden", result.getSound());
@@ -114,41 +124,41 @@ public class StationFlairsTest {
     @Test
     void twoFlairs_stackInSortedOrder_laterIdWinsPerLeaf() {
         grant(Set.of("zulu_saw", "alpha_saw"));
-        Map<String, StationAsset.Flair> flairs = Map.of(
-                "alpha_saw", flair(null, Presentation.of("SFX_Alpha", "Particles_Alpha")),
-                "zulu_saw", flair(null, Presentation.ofSound("SFX_Zulu")));
+        Map<String, Map<String, Presentation>> flairs = Map.of(
+                "alpha_saw", moments(StationFlairs.MOMENT_CYCLE, Presentation.of("SFX_Alpha", "Particles_Alpha")),
+                "zulu_saw", moments(StationFlairs.MOMENT_CYCLE, Presentation.ofSound("SFX_Zulu")));
 
-        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
         assertEquals("SFX_Zulu", result.getSound());
         assertEquals("Particles_Alpha", result.getParticles());
     }
 
-    // ==================== Unlocked id absent from the authored map ====================
+    // ==================== Unlocked id absent from the effective map ====================
 
     @Test
     void unlockedIdAbsentFromMap_isIgnored() {
         grant(Set.of("retired_flair"));
         Presentation base = Presentation.of("SFX_Base", "Particles_Base");
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                flair(null, Presentation.ofSound("SFX_Golden")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_CYCLE, Presentation.ofSound("SFX_Golden")));
 
-        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertSame(base, result);
     }
 
-    // ==================== Slot separation ====================
+    // ==================== Moment separation ====================
 
     @Test
     void cycleOnlyFlair_neverTouchesSwing() {
         grant(Set.of("golden_saw"));
         Presentation swingBase = Presentation.ofSound("SFX_Swing_Base");
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                flair(null, Presentation.ofSound("SFX_Golden_Cycle")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_CYCLE, Presentation.ofSound("SFX_Golden_Cycle")));
 
-        Presentation result = StationFlairs.effective(swingBase, flairs, StationFlairs.Slot.SWING, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(swingBase, flairs, StationFlairs.MOMENT_SWING, PLAYER, STATION_ID);
 
         assertSame(swingBase, result);
     }
@@ -158,25 +168,25 @@ public class StationFlairsTest {
         grant(Set.of("golden_saw"));
         Presentation swingBase = Presentation.ofSound("SFX_Swing_Base");
         Presentation cycleBase = Presentation.ofSound("SFX_Cycle_Base");
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                flair(Presentation.ofSound("SFX_Golden_Swing"), null));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_SWING, Presentation.ofSound("SFX_Golden_Swing")));
 
-        Presentation swingResult = StationFlairs.effective(swingBase, flairs, StationFlairs.Slot.SWING, PLAYER, STATION_ID);
-        Presentation cycleResult = StationFlairs.effective(cycleBase, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation swingResult = StationFlairs.effective(swingBase, flairs, StationFlairs.MOMENT_SWING, PLAYER, STATION_ID);
+        Presentation cycleResult = StationFlairs.effective(cycleBase, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertEquals("SFX_Golden_Swing", swingResult.getSound());
         assertSame(cycleBase, cycleResult);
     }
 
-    // ==================== RARE_FIND slot ====================
+    // ==================== RARE_FIND moment ====================
 
     @Test
-    void noProviderRegistered_rareFindSlot_isIdentityPassThrough() {
+    void noProviderRegistered_rareFindMoment_isIdentityPassThrough() {
         Presentation base = Presentation.of("SFX_T3_Base", "Particles_T3_Base");
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                StationAsset.Flair.of(null, null, Presentation.ofSound("SFX_Golden_Rare")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_RARE_FIND, Presentation.ofSound("SFX_Golden_Rare")));
 
-        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.Slot.RARE_FIND, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_RARE_FIND, PLAYER, STATION_ID);
 
         assertSame(base, result);
     }
@@ -187,12 +197,12 @@ public class StationFlairsTest {
         Presentation swingBase = Presentation.ofSound("SFX_Swing_Base");
         Presentation cycleBase = Presentation.ofSound("SFX_Cycle_Base");
         Presentation rareFindBase = Presentation.ofSound("SFX_RareFind_Base");
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                StationAsset.Flair.of(null, null, Presentation.ofSound("SFX_Golden_Rare")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_RARE_FIND, Presentation.ofSound("SFX_Golden_Rare")));
 
-        Presentation rareFindResult = StationFlairs.effective(rareFindBase, flairs, StationFlairs.Slot.RARE_FIND, PLAYER, STATION_ID);
-        Presentation swingResult = StationFlairs.effective(swingBase, flairs, StationFlairs.Slot.SWING, PLAYER, STATION_ID);
-        Presentation cycleResult = StationFlairs.effective(cycleBase, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation rareFindResult = StationFlairs.effective(rareFindBase, flairs, StationFlairs.MOMENT_RARE_FIND, PLAYER, STATION_ID);
+        Presentation swingResult = StationFlairs.effective(swingBase, flairs, StationFlairs.MOMENT_SWING, PLAYER, STATION_ID);
+        Presentation cycleResult = StationFlairs.effective(cycleBase, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertEquals("SFX_Golden_Rare", rareFindResult.getSound());
         assertSame(swingBase, swingResult);
@@ -202,43 +212,43 @@ public class StationFlairsTest {
     @Test
     void rareFindFlair_addsOntoANullBase() {
         grant(Set.of("golden_saw"));
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                StationAsset.Flair.of(null, null, Presentation.of("SFX_Golden_Rare", "Particles_Golden_Rare")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_RARE_FIND, Presentation.of("SFX_Golden_Rare", "Particles_Golden_Rare")));
 
-        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.Slot.RARE_FIND, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_RARE_FIND, PLAYER, STATION_ID);
 
         assertNotNull(result);
         assertEquals("SFX_Golden_Rare", result.getSound());
         assertEquals("Particles_Golden_Rare", result.getParticles());
     }
 
-    // ==================== COMPLETION slot ====================
+    // ==================== COMPLETION moment ====================
 
     @Test
-    void noProviderRegistered_completionSlot_isIdentityPassThrough() {
+    void noProviderRegistered_completionMoment_isIdentityPassThrough() {
         Presentation base = Presentation.of("SFX_Complete_Base", "Particles_Complete_Base");
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                StationAsset.Flair.of(null, null, null, Presentation.ofSound("SFX_Golden_Complete")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_COMPLETION, Presentation.ofSound("SFX_Golden_Complete")));
 
-        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.Slot.COMPLETION, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_COMPLETION, PLAYER, STATION_ID);
 
         assertSame(base, result);
     }
 
     @Test
-    void completionOnlyFlair_overlaysCompletion_neverTouchesOtherSlots() {
+    void completionOnlyFlair_overlaysCompletion_neverTouchesOtherMoments() {
         grant(Set.of("golden_saw"));
         Presentation swingBase = Presentation.ofSound("SFX_Swing_Base");
         Presentation cycleBase = Presentation.ofSound("SFX_Cycle_Base");
         Presentation rareFindBase = Presentation.ofSound("SFX_RareFind_Base");
         Presentation completionBase = Presentation.ofSound("SFX_Completion_Base");
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                StationAsset.Flair.of(null, null, null, Presentation.ofSound("SFX_Golden_Complete")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_COMPLETION, Presentation.ofSound("SFX_Golden_Complete")));
 
-        Presentation completionResult = StationFlairs.effective(completionBase, flairs, StationFlairs.Slot.COMPLETION, PLAYER, STATION_ID);
-        Presentation swingResult = StationFlairs.effective(swingBase, flairs, StationFlairs.Slot.SWING, PLAYER, STATION_ID);
-        Presentation cycleResult = StationFlairs.effective(cycleBase, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
-        Presentation rareFindResult = StationFlairs.effective(rareFindBase, flairs, StationFlairs.Slot.RARE_FIND, PLAYER, STATION_ID);
+        Presentation completionResult = StationFlairs.effective(completionBase, flairs, StationFlairs.MOMENT_COMPLETION, PLAYER, STATION_ID);
+        Presentation swingResult = StationFlairs.effective(swingBase, flairs, StationFlairs.MOMENT_SWING, PLAYER, STATION_ID);
+        Presentation cycleResult = StationFlairs.effective(cycleBase, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
+        Presentation rareFindResult = StationFlairs.effective(rareFindBase, flairs, StationFlairs.MOMENT_RARE_FIND, PLAYER, STATION_ID);
 
         assertEquals("SFX_Golden_Complete", completionResult.getSound());
         assertSame(swingBase, swingResult);
@@ -249,45 +259,76 @@ public class StationFlairsTest {
     @Test
     void completionFlair_addsOntoANullBase() {
         grant(Set.of("golden_saw"));
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                StationAsset.Flair.of(null, null, null,
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_COMPLETION,
                         Presentation.of("SFX_Golden_Complete", "Particles_Golden_Complete")));
 
-        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.Slot.COMPLETION, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_COMPLETION, PLAYER, STATION_ID);
 
         assertNotNull(result);
         assertEquals("SFX_Golden_Complete", result.getSound());
         assertEquals("Particles_Golden_Complete", result.getParticles());
     }
 
-    // ==================== Shake overlay (new leaf this leg) ====================
+    // ==================== IMPACT moment (new this leg - split off SWING) ====================
+
+    @Test
+    void impactFlair_isIndependentOfSwing_bothAuthoredOnSameFlairId() {
+        grant(Set.of("golden_saw"));
+        Presentation swingBase = Presentation.ofSound("SFX_Swing_Base");
+        Presentation impactBase = Presentation.ofSound("SFX_Impact_Base");
+        Map<String, Presentation> both = Map.of(
+                StationFlairs.MOMENT_SWING, Presentation.ofSound("SFX_Golden_Swing"),
+                StationFlairs.MOMENT_IMPACT, Presentation.ofSound("SFX_Golden_Impact"));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw", both);
+
+        Presentation swingResult = StationFlairs.effective(swingBase, flairs, StationFlairs.MOMENT_SWING, PLAYER, STATION_ID);
+        Presentation impactResult = StationFlairs.effective(impactBase, flairs, StationFlairs.MOMENT_IMPACT, PLAYER, STATION_ID);
+
+        assertEquals("SFX_Golden_Swing", swingResult.getSound());
+        assertEquals("SFX_Golden_Impact", impactResult.getSound());
+    }
+
+    @Test
+    void impactOnlyFlair_neverTouchesSwing() {
+        grant(Set.of("golden_saw"));
+        Presentation swingBase = Presentation.ofSound("SFX_Swing_Base");
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_IMPACT, Presentation.ofSound("SFX_Golden_Impact")));
+
+        Presentation swingResult = StationFlairs.effective(swingBase, flairs, StationFlairs.MOMENT_SWING, PLAYER, STATION_ID);
+
+        assertSame(swingBase, swingResult);
+    }
+
+    // ==================== Shake overlay ====================
 
     @Test
     void shakeLeaf_overlaysIndependentlyOfSoundAndParticles() {
         grant(Set.of("golden_saw"));
         Presentation base = Presentation.of("SFX_Base", "Particles_Base");
         Presentation.Shake shake = Presentation.Shake.of("Damage_Shake", 0.5);
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                flair(null, Presentation.of(null, null, null, null, null, null, shake)));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_CYCLE, Presentation.of(null, null, null, null, null, null, shake)));
 
-        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
         assertEquals("SFX_Base", result.getSound(), "the flair leaves Sound null - the base survives");
         assertSame(shake, result.getShake());
     }
 
-    // ==================== Union across providers (new this leg) ====================
+    // ==================== Union across providers ====================
 
     @Test
     void unionAcrossTwoProviders_bothContribute() {
         FlairUnlockRegistryImpl.getInstance().register(playerId -> Set.of("alpha_saw"));
         FlairUnlockRegistryImpl.getInstance().register(playerId -> Set.of("zulu_saw"));
-        Map<String, StationAsset.Flair> flairs = Map.of(
-                "alpha_saw", flair(null, Presentation.of("SFX_Alpha", "Particles_Alpha")),
-                "zulu_saw", flair(null, Presentation.ofSound("SFX_Zulu")));
+        Map<String, Map<String, Presentation>> flairs = Map.of(
+                "alpha_saw", moments(StationFlairs.MOMENT_CYCLE, Presentation.of("SFX_Alpha", "Particles_Alpha")),
+                "zulu_saw", moments(StationFlairs.MOMENT_CYCLE, Presentation.ofSound("SFX_Zulu")));
 
-        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
         assertEquals("SFX_Zulu", result.getSound());
@@ -300,12 +341,57 @@ public class StationFlairsTest {
             throw new IllegalStateException("boom");
         });
         grant(Set.of("golden_saw"));
-        Map<String, StationAsset.Flair> flairs = Map.of("golden_saw",
-                flair(null, Presentation.ofSound("SFX_Golden")));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_CYCLE, Presentation.ofSound("SFX_Golden")));
 
-        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.Slot.CYCLE, PLAYER, STATION_ID);
+        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
         assertEquals("SFX_Golden", result.getSound());
+    }
+
+    // ==================== stepMomentId / isKnownMomentId (open vocabulary, design 9.6) ====================
+
+    @Test
+    void stepMomentId_buildsThePrefixedId() {
+        assertEquals("step:enhance:stamp", StationFlairs.stepMomentId("enhance", "stamp"));
+    }
+
+    @Test
+    void perStepFlair_overlaysOnlyThatStepId() {
+        grant(Set.of("golden_saw"));
+        Presentation stampBase = Presentation.ofSound("SFX_Stamp_Base");
+        Presentation cycleBase = Presentation.ofSound("SFX_Cycle_Base");
+        String stepId = StationFlairs.stepMomentId("enhance", "stamp");
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(stepId, Presentation.ofSound("SFX_Golden_Stamp")));
+
+        Presentation stampResult = StationFlairs.effective(stampBase, flairs, stepId, PLAYER, STATION_ID);
+        Presentation cycleResult = StationFlairs.effective(cycleBase, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
+
+        assertEquals("SFX_Golden_Stamp", stampResult.getSound());
+        assertSame(cycleBase, cycleResult);
+    }
+
+    @Test
+    void isKnownMomentId_recognizesTheFiveWellKnownIds() {
+        assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_CYCLE));
+        assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_SWING));
+        assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_IMPACT));
+        assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_RARE_FIND));
+        assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_COMPLETION));
+    }
+
+    @Test
+    void isKnownMomentId_recognizesAnyStepPrefixedId() {
+        assertTrue(StationFlairs.isKnownMomentId("step:enhance:stamp"));
+        assertTrue(StationFlairs.isKnownMomentId("step:some_future_action:some_future_step"));
+    }
+
+    @Test
+    void isKnownMomentId_rejectsATypoOrBlank() {
+        assertFalse(StationFlairs.isKnownMomentId("cycel"));
+        assertFalse(StationFlairs.isKnownMomentId(""));
+        assertFalse(StationFlairs.isKnownMomentId(null));
     }
 }
