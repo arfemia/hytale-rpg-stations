@@ -22,7 +22,10 @@ ship, `FlairCatalog` as the ONE merge point), and **leg G (the placed-input PLAC
 visual - a new `Custody.Display` group spawning a static, network-replicated, pickup-immune,
 physics-free prop entity at the station's block-top anchor via `StationCustodyDisplay`, the
 maintainer's directed route over a Blockbench baked-node model swap) - see the "Phase 2" section
-below); leg H (the phase-2 smoke round) remains design-only. Design
+below); **leg H (the phase-2 smoke round) is DOCS-LANDED** - the smoke checklist itself is
+assembled (`../../.claude/plans/work-stations-mod-extraction-prompt.md`'s PHASE-2 SMOKE
+CHECKLIST section) but the in-game confirmation pass stays batched/pending, same posture as the
+still-outstanding phase-1 parity gate. Design
 authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
 (grounded by the decision log `../../.claude/research/rpg-stations-extraction-design.md` and the
 adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-2026-07-21.md`, ALL
@@ -146,7 +149,7 @@ extensible numeric vocabulary conditional lootables/`Requires` gates evaluate ov
 See `api/CLAUDE.md` for the full type-by-type reference and `api/impl/CLAUDE.md` for the concrete
 implementation this mod installs at `setup()`.
 
-## Phase 2 (legs A-F landed; G-H design-only)
+## Phase 2 (legs A-G landed; H docs-landed, in-game smoke pending)
 
 Full spec: design doc sections 9 + 10 (leg sequence A-H) + 12 (risks) + 13 (decision points).
 Phase 2 work started ahead of the maintainer's in-game phase-1 parity gate smoke (design section
@@ -317,6 +320,15 @@ fix layers on cleanly.
   in-game-unverified) tuning values. See `station/CLAUDE.md`'s dedicated bullet for the full
   file-by-file detail, including the documented world-space-offset simplification (no existing
   block-facing-yaw helper to compose a rotated `Offset` against).
-- **Leg H (design-only)**: the phase-2 smoke round (the FIRST item: confirm the Entity-surface
-  standing render; the SECOND: confirm the leg-G display entity actually renders in-game and tune
-  its provisional `Offset`/`Scale` values).
+- **Leg H (docs-landed, this leg)**: the phase-2 smoke round. No engine change - collects the
+  8-locale lang-key gap report (the pack's `items.lang`/`rpgstations.lang` overlay are the only
+  ones with real gaps; RPG Stations' own `rpgstations.lang` needed zero new phase-2 keys, no
+  phase-2 leg added a new player-facing UI string), updates this router tree + the MMO/pack docs
+  the earlier legs left slightly behind (the pack's `README.md`, the MMO `CHANGELOG.md`'s
+  bridge/item-seam entries for leg E), and assembles the PHASE-2 SMOKE CHECKLIST as a clearly
+  marked section in `../../.claude/plans/work-stations-mod-extraction-prompt.md` (the standing-mount
+  spike, custody place/return incl. relog, state-dependent F-hints, placed-item visuals, the anvil
+  Convert+Enhance ritual end to end incl. cancel custody-return and budget caps, Smithing XP + the
+  skill page, multi-action selection UX, plus the still-pending phase-1 parity items). The actual
+  in-game confirmation pass is still batched/pending, alongside phase 1's own parity gate (design
+  section 11) - neither has run yet; both are one maintainer smoke session away.

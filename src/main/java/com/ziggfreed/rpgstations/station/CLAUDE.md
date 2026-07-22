@@ -416,7 +416,9 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   `Recipe` override needs its OWN derived-conversion cache entry). `StationService.dispatchProgram`
   reads the resolved action's `Work.effectiveRepeat()` and calls `stop(..., StopReason.RITUAL_COMPLETE, ...)`
   on a completed non-repeating program.
-- **Not yet landed** (design scope, not started): phase 2 leg H - the phase-2 smoke round (see the
-  mod-root `CLAUDE.md`'s Phase 2 section). Leg F (the open flair/moment vocabulary) and leg G
-  (the placed-input PLACED-AS-ENTITY display) are LANDED - see the "Loot + flairs" and
-  "placed-input PLACED-AS-ENTITY visual" bullets above.
+- **Phase 2 legs A-G are all LANDED** - see the "Loot + flairs" and "placed-input
+  PLACED-AS-ENTITY visual" bullets above for F/G's file-by-file detail. **Leg H (the phase-2
+  smoke round) is docs-landed** (see the mod-root `CLAUDE.md`'s Phase 2 section and
+  `../../../../../../../../../.claude/plans/work-stations-mod-extraction-prompt.md`'s PHASE-2
+  SMOKE CHECKLIST); no engine file in this package changed for it, the in-game confirmation pass
+  itself is still batched/pending.
