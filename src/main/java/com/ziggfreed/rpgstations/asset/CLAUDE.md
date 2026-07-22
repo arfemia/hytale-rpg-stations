@@ -36,18 +36,23 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   `Presentation`/`Completion`/`Loot`/`Requires`) PLUS `Label` (an advisory display key) and
   `Steps` (an authored [`StationStep`](StationStep.java) program; absent means "build the
   implicit program" - see `../station/CLAUDE.md`'s `ImplicitProgram`).
-- **[`Custody`](Custody.java)** (design 9.4, phase 2 leg C) - session-scoped placed-input custody:
-  `{MaxQuantity?, Input?, States?}`. `MaxQuantity` defaults to **100** (maintainer decision,
-  overriding the design doc's draft 64 - `DEFAULT_MAX_QUANTITY`). `Input` (reusing
-  [`ActionInput`](ActionInput.java)'s ItemId/ResourceTypeId/Tags routes) is the explicit
-  placement-acceptance matcher; when absent, `station.StationCustody.matchesAnyConversionInput`
-  derives acceptance from the resolved action's own `Recipe.Conversions` inputs instead (the
-  sawmill's "logs by ResourceTypeId family" - zero extra authoring on top of an existing `Recipe`
-  group; `station.StationValidator`'s `CUSTODY_NO_INPUT_MATCHER` flags authoring neither). `States`
-  (`{Empty?, Loaded?}`) names the block's own `State.Definitions` entries the engine flips between
+- **[`Custody`](Custody.java)** (design 9.4, phase 2 leg C; `Display` added phase 2 leg G) -
+  session-scoped placed-input custody: `{MaxQuantity?, Input?, States?, Display?}`. `MaxQuantity`
+  defaults to **100** (maintainer decision, overriding the design doc's draft 64 -
+  `DEFAULT_MAX_QUANTITY`). `Input` (reusing [`ActionInput`](ActionInput.java)'s
+  ItemId/ResourceTypeId/Tags routes) is the explicit placement-acceptance matcher; when absent,
+  `station.StationCustody.matchesAnyConversionInput` derives acceptance from the resolved action's
+  own `Recipe.Conversions` inputs instead (the sawmill's "logs by ResourceTypeId family" - zero
+  extra authoring on top of an existing `Recipe` group; `station.StationValidator`'s
+  `CUSTODY_NO_INPUT_MATCHER` flags authoring neither). `States` (`{Empty?, Loaded?}`) names the
+  block's own `State.Definitions` entries the engine flips between
   (`world.setBlockInteractionState`); null = custody works mechanically with no visual/hint flip.
-  Whole-GROUP overridable on `ActionDef` same as every other group. See `../station/CLAUDE.md` for
-  the full engine-side behavior (`StationCustody`/`StationCustodyClaim`/`StationCustodyBreakSystem`).
+  `Display` (`{Offset{X,Y,Z}, Scale, Rotation}`, every leaf `appendInherited`, null = no visual -
+  the leg-C default) opts the placed input into a PLACED-AS-ENTITY visual at the station's
+  block-top anchor - see `../station/CLAUDE.md`'s dedicated bullet for the full engine-side
+  mechanism (`StationCustodyDisplay`). Every leaf whole-GROUP overridable on `ActionDef` same as
+  every other group. See `../station/CLAUDE.md` for the full engine-side behavior
+  (`StationCustody`/`StationCustodyClaim`/`StationCustodyBreakSystem`/`StationCustodyDisplay`).
 - **[`ActionInput`](ActionInput.java)** (design 9.1) - the diegetic action-selection matcher:
   `{ItemId?, ResourceTypeId?, Tags?, Function?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, resolved
   against the held item's live shape - `station.StationService.liveFunctionOf`, phase 2 leg E).

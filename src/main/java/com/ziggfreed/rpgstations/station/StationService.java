@@ -283,7 +283,7 @@ public final class StationService {
             boolean roomLeft = claim == null || claim.totalQuantity() < custody.effectiveMaxQuantity();
             if (roomLeft && custodyAccepts(custody, asset, action, heldForPlacement)) {
                 int moved = placeIntoCustody(store, ref, blockKey, playerUuid, asset.getId(),
-                        action.getActionId(), heldForPlacement, custody);
+                        action.getActionId(), heldForPlacement, custody, blockX, blockY, blockZ);
                 if (moved > 0) {
                     if (!loadedBefore) {
                         flipCustodyState(world, blockX, blockY, blockZ, custody, true);
@@ -1644,10 +1644,21 @@ public final class StationService {
      * Stamp step reads/mutates it directly. The bulk fungible-resource case (the sawmill's logs,
      * any {@code MaxQuantity > 1} station) is completely unaffected - only the count map matters
      * there, exactly as before.
+     *
+     * <p><b>Display spawn (design section 9, phase 2 leg G)</b>: when {@code custody} authors a
+     * {@link Custody.Display} group AND the claim has no live display entity yet
+     * ({@link StationCustodyClaim#displayRef()} null - true on first placement, and a harmless
+     * no-op guard on every top-up after that), spawns the PLACED-AS-ENTITY visual via
+     * {@link StationCustodyDisplay#spawn} at {@code (blockX, blockY, blockZ)}, representing
+     * {@link StationCustodyClaim#uniqueStack()} when set (the metadata-preserving single-item
+     * case) else a fresh one-quantity stack of the just-placed {@code itemId} (the bulk case - the
+     * visual represents PRESENCE, not the exact tally). A failed spawn is logged and swallowed
+     * (never blocks the placement itself, which already succeeded).
      */
     private int placeIntoCustody(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
             @Nonnull String blockKey, @Nonnull UUID playerUuid, @Nonnull String stationId,
-            @Nonnull String actionId, @Nonnull ItemStack held, @Nonnull Custody custody) {
+            @Nonnull String actionId, @Nonnull ItemStack held, @Nonnull Custody custody,
+            int blockX, int blockY, int blockZ) {
         String itemId = held.getItemId();
         if (itemId == null || itemId.isBlank()) {
             return 0;
@@ -1679,6 +1690,13 @@ public final class StationService {
         if (custody.effectiveMaxQuantity() == 1 && movedStack != null) {
             claim.setUniqueStack(movedStack);
         }
+        Custody.Display displayGroup = custody.getDisplay();
+        if (displayGroup != null && claim.displayRef() == null) {
+            ItemStack visualStack = claim.uniqueStack() != null ? claim.uniqueStack() : new ItemStack(itemId, 1);
+            Ref<EntityStore> displayRef = StationCustodyDisplay.spawn(store, visualStack, displayGroup,
+                    blockX, blockY, blockZ);
+            claim.setDisplayRef(displayRef);
+        }
         return moveCount;
     }
 
@@ -1692,7 +1710,10 @@ public final class StationService {
      * <p>{@code s.ref.getStore()} (not the {@code store} parameter {@link #stop} may have been
      * handed as {@code null}, e.g. on {@code stopAll}'s shutdown sweep) is the store source here -
      * a valid ref always knows its own owning store, so this covers the shutdown case too as long
-     * as the ref has not actually been removed yet.
+     * as the ref has not actually been removed yet. This is also one of the two ONLY sites that
+     * remove a claim from {@link #custodyByBlock} (the other is {@link #onCustodyBlockBroken}),
+     * so it is one of the two despawn points for {@link StationCustodyClaim#displayRef()}
+     * (design section 9, phase 2 leg G) - the display entity's lifecycle mirrors the claim's own.
      */
     private void returnCustody(@Nonnull StationSession s, @Nullable Custody custody) {
         if (s.blockKey == null) {
@@ -1716,6 +1737,7 @@ public final class StationService {
                 ownerStore = null;
             }
         }
+        StationCustodyDisplay.despawn(claim.displayRef(), ownerStore);
         if (!claim.isEmpty()) {
             List<ItemStack> stacks = claim.toItemStacks();
             Player player = ownerStore != null ? ownerStore.getComponent(s.ref, Player.getComponentType()) : null;
@@ -1762,10 +1784,22 @@ public final class StationService {
      * case where a session's own {@link #stop} already handled it via its heartbeat's block-gone
      * check on the same or a following tick - no double drop, {@link ConcurrentHashMap#remove}
      * is the idempotency gate).
+     *
+     * <p>The display-entity despawn (design section 9, phase 2 leg G) happens BEFORE the
+     * {@code isEmpty()} early-return, deliberately - a claim can legitimately hold a live
+     * {@link StationCustodyClaim#displayRef()} with ZERO items left (a Consume step drained it to
+     * empty mid-session, but the session had not yet stopped when the block broke), and this is
+     * one of the two ONLY sites that remove a claim from {@link #custodyByBlock} (the other is
+     * {@link #returnCustody}) - whichever of the two wins the removal race is the ONLY one that
+     * ever sees this claim again, so it MUST be the one to despawn its display or the entity leaks.
      */
     void onCustodyBlockBroken(@Nonnull Store<EntityStore> store, @Nonnull String blockKey, int x, int y, int z) {
         StationCustodyClaim claim = custodyByBlock.remove(blockKey);
-        if (claim == null || claim.isEmpty()) {
+        if (claim == null) {
+            return;
+        }
+        StationCustodyDisplay.despawn(claim.displayRef(), store);
+        if (claim.isEmpty()) {
             return;
         }
         dropCustodyAtBlock(store, x, y, z, claim.toItemStacks());

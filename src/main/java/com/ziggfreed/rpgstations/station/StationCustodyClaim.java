@@ -9,7 +9,9 @@ import java.util.UUID;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
+import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 /**
  * One block's live, in-memory placed-input custody claim (design section 9.4, phase-2 leg C):
@@ -41,6 +43,17 @@ final class StationCustodyClaim {
      * exercises since fungible resources carry no per-stack identity worth preserving).
      */
     @Nullable private ItemStack uniqueStack;
+
+    /**
+     * The live PLACED-AS-ENTITY visual for this claim (design section 9, phase 2 leg G), spawned
+     * once at {@code StationService#placeIntoCustody} when {@code Custody.Display} is authored,
+     * despawned at whichever claim-removal path fires first ({@code StationService#returnCustody}
+     * or {@code #onCustodyBlockBroken} - the SAME two sites that remove this claim from
+     * {@code custodyByBlock}, no third removal path exists). Null when no {@code Display} group is
+     * authored, or the spawn attempt failed (never leaked - a failed spawn just means no visual,
+     * not a dangling ref).
+     */
+    @Nullable private Ref<EntityStore> displayRef;
 
     StationCustodyClaim(@Nonnull UUID ownerId, @Nonnull String stationId, @Nonnull String actionId) {
         this.ownerId = ownerId;
@@ -84,6 +97,17 @@ final class StationCustodyClaim {
     /** Sets/replaces the metadata-preserving unique stack (the Stamp step's commit phase writes the mutated result back here). */
     void setUniqueStack(@Nullable ItemStack stack) {
         this.uniqueStack = stack;
+    }
+
+    /** The live display entity ref for this claim, or {@code null} when none was spawned. */
+    @Nullable
+    Ref<EntityStore> displayRef() {
+        return displayRef;
+    }
+
+    /** Set once by {@code StationCustodyDisplay#spawn}'s caller; cleared implicitly when the claim itself is discarded. */
+    void setDisplayRef(@Nullable Ref<EntityStore> displayRef) {
+        this.displayRef = displayRef;
     }
 
     /** One concrete {@link ItemStack} per tallied item id, for the auto-return path - prefers {@link #uniqueStack} when set (metadata preserved). */

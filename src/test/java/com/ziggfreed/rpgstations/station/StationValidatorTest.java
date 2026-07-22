@@ -931,4 +931,25 @@ public class StationValidatorTest {
     void noCustody_neverFlagsCustodyFindings() {
         assertFalse(codes(validate(validStation())).contains("CUSTODY_NO_INPUT_MATCHER"));
     }
+
+    // ==================== Custody.Display (design section 9, phase-2 leg G) ====================
+
+    @Test
+    void custodyDisplayNonPositiveScale_flagged() {
+        StationAsset a = validStation().withCustody(
+                Custody.of(100, null, null, Custody.Display.of(null, 0.0, null)));
+        assertTrue(codes(validate(a)).contains("CUSTODY_DISPLAY_NON_POSITIVE_SCALE"));
+    }
+
+    @Test
+    void custodyDisplayPositiveScale_notFlagged() {
+        StationAsset a = validStation().withCustody(
+                Custody.of(100, null, null, Custody.Display.of(null, 1.5, null)));
+        assertFalse(codes(validate(a)).contains("CUSTODY_DISPLAY_NON_POSITIVE_SCALE"));
+    }
+
+    @Test
+    void noDisplay_neverFlagsDisplayFindings() {
+        assertFalse(codes(validate(validStation())).contains("CUSTODY_DISPLAY_NON_POSITIVE_SCALE"));
+    }
 }

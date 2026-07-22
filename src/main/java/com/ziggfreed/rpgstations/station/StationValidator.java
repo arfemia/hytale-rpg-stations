@@ -169,6 +169,12 @@ public final class StationValidator {
                     label + " Custody.MaxQuantity is non-positive (" + maxQuantity + ") - falls back to the "
                             + Custody.DEFAULT_MAX_QUANTITY + " default", id));
         }
+        Custody.Display display = custody.getDisplay();
+        if (display != null && display.getScale() != null && display.getScale() <= 0) {
+            out.add(Finding.warning(DOMAIN, "CUSTODY_DISPLAY_NON_POSITIVE_SCALE",
+                    label + " Custody.Display.Scale is non-positive (" + display.getScale() + ") - falls back to "
+                            + "the 1.0 default", id));
+        }
     }
 
     /** Validates every standalone {@link LootableAsset}'s {@code Rolls} (the same {@link #checkRoll} core). */

@@ -358,6 +358,45 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   the design's accepted crash-loses-it ruling) resets on the next press, no dupe risk. The shipped
   sawmill (jar default AND the pack's MMO-bridged copy) migrated to placed input this leg - see
   `asset/CLAUDE.md`'s `Custody` entry and the pack's own `CLAUDE.md`.
+- **The placed-input PLACED-AS-ENTITY visual** (design section 9, phase 2 leg G, LANDED - the
+  maintainer's directed route over a Blockbench baked-node model swap):
+  [`StationCustodyDisplay`](StationCustodyDisplay.java) spawns a static, network-replicated,
+  pickup-immune, physics-free prop entity rendering the claim's placed item at the station's
+  block-top anchor (the SAME point every cycle/swing/impact/rare-find moment already targets),
+  gated on a new nullable `asset.Custody.Display` group (`{Offset{X,Y,Z}, Scale, Rotation}`, every
+  leaf `appendInherited`, null = no visual - the leg-C default). Mechanism copied verbatim from the
+  engine's own sanctioned exemplar, the admin "Entity Spawn Page" Items tab
+  (`hytale-shared-source/HytaleServer/NPC/.../pages/EntitySpawnPage.java`): a block-shaped
+  representative item (`Item#hasBlockType()`, e.g. the sawmill's placed logs) spawns a real
+  `BlockEntity` (renders the actual block model, not a flat icon); everything else (most
+  weapons/tools - no entity-atlas `ModelAsset`, e.g. the anvil's placed weapon) spawns a bare
+  `ItemComponent` prop with `setOverrideDroppedItemAnimation(true)` - the generic "dropped item
+  minus physics" shape. The THIRD exemplar route (`ModelAsset`-backed items) is NOT implemented
+  (rare in practice, out of this leg's scope). Pickup-disable is `PreventPickup.INSTANCE` +
+  `PropComponent` (both routes carry both). **Never-persisted, by construction**: both routes
+  `ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType())` - the same native
+  `NonSerialized` marker `ItemComponent.generatePickedUpItem`/Teleport/Projectile/Deployables use
+  for a transient plugin-owned entity - so a display entity CANNOT survive a server restart,
+  mirroring the custody claim's own "never persisted, crash = loss" lifecycle exactly and closing
+  the "reconcile orphans on restart" requirement by construction (nothing survives to reconcile).
+  Lifecycle: spawned once in `StationService#placeIntoCustody` (guarded on
+  `StationCustodyClaim#displayRef()` being null, so a top-up never re-spawns), despawned in
+  whichever of the TWO claim-removal sites fires first - `StationService#returnCustody` (every
+  session-stop exit, `stopAll`'s shutdown sweep included) or `#onCustodyBlockBroken` (the
+  no-active-session block-break path, which despawns even when the claim has already drained to
+  zero items mid-session - the only site left to reach it in that case). The ref lives ON the
+  claim (`StationCustodyClaim#displayRef`/`#setDisplayRef`, mirroring the `uniqueStack` field's own
+  pattern) - no second tracking map. Offset/Scale/Rotation math
+  (`StationCustodyDisplay#resolvePosition`/`#resolveYawRadians`/`#resolveScale`) is kept
+  PRIMITIVE-typed (doubles/floats only, no `Vector3d`/`Rotation3f` touch) so it stays unit-tested
+  without a running Hytale server, the same discipline
+  `StationEntityMountController#resolveAttachmentOffset` established. **Documented simplification**:
+  `Offset`/`Rotation` apply in WORLD SPACE, not compensated for a station block's own placement
+  rotation (`BlockType.VariantRotation` - both shipped blocks author `"NESW"`) - this codebase has
+  no existing "read a placed block's live facing yaw" helper to compose against, so a large
+  horizontal `Offset.X`/`.Z` will not track a rotated placement; both shipped exemplars keep theirs
+  small/zero for exactly this reason (see the pack's own `CLAUDE.md` for the shipped values, which
+  are provisional/in-game-unverified pending the phase-2 smoke round).
 - **The anvil arc (design section 9.5, phase 2 leg E, LANDED)**: see the mod-root `CLAUDE.md`'s
   Phase 2 section for the full narrative (the `Stamp` step, the `StampCapEngine` roll/cap engine,
   AND the live multi-action wiring leg E ALSO had to land - leg B shipped the schema/step-engine
@@ -377,6 +416,7 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   `Recipe` override needs its OWN derived-conversion cache entry). `StationService.dispatchProgram`
   reads the resolved action's `Work.effectiveRepeat()` and calls `stop(..., StopReason.RITUAL_COMPLETE, ...)`
   on a completed non-repeating program.
-- **Not yet landed** (design scope, not started): phase 2 legs G-H - the art leg and the phase-2
-  smoke round (see the mod-root `CLAUDE.md`'s Phase 2 section). Leg F (the open flair/moment
-  vocabulary) is LANDED - see the "Loot + flairs" bullet above.
+- **Not yet landed** (design scope, not started): phase 2 leg H - the phase-2 smoke round (see the
+  mod-root `CLAUDE.md`'s Phase 2 section). Leg F (the open flair/moment vocabulary) and leg G
+  (the placed-input PLACED-AS-ENTITY display) are LANDED - see the "Loot + flairs" and
+  "placed-input PLACED-AS-ENTITY visual" bullets above.

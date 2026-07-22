@@ -10,16 +10,19 @@ command rewards) with zero progression. Package root `com.ziggfreed.rpgstations`
 phase 1 (extraction) legs 0-6 landed** (scaffold, common lift, engine move, lootables, api
 artifact, MMO bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
 camera <preset>|list` + `/rpgstations validate`, the design 4.1 scope the phase-1 legs had left
-unimplemented); **phase 2 legs A-F are LANDED**: leg A (common kernel reshape), leg B
+unimplemented); **phase 2 legs A-G are LANDED**: leg A (common kernel reshape), leg B
 (multi-action schema + step engine), leg C (placed-input custody + block states + sawmill
 migration), leg D (the `Hold.Mount` knob family - the Block/Entity surface discriminator, the
 standing work mount), leg E (the anvil arc - the `Stamp` step, composable roll+cap models,
 the `EnhanceStamperRegistry` api registry, AND the live wiring that makes multi-action stations
 actually run: diegetic action selection at engage, an authored-`Steps` program dispatch path,
-`Work.Repeat` session completion), and **leg F (the open flair/moment vocabulary - the fixed
+`Work.Repeat` session completion), leg F (the open flair/moment vocabulary - the fixed
 `Slot` enum retired for open string moment ids, a new standalone `FlairAsset` type ANY mod can
-ship, `FlairCatalog` as the ONE merge point) - see the "Phase 2" section below); legs G-H (art,
-smoke) remain design-only. Design
+ship, `FlairCatalog` as the ONE merge point), and **leg G (the placed-input PLACED-AS-ENTITY
+visual - a new `Custody.Display` group spawning a static, network-replicated, pickup-immune,
+physics-free prop entity at the station's block-top anchor via `StationCustodyDisplay`, the
+maintainer's directed route over a Blockbench baked-node model swap) - see the "Phase 2" section
+below); leg H (the phase-2 smoke round) remains design-only. Design
 authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
 (grounded by the decision log `../../.claude/research/rpg-stations-extraction-design.md` and the
 adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-2026-07-21.md`, ALL
@@ -294,6 +297,26 @@ fix layers on cleanly.
   `FlairUnlockRegistry`/`StationComponent` provider is UNTOUCHED (it already answers "which ids
   has this player unlocked" and was always vocabulary-agnostic). See `station/CLAUDE.md`'s "Loot +
   flairs" bullet for the full file-by-file detail.
-- **Legs G-H (design-only)**: the art leg (including custody's own display-entity visual layer,
-  the Anvil's texture-path verification), and the phase-2 smoke round (the FIRST item: confirm the
-  Entity-surface standing render).
+- **Leg G (LANDED, this mod + the pack)**: the placed-input PLACED-AS-ENTITY visual - the
+  maintainer's directed route (a scout-resolved, source-verified mechanism: the engine's own
+  sanctioned admin "Entity Spawn Page" Items-tab exemplar) over a Blockbench baked-node model swap.
+  A new nullable `asset.Custody.Display` group (`{Offset{X,Y,Z}, Scale, Rotation}`, every leaf
+  `appendInherited`) opts a `Custody`-governed action into a spawned prop entity rendering the
+  placed item at the station's block-top anchor - `station.StationCustodyDisplay` (new class):
+  block-shaped items (the sawmill's placed logs) spawn a real `BlockEntity` (the actual block
+  model, not a flat icon), everything else (the anvil's placed weapon) spawns a bare `ItemComponent`
+  prop (the generic "dropped item minus physics" shape). Both routes
+  `ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType())` - the display entity
+  never survives a server restart, matching custody's own "never persisted, crash = loss"
+  lifecycle exactly, which resolves "reconcile orphans on restart" by construction. Lifecycle
+  tracked ON the claim (`StationCustodyClaim.displayRef`, mirroring `uniqueStack`'s own pattern):
+  spawned once at first placement (`StationService#placeIntoCustody`), despawned at whichever of
+  the two claim-removal sites fires first (`#returnCustody` or `#onCustodyBlockBroken`). Shipped
+  on both pack exemplars (`Sawmill.json`'s `Custody.Display`, the anvil's `enhance` action's
+  `Custody.Display`) - see the pack's own `CLAUDE.md` for the shipped (provisional,
+  in-game-unverified) tuning values. See `station/CLAUDE.md`'s dedicated bullet for the full
+  file-by-file detail, including the documented world-space-offset simplification (no existing
+  block-facing-yaw helper to compose a rotated `Offset` against).
+- **Leg H (design-only)**: the phase-2 smoke round (the FIRST item: confirm the Entity-surface
+  standing render; the SECOND: confirm the leg-G display entity actually renders in-game and tune
+  its provisional `Offset`/`Scale` values).

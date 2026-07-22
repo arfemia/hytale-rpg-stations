@@ -2,6 +2,7 @@ package com.ziggfreed.rpgstations.station;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.LinkedHashMap;
@@ -151,6 +152,17 @@ class StationCustodyTest {
         claim.add("Wood_Oak_Log", 0);
         claim.add("Wood_Oak_Log", -3);
         assertTrue(claim.isEmpty());
+    }
+
+    @Test
+    void claim_displayRef_defaultsNull_thenSettable() {
+        // design section 9, phase 2 leg G: the PLACED-AS-ENTITY visual's ref lives on the claim
+        // itself, null until StationCustodyDisplay#spawn succeeds (never constructed here - a
+        // live Ref<EntityStore> needs a running server; this only exercises the plain getter/setter).
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work");
+        assertNull(claim.displayRef());
+        claim.setDisplayRef(null);
+        assertNull(claim.displayRef());
     }
 
     // ==================== matchesInput / matchesAnyConversionInput ====================
