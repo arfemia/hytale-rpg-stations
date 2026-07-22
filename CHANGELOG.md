@@ -117,3 +117,21 @@ the MMO-side bridge presence-check hardening live in their own repos' history.
 Status: build-green throughout (Java + tests); the phase-1 parity gate and the phase-2 smoke round
 (design doc section 11; the mod-root `CLAUDE.md`'s Phase 2 section) are both maintainer in-game
 smoke passes still batched/pending as of this entry.
+
+### Deprecation sweep (maintainer edict close-out)
+
+- Fixes every remaining `@Deprecated(forRemoval = true)` engine-API call in this mod's `src/main`
+  (33 sites across `StationService`/`StationStepHandlers`/`StationHoldController`/
+  `StationUseInteraction`, plus `LootEngine`'s own pre-existing single-purpose helper): `Player
+  .getInventory().getStorage()`/`.getActiveHotbarItem()`/`.getCombinedBackpackStorageHotbar()`
+  and `Player.getPlayerRef()`, every replacement the exact one each deprecated method's own
+  javadoc names (`InventoryComponent.Storage`/`Hotbar` component fetch, `InventoryComponent
+  #getCombined(..., BACKPACK_STORAGE_HOTBAR)`, the `PlayerRef` component fetch), never a
+  guessed/wider alternative (`InventoryComponent#getItemInHand` was deliberately NOT substituted
+  for `getActiveHotbarItem()` - it also folds in the `Tool` component, a different semantic).
+  New `util.InventoryAccess` (DRY: the shared ref/store null-guard + component fetch every one of
+  those call sites duplicated) replaces `LootEngine`'s own private `storageContainerOf` and backs
+  every other site. Zero `@SuppressWarnings("deprecation")` anywhere; `ziggfreed-common`'s
+  arc-touched files (`cast/CastKernel`/`StepSemantics`, `i18n/Msg`, `ui/hud/KeyedCustomHud`,
+  `ui/rows/SummaryRow*`) and the MMO's `integration/stations`/`station` packages were audited via
+  a `-Xlint:deprecation` compile and carried zero deprecated calls to begin with.

@@ -29,6 +29,7 @@ import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.CommandRewardExecutor;
 import com.ziggfreed.rpgstations.loot.LootEngine;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
+import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -81,16 +82,16 @@ final class StationStepHandlers {
             try {
                 if (isResource) {
                     ResourceQuantity resource = new ResourceQuantity(inputRef, quantity);
-                    ResourceTransaction tx = ctx.player.getInventory().getStorage().canRemoveResource(resource)
-                            ? ctx.player.getInventory().getStorage().removeResource(resource)
-                            : ctx.player.getInventory().getCombinedBackpackStorageHotbar().removeResource(resource);
+                    ResourceTransaction tx = InventoryAccess.storageOf(ctx.player).canRemoveResource(resource)
+                            ? InventoryAccess.storageOf(ctx.player).removeResource(resource)
+                            : InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeResource(resource);
                     StationService.tallyResourceConsumption(ctx.session, tx, inputRef);
                 } else {
                     ItemStack input = new ItemStack(inputRef, quantity);
-                    if (ctx.player.getInventory().getStorage().canRemoveItemStack(input)) {
-                        ctx.player.getInventory().getStorage().removeItemStack(input);
+                    if (InventoryAccess.storageOf(ctx.player).canRemoveItemStack(input)) {
+                        InventoryAccess.storageOf(ctx.player).removeItemStack(input);
                     } else {
-                        ctx.player.getInventory().getCombinedBackpackStorageHotbar().removeItemStack(input);
+                        InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeItemStack(input);
                     }
                     ctx.session.consumedItems.merge(inputRef, quantity, Integer::sum);
                 }
@@ -145,7 +146,7 @@ final class StationStepHandlers {
             }
             int quantity = produce.getQuantity() != null && produce.getQuantity() > 0 ? produce.getQuantity() : 1;
             try {
-                ctx.player.getInventory().getStorage().addItemStack(new ItemStack(produce.getItemId(), quantity));
+                InventoryAccess.storageOf(ctx.player).addItemStack(new ItemStack(produce.getItemId(), quantity));
                 ctx.session.producedItems.merge(produce.getItemId(), quantity, Integer::sum);
             } catch (Throwable t) {
                 Log.warn("STATION Produce step failed for '" + ctx.session.stationId + "': " + t.getMessage());
@@ -351,7 +352,7 @@ final class StationStepHandlers {
                 }
             }
 
-            if (!ctx.player.getInventory().getStorage().canAddItemStacks(List.of(weaponStack))) {
+            if (!InventoryAccess.storageOf(ctx.player).canAddItemStacks(List.of(weaponStack))) {
                 return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL,
                         "Stamp step '" + step.getId() + "' - no room to return the enhanced item later");
             }
@@ -427,7 +428,7 @@ final class StationStepHandlers {
             for (ItemStack restore : toRestore) {
                 if (restore != null) {
                     try {
-                        player.getInventory().getStorage().addItemStack(restore);
+                        InventoryAccess.storageOf(player).addItemStack(restore);
                     } catch (Throwable restoreFailure) {
                         Log.warn("STAMP restore failed for '" + restore.getItemId() + "': " + restoreFailure.getMessage());
                     }
@@ -491,12 +492,12 @@ final class StationStepHandlers {
                 int quantity) {
             if (isResource) {
                 ResourceQuantity resource = new ResourceQuantity(ref, quantity);
-                return player.getInventory().getStorage().canRemoveResource(resource)
-                        || player.getInventory().getCombinedBackpackStorageHotbar().canRemoveResource(resource);
+                return InventoryAccess.storageOf(player).canRemoveResource(resource)
+                        || InventoryAccess.combinedBackpackStorageHotbarOf(player).canRemoveResource(resource);
             }
             ItemStack want = new ItemStack(ref, quantity);
-            return player.getInventory().getStorage().canRemoveItemStack(want)
-                    || player.getInventory().getCombinedBackpackStorageHotbar().canRemoveItemStack(want);
+            return InventoryAccess.storageOf(player).canRemoveItemStack(want)
+                    || InventoryAccess.combinedBackpackStorageHotbarOf(player).canRemoveItemStack(want);
         }
 
         /**
@@ -509,16 +510,16 @@ final class StationStepHandlers {
                 @Nonnull String ref, int quantity) {
             if (isResource) {
                 ResourceQuantity resource = new ResourceQuantity(ref, quantity);
-                ResourceTransaction tx = player.getInventory().getStorage().canRemoveResource(resource)
-                        ? player.getInventory().getStorage().removeResource(resource)
-                        : player.getInventory().getCombinedBackpackStorageHotbar().removeResource(resource);
+                ResourceTransaction tx = InventoryAccess.storageOf(player).canRemoveResource(resource)
+                        ? InventoryAccess.storageOf(player).removeResource(resource)
+                        : InventoryAccess.combinedBackpackStorageHotbarOf(player).removeResource(resource);
                 return drainedStacksOf(tx);
             }
             ItemStack want = new ItemStack(ref, quantity);
-            if (player.getInventory().getStorage().canRemoveItemStack(want)) {
-                player.getInventory().getStorage().removeItemStack(want);
+            if (InventoryAccess.storageOf(player).canRemoveItemStack(want)) {
+                InventoryAccess.storageOf(player).removeItemStack(want);
             } else {
-                player.getInventory().getCombinedBackpackStorageHotbar().removeItemStack(want);
+                InventoryAccess.combinedBackpackStorageHotbarOf(player).removeItemStack(want);
             }
             return List.of(want);
         }

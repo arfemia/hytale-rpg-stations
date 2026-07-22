@@ -10,10 +10,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
-import com.hypixel.hytale.server.core.inventory.InventoryComponent;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.inventory.container.ItemContainer;
 import com.hypixel.hytale.server.core.modules.item.ItemModule;
@@ -23,6 +21,7 @@ import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.ItemDropUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -191,25 +190,6 @@ public final class LootEngine {
     }
 
     /**
-     * The non-deprecated replacement for {@code Player.getInventory().getStorage()}
-     * ({@code Inventory#getStorage} is {@code @Deprecated(forRemoval=true)}; its own javadoc
-     * names this exact replacement): the {@code InventoryComponent.Storage} component fetched
-     * off the player's own ref/store, mirroring the established in-mod precedent
-     * ({@code station.StationService#placeIntoCustody}'s {@code InventoryComponent.Hotbar}
-     * fetch). {@code null} when the player's ref/store cannot be resolved (never throws).
-     */
-    @Nullable
-    private static ItemContainer storageContainerOf(@Nonnull Player player) {
-        Ref<EntityStore> ref = player.getReference();
-        if (ref == null || !ref.isValid()) {
-            return null;
-        }
-        InventoryComponent.Storage storage = ref.getStore()
-                .getComponent(ref, InventoryComponent.Storage.getComponentType());
-        return storage != null ? storage.getInventory() : null;
-    }
-
-    /**
      * N extra copies of {@code cycleOutput}, storage-first; a copy that cannot fit drops as a
      * ground item at the block instead of being skipped (SMOKE-FIX S3 (b)) - every copy still
      * counts as granted either way, so the remaining copies keep rolling.
@@ -217,7 +197,7 @@ public final class LootEngine {
     private static void grantBonusOutputCopies(@Nonnull Player player, @Nonnull ItemStack cycleOutput,
             int copies, @Nonnull GrantResult result, @Nullable Store<EntityStore> store,
             int blockX, int blockY, int blockZ) {
-        ItemContainer container = storageContainerOf(player);
+        ItemContainer container = InventoryAccess.storageOf(player);
         for (int i = 0; i < copies; i++) {
             try {
                 ItemStack bonus = new ItemStack(cycleOutput.getItemId(), cycleOutput.getQuantity());
@@ -252,7 +232,7 @@ public final class LootEngine {
         if (drops == null || drops.isEmpty()) {
             return;
         }
-        ItemContainer container = storageContainerOf(player);
+        ItemContainer container = InventoryAccess.storageOf(player);
         for (ItemStack stack : drops) {
             try {
                 if (container != null && container.canAddItemStacks(List.of(stack))) {

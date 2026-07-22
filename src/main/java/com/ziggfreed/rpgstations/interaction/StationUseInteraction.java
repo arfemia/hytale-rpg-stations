@@ -16,6 +16,7 @@ import com.hypixel.hytale.server.core.modules.interaction.interaction.config.Sim
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.station.StationService;
+import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -78,7 +79,9 @@ public final class StationUseInteraction extends SimpleInstantInteraction {
                 return;
             }
 
-            PlayerRef playerRef = player.getPlayerRef();
+            // Player.getPlayerRef() is @Deprecated(forRemoval=true) - fetch the PlayerRef
+            // component manually per its own javadoc replacement note (InventoryAccess.playerRefOf).
+            PlayerRef playerRef = InventoryAccess.playerRefOf(player);
             if (playerRef == null) {
                 ctx.getState().state = InteractionState.Failed;
                 return;

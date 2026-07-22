@@ -27,6 +27,7 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.camera.ServerCameraService;
 import com.ziggfreed.common.instance.effect.EntityEffectService;
+import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -237,7 +238,7 @@ final class StationHoldController {
             return;
         }
         try {
-            ItemStack held = player.getInventory().getActiveHotbarItem();
+            ItemStack held = InventoryAccess.activeHotbarItemOf(player);
             Item item = held != null ? held.getItem() : null;
             String itemAnimationsId = item != null ? item.getPlayerAnimationsId() : null;
             if (itemAnimationsId == null || itemAnimationsId.isBlank()) {
