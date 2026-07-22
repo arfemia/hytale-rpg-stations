@@ -9,6 +9,7 @@ import javax.annotation.Nonnull;
 import com.hypixel.hytale.assetstore.event.LoadedAssetsEvent;
 import com.hypixel.hytale.assetstore.map.DefaultAssetMap;
 import com.hypixel.hytale.logger.HytaleLogger;
+import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.Interaction;
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
@@ -23,6 +24,7 @@ import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.station.StationCatalog;
+import com.ziggfreed.rpgstations.station.StationDeathSystem;
 import com.ziggfreed.rpgstations.station.StationFrameSystem;
 import com.ziggfreed.rpgstations.station.StationInterruptDamageSystem;
 import com.ziggfreed.rpgstations.station.StationService;
@@ -75,8 +77,31 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerSettingsAssetStore();
         registerStationInteraction();
         registerStationSystems();
+        registerTeardownHooks();
         Log.info("RpgStations setup complete (leg 4 - the api artifact is live: events fire, "
                 + "the factor/flair-unlock/summary-enricher registries are wired into the engine).");
+    }
+
+    /**
+     * The two teardown hooks {@link StationService#stopForRef}/{@link StationService#stopFor}
+     * were ALREADY shaped for (see their own javadoc: "Death hook", "Disconnect hook") but never
+     * wired to a live event until now (design section 4.2; leg 5 relies on RpgStations owning
+     * these once the MMO's equivalent calls are deleted). Server-shutdown teardown was already
+     * covered by {@link #shutdown()}'s {@code stopAll}.
+     */
+    private void registerTeardownHooks() {
+        getEntityStoreRegistry().registerSystem(new StationDeathSystem());
+        getEventRegistry().register(PlayerDisconnectEvent.class, event -> {
+            try {
+                var playerRef = event.getPlayerRef();
+                var uuid = playerRef != null ? playerRef.getUuid() : null;
+                if (uuid != null) {
+                    StationService.getInstance().stopFor(uuid, StationService.StopReason.DISCONNECTED);
+                }
+            } catch (Throwable t) {
+                Log.warn("Station disconnect teardown failed: " + t.getMessage());
+            }
+        });
     }
 
     /**
