@@ -62,7 +62,7 @@ public class StationAssetCodecTest {
                 + " \"Work\": { \"CycleMs\": 4665, \"MaxDurationMs\": 600000,"
                 + "   \"Xp\": [ { \"Skill\": \"WOODCUTTING\", \"PerCycle\": 8.0 } ] },"
                 + " \"Recipe\": { \"FromCrafting\": { \"Categories\": [\"WoodPlanks\"] } },"
-                + " \"Hold\": { \"EffectId\": \"RPG_Station_Hold\", \"Seat\": { \"Enabled\": true } },"
+                + " \"Hold\": { \"EffectId\": \"RPG_Station_Hold\", \"Mount\": { \"Surface\": \"Block\" } },"
                 + " \"Tool\": { \"Gather\": { \"GatherType\": \"Woods\", \"MinPower\": 0.1 } },"
                 + " \"Animation\": { \"EmoteId\": \"RPG_Emote_Saw\" },"
                 + " \"Presentation\": { \"Sound\": \"SFX_Wood_Break\" } }");
@@ -74,7 +74,7 @@ public class StationAssetCodecTest {
         assertNull(a.getRecipe().getConversions());
         assertEquals("WoodPlanks", a.getRecipe().getFromCrafting().getCategories()[0]);
         assertEquals("RPG_Station_Hold", a.getHold().getEffectId());
-        assertEquals(Boolean.TRUE, a.getHold().getSeat().getEnabled());
+        assertEquals("Block", a.getHold().getMount().getSurface());
         assertEquals("Woods", a.getTool().getGather().getGatherType());
         assertEquals("RPG_Emote_Saw", a.getAnimation().getEmoteId());
         assertEquals("SFX_Wood_Break", a.getPresentation().getSound());
@@ -224,18 +224,71 @@ public class StationAssetCodecTest {
         assertNull(a.getLoot());
     }
 
-    // ==================== Hold.Seat / Tool.XpScale / Work.Idle (unchanged, sibling-leaf inherit) ====================
+    // ==================== Hold.Mount / Tool.XpScale / Work.Idle (sibling-leaf inherit) ====================
 
     @Test
-    void holdSeat_siblingLeafInherit() throws Exception {
+    void holdMountBlock_siblingLeafInherit() throws Exception {
         StationAsset parent = decodeWithParent("{ \"Hold\": { \"MovementLock\": true,"
                 + " \"EffectId\": \"RPG_Station_Hold\", \"InterruptOnDamage\": true } }",
-                null, "seat_parent", null);
-        StationAsset child = decodeWithParent("{ \"Hold\": { \"Seat\": { \"Enabled\": true } } }",
-                parent, "seat_child", "seat_parent");
-        assertEquals(Boolean.TRUE, child.getHold().getSeat().getEnabled());
+                null, "mount_parent", null);
+        StationAsset child = decodeWithParent("{ \"Hold\": { \"Mount\": { \"Surface\": \"Block\" } } }",
+                parent, "mount_child", "mount_parent");
+        assertEquals("Block", child.getHold().getMount().getSurface());
+        assertFalse(child.getHold().getMount().isEntitySurface());
         assertEquals(Boolean.TRUE, child.getHold().getMovementLock(), "sibling leaf inherits");
         assertEquals("RPG_Station_Hold", child.getHold().getEffectId(), "sibling leaf inherits");
+    }
+
+    // ==================== Hold.Mount.Entity (design 9.2, phase 2 leg D) ====================
+
+    @Test
+    void holdMountEntity_decodesFullShape() throws Exception {
+        StationAsset a = decodeAsset("{ \"Hold\": { \"Mount\": { \"Surface\": \"Entity\","
+                + " \"Entity\": { \"Offset\": { \"X\": 0.0, \"Y\": 0.5, \"Z\": 0.3 },"
+                + " \"DismountOnMove\": true, \"Steerable\": false } } } }");
+        StationAsset.Hold.Mount mount = a.getHold().getMount();
+        assertTrue(mount.isEntitySurface());
+        StationAsset.Hold.Mount.Entity entity = mount.getEntity();
+        assertEquals(0.0, entity.getOffset().getX());
+        assertEquals(0.5, entity.getOffset().getY());
+        assertEquals(0.3, entity.getOffset().getZ());
+        assertTrue(entity.effectiveDismountOnMove());
+        assertFalse(entity.effectiveSteerable());
+    }
+
+    @Test
+    void holdMountEntity_defaults_dismountOnMoveTrueSteerableFalse() throws Exception {
+        StationAsset a = decodeAsset("{ \"Hold\": { \"Mount\": { \"Surface\": \"Entity\" } } }");
+        StationAsset.Hold.Mount mount = a.getHold().getMount();
+        assertTrue(mount.isEntitySurface());
+        assertNull(mount.getEntity(), "no Entity group authored - defaults resolve at the reader (StationService)");
+    }
+
+    @Test
+    void holdMountEntity_isEntitySurface_caseInsensitiveAndTrimmed() throws Exception {
+        StationAsset a = decodeAsset("{ \"Hold\": { \"Mount\": { \"Surface\": \"  entity  \" } } }");
+        assertTrue(a.getHold().getMount().isEntitySurface());
+    }
+
+    @Test
+    void holdMountEntity_siblingLeafInherit() throws Exception {
+        StationAsset parent = decodeWithParent("{ \"Hold\": { \"Mount\": { \"Surface\": \"Entity\","
+                + " \"Entity\": { \"Offset\": { \"X\": 0.0, \"Y\": 0.5, \"Z\": 0.3 }, \"DismountOnMove\": true } } } }",
+                null, "entitymount_parent", null);
+        StationAsset child = decodeWithParent("{ \"Hold\": { \"Mount\": { \"Surface\": \"Entity\","
+                + " \"Entity\": { \"Steerable\": true } } } }",
+                parent, "entitymount_child", "entitymount_parent");
+        // Every leaf, at every nesting depth, is appendInherited (BuilderCodec.decodeAndInheritJson
+        // wholesale-copies every registered field from the parent BEFORE parsing the child's raw
+        // JSON, then overwrites only the keys the child's JSON actually names) - so the child's
+        // Entity inherits Offset/DismountOnMove sibling-leaf-style from the parent's Entity, three
+        // levels deep (Hold -> Mount -> Entity), same mechanism as the Hold-level test above.
+        StationAsset.Hold.Mount.Entity childEntity = child.getHold().getMount().getEntity();
+        assertTrue(childEntity.effectiveSteerable(), "own leaf wins");
+        assertEquals(0.0, childEntity.getOffset().getX(), "sibling leaf inherits (whole Offset object)");
+        assertEquals(0.5, childEntity.getOffset().getY(), "sibling leaf inherits (whole Offset object)");
+        assertEquals(0.3, childEntity.getOffset().getZ(), "sibling leaf inherits (whole Offset object)");
+        assertTrue(childEntity.effectiveDismountOnMove(), "sibling leaf inherits");
     }
 
     @Test

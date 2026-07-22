@@ -18,6 +18,8 @@ import javax.annotation.Nonnull;
  * content keys ({@code station.sawmill.name}/{@code .desc}). Leg P0 (phase-1 closeout) adds the
  * {@code command.*} keys backing {@code RpgStationsCommand} ({@code /rpgstations camera|validate}).
  * Phase-2 leg C adds the {@code ui.station.custody.*} placed-input toast keys (design 9.4).
+ * Phase-2 leg D adds {@code ui.station.mount_unavailable} (design 9.2's Mount knob family - the
+ * Entity surface's engage-denial toast; {@code seat_unavailable} stays the Block surface's own).
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -33,6 +35,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.inventory_full",
             "rpgstations.ui.station.wrong_tool",
             "rpgstations.ui.station.seat_unavailable",
+            "rpgstations.ui.station.mount_unavailable",
             "rpgstations.ui.station.practice",
             "rpgstations.ui.station.rare_find",
             "rpgstations.ui.station.lucky",

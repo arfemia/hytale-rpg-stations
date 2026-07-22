@@ -28,7 +28,7 @@
     "MovementLock": true,
     "EffectId": "RPG_Station_Hold",
     "InterruptOnDamage": true,
-    "Seat": { "Enabled": true }
+    "Mount": { "Surface": "Block" }
   },
   "Tool": {
     "Gather": { "GatherType": "Woods", "MinPower": 0.1 },

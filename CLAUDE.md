@@ -11,9 +11,10 @@ phase 1 (extraction) legs 0-6 landed** (scaffold, common lift, engine move, loot
 artifact, MMO bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
 camera <preset>|list` + `/rpgstations validate`, the design 4.1 scope the phase-1 legs had left
 unimplemented); **phase 2 leg A (common kernel reshape), leg B (multi-action schema + step
-engine), and leg C (placed-input custody + block states + sawmill migration) are LANDED** - see
-the "Phase 2" section below; legs D-H (the Mount knob family, the anvil, open flair vocabulary,
-art, smoke) remain design-only. Design
+engine), leg C (placed-input custody + block states + sawmill migration), and leg D (the
+`Hold.Mount` knob family - the Block/Entity surface discriminator, the standing work mount) are
+LANDED** - see the "Phase 2" section below; legs E-H (the anvil, open flair vocabulary, art,
+smoke) remain design-only. Design
 authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
 (grounded by the decision log `../../.claude/research/rpg-stations-extraction-design.md` and the
 adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-2026-07-21.md`, ALL
@@ -137,7 +138,7 @@ extensible numeric vocabulary conditional lootables/`Requires` gates evaluate ov
 See `api/CLAUDE.md` for the full type-by-type reference and `api/impl/CLAUDE.md` for the concrete
 implementation this mod installs at `setup()`.
 
-## Phase 2 (legs A-C landed; D-H design-only)
+## Phase 2 (legs A-D landed; E-H design-only)
 
 Full spec: design doc sections 9 + 10 (leg sequence A-H) + 12 (risks) + 13 (decision points).
 Phase 2 work started ahead of the maintainer's in-game phase-1 parity gate smoke (design section
@@ -199,7 +200,29 @@ fix layers on cleanly.
   JSON gained `State.Definitions.Default/Loaded` with per-state `InteractionHint`, the backpack
   drain per real cycle is retired. See `station/CLAUDE.md` for the file-by-file detail
   (`StationCustody`/`StationCustodyClaim`/`StationCustodyBreakSystem`).
-- **Legs D-H (design-only)**: the `Hold.Mount` knob family (`Surface: Block|Entity` - a standing
-  work mount via a spawned anchor entity), the anvil (Convert + Enhance, the flagship step-sequence
-  exemplar with the `Stamp` step), the open flair/moment vocabulary, the art leg (including custody's
-  own display-entity visual layer), and the phase-2 smoke round.
+- **Leg D (LANDED, this mod)**: the `Hold.Mount` knob family (design 9.2) - `StationAsset.Hold.Mount`
+  REPLACES `Hold.Seat.Enabled` (unreleased rename, no alias; the pack's own sawmill copy moved in
+  lockstep). `Surface` is a UNION DISCRIMINATOR (`"Block"`|`"Entity"`, critique m3's bless - two
+  structurally different code paths, not a mode) defaulting to `"Block"` when absent on an
+  authored `Mount` group. `Surface: "Block"` refactors the existing seat mount behind the new
+  group with ZERO behavior change (`StationMountController` untouched - the regression anchor).
+  `Surface: "Entity"` is the STANDING work mount (`station.StationEntityMountController`, new): at
+  engage, spawn a minimal anchor entity at the block center (a phase-2 SPIKE component set -
+  `SpawnMinecartInteraction`'s own list minus the cart/model leaves) and attach
+  `MountedComponent(anchorRef, attachmentOffset, MountController.Minecart)` to the player directly
+  (no interaction chain). CRITIQUE FIX (m7): `Hold.Mount.Entity.Offset {X,Y,Z}` converts explicitly
+  to the constructor's `Rotation3f attachmentOffset` parameter (a native mislabeling - it is really
+  a spatial offset). `Steerable` (default false) applies the SAME hold effect effect-mode uses plus
+  a per-heartbeat anchor snap-back to defeat the native WASD-steers-the-anchor behavior;
+  `DismountOnMove` (default true) runs the same origin-delta walk-off check effect-mode uses (the
+  entity-mount controller has no native auto-dismount). Because this path never populates the
+  client's `MountedUpdate.Block` field, the mount mine infers the player renders STANDING by
+  construction - in-game-unverifiable from server source alone, the FIRST phase-2 smoke item.
+  `StationValidator` gained `MOUNT_FACE_BLOCK_CONFLICT` (generalized from the old
+  `SEAT_FACE_BLOCK_CONFLICT`), `UNKNOWN_MOUNT_SURFACE`, `MOUNT_ENTITY_GROUP_IGNORED`, and
+  `MOUNT_STEERABLE_UNTESTED` (all warn-only, per the maintainer ruling). See `station/CLAUDE.md`'s
+  Mount bullet for the full file-by-file detail.
+- **Legs E-H (design-only)**: the anvil (Convert + Enhance, the flagship step-sequence exemplar
+  with the `Stamp` step - authoring `Surface: "Entity"`, the maintainer's standing-smith call), the
+  open flair/moment vocabulary, the art leg (including custody's own display-entity visual layer),
+  and the phase-2 smoke round (the FIRST item: confirm the Entity-surface standing render).

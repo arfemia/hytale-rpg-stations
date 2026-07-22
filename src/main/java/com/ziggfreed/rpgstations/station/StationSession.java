@@ -69,10 +69,33 @@ final class StationSession {
     String holdEffectId;
     boolean interruptOnDamage;
     /**
-     * True when this session is using the native SEAT mount hold (BlockMountAPI) instead of
-     * the effect-mode movement lock. Set once at engage from {@code Hold.Seat.Enabled}.
+     * True when this session is using the native BLOCK mount hold (BlockMountAPI) instead of
+     * the effect-mode movement lock. Set once at engage from {@code Hold.Mount.Surface} being
+     * {@code "Block"} (or the group being authored with no recognized {@code Surface} - see
+     * {@code StationAsset.Hold.Mount#isEntitySurface}). Formerly {@code Hold.Seat.Enabled}.
      */
     boolean seatMode;
+    /**
+     * True when this session is using the ENTITY mount hold (design section 9.2, phase 2 leg D
+     * - the standing work mount: a spawned anchor entity) instead of the effect-mode movement
+     * lock. Set once at engage from {@code Hold.Mount.Surface} being {@code "Entity"}; mutually
+     * exclusive with {@link #seatMode} (the two are the same discriminator's two arms).
+     */
+    boolean entityMountMode;
+    /** The entity-mount anchor's ref ({@link #entityMountMode} only); null otherwise. */
+    @Nullable Ref<EntityStore> mountAnchorRef;
+    /**
+     * {@code Hold.Mount.Entity.Steerable}, resolved at engage ({@link #entityMountMode} only;
+     * default false). {@code true} skips the hold-effect lock + heartbeat snap-back (reserved
+     * for a future vehicle-like station).
+     */
+    boolean entitySteerable;
+    /**
+     * {@code Hold.Mount.Entity.DismountOnMove}, resolved at engage ({@link #entityMountMode}
+     * only; default true). {@code true} = the heartbeat runs the SAME origin-delta walk-off
+     * check effect-mode uses; {@code false} = hard-lock until crouch/re-press.
+     */
+    boolean entityDismountOnMove;
     boolean cameraApplied;
     boolean cameraLocked;
     boolean faceBlock;

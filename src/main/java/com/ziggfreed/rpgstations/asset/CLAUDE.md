@@ -16,7 +16,9 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   `StationCycleCompletedEvent.xpAsks`; optional `Idle` practice mode; `Repeat` - phase 2 leg B,
   read only by the `station.step` engine's program-completion handling, unused by any shipped
   content yet), `Recipe` (authored `Conversions` or `FromCrafting` derivation), `Hold` (the
-  movement-lock effect / seat mount), `Tool` (the held-tool gate + `XpScale`), `Custody` (phase 2
+  movement-lock effect / the `Mount` knob family - phase 2 leg D, design 9.2, see
+  `../station/CLAUDE.md`'s Mount bullet for the Block/Entity surface breakdown), `Tool` (the
+  held-tool gate + `XpScale`), `Custody` (phase 2
   leg C - session-scoped placed-input custody, see [`Custody`](Custody.java) below), `Loot`
   (`Tables`/`Rolls`), `Camera` (third-person pull + `FaceBlock`/`Recipe`), `Animation` (`EmoteId` +
   `Swing`/`Impact`/`ActionClip`), `Presentation` (per-cycle moment), `Completion` (session-end

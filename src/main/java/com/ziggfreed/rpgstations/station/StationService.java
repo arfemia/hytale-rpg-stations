@@ -335,10 +335,10 @@ public final class StationService {
         s.exclusive = exclusive;
 
         StationAsset.Hold hold = asset.getHold();
-        StationAsset.Hold.Seat seatGroup = hold != null ? hold.getSeat() : null;
-        s.seatMode = seatGroup != null && seatGroup.getEnabled() != null && seatGroup.getEnabled();
-        s.movementLock = !s.seatMode
-                && (hold == null || hold.getMovementLock() == null || hold.getMovementLock());
+        StationAsset.Hold.Mount mountGroup = hold != null ? hold.getMount() : null;
+        boolean mounted = mountGroup != null;
+        s.entityMountMode = mounted && mountGroup.isEntitySurface();
+        s.seatMode = mounted && !s.entityMountMode;
         s.holdEffectId = hold != null && hold.getEffectId() != null && !hold.getEffectId().isBlank()
                 ? hold.getEffectId() : DEFAULT_HOLD_EFFECT;
         s.interruptOnDamage = hold == null || hold.getInterruptOnDamage() == null || hold.getInterruptOnDamage();
@@ -348,10 +348,32 @@ public final class StationService {
             return;
         }
 
+        StationAsset.Hold.Mount.Entity entityGroup = s.entityMountMode ? mountGroup.getEntity() : null;
+        s.entitySteerable = entityGroup != null && entityGroup.effectiveSteerable();
+        s.entityDismountOnMove = entityGroup == null || entityGroup.effectiveDismountOnMove();
+        if (s.entityMountMode) {
+            // Steerable (default false) applies the hold effect + heartbeat snap-back to defeat
+            // the native WASD-steers-the-anchor behavior (design 9.2); Steerable true skips both,
+            // reserved for a future vehicle-like station.
+            Ref<EntityStore> anchorRef = StationEntityMountController.spawnAnchor(commandBuffer, blockX, blockY, blockZ);
+            // attach() failing AFTER a successful spawn is an accepted, extremely-low-probability
+            // edge case (both calls are simple queued commandBuffer ops, effectively non-throwing
+            // under normal operation) - a stray unmounted anchor from that narrow window is a
+            // phase-2 spike-item cleanup, not solved here (the commandBuffer's own pending-ref
+            // semantics make an immediate same-tick despawn unverified, so it is not attempted).
+            if (anchorRef == null || !StationEntityMountController.attach(ref, anchorRef, commandBuffer, entityGroup)) {
+                toast(playerRef, RpgMsg.tr("ui.station.mount_unavailable"));
+                return;
+            }
+            s.mountAnchorRef = anchorRef;
+        }
+        s.movementLock = (!mounted && (hold == null || hold.getMovementLock() == null || hold.getMovementLock()))
+                || (s.entityMountMode && !s.entitySteerable);
+
         StationAsset.Camera camera = asset.getCamera();
         String cameraMode = camera != null && camera.getMode() != null ? camera.getMode() : "ThirdPerson";
-        boolean seatDefaultNoCamera = s.seatMode && camera == null;
-        s.cameraApplied = !seatDefaultNoCamera && !"None".equalsIgnoreCase(cameraMode);
+        boolean mountDefaultNoCamera = mounted && camera == null;
+        s.cameraApplied = !mountDefaultNoCamera && !"None".equalsIgnoreCase(cameraMode);
         s.cameraLocked = camera == null || camera.getLocked() == null || camera.getLocked();
         s.faceBlock = s.cameraApplied && camera != null && camera.getFaceBlock() != null && camera.getFaceBlock();
         s.cameraRecipe = camera != null ? camera.getRecipe() : null;
@@ -485,11 +507,16 @@ public final class StationService {
             stop(s, StopReason.STATION_GONE, store);
             return false;
         }
-        if (seatModeShouldStop(s.seatMode, StationMountController.isMounted(s.ref, store))) {
+        boolean mounted = s.seatMode || s.entityMountMode;
+        if (seatModeShouldStop(mounted, StationMountController.isMounted(s.ref, store))) {
             stop(s, StopReason.MOVED, store);
             return false;
         }
-        if (!s.seatMode) {
+        // Walk-off (origin-delta) check: the Block route's native mount snaps the transform (no
+        // check needed), and the Entity route only runs it when DismountOnMove is true (default -
+        // the entity-mount controller has no native auto-dismount, so this IS the dismount; false
+        // = hard-lock until crouch/re-press, the enchanting-circle look, design 9.2).
+        if (!s.seatMode && (!s.entityMountMode || s.entityDismountOnMove)) {
             TransformComponent transform = store.getComponent(s.ref, TransformComponent.getComponentType());
             if (transform != null) {
                 Vector3d pos = transform.getPosition();
@@ -501,6 +528,9 @@ public final class StationService {
                     return false;
                 }
             }
+        }
+        if (s.entityMountMode && !s.entitySteerable) {
+            StationEntityMountController.snapBack(s.mountAnchorRef, store, s.blockX, s.blockY, s.blockZ);
         }
         MovementStatesComponent ms = store.getComponent(s.ref, MovementStatesComponent.getComponentType());
         if (ms != null && ms.getMovementStates() != null && ms.getMovementStates().crouching) {
@@ -1238,8 +1268,25 @@ public final class StationService {
         if (entityAlive) {
             StationHoldController.releaseHold(s, store);
         }
-        if (s.seatMode && entityAlive) {
+        if ((s.seatMode || s.entityMountMode) && entityAlive) {
+            // Same removal call for BOTH Mount surfaces - it just clears MountedComponent,
+            // agnostic of Block vs Entity controller type.
             StationMountController.dismount(s.ref, store);
+        }
+        if (s.entityMountMode) {
+            // The anchor's own store/ref is independent of the player's (entityAlive above answers
+            // "is the PLAYER still here", not "is the anchor's world/store still resolvable") - fall
+            // back to the anchor ref's own store so a WORLD_CHANGED/DISCONNECTED stop (store param
+            // null) still despawns it, same reasoning as returnCustody's ownerStore resolution.
+            Store<EntityStore> anchorStore = store;
+            if (anchorStore == null && s.mountAnchorRef != null && s.mountAnchorRef.isValid()) {
+                try {
+                    anchorStore = s.mountAnchorRef.getStore();
+                } catch (Throwable ignored) {
+                    anchorStore = null;
+                }
+            }
+            StationEntityMountController.despawn(s.mountAnchorRef, anchorStore);
         }
         if (!silent && s.playerRef != null) {
             try {
@@ -1853,7 +1900,14 @@ public final class StationService {
         return null;
     }
 
-    /** The seat-mode heartbeat's PURE decision. */
+    /**
+     * The mount-mode heartbeat's PURE decision - generic over EITHER {@code Hold.Mount} surface
+     * (design 9.2): both the Block route (native {@code BlockMountAPI}) and the Entity route (a
+     * spawned anchor) attach the SAME {@code MountedComponent} type to the player, so one native
+     * {@code isMounted} read serves both; the caller passes {@code s.seatMode || s.entityMountMode}
+     * as {@code seatMode}. Kept under its original name (tested, byte-stable) rather than renamed
+     * out from under its existing coverage.
+     */
     static boolean seatModeShouldStop(boolean seatMode, boolean mounted) {
         return seatMode && !mounted;
     }

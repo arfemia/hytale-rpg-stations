@@ -126,6 +126,7 @@ public final class StationValidator {
             checkAnimation(a, id, label, out);
             checkPresentationRefs(a, id, label, out);
             checkCamera(a, id, label, out);
+            checkMount(a, id, label, out);
             checkCompletion(a, id, label, out);
             checkFlairs(a, id, label, out);
             checkCustody(a.getCustody(), a.getRecipe(), label, id, out);
@@ -687,13 +688,48 @@ public final class StationValidator {
                             + "' which is not a known StationCameraPreset id - falls back to 'look_rot' at runtime", id));
         }
         StationAsset.Hold hold = a.getHold();
-        StationAsset.Hold.Seat seat = hold != null ? hold.getSeat() : null;
-        boolean seatMode = seat != null && seat.getEnabled() != null && seat.getEnabled();
-        if (seatMode && faceBlock) {
-            out.add(Finding.warning(DOMAIN, "SEAT_FACE_BLOCK_CONFLICT",
-                    label + " authors both Hold.Seat.Enabled true and Camera.FaceBlock true - the native seat"
-                            + " mount already locks facing while keeping the camera free; the packet-level"
-                            + " FaceBlock lock on top is redundant (or conflicting) with it", id));
+        StationAsset.Hold.Mount mount = hold != null ? hold.getMount() : null;
+        if (mount != null && faceBlock) {
+            out.add(Finding.warning(DOMAIN, "MOUNT_FACE_BLOCK_CONFLICT",
+                    label + " authors both Hold.Mount (a native Block or Entity mount) and Camera.FaceBlock"
+                            + " true - the mount already locks facing while keeping the camera free; the"
+                            + " packet-level FaceBlock lock on top is redundant (or conflicting) with it", id));
+        }
+    }
+
+    /**
+     * The Mount knob family (design section 9.2, phase 2 leg D): an unrecognized
+     * {@code Surface} value, an {@code Entity} group authored under a Block surface (ignored at
+     * runtime), and the untested {@code Steerable true} combo - all warn-only, per the maintainer
+     * ruling ("validator warns on odd combos, never blocks").
+     */
+    private static void checkMount(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
+                                   @Nonnull List<Finding> out) {
+        StationAsset.Hold hold = a.getHold();
+        StationAsset.Hold.Mount mount = hold != null ? hold.getMount() : null;
+        if (mount == null) {
+            return;
+        }
+        String surface = mount.getSurface();
+        boolean entitySurface = mount.isEntitySurface();
+        if (surface != null && !surface.isBlank()
+                && !"Block".equalsIgnoreCase(surface.trim()) && !entitySurface) {
+            out.add(Finding.warning(DOMAIN, "UNKNOWN_MOUNT_SURFACE",
+                    label + " authors Hold.Mount.Surface '" + surface
+                            + "' which is neither \"Block\" nor \"Entity\" - falls back to Block at runtime", id));
+        }
+        StationAsset.Hold.Mount.Entity entity = mount.getEntity();
+        if (entity == null) {
+            return;
+        }
+        if (!entitySurface) {
+            out.add(Finding.warning(DOMAIN, "MOUNT_ENTITY_GROUP_IGNORED",
+                    label + " authors Hold.Mount.Entity with Surface \"Block\" (or omitted) - the Entity"
+                            + " group is only read when Surface is \"Entity\"", id));
+        } else if (entity.effectiveSteerable()) {
+            out.add(Finding.warning(DOMAIN, "MOUNT_STEERABLE_UNTESTED",
+                    label + " authors Hold.Mount.Entity.Steerable true - reserved for a future"
+                            + " vehicle-like station, not yet verified in-game", id));
         }
     }
 

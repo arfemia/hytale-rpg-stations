@@ -15,11 +15,15 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * Policy-thin glue over the native {@code BlockMountAPI} for a station's SEAT hold mode.
- * Ported verbatim from the MMO's {@code station.StationMountController} (RPG Stations
- * extraction leg 2), {@code SafeLog} severed to RpgStations' own {@code util.Log}.
+ * Policy-thin glue over the native {@code BlockMountAPI} for {@code Hold.Mount.Surface}
+ * {@code "Block"} - today's seat mount, UNCHANGED behind the design-9.2 Mount knob family
+ * (phase 2 leg D) refactor; the regression anchor. Formerly gated by {@code Hold.Seat.Enabled}
+ * (unreleased rename, no alias). Ported verbatim from the MMO's
+ * {@code station.StationMountController} (RPG Stations extraction leg 2), {@code SafeLog}
+ * severed to RpgStations' own {@code util.Log}. Sibling: {@link StationEntityMountController}
+ * (the {@code "Entity"} surface - the standing work mount).
  *
- * <p><b>Why seat mode exists:</b> the packet-camera preset hunt ({@link StationCameraPreset})
+ * <p><b>Why this route exists:</b> the packet-camera preset hunt ({@link StationCameraPreset})
  * never found a combination that combines a FREE mouse-orbitable camera with a LOCKED player
  * body/head. Mounting the player on the station block via the native {@code BlockMountAPI}
  * sidesteps the packet hunt entirely: the client already renders its own free-orbit camera

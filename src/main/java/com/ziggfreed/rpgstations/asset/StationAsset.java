@@ -712,17 +712,18 @@ public final class StationAsset
      * heartbeat (decay-as-release). Reader defaults: {@code MovementLock} true, {@code EffectId}
      * {@code "RPG_Station_Hold"}, {@code InterruptOnDamage} true.
      *
-     * <p>{@link #seat}: an alternate hold strategy trading the packet-camera hunt for the
-     * engine's own native seated mount ({@code BlockMountAPI.mountOnBlock}). When
-     * {@link Seat#getEnabled()} is true, {@link #movementLock}/{@link #effectId} are IGNORED
-     * at runtime (the mount itself is the movement lock); {@link #interruptOnDamage} stays
-     * live either way. Requires the station BLOCK to author {@code BlockType.Seats[]}.
+     * <p>{@link #mount}: the mount knob family (design section 9.2, phase 2 leg D) - an
+     * alternate hold strategy trading the packet-camera hunt for the engine's own native mount
+     * mechanics. When {@link #mount} is authored, {@link #movementLock}/{@link #effectId} are
+     * IGNORED for the BLOCK surface (the mount itself is the lock) but stay meaningful for the
+     * ENTITY surface's default (non-{@code Steerable}) case - see {@link Mount} for the full
+     * per-surface breakdown; {@link #interruptOnDamage} stays live either way.
      */
     public static final class Hold {
         @Nullable protected Boolean movementLock;
         @Nullable protected String effectId;
         @Nullable protected Boolean interruptOnDamage;
-        @Nullable protected Seat seat;
+        @Nullable protected Mount mount;
 
         public static final BuilderCodec<Hold> CODEC = BuilderCodec.builder(Hold.class, Hold::new)
                 .appendInherited(new KeyedCodec<>("MovementLock", Codec.BOOLEAN, false),
@@ -733,8 +734,8 @@ public final class StationAsset
                 .appendInherited(new KeyedCodec<>("InterruptOnDamage", Codec.BOOLEAN, false),
                         (o, v) -> o.interruptOnDamage = v, o -> o.interruptOnDamage,
                         (o, p) -> o.interruptOnDamage = p.interruptOnDamage).add()
-                .appendInherited(new KeyedCodec<>("Seat", Seat.CODEC, false),
-                        (o, v) -> o.seat = v, o -> o.seat, (o, p) -> o.seat = p.seat).add()
+                .appendInherited(new KeyedCodec<>("Mount", Mount.CODEC, false),
+                        (o, v) -> o.mount = v, o -> o.mount, (o, p) -> o.mount = p.mount).add()
                 .build();
 
         @Nonnull
@@ -745,12 +746,12 @@ public final class StationAsset
 
         @Nonnull
         public static Hold of(@Nullable Boolean movementLock, @Nullable String effectId,
-                @Nullable Boolean interruptOnDamage, @Nullable Seat seat) {
+                @Nullable Boolean interruptOnDamage, @Nullable Mount mount) {
             Hold h = new Hold();
             h.movementLock = movementLock;
             h.effectId = effectId;
             h.interruptOnDamage = interruptOnDamage;
-            h.seat = seat;
+            h.mount = mount;
             return h;
         }
 
@@ -770,29 +771,193 @@ public final class StationAsset
         }
 
         @Nullable
-        public Seat getSeat() {
-            return seat;
+        public Mount getMount() {
+            return mount;
         }
 
-        /** Opt-in SEAT hold mode. {@link #enabled} default OFF. */
-        public static final class Seat {
-            @Nullable protected Boolean enabled;
+        /**
+         * The mount knob family (design section 9.2, phase 2 leg D). REPLACES the phase-1
+         * {@code Hold.Seat.Enabled} flag (unreleased rename, no back-compat alias - the pack's
+         * own copy of the sawmill moves in lockstep, see {@code station/CLAUDE.md}).
+         *
+         * <p><b>{@link #surface} is a UNION DISCRIMINATOR, not a mode</b> (critique m3's bless,
+         * recorded here per the binding fix's "write the one-line rationale into the codec
+         * javadoc and the router" instruction): {@code "Block"} and {@code "Entity"} route to two
+         * STRUCTURALLY DIFFERENT engine mechanisms (native {@code BlockMountAPI.mountOnBlock} vs
+         * a plugin-spawned anchor entity + a directly-attached {@code MountedComponent}), each
+         * with its OWN sub-knob set and its own steering/drift risk profile - the same shape as
+         * {@code EffectStep.Type}, never a bundled mode collapsing independent switches into one
+         * enum. Absent {@link #surface} on an authored {@code Mount} group defaults to
+         * {@code "Block"} (the phase-1 single-surface behavior, now expressed as this
+         * discriminator's default arm rather than a separate boolean flag).
+         *
+         * <ul>
+         *   <li><b>{@code "Block"}</b> - today's seat mount, UNCHANGED (the regression anchor):
+         *   {@code station.StationMountController.mount} via native {@code BlockMountAPI}. The
+         *   target block must author {@code BlockType.Seats[]}. {@link #entity} is not read.
+         *   <li><b>{@code "Entity"}</b> - the STANDING work mount (design 9.2's "furniture /
+         *   vehicle / mount that can show player NOT sitting"): {@code
+         *   station.StationEntityMountController} spawns a minimal anchor entity at engage and
+         *   attaches {@code MountedComponent(anchorRef, attachmentOffset,
+         *   MountController.Minecart)} to the player directly (no interaction chain - the plugin
+         *   attaches it itself). Because this path never populates the client's
+         *   {@code MountedUpdate.Block} field (that leaf is BlockMount-exclusive), the mount mine
+         *   infers the player renders STANDING by construction - in-game-unverifiable from server
+         *   source alone, the maintainer's phase-2 smoke item. See {@link Entity} for its
+         *   sub-knobs.
+         * </ul>
+         */
+        public static final class Mount {
+            @Nullable protected String surface;
+            @Nullable protected Entity entity;
 
-            public static final BuilderCodec<Seat> CODEC = BuilderCodec.builder(Seat.class, Seat::new)
-                    .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
-                            (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled).add()
+            public static final BuilderCodec<Mount> CODEC = BuilderCodec.builder(Mount.class, Mount::new)
+                    .appendInherited(new KeyedCodec<>("Surface", Codec.STRING, false),
+                            (o, v) -> o.surface = v, o -> o.surface, (o, p) -> o.surface = p.surface).add()
+                    .appendInherited(new KeyedCodec<>("Entity", Entity.CODEC, false),
+                            (o, v) -> o.entity = v, o -> o.entity, (o, p) -> o.entity = p.entity).add()
                     .build();
 
             @Nonnull
-            public static Seat of(@Nullable Boolean enabled) {
-                Seat s = new Seat();
-                s.enabled = enabled;
-                return s;
+            public static Mount of(@Nullable String surface, @Nullable Entity entity) {
+                Mount m = new Mount();
+                m.surface = surface;
+                m.entity = entity;
+                return m;
             }
 
             @Nullable
-            public Boolean getEnabled() {
-                return enabled;
+            public String getSurface() {
+                return surface;
+            }
+
+            @Nullable
+            public Entity getEntity() {
+                return entity;
+            }
+
+            /**
+             * True when {@link #surface} is {@code "Entity"} (trimmed, case-insensitive);
+             * everything else (null, blank, {@code "Block"}, or an unrecognized value - the
+             * validator warns on the last case, never blocks) resolves to the Block route.
+             */
+            public boolean isEntitySurface() {
+                return surface != null && "Entity".equalsIgnoreCase(surface.trim());
+            }
+
+            /**
+             * The standing work mount's own sub-knobs (design 9.2); read ONLY when
+             * {@link Mount#isEntitySurface()} - authoring this group under a Block surface is a
+             * validator warning ({@code MOUNT_ENTITY_GROUP_IGNORED}), never an error.
+             */
+            public static final class Entity {
+                @Nullable protected Offset offset;
+                @Nullable protected Boolean dismountOnMove;
+                @Nullable protected Boolean steerable;
+
+                public static final BuilderCodec<Entity> CODEC = BuilderCodec.builder(Entity.class, Entity::new)
+                        .appendInherited(new KeyedCodec<>("Offset", Offset.CODEC, false),
+                                (o, v) -> o.offset = v, o -> o.offset, (o, p) -> o.offset = p.offset).add()
+                        .appendInherited(new KeyedCodec<>("DismountOnMove", Codec.BOOLEAN, false),
+                                (o, v) -> o.dismountOnMove = v, o -> o.dismountOnMove,
+                                (o, p) -> o.dismountOnMove = p.dismountOnMove).add()
+                        .appendInherited(new KeyedCodec<>("Steerable", Codec.BOOLEAN, false),
+                                (o, v) -> o.steerable = v, o -> o.steerable,
+                                (o, p) -> o.steerable = p.steerable).add()
+                        .build();
+
+                @Nonnull
+                public static Entity of(@Nullable Offset offset, @Nullable Boolean dismountOnMove,
+                        @Nullable Boolean steerable) {
+                    Entity e = new Entity();
+                    e.offset = offset;
+                    e.dismountOnMove = dismountOnMove;
+                    e.steerable = steerable;
+                    return e;
+                }
+
+                @Nullable
+                public Offset getOffset() {
+                    return offset;
+                }
+
+                @Nullable
+                public Boolean getDismountOnMove() {
+                    return dismountOnMove;
+                }
+
+                @Nullable
+                public Boolean getSteerable() {
+                    return steerable;
+                }
+
+                /**
+                 * {@link #dismountOnMove}, reader-defaulted to {@code true} when null: the
+                 * heartbeat implements a walk-off check (no native auto-dismount exists for the
+                 * entity-mount controller). {@code false} = hard-lock until crouch/re-press (the
+                 * enchanting-circle look).
+                 */
+                public boolean effectiveDismountOnMove() {
+                    return dismountOnMove == null || dismountOnMove;
+                }
+
+                /**
+                 * {@link #steerable}, reader-defaulted to {@code false} when null: the default
+                 * applies the hold effect + a per-heartbeat anchor snap-back to defeat the native
+                 * WASD-steers-the-anchor behavior. {@code true} skips both (reserved for a future
+                 * vehicle-like station; {@code station.StationValidator} flags it as untested).
+                 */
+                public boolean effectiveSteerable() {
+                    return steerable != null && steerable;
+                }
+
+                /**
+                 * The attachment-offset knob. CRITIQUE FIX (m7): the {@code MountedComponent}
+                 * entity-mount constructor's matching parameter is a {@code Rotation3f}, NOT a
+                 * {@code Vector3f}, despite reading like a plain positional offset (a native
+                 * mislabeling the mount mine confirms - {@code attachmentOffset} is used as a
+                 * spatial XYZ offset for entity mounts, never as an actual rotation). The
+                 * conversion happens explicitly at the ONE ECS call site,
+                 * {@code station.StationEntityMountController.attach} - see that class's javadoc.
+                 */
+                public static final class Offset {
+                    @Nullable protected Double x;
+                    @Nullable protected Double y;
+                    @Nullable protected Double z;
+
+                    public static final BuilderCodec<Offset> CODEC = BuilderCodec.builder(Offset.class, Offset::new)
+                            .appendInherited(new KeyedCodec<>("X", Codec.DOUBLE, false),
+                                    (o, v) -> o.x = v, o -> o.x, (o, p) -> o.x = p.x).add()
+                            .appendInherited(new KeyedCodec<>("Y", Codec.DOUBLE, false),
+                                    (o, v) -> o.y = v, o -> o.y, (o, p) -> o.y = p.y).add()
+                            .appendInherited(new KeyedCodec<>("Z", Codec.DOUBLE, false),
+                                    (o, v) -> o.z = v, o -> o.z, (o, p) -> o.z = p.z).add()
+                            .build();
+
+                    @Nonnull
+                    public static Offset of(@Nullable Double x, @Nullable Double y, @Nullable Double z) {
+                        Offset o = new Offset();
+                        o.x = x;
+                        o.y = y;
+                        o.z = z;
+                        return o;
+                    }
+
+                    @Nullable
+                    public Double getX() {
+                        return x;
+                    }
+
+                    @Nullable
+                    public Double getY() {
+                        return y;
+                    }
+
+                    @Nullable
+                    public Double getZ() {
+                        return z;
+                    }
+                }
             }
         }
     }

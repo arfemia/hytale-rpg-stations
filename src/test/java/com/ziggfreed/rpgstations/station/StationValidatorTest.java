@@ -591,15 +591,85 @@ public class StationValidatorTest {
     }
 
     @Test
-    void seatFaceBlockConflict_flagged() {
-        StationAsset a = StationAsset.of("seatconflict",
-                StationAsset.Identity.of("rpgstations.station.seatconflict.name", null, null),
+    void mountFaceBlockConflict_flagged_blockSurface() {
+        StationAsset a = StationAsset.of("mountconflictblock",
+                StationAsset.Identity.of("rpgstations.station.mountconflictblock.name", null, null),
                 null, oakRecipe(),
-                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Seat.of(true)),
+                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Block", null)),
                 null,
                 StationAsset.Camera.of("ThirdPerson", true, true),
                 null, null, null);
-        assertTrue(codes(validate(a)).contains("SEAT_FACE_BLOCK_CONFLICT"));
+        assertTrue(codes(validate(a)).contains("MOUNT_FACE_BLOCK_CONFLICT"));
+    }
+
+    @Test
+    void mountFaceBlockConflict_flagged_entitySurface() {
+        StationAsset a = StationAsset.of("mountconflictentity",
+                StationAsset.Identity.of("rpgstations.station.mountconflictentity.name", null, null),
+                null, oakRecipe(),
+                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Entity", null)),
+                null,
+                StationAsset.Camera.of("ThirdPerson", true, true),
+                null, null, null);
+        assertTrue(codes(validate(a)).contains("MOUNT_FACE_BLOCK_CONFLICT"));
+    }
+
+    // ==================== Hold.Mount (design 9.2, phase 2 leg D) ====================
+
+    @Test
+    void unknownMountSurface_flagged() {
+        StationAsset a = StationAsset.of("unknownsurface",
+                StationAsset.Identity.of("rpgstations.station.unknownsurface.name", null, null),
+                null, oakRecipe(),
+                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Chair", null)),
+                null, null, null, null, null);
+        assertTrue(codes(validate(a)).contains("UNKNOWN_MOUNT_SURFACE"));
+    }
+
+    @Test
+    void mountSurfaceBlock_noFinding() {
+        StationAsset a = StationAsset.of("blocksurface",
+                StationAsset.Identity.of("rpgstations.station.blocksurface.name", null, null),
+                null, oakRecipe(),
+                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Block", null)),
+                null, null, null, null, null);
+        Set<String> codes = codes(validate(a));
+        assertFalse(codes.contains("UNKNOWN_MOUNT_SURFACE"));
+        assertFalse(codes.contains("MOUNT_ENTITY_GROUP_IGNORED"));
+        assertFalse(codes.contains("MOUNT_STEERABLE_UNTESTED"));
+    }
+
+    @Test
+    void mountEntityGroupIgnored_flagged_whenSurfaceIsBlock() {
+        StationAsset.Hold.Mount.Entity entity = StationAsset.Hold.Mount.Entity.of(null, null, null);
+        StationAsset a = StationAsset.of("entitygroupignored",
+                StationAsset.Identity.of("rpgstations.station.entitygroupignored.name", null, null),
+                null, oakRecipe(),
+                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Block", entity)),
+                null, null, null, null, null);
+        assertTrue(codes(validate(a)).contains("MOUNT_ENTITY_GROUP_IGNORED"));
+    }
+
+    @Test
+    void mountSteerableUntested_flagged() {
+        StationAsset.Hold.Mount.Entity entity = StationAsset.Hold.Mount.Entity.of(null, null, true);
+        StationAsset a = StationAsset.of("steerable",
+                StationAsset.Identity.of("rpgstations.station.steerable.name", null, null),
+                null, oakRecipe(),
+                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Entity", entity)),
+                null, null, null, null, null);
+        assertTrue(codes(validate(a)).contains("MOUNT_STEERABLE_UNTESTED"));
+    }
+
+    @Test
+    void mountSteerableDefault_noFinding() {
+        StationAsset.Hold.Mount.Entity entity = StationAsset.Hold.Mount.Entity.of(null, null, null);
+        StationAsset a = StationAsset.of("nonsteerable",
+                StationAsset.Identity.of("rpgstations.station.nonsteerable.name", null, null),
+                null, oakRecipe(),
+                StationAsset.Hold.of(null, null, null, StationAsset.Hold.Mount.of("Entity", entity)),
+                null, null, null, null, null);
+        assertFalse(codes(validate(a)).contains("MOUNT_STEERABLE_UNTESTED"));
     }
 
     // ==================== Completion / Flairs (unchanged) ====================

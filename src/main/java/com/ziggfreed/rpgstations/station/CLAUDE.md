@@ -132,31 +132,80 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   never-persisted per-player override, set via [`/rpgstations camera <preset>|list`](../command/CLAUDE.md)
   (leg P0, phase-1 closeout) - `StationCameraPreset.resolve` consults it. **Never invent a fourth
   `ServerCameraSettings` field combination beyond what those three first-party sources establish.**
-- **Seat hold mode, the camera-problem's real answer** (`StationAsset.Hold.Seat.Enabled`,
-  [`StationMountController`](StationMountController.java)): mounts the player on the station
-  block via native `BlockMountAPI.mountOnBlock` - the answer to the packet hunt's dead end (no
-  `ServerCameraSettings` combination ever combined a free mouse-orbit camera with a locked body).
-  Mounting sidesteps the whole packet hunt: the client renders its own free-orbit camera for a
-  seated entity, and the ENGINE broadcasts the seated player's facing to every OTHER viewer from
-  the seat's fixed geometry, never from the seated player's own live `TransformComponent`.
-  **Requires the station BLOCK to author `BlockType.Seats[]`** (`{"Offset":{...},"Yaw":<degrees>}`)
-  - `mountOnBlock` refuses to mount at an un-authored position. **The shared `RPG_Station_Sawmill`
-  block authors `Seats[].Yaw: 180`** because the engine adds a hard, unconditional +180deg in
-  `BlockMountPoint.computeRotationEuler` (a first-party `// ?` comment in the shared source) - an
-  authored `Yaw: 0` faces the worker AWAY from the bench; this was a landed in-game fix (pack
-  commit `224f2c6`), not a hypothetical. Movement lock: seat mode forces `movementLock = false`
-  (`Hold.MovementLock`/`EffectId` stay authorable as a fallback but are ignored while seated) -
-  the mount itself is the lock. Exit detection: the native engine removes `MountedComponent` on
-  its own once the player sends a movement input past its 600ms grace; the heartbeat's seat-mode
-  branch checks `StationMountController.isMounted` INSTEAD of the ordinary `MaxMoveMeters`
-  origin-delta walk-off check (the mount SNAPS the player's transform to the seat's fixed
-  geometry at engage - an intentional reposition, not a walk-off). **The one unresolved,
-  documented risk**: nothing server-side stops the CLIENT from continuing to send mouse-derived
-  `bodyOrientation` in its `ClientMovement` packets while seated (`MountSystems.HandleMountInput`'s
-  `SetBody` branch unconditionally re-applies it); whether the client itself suppresses it while
-  visually seated cannot be confirmed from server source alone - an in-game verification item, not
-  solved in code.
-- **Seat/swing routing, the seated-worker fix**: a seat-mode session's swing does NOT re-fire the
+- **The `Hold.Mount` knob family, the camera-problem's real answer** (design section 9.2, phase 2
+  leg D; REPLACES the phase-1 `Hold.Seat.Enabled` flag - unreleased rename, no back-compat alias,
+  the pack's own copy of the sawmill moved in lockstep): `StationAsset.Hold.Mount.Surface` is a
+  UNION DISCRIMINATOR between `"Block"` and `"Entity"` - **critique m3's bless, recorded here per
+  the binding fix's "write the one-line rationale into the codec javadoc and the router"
+  instruction**: the two values route to STRUCTURALLY DIFFERENT engine mechanisms (native
+  `BlockMountAPI.mountOnBlock` vs a plugin-spawned anchor entity + a directly-attached
+  `MountedComponent`), each with its own sub-knob set and its own steering/drift risk profile -
+  the same shape as `EffectStep.Type`, never a bundled mode collapsing independent switches into
+  one enum. Absent `Surface` on an authored `Mount` group defaults to `"Block"`.
+  - **`Surface: "Block"`** ([`StationMountController`](StationMountController.java), UNCHANGED
+    behind the refactor - the regression anchor): mounts the player on the station block via
+    native `BlockMountAPI.mountOnBlock` - the answer to the packet hunt's dead end (no
+    `ServerCameraSettings` combination ever combined a free mouse-orbit camera with a locked
+    body). Mounting sidesteps the whole packet hunt: the client renders its own free-orbit camera
+    for a seated entity, and the ENGINE broadcasts the seated player's facing to every OTHER
+    viewer from the seat's fixed geometry, never from the seated player's own live
+    `TransformComponent`. **Requires the station BLOCK to author `BlockType.Seats[]`**
+    (`{"Offset":{...},"Yaw":<degrees>}`) - `mountOnBlock` refuses to mount at an un-authored
+    position. **The shared `RPG_Station_Sawmill` block authors `Seats[].Yaw: 180`** because the
+    engine adds a hard, unconditional +180deg in `BlockMountPoint.computeRotationEuler` (a
+    first-party `// ?` comment in the shared source) - an authored `Yaw: 0` faces the worker AWAY
+    from the bench; this was a landed in-game fix (pack commit `224f2c6`), not a hypothetical.
+    Movement lock: the Block route forces `movementLock = false` (`Hold.MovementLock`/`EffectId`
+    stay authorable as a fallback but are ignored while mounted this way) - the mount itself is
+    the lock. Exit detection: the native engine removes `MountedComponent` on its own once the
+    player sends a movement input past its 600ms grace; the heartbeat's mounted-mode branch checks
+    `StationMountController.isMounted` INSTEAD of the ordinary `MaxMoveMeters` origin-delta
+    walk-off check (the mount SNAPS the player's transform to the seat's fixed geometry at engage
+    - an intentional reposition, not a walk-off). **The one unresolved, documented risk**: nothing
+    server-side stops the CLIENT from continuing to send mouse-derived `bodyOrientation` in its
+    `ClientMovement` packets while seated (`MountSystems.HandleMountInput`'s `SetBody` branch
+    unconditionally re-applies it); whether the client itself suppresses it while visually seated
+    cannot be confirmed from server source alone - an in-game verification item, not solved in
+    code.
+  - **`Surface: "Entity"`** ([`StationEntityMountController`](StationEntityMountController.java))
+    - the STANDING work mount (design 9.2's "furniture / vehicle / mount that can show player NOT
+    sitting"; the maintainer's anvil authors this surface, see the mod-root `CLAUDE.md`'s Phase 2
+    section). At engage: spawn a minimal anchor entity at the station block's center
+    (`spawnAnchor` - a phase-2 SPIKE component set, `SpawnMinecartInteraction`'s own list minus
+    the cart/model leaves, see that class's javadoc for the iteration knobs), then attach
+    `MountedComponent(anchorRef, attachmentOffset, MountController.Minecart)` to the player
+    DIRECTLY via the public constructor (`attach` - no interaction chain, the plugin attaches it
+    itself). Because this path NEVER populates the client's `MountedUpdate.Block` field (that leaf
+    is BlockMount-exclusive), the mount mine infers the player renders STANDING by construction -
+    the strongest source-backed inference, but genuinely **in-game-unverifiable from server source
+    alone** (the maintainer's phase-2 smoke item). **CRITIQUE FIX (m7)**:
+    `Hold.Mount.Entity.Offset {X,Y,Z}` converts EXPLICITLY to the `MountedComponent` constructor's
+    `Rotation3f attachmentOffset` parameter at the one ECS call site (`attach`) - that parameter is
+    a `Rotation3f`, NOT a `Vector3f`, despite reading like a plain positional offset (a native
+    mislabeling the mount mine confirms). **The steering/drift risk** (documented, not solved
+    here): the native entity-mount controller has NO auto-dismount and applies WASD input DIRECTLY
+    to the anchor's own transform (`HandleMountInput`, the asymmetry that exempts entity mounts
+    from the Block route's 600ms-grace auto-dismount). The default (`Steerable` false, the
+    maintainer's fallback-is-a-data-change design) mitigation is two-layered: the SAME hold effect
+    effect-mode uses (via `StationHoldController`) defeats client-sent movement input, and the
+    heartbeat calls `snapBack` every tick to re-assert the anchor's authored transform. Neither
+    mitigation is proven sufficient against client-trust `SetBody` (mouse-look) drift - the SAME
+    unresolved-risk class the Block route's `bodyOrientation` question already carries; an
+    in-game verification item. `DismountOnMove` (default true) runs the SAME origin-delta
+    walk-off check effect-mode uses (the entity-mount controller has no native auto-dismount, so
+    this IS the dismount); `false` = hard-lock until crouch/re-press (the enchanting-circle look).
+    `Steerable: true` (reserved, `StationValidator`'s `MOUNT_STEERABLE_UNTESTED` warns it) skips
+    both mitigations, letting WASD freely drive the anchor - a future vehicle-like station's knob,
+    unused by anything shipped. Anchor lifecycle: session-scoped, despawned in the ONE idempotent
+    `stop()` funnel (`stopAll`'s shutdown sweep included, resolving its own store off the anchor
+    ref the same way `returnCustody` resolves its owner store off a possibly-null `stop()`
+    parameter). Engage-time behavior otherwise matches EFFECT mode, not the Block route: the work
+    emote plays normally at engage and per swing (no Action-slot swing-route substitution - that
+    workaround exists only to route around the Block route's sit-pose suppressing the `Emote`
+    slot, which does not apply to a standing mount), and the default work camera stays off (free
+    mount-orbit camera) the same way the Block route defaults it off.
+- **Seat/swing routing, the seated-worker fix** (Block route only - `useActionSlotForSwing` stays
+  keyed to `seatMode`, unaffected by the Entity route, see above): a seat-mode session's swing does NOT re-fire the
   work emote on the `Emote` slot (the sit pose wins over that slot's clip, so the player never
   visibly swings). `StationService.runSwing`'s pure `useActionSlotForSwing(seatMode)` decision
   routes a seat-mode session through `StationHoldController.playActionSwing` instead of
@@ -283,6 +332,7 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   the design's accepted crash-loses-it ruling) resets on the next press, no dupe risk. The shipped
   sawmill (jar default AND the pack's MMO-bridged copy) migrated to placed input this leg - see
   `asset/CLAUDE.md`'s `Custody` entry and the pack's own `CLAUDE.md`.
-- **Not yet landed** (design scope, not started): phase 2 legs D-H - the `Hold.Mount` knob family,
-  the anvil (Convert + Enhance, the `Stamp` step), the open flair/moment vocabulary, the art leg,
-  and the phase-2 smoke round (see the mod-root `CLAUDE.md`'s Phase 2 section).
+- **Not yet landed** (design scope, not started): phase 2 legs E-H - the anvil (Convert + Enhance,
+  the `Stamp` step), the open flair/moment vocabulary, the art leg, and the phase-2 smoke round
+  (see the mod-root `CLAUDE.md`'s Phase 2 section). Leg D (the `Hold.Mount` knob family, above) is
+  LANDED.
