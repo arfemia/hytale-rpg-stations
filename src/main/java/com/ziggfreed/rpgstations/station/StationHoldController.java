@@ -241,11 +241,25 @@ final class StationHoldController {
             Item item = held != null ? held.getItem() : null;
             String itemAnimationsId = item != null ? item.getPlayerAnimationsId() : null;
             if (itemAnimationsId == null || itemAnimationsId.isBlank()) {
-                Log.fine("STATION seat-mode swing skipped: held item has no PlayerAnimationsId");
+                // [SMOKEDIAG] R2 seated-swing diagnosis (THE decisive line, elevated from the
+                // pre-existing Log.fine to info for the smoke boot): a runtime precondition
+                // failure (empty/non-hatchet active slot, no PlayerAnimationsId) is
+                // server-fixable, distinct from a fully-correct resolve below.
+                Log.info("[SMOKEDIAG] clip-resolved SKIP activeItem="
+                        + (item != null ? item.getId() : "null") + " playerAnimationsId=null");
                 return;
             }
             String clipId = s.actionClip != null && !s.actionClip.isBlank() ? s.actionClip : DEFAULT_ACTION_CLIP;
+            // [SMOKEDIAG] R2 seated-swing diagnosis: a fully-correct resolve (activeItem=
+            // Tool_Hatchet_*, playerAnimationsId=Hatchet, clip=Chop) means the server dispatches
+            // a valid swing packet on every beat - the remaining question is client rendering.
+            Log.info("[SMOKEDIAG] clip-resolved activeItem=" + item.getId()
+                    + " playerAnimationsId=" + itemAnimationsId + " clip=" + clipId);
             AnimationUtils.playAnimation(s.ref, AnimationSlot.Action, itemAnimationsId, clipId, true, store);
+            // [SMOKEDIAG] R2 seated-swing diagnosis: confirms the server dispatched the swing
+            // packet with concrete valid values (sendToSelf=true - the caster also sees it).
+            Log.info("[SMOKEDIAG] packet-sent slot=Action anim=" + itemAnimationsId
+                    + " clip=" + clipId + " sendToSelf=true");
         } catch (Throwable t) {
             Log.warn("STATION seat-mode action animation failed: " + t.getMessage());
         }

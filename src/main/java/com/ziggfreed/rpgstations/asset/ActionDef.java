@@ -103,6 +103,17 @@ public final class ActionDef {
         return a;
     }
 
+    /**
+     * Java-side test/fixture helper; not part of any codec fold. {@link #of} has no
+     * {@code custody} parameter (an oversight in that factory's original param list), so a
+     * fixture needing a per-action {@link Custody} override chains this instead.
+     */
+    @Nonnull
+    public ActionDef withCustody(@Nullable Custody custody) {
+        this.custody = custody;
+        return this;
+    }
+
     @Nullable
     public String getLabel() {
         return label;

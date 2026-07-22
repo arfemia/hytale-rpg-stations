@@ -128,6 +128,34 @@ public final class ActionResolver {
         return null;
     }
 
+    /**
+     * Restart-orphan recovery (R5 fix, design 9.4's self-heal extended): the FIRST action whose
+     * {@link Custody#getStates()}' {@code Loaded} name case-insensitively matches {@code
+     * currentStateName} - the block's own CURRENTLY PERSISTED interaction-state name, read
+     * separately from any live claim (which is memory-only and lost across a restart). Consulted
+     * ONLY as a third fallback ({@code StationService#toggle}, after both the live-claim selector
+     * and {@link #selectActionByFamily} return null) so it never disturbs the already-correct
+     * in-session fast path. Returns {@code null} when {@code currentStateName} is null/blank, or
+     * when no action authors a matching {@code Custody.States.Loaded} (including no {@code
+     * Custody} at all) - a genuinely idle/never-loaded block correctly finds nothing here.
+     */
+    @Nullable
+    public static String selectActionForBlockState(@Nonnull StationAsset asset, @Nullable String currentStateName) {
+        if (currentStateName == null || currentStateName.isBlank()) {
+            return null;
+        }
+        for (String actionId : actionIds(asset)) {
+            ResolvedAction resolved = resolve(asset, actionId);
+            Custody custody = resolved.getCustody();
+            Custody.States states = custody != null ? custody.getStates() : null;
+            String loaded = states != null ? states.getLoaded() : null;
+            if (loaded != null && loaded.equalsIgnoreCase(currentStateName)) {
+                return actionId;
+            }
+        }
+        return null;
+    }
+
     private static boolean matchesAnyResourceType(@Nonnull ActionInput input, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
             @Nullable String heldFunction) {

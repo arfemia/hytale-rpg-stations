@@ -6,10 +6,10 @@ import javax.annotation.Nullable;
 import org.joml.Vector3d;
 
 import com.hypixel.hytale.component.AddReason;
+import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
-import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Rotation3f;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
@@ -92,9 +92,21 @@ final class StationCustodyDisplay {
      * {@code display}'s knobs. Returns {@code null} (never throws) on any failure, on a blank
      * item id, or when {@code visualStack} is null - the caller treats a null return as "no
      * visual this time", never a hard error (placement itself already succeeded by this point).
+     *
+     * <p><b>R4 fix</b>: takes a {@code commandBuffer} instead of the raw {@code store}. The
+     * call site (({@code StationService#placeIntoCustody}) runs from {@code toggle()}, itself
+     * INSIDE an interaction handler - i.e. inside the store's processing lock - so a direct
+     * {@code store.addEntity} throws {@code IllegalStateException("Store is currently
+     * processing!")} (Store.java's {@code assertWriteProcessing}), which the caller's own
+     * {@code catch (Throwable)} swallowed into a silently no-op spawn. {@code commandBuffer
+     * .addEntity} is the tick-safe primitive first-party interaction handlers use for exactly
+     * this (e.g. {@code SpawnMinecartInteraction}, this mod's own sibling
+     * {@code StationEntityMountController#spawnAnchor}) - it queues the add and returns a
+     * PENDING {@link Ref} valid after the current tick's commandBuffer flush, which is fine here
+     * since the ref is only read back on a LATER tick ({@link StationCustodyClaim#displayRef()}).
      */
     @Nullable
-    static Ref<EntityStore> spawn(@Nonnull Store<EntityStore> store, @Nullable ItemStack visualStack,
+    static Ref<EntityStore> spawn(@Nonnull CommandBuffer<EntityStore> commandBuffer, @Nullable ItemStack visualStack,
             @Nonnull Custody.Display display, int blockX, int blockY, int blockZ) {
         if (visualStack == null) {
             return null;
@@ -111,8 +123,8 @@ final class StationCustodyDisplay {
 
             Item item = Item.getAssetMap().getAsset(itemId);
             Ref<EntityStore> ref = (item != null && item.hasBlockType())
-                    ? spawnBlockEntity(store, itemId, position, rotation, scale)
-                    : spawnItemEntity(store, itemId, position, rotation, scale);
+                    ? spawnBlockEntity(commandBuffer, itemId, position, rotation, scale)
+                    : spawnItemEntity(commandBuffer, itemId, position, rotation, scale);
             if (ref == null) {
                 Log.warn("STATION custody display spawn produced no entity for '" + itemId + "'");
             }
@@ -125,8 +137,8 @@ final class StationCustodyDisplay {
 
     /** Route 1 (block-shaped item): {@code EntitySpawnPage.spawnItem}'s {@code item.hasBlockType()} branch, verbatim. */
     @Nonnull
-    private static Ref<EntityStore> spawnBlockEntity(@Nonnull Store<EntityStore> store, @Nonnull String itemId,
-            @Nonnull Vector3d position, @Nonnull Rotation3f rotation, float scale) {
+    private static Ref<EntityStore> spawnBlockEntity(@Nonnull CommandBuffer<EntityStore> commandBuffer,
+            @Nonnull String itemId, @Nonnull Vector3d position, @Nonnull Rotation3f rotation, float scale) {
         Holder<EntityStore> holder = EntityStore.REGISTRY.newHolder();
         holder.addComponent(BlockEntity.getComponentType(), new BlockEntity(itemId));
         holder.addComponent(TransformComponent.getComponentType(), new TransformComponent(position, rotation));
@@ -140,16 +152,16 @@ final class StationCustodyDisplay {
         holder.addComponent(PropComponent.getComponentType(), PropComponent.get());
         holder.ensureComponent(UUIDComponent.getComponentType());
         holder.ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType());
-        return store.addEntity(holder, AddReason.SPAWN);
+        return commandBuffer.addEntity(holder, AddReason.SPAWN);
     }
 
     /** Route 2 (everything else): {@code EntitySpawnPage.spawnItem}'s final {@code else} branch, verbatim. */
     @Nonnull
-    private static Ref<EntityStore> spawnItemEntity(@Nonnull Store<EntityStore> store, @Nonnull String itemId,
-            @Nonnull Vector3d position, @Nonnull Rotation3f rotation, float scale) {
+    private static Ref<EntityStore> spawnItemEntity(@Nonnull CommandBuffer<EntityStore> commandBuffer,
+            @Nonnull String itemId, @Nonnull Vector3d position, @Nonnull Rotation3f rotation, float scale) {
         Holder<EntityStore> holder = EntityStore.REGISTRY.newHolder();
         holder.addComponent(NetworkId.getComponentType(),
-                new NetworkId(store.getExternalData().takeNextNetworkId()));
+                new NetworkId(commandBuffer.getExternalData().takeNextNetworkId()));
         holder.addComponent(TransformComponent.getComponentType(), new TransformComponent(position, rotation));
         ItemStack tooltip = new ItemStack(itemId, 1);
         tooltip.setOverrideDroppedItemAnimation(true);
@@ -161,20 +173,24 @@ final class StationCustodyDisplay {
         holder.addComponent(PropComponent.getComponentType(), PropComponent.get());
         holder.ensureComponent(UUIDComponent.getComponentType());
         holder.ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType());
-        return store.addEntity(holder, AddReason.SPAWN);
+        return commandBuffer.addEntity(holder, AddReason.SPAWN);
     }
 
     /**
-     * Despawns {@code displayRef} (never throws; no-op when already gone or {@code store} could
-     * not be resolved) - called from whichever claim-removal path fires first
+     * Despawns {@code displayRef} (never throws; no-op when already gone or {@code commandBuffer}
+     * could not be resolved) - called from whichever claim-removal path fires first
      * ({@code StationService#returnCustody} or {@code #onCustodyBlockBroken}).
+     *
+     * <p><b>R4 fix</b>: takes a {@code commandBuffer} instead of the raw {@code store} - the SAME
+     * processing-lock hazard {@link #spawn} carries applies to teardown too (both claim-removal
+     * call sites run inside {@code stop()}, itself often inside an interaction/tick handler).
      */
-    static void despawn(@Nullable Ref<EntityStore> displayRef, @Nullable Store<EntityStore> store) {
-        if (displayRef == null || !displayRef.isValid() || store == null) {
+    static void despawn(@Nullable Ref<EntityStore> displayRef, @Nullable CommandBuffer<EntityStore> commandBuffer) {
+        if (displayRef == null || !displayRef.isValid() || commandBuffer == null) {
             return;
         }
         try {
-            store.removeEntity(displayRef, RemoveReason.REMOVE);
+            commandBuffer.removeEntity(displayRef, RemoveReason.REMOVE);
         } catch (Throwable t) {
             Log.fine("STATION custody display despawn failed: " + t.getMessage());
         }

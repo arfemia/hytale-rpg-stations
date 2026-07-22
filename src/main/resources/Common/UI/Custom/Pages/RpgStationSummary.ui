@@ -19,7 +19,7 @@
 // children) - the MMO panel's root-cause fix: an Anchor-less frame Group fills the nearest sized
 // ancestor (the full-viewport canvas), so #Content's own background rendered full width even
 // after every label got its own width cap. Every #Content child below also carries an explicit
-// Width, matching the panelWidth() (480) the Java side reads.
+// Width, matching the panelWidth() (528) the Java side reads.
 //
 // Document path + top-level ids are mod-namespaced (RpgStationSummary.ui / #RpgStationSummary*)
 // so a co-installed mod's HUD document cannot clobber this one on the client's flat namespace.
@@ -76,18 +76,18 @@ Group #RpgStationSummaryHudCanvas {
 
   Group #RpgStationSummaryRoot {
     // Static fallback anchor only; the runtime applyConfiguredPosition always wins. NO Height:
-    // content-height sized. Width MUST match StationSummaryHud.panelWidth() (480).
-    Anchor: (Width: 480, Horizontal: 0, Top: 72);
+    // content-height sized. Width MUST match StationSummaryHud.panelWidth() (528).
+    Anchor: (Width: 528, Horizontal: 0, Top: 72);
     LayoutMode: Top;
     Visible: false;
 
     $F.@ZigDecoratedFrame {
       @Ornaments = false;
-      Anchor: (Width: 480);
+      Anchor: (Width: 528);
 
       #Content {
         Group #RpgStationSummaryTitleRow {
-          Anchor: (Height: 32, Top: 4, Width: 444);
+          Anchor: (Height: 32, Top: 4, Width: 492);
           LayoutMode: Left;
 
           Group #RpgStationSummaryStationIcon {
@@ -107,7 +107,7 @@ Group #RpgStationSummaryHudCanvas {
 
         Label #RpgStationSummaryText {
           Text: "";
-          Anchor: (Top: 6, Width: 444);
+          Anchor: (Top: 6, Width: 492);
           Style: @SummaryBodyStyle;
         }
 
@@ -119,7 +119,7 @@ Group #RpgStationSummaryHudCanvas {
           LayoutMode: Top;
 
           Group #RpgStationSummaryItem0 {
-            Anchor: (Height: 28, Top: 4, Width: 444);
+            Anchor: (Height: 28, Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
@@ -127,7 +127,7 @@ Group #RpgStationSummaryHudCanvas {
             Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
           }
           Group #RpgStationSummaryItem1 {
-            Anchor: (Height: 28, Top: 4, Width: 444);
+            Anchor: (Height: 28, Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
@@ -135,7 +135,7 @@ Group #RpgStationSummaryHudCanvas {
             Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
           }
           Group #RpgStationSummaryItem2 {
-            Anchor: (Height: 28, Top: 4, Width: 444);
+            Anchor: (Height: 28, Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
@@ -143,7 +143,7 @@ Group #RpgStationSummaryHudCanvas {
             Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
           }
           Group #RpgStationSummaryItem3 {
-            Anchor: (Height: 28, Top: 4, Width: 444);
+            Anchor: (Height: 28, Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
@@ -151,7 +151,7 @@ Group #RpgStationSummaryHudCanvas {
             Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
           }
           Group #RpgStationSummaryItem4 {
-            Anchor: (Height: 28, Top: 4, Width: 444);
+            Anchor: (Height: 28, Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
@@ -159,7 +159,7 @@ Group #RpgStationSummaryHudCanvas {
             Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
           }
           Group #RpgStationSummaryItem5 {
-            Anchor: (Height: 28, Top: 4, Width: 444);
+            Anchor: (Height: 28, Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
@@ -169,7 +169,7 @@ Group #RpgStationSummaryHudCanvas {
 
           Label #RpgStationSummaryItemMore {
             Text: "";
-            Anchor: (Height: 20, Top: 4, Width: 444);
+            Anchor: (Height: 20, Top: 4, Width: 492);
             Visible: false;
             Style: @LedgerMoreStyle;
           }

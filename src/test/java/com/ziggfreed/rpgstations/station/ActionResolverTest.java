@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
+import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
@@ -133,5 +134,66 @@ public class ActionResolverTest {
 
         assertEquals("misc", ActionResolver.selectAction(a, "Dirt", null, null, null),
                 "the trailing catch-all (no Input group) matches anything the earlier route missed");
+    }
+
+    // ==================== selectActionForBlockState (R5 fix - restart-orphan recovery) ====================
+
+    private static Custody custodyLoaded(String loadedStateName) {
+        return Custody.of(100, null, Custody.States.of("Default", loadedStateName));
+    }
+
+    /** The exact anvil shape (design 9.5): convert=BarsPlaced, enhance=WeaponPlaced. */
+    private static StationAsset anvilShapedAsset() {
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("convert", ActionDef.of(null, null, null, null, null, null, null, null, null, null, null, null, null)
+                .withCustody(custodyLoaded("BarsPlaced")));
+        actions.put("enhance", ActionDef.of(null, null, null, null, null, null, null, null, null, null, null, null, null)
+                .withCustody(custodyLoaded("WeaponPlaced")));
+        return new StationAsset().withActions(actions);
+    }
+
+    @Test
+    void selectActionForBlockState_matchesTheFirstActionWhoseLoadedStateNameMatches() {
+        StationAsset a = anvilShapedAsset();
+        assertEquals("convert", ActionResolver.selectActionForBlockState(a, "BarsPlaced"));
+        assertEquals("enhance", ActionResolver.selectActionForBlockState(a, "WeaponPlaced"));
+    }
+
+    @Test
+    void selectActionForBlockState_caseInsensitive() {
+        StationAsset a = anvilShapedAsset();
+        assertEquals("convert", ActionResolver.selectActionForBlockState(a, "barsplaced"));
+    }
+
+    @Test
+    void selectActionForBlockState_genuinelyIdleStateName_noFalseRescue() {
+        StationAsset a = anvilShapedAsset();
+        assertNull(ActionResolver.selectActionForBlockState(a, "Default"),
+                "a genuinely-idle (never-loaded) state name must not falsely resolve an action");
+    }
+
+    @Test
+    void selectActionForBlockState_nullOrBlankStateName_returnsNull() {
+        StationAsset a = anvilShapedAsset();
+        assertNull(ActionResolver.selectActionForBlockState(a, null));
+        assertNull(ActionResolver.selectActionForBlockState(a, ""));
+    }
+
+    @Test
+    void selectActionForBlockState_noActionAuthorsCustody_alwaysNull() {
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("work", ActionDef.of(null, null, null, null, null, null, null, null, null, null, null, null, null));
+        StationAsset a = new StationAsset().withActions(actions);
+        assertNull(ActionResolver.selectActionForBlockState(a, "BarsPlaced"));
+        assertNull(ActionResolver.selectActionForBlockState(a, "Default"));
+    }
+
+    @Test
+    void selectActionForBlockState_singleActionStation_stationLevelCustodyStillResolvesImplicitWork() {
+        // No Actions map at all - the implicit ACTION_WORK action inherits the station-level
+        // Custody wholesale (ActionResolver.resolve's own byte-stable-regression framing).
+        StationAsset a = new StationAsset().withCustody(custodyLoaded("Loaded"));
+        assertEquals(ActionResolver.ACTION_WORK, ActionResolver.selectActionForBlockState(a, "Loaded"));
+        assertNull(ActionResolver.selectActionForBlockState(a, "Default"));
     }
 }

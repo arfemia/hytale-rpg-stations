@@ -68,7 +68,7 @@ public final class StationSummaryHud extends KeyedCustomHud {
     public static final String ROOT_SELECTOR = "#RpgStationSummaryRoot";
 
     /** Must match the {@code .ui}'s {@code #RpgStationSummaryRoot} static-fallback Width. */
-    private static final int PANEL_WIDTH_PX = 480;
+    private static final int PANEL_WIDTH_PX = 528;
 
     private static final long DEFAULT_DURATION_MS = 6000L;
     private static final long UPDATE_INTERVAL_MS = 250L;

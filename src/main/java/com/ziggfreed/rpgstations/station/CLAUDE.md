@@ -433,3 +433,71 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   `../../../../../../../../../.claude/plans/work-stations-mod-extraction-prompt.md`'s PHASE-2
   SMOKE CHECKLIST); no engine file in this package changed for it, the in-game confirmation pass
   itself is still batched/pending.
+- **First fresh-boot smoke fix round (R1-R5, LANDED this leg)**: five defects the maintainer's
+  fresh boot surfaced, all fixed against the actually-smoked artifacts.
+  - **R1 (item localization + HUD width)**: `StationService.itemNameMsg` was a bare `Msg.key(
+    "items." + itemId + ".name")` with NO existence probe and NO native-namespace fallback, so
+    every NATIVE vanilla item in the session-summary ledger (most rows - the sawmill's logs, the
+    anvil's bars) resolved to an unregistered `items.<id>.name` key the client rendered as raw
+    unresolved text. Fixed by delegating to a new lifted `ziggfreed-common` primitive,
+    `i18n.NativeNames.itemNameMsg` (probes `server.items.<id>.name` FIRST, then `items.<id>.name`,
+    then a prettified raw fallback - the exact two-tier shape the MMO's own `content.objective
+    .TargetNameResolver#itemNameMsg` already proved necessary). Also widened the summary panel
+    +48px (`StationSummaryHud.PANEL_WIDTH_PX` 480->528, every `RpgStationSummary.ui` `#Content`
+    child 444->492) to restore the headroom the extraction had silently shrunk from the
+    pre-extraction MMO panel's 520px.
+  - **R2 (seated swing, [SMOKEDIAG]-instrumented, unresolved pending a boot)**: a full paper
+    trace found the seated-worker swing DISPATCH (`runSwing`/`useActionSlotForSwing`/
+    `StationHoldController#playActionSwing`) provably correct and unchanged since the
+    in-game-proven pre-extraction commit - the break, if real, is CLIENT-SIDE rendering of a
+    server-fired `Action`-slot animation on a block-mounted (seated) player, unobservable from
+    server source. Five `[SMOKEDIAG]` `Log.info` lines (tagged, removable in one sweep) pinpoint
+    exactly which link breaks on the next boot: `engage-armed` (session start, `StationService
+    .toggle`), `beat-fired` (the per-swing timer, `tickFrameOnce`), `route-chosen` (`runSwing`),
+    `clip-resolved` (SKIP or success, `StationHoldController.playActionSwing` - THE decisive
+    line), `packet-sent` (after the `AnimationUtils.playAnimation` call). If all five fire with a
+    real clip every boot, the server is proven correct and the fix is client-side (e.g. switch to
+    `Hold.Mount.Surface: "Entity"`), not a server code change.
+  - **R3 (inventory pull for custody placement)**: `StationService#toggle`'s placed-input custody
+    branch only ever tried the ACTIVE HOTBAR SLOT (`custodyAccepts`/`placeIntoCustody`), so
+    matching material sitting unheld in storage/backpack was invisible to placement - a false
+    "no materials" toast. `placeIntoCustody` now takes an explicit source `ItemContainer`/slot/
+    stack (generalized off the hotbar-only derivation) so BOTH the held-item path AND a new
+    fallback, `findFirstCustodyMatchInInventory` (scans `InventoryComponent
+    .HOTBAR_STORAGE_BACKPACK`, skipping the already-tried held slot), route through the IDENTICAL
+    placement engine - held still wins first, the fallback only runs when the held slot didn't
+    match. No new lang key (directive 5 only widens WHERE a match can be found, not the
+    messaging).
+  - **R4 (display entity, TWO independent causes fixed)**: (a) AUTHORING - the anvil's `convert`
+    action's `Custody` authored no `Display` group at all, so a placed bar never even attempted a
+    spawn (`placeIntoCustody` guards the spawn on a non-null `Custody.Display`) - fixed with a
+    `convert.Custody.Display` matching `enhance`'s own values, see the pack's own `CLAUDE.md`.
+    (b) ENGINE - `StationCustodyDisplay#spawn`/`#despawn` called `store.addEntity`/
+    `store.removeEntity` DIRECTLY, which throws `IllegalStateException("Store is currently
+    processing!")` when invoked from inside an interaction handler (the ONLY call site,
+    `StationService#placeIntoCustody`, runs inside `toggle()`, itself inside the store's
+    processing lock) - the throw was swallowed by the method's own `catch (Throwable)` into a
+    silent WARN, so the sawmill's placed-logs display (which DID author `Display` from leg G)
+    never appeared either. Fixed by switching both methods to the tick-safe
+    `CommandBuffer<EntityStore>` primitive (`commandBuffer.addEntity`/`.removeEntity`, the same
+    one `StationEntityMountController#spawnAnchor` already used) - `placeIntoCustody` now takes a
+    `commandBuffer` param, and `stop()`/`returnCustody`/`onCustodyBlockBroken` all thread a
+    nullable `CommandBuffer` through so teardown despawn is tick-safe too wherever one is
+    available (every frame-tick/interaction call site has one; the damage/death/disconnect/
+    shutdown hooks pass `null` and leave the entity behind - harmless, it is `NonSerialized` so it
+    cannot survive a restart regardless).
+  - **R5 (loaded-station restart-orphan recovery)**: action selection at `toggle()` only ever
+    consulted the live claim (gone after a restart - custody is memory-only) or the held item
+    (scored against `ActionInput`, which the wrong tool never matches) - a stale `Loaded`
+    block-state with no claim behind it dead-ended EVERY press with `ui.station.no_action`
+    ("nothing this station can work with"), even holding the right tool. A new pure resolver,
+    `ActionResolver#selectActionForBlockState(asset, currentStateName)`, is consulted as a THIRD
+    fallback (only when both the live-claim and held-item selectors return null): it matches the
+    block's own CURRENT persisted interaction-state name (read via the source-verified
+    `BlockAccessor.getCurrentInteractionState(world.getBlockType(x,y,z))` reverse-lookup, the
+    exact inverse of `flipCustodyState`'s own `setBlockInteractionState` write) against each
+    action's `Custody.States.Loaded` name. Recovering the action id re-enters the ALREADY-correct
+    custody fall-through (`preClaim` stays null, so the existing not-loaded self-heal flips the
+    block back to Empty), so the player is unstuck on the very next press and denies with the
+    truthful `ui.station.no_materials` (claim genuinely lost) instead of the dead-end
+    `ui.station.no_action`.

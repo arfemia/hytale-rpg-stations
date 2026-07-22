@@ -35,12 +35,15 @@ import com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent;
 import com.hypixel.hytale.server.core.inventory.InventoryComponent;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.inventory.ResourceQuantity;
+import com.hypixel.hytale.server.core.inventory.container.CombinedItemContainer;
+import com.hypixel.hytale.server.core.inventory.container.ItemContainer;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransaction;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.accessor.BlockAccessor;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.core.util.NotificationUtil;
 import com.ziggfreed.common.camera.CameraShakeService;
@@ -49,6 +52,7 @@ import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.cast.WorldKeyedQueues;
 import com.ziggfreed.common.cast.step.CastKernel;
 import com.ziggfreed.common.i18n.Msg;
+import com.ziggfreed.common.i18n.NativeNames;
 import com.ziggfreed.common.sound.Sound3D;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.rpgstations.api.FactorContext;
@@ -212,7 +216,7 @@ public final class StationService {
         }
         StationSession existing = byPlayer.get(playerUuid);
         if (existing != null) {
-            stop(existing, StopReason.PLAYER_EXIT, store);
+            stop(existing, StopReason.PLAYER_EXIT, store, commandBuffer);
             return;
         }
 
@@ -249,6 +253,15 @@ public final class StationService {
                 ? preClaim.actionId
                 : selectActionForHeld(asset, player);
         if (selectedActionId == null) {
+            // R5 fix (restart-orphan recovery, design 9.4's self-heal extended): neither the live
+            // claim (memory-only, lost across a restart) nor the held item matched - before
+            // denying, recover the action from the block's OWN persisted interaction-state name
+            // (survives a restart) so a Loaded block orphaned by a crash/restart is not a
+            // permanent dead end for a player holding the right tool but nothing matching held.
+            selectedActionId = ActionResolver.selectActionForBlockState(asset,
+                    currentBlockStateName(world, blockX, blockY, blockZ));
+        }
+        if (selectedActionId == null) {
             toast(playerRef, RpgMsg.tr("ui.station.no_action"));
             return;
         }
@@ -277,11 +290,30 @@ public final class StationService {
                 // restart with no live claim behind it resets to Empty here, idempotently.
                 flipCustodyState(world, blockX, blockY, blockZ, custody, false);
             }
-            ItemStack heldForPlacement = player.getInventory().getActiveHotbarItem();
             boolean roomLeft = claim == null || claim.totalQuantity() < custody.effectiveMaxQuantity();
-            if (roomLeft && custodyAccepts(custody, asset, action, heldForPlacement)) {
-                int moved = placeIntoCustody(store, ref, blockKey, playerUuid, asset.getId(),
-                        action.getActionId(), heldForPlacement, custody, blockX, blockY, blockZ);
+            if (roomLeft) {
+                InventoryComponent.Hotbar hotbarComp =
+                        store.getComponent(ref, InventoryComponent.Hotbar.getComponentType());
+                ItemStack heldForPlacement = hotbarComp != null ? hotbarComp.getActiveItem() : null;
+                int moved = 0;
+                if (custodyAccepts(custody, asset, action, heldForPlacement)) {
+                    moved = placeIntoCustody(store, ref, commandBuffer, blockKey, playerUuid, asset.getId(),
+                            action.getActionId(), hotbarComp.getInventory(), hotbarComp.getActiveSlot(),
+                            heldForPlacement, custody, blockX, blockY, blockZ);
+                }
+                if (moved <= 0 && hotbarComp != null) {
+                    // R3 fix (directive 5's held-else-inventory ruling): the held slot didn't
+                    // match (or nothing is held) - scan the rest of the inventory before denying,
+                    // so matching material sitting unheld in the backpack is no longer invisible
+                    // to placement.
+                    InventoryMatch found = findFirstCustodyMatchInInventory(store, ref, custody, asset, action,
+                            hotbarComp.getActiveSlot());
+                    if (found != null) {
+                        moved = placeIntoCustody(store, ref, commandBuffer, blockKey, playerUuid, asset.getId(),
+                                action.getActionId(), found.container(), found.slot(), found.stack(), custody,
+                                blockX, blockY, blockZ);
+                    }
+                }
                 if (moved > 0) {
                     if (!loadedBefore) {
                         flipCustodyState(world, blockX, blockY, blockZ, custody, true);
@@ -291,7 +323,8 @@ public final class StationService {
                     return;
                 }
             }
-            // Nothing placed (no match, or already full): fall through to engage below.
+            // Nothing placed anywhere (not held, not elsewhere in the inventory, or already
+            // full): fall through to engage below.
         }
 
         // 3) Exclusive occupancy - the RESOLVED action's own Work override when authored.
@@ -459,6 +492,14 @@ public final class StationService {
         s.nextCycleAtMs = now + (s.idleMode ? s.idleCycleMs : s.cycleMs);
         s.nextSwingAtMs = now + s.swingIntervalMs;
 
+        // [SMOKEDIAG] R2 seated-swing diagnosis (removable in one sweep after the next boot
+        // confirms/refutes the seated-worker swing dispatch): proves the session engaged with
+        // seatMode/swingIntervalMs at their JSON-authored values (or reveals a runtime
+        // resolution mismatch vs the pack asset).
+        Log.info("[SMOKEDIAG] engage-armed station=" + s.stationId + " action=" + s.actionId
+                + " seatMode=" + s.seatMode + " entityMountMode=" + s.entityMountMode
+                + " swingIntervalMs=" + s.swingIntervalMs + " actionClip=" + s.actionClip);
+
         byPlayer.put(playerUuid, s);
         if (exclusive) {
             byBlock.put(blockKey, playerUuid);
@@ -504,7 +545,7 @@ public final class StationService {
             try {
                 if (now >= s.nextHeartbeatAtMs) {
                     s.nextHeartbeatAtMs = now + HEARTBEAT_MS;
-                    if (!heartbeat(s, world, store)) {
+                    if (!heartbeat(s, world, store, commandBuffer)) {
                         it.remove();
                         continue;
                     }
@@ -527,7 +568,14 @@ public final class StationService {
                     }
                 }
                 if (s.swingIntervalMs > 0 && now >= s.nextSwingAtMs) {
+                    // [SMOKEDIAG] R2 seated-swing diagnosis: should log ~every swingIntervalMs.
+                    // If it NEVER logs, swingIntervalMs is 0 at runtime (contradicting the
+                    // codec) - re-examine the resolved-action Animation group.
+                    long wasDueSmokediag = s.nextSwingAtMs;
                     s.nextSwingAtMs = now + s.swingIntervalMs;
+                    Log.info("[SMOKEDIAG] beat-fired station=" + s.stationId + " nextSwingAtMs(was)="
+                            + wasDueSmokediag + " now=" + now + " swingIntervalMs=" + s.swingIntervalMs
+                            + " seatMode=" + s.seatMode);
                     runSwing(s, store);
                 }
                 if (impactDue(now, s.pendingImpactAtMs)) {
@@ -536,7 +584,7 @@ public final class StationService {
                 }
             } catch (Throwable t) {
                 Log.warn("STATION tick failed: " + t.getMessage(), t);
-                stop(s, StopReason.PLAYER_EXIT, store);
+                stop(s, StopReason.PLAYER_EXIT, store, commandBuffer);
                 it.remove();
             }
         }
@@ -544,18 +592,18 @@ public final class StationService {
 
     /** Terminate checks in order + hold TTL refresh. Returns false when the session ended. */
     private boolean heartbeat(@Nonnull StationSession s, @Nonnull World world,
-                              @Nonnull Store<EntityStore> store) {
+                              @Nonnull Store<EntityStore> store, @Nonnull CommandBuffer<EntityStore> commandBuffer) {
         if (s.ref == null || !s.ref.isValid() || s.ref.getStore() != store) {
-            stop(s, StopReason.WORLD_CHANGED, null);
+            stop(s, StopReason.WORLD_CHANGED, null, null);
             return false;
         }
         if (blockIdAt(world, s.blockX, s.blockY, s.blockZ) != s.startBlockId) {
-            stop(s, StopReason.STATION_GONE, store);
+            stop(s, StopReason.STATION_GONE, store, commandBuffer);
             return false;
         }
         boolean mounted = s.seatMode || s.entityMountMode;
         if (seatModeShouldStop(mounted, StationMountController.isMounted(s.ref, store))) {
-            stop(s, StopReason.MOVED, store);
+            stop(s, StopReason.MOVED, store, commandBuffer);
             return false;
         }
         // Walk-off (origin-delta) check: the Block route's native mount snaps the transform (no
@@ -570,7 +618,7 @@ public final class StationService {
                 double dy = pos.y - s.originY;
                 double dz = pos.z - s.originZ;
                 if (dx * dx + dy * dy + dz * dz > s.maxMoveSq) {
-                    stop(s, StopReason.MOVED, store);
+                    stop(s, StopReason.MOVED, store, commandBuffer);
                     return false;
                 }
             }
@@ -580,7 +628,7 @@ public final class StationService {
         }
         MovementStatesComponent ms = store.getComponent(s.ref, MovementStatesComponent.getComponentType());
         if (ms != null && ms.getMovementStates() != null && ms.getMovementStates().crouching) {
-            stop(s, StopReason.PLAYER_EXIT, store);
+            stop(s, StopReason.PLAYER_EXIT, store, commandBuffer);
             return false;
         }
         if (s.toolReq != null) {
@@ -597,16 +645,16 @@ public final class StationService {
                     StationEvents.fireToolBroke(store, s.playerRef, s.playerUuid, s.sessionId, s.stationId,
                             heldItemId);
                 }
-                stop(s, toolStop, store);
+                stop(s, toolStop, store, commandBuffer);
                 return false;
             }
         }
         if (System.currentTimeMillis() - s.startedAtMs >= s.maxDurationMs) {
-            stop(s, StopReason.SESSION_CAP, store);
+            stop(s, StopReason.SESSION_CAP, store, commandBuffer);
             return false;
         }
         if (!stationsEnabled()) {
-            stop(s, StopReason.FEATURE_DISABLED, store);
+            stop(s, StopReason.FEATURE_DISABLED, store, commandBuffer);
             return false;
         }
         StationHoldController.applyHold(s, store);
@@ -623,12 +671,12 @@ public final class StationService {
                              @Nonnull CommandBuffer<EntityStore> commandBuffer) {
         StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
         if (asset == null) {
-            stop(s, StopReason.STATION_GONE, store);
+            stop(s, StopReason.STATION_GONE, store, commandBuffer);
             return false;
         }
         Player player = store.getComponent(s.ref, Player.getComponentType());
         if (player == null) {
-            stop(s, StopReason.WORLD_CHANGED, null);
+            stop(s, StopReason.WORLD_CHANGED, null, commandBuffer);
             return false;
         }
 
@@ -656,10 +704,10 @@ public final class StationService {
             s.nextCycleAtMs = System.currentTimeMillis() + s.idleCycleMs;
             return runIdleCycle(s, store, commandBuffer, action);
         } else if (check.state == ConversionState.NO_INPUTS) {
-            stop(s, StopReason.OUT_OF_INPUTS, store);
+            stop(s, StopReason.OUT_OF_INPUTS, store, commandBuffer);
             return false;
         } else { // NO_ROOM
-            stop(s, StopReason.INVENTORY_FULL, store);
+            stop(s, StopReason.INVENTORY_FULL, store, commandBuffer);
             return false;
         }
     }
@@ -730,18 +778,18 @@ public final class StationService {
                                        @Nonnull CommandBuffer<EntityStore> commandBuffer) {
         StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
         if (asset == null) {
-            stop(s, StopReason.STATION_GONE, store);
+            stop(s, StopReason.STATION_GONE, store, commandBuffer);
             return false;
         }
         Player player = store.getComponent(s.ref, Player.getComponentType());
         if (player == null) {
-            stop(s, StopReason.WORLD_CHANGED, null);
+            stop(s, StopReason.WORLD_CHANGED, null, commandBuffer);
             return false;
         }
         List<StationStep> steps = s.activeProgramSteps;
         if (steps == null) {
             Log.warn("STATION resume with no active program snapshot for '" + s.stationId + "' - stopping");
-            stop(s, StopReason.STEP_FAILED, store);
+            stop(s, StopReason.STEP_FAILED, store, commandBuffer);
             return false;
         }
         ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, s.actionId);
@@ -791,7 +839,7 @@ public final class StationService {
             StationStepResult.Fail fail = (StationStepResult.Fail) failed.result();
             Log.warn("STATION step program failed for '" + s.stationId + "' at step index "
                     + failed.atIndex() + ": " + fail.message());
-            stop(s, fail.reason(), store);
+            stop(s, fail.reason(), store, commandBuffer);
             return false;
         }
 
@@ -809,7 +857,7 @@ public final class StationService {
 
         StationAsset.Work work = action.getWork();
         if (work != null && !work.effectiveRepeat()) {
-            stop(s, StopReason.RITUAL_COMPLETE, store);
+            stop(s, StopReason.RITUAL_COMPLETE, store, commandBuffer);
             return false;
         }
         return true;
@@ -1284,7 +1332,12 @@ public final class StationService {
             return;
         }
         Player swingPlayer = store.getComponent(s.ref, Player.getComponentType());
-        if (useActionSlotForSwing(s.seatMode)) {
+        boolean useActionSlotSmokediag = useActionSlotForSwing(s.seatMode);
+        // [SMOKEDIAG] R2 seated-swing diagnosis: confirms the seat route is taken. If it shows
+        // playEmote for a seated session, seatMode is false at runtime - re-examine Mount parse.
+        Log.info("[SMOKEDIAG] route-chosen seatMode=" + s.seatMode + " -> "
+                + (useActionSlotSmokediag ? "playActionSwing" : "playEmote"));
+        if (useActionSlotSmokediag) {
             StationHoldController.playActionSwing(s, swingPlayer, store);
         } else {
             StationHoldController.playEmote(s, store);
@@ -1406,9 +1459,16 @@ public final class StationService {
     /**
      * The one idempotent exit funnel. Each teardown step is individually guarded so one
      * failure never skips the rest. {@code store} is null on paths where the entity is gone.
+     *
+     * <p><b>R4 companion fix</b>: {@code commandBuffer} is nullable - most call sites (the
+     * frame-tick drain, {@code toggle}'s re-press exit) hold one; the shutdown/disconnect/damage/
+     * death sweeps ({@link #onDamage}/{@link #stopForRef}/{@link #stopFor}/{@link #stopAll}) do
+     * not and pass {@code null}, in which case {@link #returnCustody} falls back cleanly (the
+     * custody display prop, if any, is left behind - it is {@code NonSerialized} so it never
+     * survives a restart regardless).
      */
     private void stop(@Nonnull StationSession s, @Nonnull StopReason reason,
-                      @Nullable Store<EntityStore> store) {
+                      @Nullable Store<EntityStore> store, @Nullable CommandBuffer<EntityStore> commandBuffer) {
         if (!s.stopped.compareAndSet(false, true)) {
             return;
         }
@@ -1426,7 +1486,7 @@ public final class StationService {
         StationAsset stopAsset = StationCatalog.getInstance().getStation(s.stationId);
         String stopActionId = s.actionId != null ? s.actionId : ACTION_WORK;
         Custody stopCustody = stopAsset != null ? ActionResolver.resolve(stopAsset, stopActionId).getCustody() : null;
-        returnCustody(s, stopCustody);
+        returnCustody(s, stopCustody, commandBuffer);
 
         boolean entityAlive = store != null && s.ref != null && s.ref.isValid() && s.ref.getStore() == store;
         boolean silent = reason == StopReason.DISCONNECTED || reason == StopReason.SERVER_STOP
@@ -1503,7 +1563,10 @@ public final class StationService {
         for (StationSession s : byPlayer.values()) {
             if (s.ref != null && s.ref.getStore() == store
                     && s.ref.getIndex() == victimRef.getIndex() && s.interruptOnDamage) {
-                stop(s, StopReason.DAMAGED, store);
+                // No live CommandBuffer at this call site (an Inspect-group damage system, not a
+                // frame-tick/interaction handler) - a placed-input custody display prop despawn
+                // here (R4) degrades to "leave it, it's NonSerialized so it dies on restart".
+                stop(s, StopReason.DAMAGED, store, null);
                 return;
             }
         }
@@ -1514,7 +1577,8 @@ public final class StationService {
                            @Nonnull StopReason reason) {
         for (StationSession s : byPlayer.values()) {
             if (s.ref != null && s.ref.getStore() == store && s.ref.getIndex() == ref.getIndex()) {
-                stop(s, reason, store);
+                // No live CommandBuffer at this call site (death hook) - see onDamage's note.
+                stop(s, reason, store, null);
                 return;
             }
         }
@@ -1524,14 +1588,14 @@ public final class StationService {
     public void stopFor(@Nonnull UUID playerUuid, @Nonnull StopReason reason) {
         StationSession s = byPlayer.get(playerUuid);
         if (s != null) {
-            stop(s, reason, null);
+            stop(s, reason, null, null);
         }
     }
 
     /** Server shutdown: best-effort teardown of every live session. */
     public void stopAll(@Nonnull StopReason reason) {
         for (StationSession s : new ArrayList<>(byPlayer.values())) {
-            stop(s, reason, null);
+            stop(s, reason, null, null);
         }
     }
 
@@ -1704,9 +1768,56 @@ public final class StationService {
     }
 
     /**
-     * Moves up to {@code custody.effectiveMaxQuantity() - currentTotal} of {@code held}'s ACTIVE
-     * HOTBAR SLOT into the block's claim (creating it, owned by {@code playerUuid}, on first
-     * placement), removing exactly that amount from the slot. Returns the amount actually moved
+     * One scanned inventory-fallback placement candidate (R3 fix - directive 5's held-else-
+     * inventory ruling): the source container the match lives in, its slot within THAT
+     * container, and the matched stack itself.
+     */
+    private record InventoryMatch(@Nonnull ItemContainer container, short slot, @Nonnull ItemStack stack) {
+    }
+
+    /**
+     * R3 fix: when the player's held (active hotbar) stack does not satisfy {@code custody}'s
+     * placement matcher, matching material sitting ELSEWHERE in the inventory (storage/backpack)
+     * was previously invisible to placement - the station denied with the truthful-sounding but
+     * misleading "no materials" toast even though the player was carrying the right item. Scans
+     * the combined hotbar-storage-backpack view ({@link InventoryComponent#HOTBAR_STORAGE_BACKPACK},
+     * the same priority order {@code Inventory}'s own combined accessors use) for the FIRST stack
+     * {@link #custodyAccepts} accepts, skipping {@code skipSlot} (the already-tried held slot -
+     * numerically identical to this combined view's own slot indices, since the hotbar container
+     * is first in {@code HOTBAR_STORAGE_BACKPACK}). Returns {@code null} when nothing else
+     * matches; never throws (an empty/unresolvable inventory just yields no match).
+     */
+    @Nullable
+    private static InventoryMatch findFirstCustodyMatchInInventory(@Nonnull Store<EntityStore> store,
+            @Nonnull Ref<EntityStore> ref, @Nonnull Custody custody, @Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action, short skipSlot) {
+        try {
+            CombinedItemContainer combined =
+                    InventoryComponent.getCombined(store, ref, InventoryComponent.HOTBAR_STORAGE_BACKPACK);
+            short capacity = combined.getCapacity();
+            for (short slot = 0; slot < capacity; slot++) {
+                if (slot == skipSlot) {
+                    continue;
+                }
+                ItemStack stack = combined.getItemStack(slot);
+                if (ItemStack.isEmpty(stack)) {
+                    continue;
+                }
+                if (custodyAccepts(custody, asset, action, stack)) {
+                    return new InventoryMatch(combined, slot, stack);
+                }
+            }
+        } catch (Throwable t) {
+            Log.warn("STATION custody inventory-fallback scan failed: " + t.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Moves up to {@code custody.effectiveMaxQuantity() - currentTotal} of {@code matchedStack}'s
+     * source slot into the block's claim (creating it, owned by {@code playerUuid}, on first
+     * placement), removing exactly that amount from {@code sourceContainer}'s {@code sourceSlot}.
+     * Returns the amount actually moved
      * (0 = nothing eligible / no room / the slot removal failed).
      *
      * <p><b>Metadata-preserving single-item placement</b> (a genuine fix, not in the original
@@ -1729,29 +1840,38 @@ public final class StationService {
      * case) else a fresh one-quantity stack of the just-placed {@code itemId} (the bulk case - the
      * visual represents PRESENCE, not the exact tally). A failed spawn is logged and swallowed
      * (never blocks the placement itself, which already succeeded).
+     *
+     * <p><b>R3 fix</b>: takes an explicit {@code sourceContainer}/{@code sourceSlot}/
+     * {@code matchedStack} instead of deriving the active hotbar slot internally, so BOTH the
+     * held-item placement AND the {@link #findFirstCustodyMatchInInventory} fallback go through
+     * the IDENTICAL whole-stack + top-up + cap math, metadata-preserving single-item path, and
+     * display-spawn logic - one engine, two candidate sources.
+     *
+     * <p><b>R4 fix</b>: takes {@code commandBuffer} and forwards it to {@link
+     * StationCustodyDisplay#spawn} instead of {@code store} - {@code store.addEntity} throws
+     * {@code IllegalStateException} when called from an interaction handler (this call site runs
+     * inside {@code toggle()}, itself inside the store's processing lock), the swallowed root
+     * cause of the display never appearing.
      */
     private int placeIntoCustody(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
-            @Nonnull String blockKey, @Nonnull UUID playerUuid, @Nonnull String stationId,
-            @Nonnull String actionId, @Nonnull ItemStack held, @Nonnull Custody custody,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull String blockKey, @Nonnull UUID playerUuid,
+            @Nonnull String stationId, @Nonnull String actionId, @Nonnull ItemContainer sourceContainer,
+            short sourceSlot, @Nonnull ItemStack matchedStack, @Nonnull Custody custody,
             int blockX, int blockY, int blockZ) {
-        String itemId = held.getItemId();
+        String itemId = matchedStack.getItemId();
         if (itemId == null || itemId.isBlank()) {
             return 0;
         }
         StationCustodyClaim claim = custodyByBlock.get(blockKey);
         int currentTotal = claim != null ? claim.totalQuantity() : 0;
-        int moveCount = StationCustody.placeableQuantity(currentTotal, held.getQuantity(),
+        int moveCount = StationCustody.placeableQuantity(currentTotal, matchedStack.getQuantity(),
                 custody.effectiveMaxQuantity());
         if (moveCount <= 0) {
             return 0;
         }
-        InventoryComponent.Hotbar hotbar = store.getComponent(ref, InventoryComponent.Hotbar.getComponentType());
-        if (hotbar == null || hotbar.getActiveSlot() == InventoryComponent.INACTIVE_SLOT_INDEX) {
-            return 0;
-        }
         ItemStack movedStack;
         try {
-            var transaction = hotbar.getInventory().removeItemStackFromSlot(hotbar.getActiveSlot(), moveCount);
+            var transaction = sourceContainer.removeItemStackFromSlot(sourceSlot, moveCount);
             movedStack = transaction != null ? transaction.getOutput() : null;
         } catch (Throwable t) {
             Log.warn("STATION custody placement removal failed: " + t.getMessage());
@@ -1768,7 +1888,7 @@ public final class StationService {
         Custody.Display displayGroup = custody.getDisplay();
         if (displayGroup != null && claim.displayRef() == null) {
             ItemStack visualStack = claim.uniqueStack() != null ? claim.uniqueStack() : new ItemStack(itemId, 1);
-            Ref<EntityStore> displayRef = StationCustodyDisplay.spawn(store, visualStack, displayGroup,
+            Ref<EntityStore> displayRef = StationCustodyDisplay.spawn(commandBuffer, visualStack, displayGroup,
                     blockX, blockY, blockZ);
             claim.setDisplayRef(displayRef);
         }
@@ -1789,8 +1909,15 @@ public final class StationService {
      * remove a claim from {@link #custodyByBlock} (the other is {@link #onCustodyBlockBroken}),
      * so it is one of the two despawn points for {@link StationCustodyClaim#displayRef()}
      * (design section 9, phase 2 leg G) - the display entity's lifecycle mirrors the claim's own.
+     *
+     * <p><b>R4 companion fix</b>: {@code commandBuffer} (nullable, forwarded from {@link #stop})
+     * is what the display despawn now uses instead of a resolved {@code Store} - see {@link
+     * StationCustodyDisplay#despawn}'s own javadoc for why. A {@code null} commandBuffer (the
+     * damage/death/disconnect/shutdown hooks) leaves the display entity behind; it is {@code
+     * NonSerialized} so it cannot survive a restart regardless.
      */
-    private void returnCustody(@Nonnull StationSession s, @Nullable Custody custody) {
+    private void returnCustody(@Nonnull StationSession s, @Nullable Custody custody,
+            @Nullable CommandBuffer<EntityStore> commandBuffer) {
         if (s.blockKey == null) {
             return;
         }
@@ -1812,7 +1939,7 @@ public final class StationService {
                 ownerStore = null;
             }
         }
-        StationCustodyDisplay.despawn(claim.displayRef(), ownerStore);
+        StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
         if (!claim.isEmpty()) {
             List<ItemStack> stacks = claim.toItemStacks();
             // Try-guarded (SMOKE-FIX S3 hardening): this is the FIRST point custody-return
@@ -1881,12 +2008,13 @@ public final class StationService {
      * {@link #returnCustody}) - whichever of the two wins the removal race is the ONLY one that
      * ever sees this claim again, so it MUST be the one to despawn its display or the entity leaks.
      */
-    void onCustodyBlockBroken(@Nonnull Store<EntityStore> store, @Nonnull String blockKey, int x, int y, int z) {
+    void onCustodyBlockBroken(@Nonnull Store<EntityStore> store, @Nonnull CommandBuffer<EntityStore> commandBuffer,
+            @Nonnull String blockKey, int x, int y, int z) {
         StationCustodyClaim claim = custodyByBlock.remove(blockKey);
         if (claim == null) {
             return;
         }
-        StationCustodyDisplay.despawn(claim.displayRef(), store);
+        StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
         if (claim.isEmpty()) {
             return;
         }
@@ -2113,6 +2241,27 @@ public final class StationService {
         }
     }
 
+    /**
+     * R5 fix: the block's CURRENTLY PERSISTED interaction-state name at (x,y,z) (e.g. custody's
+     * own {@code "BarsPlaced"}/{@code "WeaponPlaced"}), or {@code null} when unreadable or the
+     * block authors no state family at all. {@code world.getBlockType(x,y,z)} already returns the
+     * block's CURRENT state variant (confirmed: {@code IChunkAccessorSync#getBlockType} reads the
+     * live block id off the chunk, the same accessor {@link #flipCustodyState} writes through);
+     * {@link BlockAccessor#getCurrentInteractionState} is the source-verified reverse lookup
+     * ({@code blockType.getStateForBlock(blockType)}) from that live variant back to its state
+     * NAME - the exact inverse of {@code BlockType#getBlockForState} (name -> variant), which
+     * {@code flipCustodyState}/{@code setBlockInteractionState} already use to WRITE a state.
+     */
+    @Nullable
+    private static String currentBlockStateName(@Nonnull World world, int x, int y, int z) {
+        try {
+            BlockType bt = world.getBlockType(x, y, z);
+            return bt != null ? BlockAccessor.getCurrentInteractionState(bt) : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     /** Localized station display name: explicit NameKey (already a full id), else the rpgstations.station.<id>.name convention. */
     @Nonnull
     private static Message stationNameMsg(@Nonnull StationAsset asset) {
@@ -2122,10 +2271,19 @@ public final class StationService {
         return Msg.key(key);
     }
 
-    /** Native item/block name as a client-resolved {@link Message} ({@code items.<id>.name} convention). */
+    /**
+     * Native item/block display name as a client-resolved {@link Message}: the native {@code
+     * server.items.<id>.name} key (vanilla/base-game items - most consumed/produced ledger rows,
+     * e.g. the sawmill's logs/planks or the anvil's bars) FIRST, then the {@code items.<id>.name}
+     * namespace this mod's/a pack's own {@code items.lang} loads under, else a prettified raw
+     * fallback - {@code common.i18n.NativeNames}' shared two-tier probe (R1 fix: the previous
+     * single-namespace {@code Msg.key("items." + itemId + ".name")} had no existence check and no
+     * native-namespace fallback, so a native item resolved to an unregistered translation key the
+     * client rendered as the raw key text).
+     */
     @Nonnull
     private static Message itemNameMsg(@Nonnull String itemId) {
-        return Msg.key("items." + itemId + ".name");
+        return NativeNames.itemNameMsg(itemId);
     }
 
     private static void toast(@Nonnull PlayerRef playerRef, @Nonnull Message message) {

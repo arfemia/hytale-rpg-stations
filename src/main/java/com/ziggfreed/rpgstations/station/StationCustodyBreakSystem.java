@@ -48,7 +48,7 @@ public final class StationCustodyBreakSystem extends EntityEventSystem<EntitySto
         }
         var pos = event.getTargetBlock();
         String blockKey = worldUuid + ":" + pos.x + ":" + pos.y + ":" + pos.z;
-        StationService.getInstance().onCustodyBlockBroken(store, blockKey, pos.x, pos.y, pos.z);
+        StationService.getInstance().onCustodyBlockBroken(store, commandBuffer, blockKey, pos.x, pos.y, pos.z);
     }
 
     @Nullable
