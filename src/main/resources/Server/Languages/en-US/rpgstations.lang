@@ -32,6 +32,7 @@ ui.station.summary.title = Work Complete
 ui.station.summary.cycles = Worked {0} cycles
 ui.station.summary.item_consumed = -{1} {0}
 ui.station.summary.item_produced = +{1} {0}
+ui.station.gain.produced = +{1} {0}
 ui.station.summary.lucky =  (Lucky!)
 ui.station.summary.items_more = +{0} more
 station.sawmill.name = Sawmill

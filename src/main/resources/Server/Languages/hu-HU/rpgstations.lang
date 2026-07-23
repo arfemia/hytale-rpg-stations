@@ -32,6 +32,7 @@ ui.station.summary.title = Munka Befejezve
 ui.station.summary.cycles = {0} ciklus végrehajtva
 ui.station.summary.item_consumed = -{1} {0}
 ui.station.summary.item_produced = +{1} {0}
+ui.station.gain.produced = +{1} {0}
 ui.station.summary.lucky =  (Szerencse!)
 ui.station.summary.items_more = +{0} további
 station.sawmill.name = Fűrészmalom

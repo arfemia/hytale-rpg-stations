@@ -135,3 +135,29 @@ smoke passes still batched/pending as of this entry.
   arc-touched files (`cast/CastKernel`/`StepSemantics`, `i18n/Msg`, `ui/hud/KeyedCustomHud`,
   `ui/rows/SummaryRow*`) and the MMO's `integration/stations`/`station` packages were audited via
   a `-Xlint:deprecation` compile and carried zero deprecated calls to begin with.
+
+### Round-5: item-grant UX refinements (maintainer in-game, 2026-07-22)
+
+Three grant-side UX refinements from the maintainer's in-game smoke session, with the generic
+engine pieces lifted to `ziggfreed-common` per the root lift paradigm (this mod keeps only its own
+policy):
+
+- Adds a hotbar-first-if-space, then-backpack-storage GRANT ordering for every item this mod hands
+  a player: placed-input custody retrieval/return, a per-cycle produced output, a luck bonus-copy
+  grant, and a rare-find/tier `ItemDropList` grant all route through a new `util.ItemGrantUtil`
+  seam, itself a thin policy wrapper (the drop-at-block fallback target only) over
+  `ziggfreed-common`'s new generic `inventory.InventoryGrant` ordering primitive. Deliberately
+  GRANT-side only - this mod's CONSUME side (the per-cycle Convert drain, held-tool reads) keeps
+  preferring backpack storage over the hotbar for the historic client-camera reason documented on
+  `ItemGrantUtil`'s own javadoc. `giveClaimToOwner` (custody give-back) is now PER-STACK instead of
+  an all-or-nothing batch check, so a claim holding several distinct item ids can land some in the
+  hotbar, some in the backpack, and only the genuine overflow on the ground.
+- Adds native-pickup-mimic feedback to press-F custody retrieval: a retrieved stack now plays the
+  SAME message + SFX + item-icon notification a genuine walk-over/block-harvest pickup does, via
+  `ziggfreed-common`'s new `feedback.PickupMimic` primitive (which delegates straight to the
+  engine's own pickup-notify method for byte-exact parity) - replacing the old generic "materials
+  retrieved" toast.
+- Adds live item-gain notifications while working: a produced material and a lucky drop (bonus
+  copy or rare-find) each show WHAT was gained, with the item's own icon and name; a lucky drop
+  renders in GOLD text, replacing the old generic "Lucky!"/"You find something extra!" toasts.
+  New key `ui.station.gain.produced` (9 locales).

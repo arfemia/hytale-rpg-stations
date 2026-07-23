@@ -32,6 +32,7 @@ ui.station.summary.title = Çalışma Tamamlandı
 ui.station.summary.cycles = {0} döngü çalışıldı
 ui.station.summary.item_consumed = -{1} {0}
 ui.station.summary.item_produced = +{1} {0}
+ui.station.gain.produced = +{1} {0}
 ui.station.summary.lucky =  (Şanslı!)
 ui.station.summary.items_more = +{0} daha
 station.sawmill.name = Bıçkıhane

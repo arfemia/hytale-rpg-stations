@@ -53,8 +53,10 @@ import com.ziggfreed.common.cast.ModelParticleService;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.cast.WorldKeyedQueues;
 import com.ziggfreed.common.cast.step.CastKernel;
+import com.ziggfreed.common.feedback.PickupMimic;
 import com.ziggfreed.common.i18n.Msg;
 import com.ziggfreed.common.i18n.NativeNames;
+import com.ziggfreed.common.inventory.InventoryGrant;
 import com.ziggfreed.common.sound.Sound3D;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.rpgstations.api.FactorContext;
@@ -77,6 +79,7 @@ import com.ziggfreed.rpgstations.loot.LootEngine;
 import com.ziggfreed.rpgstations.ui.StationSummaryHud;
 import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.ItemDropUtil;
+import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -127,6 +130,9 @@ public final class StationService {
      * unbounded-spawner particle asset fired at a bare position would otherwise leak forever).
      */
     private static final float MOMENT_PARTICLE_MAX_DURATION_SECONDS = 4.0f;
+
+    /** Round-5 refinement 3: the "lucky grant" notification color (distinct from {@link #toast}'s plain YELLOW). */
+    private static final Color GOLD = new Color(0xFFD700);
 
     /** Every teardown path a session can leave through; drives the localized stop toast. */
     public enum StopReason {
@@ -1088,9 +1094,10 @@ public final class StationService {
     /**
      * Folds a {@link LootEngine.GrantResult} into the session's item ledger, plays every
      * reached floor's {@code Presentation} through {@link #emitMoment} on {@link
-     * StationFlairs#MOMENT_RARE_FIND}, and fires the two keyed notifications (design 4.5.1):
-     * bonus-copy grants -> {@code ui.station.lucky}, droplist grants -> {@code
-     * ui.station.rare_find}. Both may fire on the same pass (independent grant kinds).
+     * StationFlairs#MOMENT_RARE_FIND}, and fires a round-5 item-specific GOLD "what you gained"
+     * notification ({@link #notifyItemGain}, {@code lucky=true}) per distinct item id in EITHER
+     * grant kind - REPLACES the old generic {@code ui.station.lucky}/{@code ui.station.rare_find}
+     * toasts (design 4.5.1), which no longer fire from here.
      */
     static void applyGrantResult(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull LootEngine.GrantResult result) {
@@ -1108,11 +1115,11 @@ public final class StationService {
             emitMoment(store, s, StationFlairs.MOMENT_RARE_FIND, p, blockPos);
         }
         if (s.playerRef != null) {
-            if (!result.getBonusCopyItems().isEmpty()) {
-                toast(s.playerRef, RpgMsg.tr("ui.station.lucky"));
+            for (Map.Entry<String, Integer> e : result.getBonusCopyItems().entrySet()) {
+                notifyItemGain(s.playerRef, e.getKey(), e.getValue(), true);
             }
-            if (!result.getDropListItems().isEmpty()) {
-                toast(s.playerRef, RpgMsg.tr("ui.station.rare_find"));
+            for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
+                notifyItemGain(s.playerRef, e.getKey(), e.getValue(), true);
             }
         }
     }
@@ -1951,9 +1958,9 @@ public final class StationService {
     /**
      * Every custody auto-return path (design section 9.4: "unconsumed input auto-returns on
      * EVERY exit path") funnels here from {@link #stop}: removes the block's claim (if any owned
-     * by THIS session's player), returns its items to the owner's inventory when reachable and
-     * there is room ({@link StationCustody#shouldReturnToInventory}), else drops them at the
-     * block once, then flips the block back to its Empty custody state.
+     * by THIS session's player), returns its items to the owner hotbar-first then backpack
+     * storage (round-5, via {@link ItemGrantUtil}), else drops them at the block once, then flips
+     * the block back to its Empty custody state.
      *
      * <p>{@code s.ref.getStore()} (not the {@code store} parameter {@link #stop} may have been
      * handed as {@code null}, e.g. on {@code stopAll}'s shutdown sweep) is the store source here -
@@ -2010,24 +2017,32 @@ public final class StationService {
     }
 
     /**
-     * Hands {@code claim}'s contents to {@code ownerRef}'s owner - inventory-first (reachable and
-     * there is room), else dropped at the block once (never partial). Extracted (DRY) so both
+     * Hands {@code claim}'s contents to {@code ownerRef}'s owner - PER STACK, hotbar-first, then
+     * backpack storage, then dropped at the block (round-5 refinement 1, via {@link
+     * ItemGrantUtil} - supersedes this method's old ALL-OR-NOTHING batch-against-storage-only
+     * check: a claim holding several distinct item ids can now land some in the hotbar, some in
+     * the backpack, and only the genuine overflow on the ground, instead of dropping the WHOLE
+     * claim the moment one combined-batch room check failed). Extracted (DRY) so both
      * {@link #returnCustody} (every session-stop exit) and {@link #retrieveCustody} (the press-F
-     * retrieval feature - design's S3 inventory-first/drop-at-block directive, reused verbatim)
-     * share ONE give-back engine. No-op when {@code claim} is empty. Never throws.
+     * retrieval feature) share ONE give-back engine. Returns the stacks that actually landed IN
+     * INVENTORY (hotbar or backpack, excluding anything dropped) - {@link #retrieveCustody} uses
+     * this to fire a native-pickup-mimic notification only for what the player genuinely
+     * received (round-5 refinement 2); {@link #returnCustody} discards the return value. No-op
+     * (empty result) when {@code claim} is empty. Never throws.
      */
-    private static void giveClaimToOwner(@Nullable Store<EntityStore> ownerStore, @Nullable Ref<EntityStore> ownerRef,
-            @Nonnull StationCustodyClaim claim, int blockX, int blockY, int blockZ) {
+    @Nonnull
+    private static List<ItemStack> giveClaimToOwner(@Nullable Store<EntityStore> ownerStore,
+            @Nullable Ref<EntityStore> ownerRef, @Nonnull StationCustodyClaim claim,
+            int blockX, int blockY, int blockZ) {
         if (claim.isEmpty()) {
-            return;
+            return List.of();
         }
         List<ItemStack> stacks = claim.toItemStacks();
         // Try-guarded (SMOKE-FIX S3 hardening): this is the FIRST point a give-back mutates
         // anything, but the claim was already popped off custodyByBlock by the caller - an
         // unguarded throw here would escape entirely (never reaching the drop-at-block fallback
-        // below), silently losing the items. Degrading to "no player found" (same as an
-        // unresolved store) routes it through the SAME drop-at-block fallback every other
-        // unreachable-owner case already uses.
+        // below), silently losing the items. Degrading to "no player found" routes every stack
+        // through the SAME drop-at-block fallback every other unreachable-owner case already uses.
         Player player;
         try {
             player = ownerStore != null && ownerRef != null && ownerRef.isValid()
@@ -2036,26 +2051,23 @@ public final class StationService {
             Log.warn("STATION custody give player lookup failed: " + t.getMessage());
             player = null;
         }
-        boolean hasRoom = player != null;
-        if (hasRoom) {
-            try {
-                hasRoom = InventoryAccess.storageOf(player).canAddItemStacks(stacks);
-            } catch (Throwable t) {
-                hasRoom = false;
-            }
+        if (player == null) {
+            dropCustodyAtBlock(ownerStore, blockX, blockY, blockZ, stacks);
+            return List.of();
         }
-        if (StationCustody.shouldReturnToInventory(player != null, hasRoom)) {
+        List<ItemStack> landedInInventory = new ArrayList<>(stacks.size());
+        for (ItemStack stack : stacks) {
             try {
-                for (ItemStack stack : stacks) {
-                    InventoryAccess.storageOf(player).addItemStack(stack);
+                if (ItemGrantUtil.grant(player, stack, ownerStore, blockX, blockY, blockZ)
+                        != InventoryGrant.Landed.FALLBACK) {
+                    landedInInventory.add(stack);
                 }
             } catch (Throwable t) {
-                Log.warn("STATION custody give to inventory failed: " + t.getMessage());
-                dropCustodyAtBlock(ownerStore, blockX, blockY, blockZ, stacks);
+                Log.warn("STATION custody give failed for '" + stack.getItemId() + "': " + t.getMessage());
+                dropCustodyAtBlock(ownerStore, blockX, blockY, blockZ, List.of(stack));
             }
-        } else {
-            dropCustodyAtBlock(ownerStore, blockX, blockY, blockZ, stacks);
         }
+        return landedInInventory;
     }
 
     // ==================== Press-F custody retrieval (new feature) ====================
@@ -2110,7 +2122,7 @@ public final class StationService {
             if (outcome == StationCustodyRetrieval.Outcome.RETRIEVE) {
                 custodyByBlock.remove(blockKey, claim);
                 StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
-                giveClaimToOwner(store, ref, claim, claim.blockX, claim.blockY, claim.blockZ);
+                List<ItemStack> landed = giveClaimToOwner(store, ref, claim, claim.blockX, claim.blockY, claim.blockZ);
                 StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
                 Custody custody = asset != null
                         ? ActionResolver.resolve(asset, claim.actionId).getCustody() : null;
@@ -2122,6 +2134,17 @@ public final class StationService {
                         Log.fine("STATION retrieve block-state flip failed: " + t.getMessage());
                     }
                 }
+                if (!landed.isEmpty()) {
+                    // Round-5 refinement 2: mimic the ENGINE's own native pickup feedback (message +
+                    // SFX + item icon) per genuinely-received stack, via common's PickupMimic (which
+                    // itself delegates to the real Player#notifyPickupItem - not a re-derived
+                    // lookalike, scout findings 1-4). A stack that dropped at the block instead (no
+                    // room anywhere) falls through to the classic generic toast below - "you picked
+                    // it up" would be a lie for something sitting on the ground.
+                    notifyNativePickup(store, ref, landed, claim.blockX, claim.blockY, claim.blockZ);
+                } else {
+                    toast(playerRef, RpgMsg.tr("ui.station.retrieve.done"));
+                }
             }
             String key = retrieveOutcomeKey(outcome);
             if (key != null) {
@@ -2132,14 +2155,17 @@ public final class StationService {
         }
     }
 
-    /** The retrieve-toast key for an {@link StationCustodyRetrieval.Outcome}, or null for outcomes that toast nothing (silent). */
+    /**
+     * The retrieve-toast key for a denial outcome; {@code RETRIEVE}'s own feedback is handled
+     * inline in {@link #retrieveCustody} (round-5's native-pickup-mimic notification, or the
+     * plain done toast when nothing landed in inventory) - never double-toast here.
+     */
     @Nullable
     private static String retrieveOutcomeKey(@Nonnull StationCustodyRetrieval.Outcome outcome) {
         return switch (outcome) {
             case BUSY -> "ui.station.retrieve.busy";
             case NOT_OWNER -> "ui.station.occupied";
-            case RETRIEVE -> "ui.station.retrieve.done";
-            case UNKNOWN_TARGET, NOTHING_TO_RETRIEVE -> null;
+            case RETRIEVE, UNKNOWN_TARGET, NOTHING_TO_RETRIEVE -> null;
         };
     }
 
@@ -2458,6 +2484,56 @@ public final class StationService {
     @Nonnull
     private static Message itemNameMsg(@Nonnull String itemId) {
         return NativeNames.itemNameMsg(itemId);
+    }
+
+    /**
+     * Round-5 refinement 3 (maintainer, 2026-07-22): a live, item-specific "what you gained"
+     * notification - icon + client-resolved name + quantity, via the SAME
+     * {@code NotificationUtil.sendNotification(handler, message, secondaryMessage, item)} shape
+     * the native pickup notification uses (scout finding 2), so the item icon renders the same
+     * way. Deliberately LIGHTER than {@link #notifyNativePickup}/{@code PickupMimic}: no SFX and
+     * no {@code ShowItemPickupNotifications} gate - this fires ambiently roughly once per work
+     * cycle, not for a one-shot deliberate pickup action, so it skips the sound cue that primitive
+     * layers on. {@code lucky=true} appends the ALREADY-9-locale {@code ui.station.summary.lucky}
+     * suffix (DRY - the SAME {@code Msg.cat} composition {@link #ledgerRows} builds for the
+     * end-of-session ledger row) and styles the whole line {@link #GOLD}. Called from both this
+     * class ({@link #applyGrantResult}) and {@code StationStepHandlers.ProduceHandler} (same
+     * package). Never throws.
+     */
+    static void notifyItemGain(@Nonnull PlayerRef playerRef, @Nonnull String itemId, int quantity, boolean lucky) {
+        try {
+            Message line = RpgMsg.tr("ui.station.gain.produced", itemNameMsg(itemId), quantity);
+            if (lucky) {
+                line = Msg.cat(line, RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
+            }
+            NotificationUtil.sendNotification(playerRef.getPacketHandler(), line, null,
+                    new ItemStack(itemId, Math.max(1, quantity)).toPacket());
+        } catch (Throwable t) {
+            Log.fine("STATION item-gain notify failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Round-5 refinement 2: mimics the ENGINE's own native item-pickup feedback (message + SFX +
+     * item icon) once per retrieved stack, via {@code common.feedback.PickupMimic
+     * #notifyLikeNativePickup} - which itself delegates STRAIGHT to the real {@code
+     * Player#notifyPickupItem}, never a re-derived lookalike (scout findings 1-4). 3D-positioned
+     * at the station block center (a world position IS known here) so the SFX plays from the
+     * block, matching where the materials visually sat. Never throws.
+     */
+    private static void notifyNativePickup(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
+            @Nonnull List<ItemStack> stacks, int blockX, int blockY, int blockZ) {
+        if (stacks.isEmpty() || !ref.isValid()) {
+            return;
+        }
+        Vector3d pos = new Vector3d(blockX + 0.5, blockY + 0.5, blockZ + 0.5);
+        for (ItemStack stack : stacks) {
+            try {
+                PickupMimic.notifyLikeNativePickup(ref, store, stack, pos);
+            } catch (Throwable t) {
+                Log.fine("STATION retrieve pickup-mimic notify failed: " + t.getMessage());
+            }
+        }
     }
 
     private static void toast(@Nonnull PlayerRef playerRef, @Nonnull Message message) {

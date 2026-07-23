@@ -188,15 +188,4 @@ final class StationCustody {
         }
         return false;
     }
-
-    /**
-     * The auto-return branch decision (design 9.4: "return to inventory; if unreachable, drop at
-     * block"): return to inventory only when the owner is reachable (a live store/ref resolved)
-     * AND their inventory has room for the whole claim; otherwise drop everything at the block -
-     * never a partial add (that would split the claim between two destinations, a dupe-adjacent
-     * shape). Pure so every combination is exhaustively unit-tested without a live server.
-     */
-    static boolean shouldReturnToInventory(boolean ownerReachable, boolean hasInventoryRoom) {
-        return ownerReachable && hasInventoryRoom;
-    }
 }

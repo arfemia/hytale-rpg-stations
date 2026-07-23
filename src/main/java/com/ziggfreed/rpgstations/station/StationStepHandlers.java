@@ -30,6 +30,7 @@ import com.ziggfreed.rpgstations.loot.CommandRewardExecutor;
 import com.ziggfreed.rpgstations.loot.LootEngine;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.util.InventoryAccess;
+import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -129,7 +130,11 @@ final class StationStepHandlers {
         }
     }
 
-    /** Adds {@code Produce.Quantity} of {@code Produce.ItemId} to the player's storage. */
+    /**
+     * Adds {@code Produce.Quantity} of {@code Produce.ItemId} to the player, hotbar-first then
+     * backpack storage then drop-at-block (round-5, via {@code util.ItemGrantUtil}), then fires a
+     * live item-gain notification ({@code StationService#notifyItemGain}).
+     */
     static final class ProduceHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
         @Override
         public StationStepResult execute(StationStepContext ctx, StationStep step) {
@@ -146,8 +151,17 @@ final class StationStepHandlers {
             }
             int quantity = produce.getQuantity() != null && produce.getQuantity() > 0 ? produce.getQuantity() : 1;
             try {
-                InventoryAccess.storageOf(ctx.player).addItemStack(new ItemStack(produce.getItemId(), quantity));
+                // Round-5: ItemGrantUtil.grant never throws for "no room" anymore (it drops at
+                // the block instead) - this try/catch now only guards a genuinely unexpected
+                // failure (ItemStack construction, the ledger merge, the notify call), not the
+                // old "container full" case (that was already precluded by runCycle's NO_ROOM
+                // precheck before this handler ever runs for a real cycle).
+                ItemGrantUtil.grant(ctx.player, new ItemStack(produce.getItemId(), quantity), ctx.store,
+                        ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
                 ctx.session.producedItems.merge(produce.getItemId(), quantity, Integer::sum);
+                if (ctx.session.playerRef != null) {
+                    StationService.notifyItemGain(ctx.session.playerRef, produce.getItemId(), quantity, false);
+                }
             } catch (Throwable t) {
                 Log.warn("STATION Produce step failed for '" + ctx.session.stationId + "': " + t.getMessage());
                 return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL, t.getMessage());

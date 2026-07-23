@@ -225,28 +225,4 @@ class StationCustodyTest {
         assertTrue(StationCustody.matchesAnyConversionInput(conversions, "MMO_Iron_Ingot", new String[0]));
         assertFalse(StationCustody.matchesAnyConversionInput(conversions, "MMO_Gold_Ingot", new String[0]));
     }
-
-    // ==================== shouldReturnToInventory (the auto-return branch decision) ====================
-    // Design 9.4's exit-path coverage: EVERY stop() call funnels through this one decision, so
-    // its four combinations exhaustively cover "return to inventory" vs "drop at block".
-
-    @Test
-    void shouldReturnToInventory_ownerReachableWithRoom_returnsToInventory() {
-        assertTrue(StationCustody.shouldReturnToInventory(true, true));
-    }
-
-    @Test
-    void shouldReturnToInventory_ownerReachableButFull_dropsAtBlock() {
-        assertFalse(StationCustody.shouldReturnToInventory(true, false));
-    }
-
-    @Test
-    void shouldReturnToInventory_ownerUnreachableWithRoomFlagIrrelevant_dropsAtBlock() {
-        assertFalse(StationCustody.shouldReturnToInventory(false, true));
-    }
-
-    @Test
-    void shouldReturnToInventory_ownerUnreachableAndNoRoom_dropsAtBlock() {
-        assertFalse(StationCustody.shouldReturnToInventory(false, false));
-    }
 }

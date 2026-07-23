@@ -338,8 +338,12 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   `itemId -> resourceTypeId[]` resolver, oldest-placed-first, tallying REAL drained ids into the
   session ledger), `matchesInput`/`matchesAnyConversionInput` (the placement-acceptance matchers -
   an explicit `asset.Custody.getInput()` OR, absent, ANY of the resolved `Recipe.Conversions`
-  inputs, the sawmill's zero-extra-authoring "logs by ResourceTypeId family" fallback), and
-  `shouldReturnToInventory` (the auto-return branch decision, exhaustively unit-tested). `toggle`
+  inputs, the sawmill's zero-extra-authoring "logs by ResourceTypeId family" fallback). Round-5
+  (2026-07-22) retired the pure `shouldReturnToInventory` all-or-nothing batch decision in favor
+  of `util.ItemGrantUtil`'s per-stack hotbar-first-then-backpack-then-drop-at-block routing (a
+  policy wrapper over `ziggfreed-common`'s `inventory.InventoryGrant`), so a claim holding several
+  distinct item ids can land some in the hotbar, some in the backpack, and only the genuine
+  overflow on the ground. `toggle`
   gates a `Custody`-governing station behind ONE state-dependent F: not-loaded (no live claim, or
   an empty one) + a matching held stack places/tops-up (`placeIntoCustody`, removing exactly the
   moved amount off the ACTIVE HOTBAR SLOT via `ItemContainer.removeItemStackFromSlot`) and returns

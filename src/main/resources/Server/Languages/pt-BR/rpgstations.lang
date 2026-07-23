@@ -25,6 +25,7 @@ ui.station.summary.title = Trabalho Completo
 ui.station.summary.cycles = Trabalhou {0} ciclos
 ui.station.summary.item_consumed = -{1} {0}
 ui.station.summary.item_produced = +{1} {0}
+ui.station.gain.produced = +{1} {0}
 ui.station.summary.lucky = (Sorte!)
 ui.station.summary.items_more = +{0} mais
 ui.station.no_action = Você não tem nada com o qual esta estação possa trabalhar.

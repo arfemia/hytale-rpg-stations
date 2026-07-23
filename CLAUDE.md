@@ -87,7 +87,9 @@ src/main/java/com/ziggfreed/rpgstations/
   i18n/                       see i18n/CLAUDE.md - RpgMsg (the rpgstations. prefix wrapper over common Msg) + RpgStationsLangKeys
   validation/                 see validation/CLAUDE.md - Finding/Severity/Report (the mini content-audit core; StationValidator itself lives in station/)
   util/                       Log (this mod's own SafeLog-shaped facade over RpgStationsPlugin.LOGGER - NEVER the MMO's
-                               SafeLog) + Permissions (OP-when-permissions-off else "rpgstations.admin")
+                               SafeLog) + Permissions (OP-when-permissions-off else "rpgstations.admin") + ItemGrantUtil
+                               (round-5: this mod's policy wrapper over ziggfreed-common's InventoryGrant, adding only
+                               the drop-at-block fallback)
 ```
 
 ## Conventions (this mod's own; hyMMO's root CLAUDE.md does NOT auto-apply)
@@ -199,8 +201,11 @@ fix layers on cleanly.
   custody auto-returns on EVERY session stop reason (`StationService.stop`'s `returnCustody`,
   unconditional, resolving the store off `s.ref.getStore()` so it covers `stopAll`'s shutdown
   sweep too) - to the owner's inventory when reachable with room, else dropped at the block once
-  via the native `ItemComponent.generateItemDrops` spawn (`StationCustody.shouldReturnToInventory`
-  is the pure branch decision); a NEW `StationCustodyBreakSystem` (`BreakBlockEvent`) covers the
+  via the native `ItemComponent.generateItemDrops` spawn (round-5, 2026-07-22: this hotbar-first-
+  then-backpack-then-drop ordering now routes per-stack through `util.ItemGrantUtil`, a policy
+  wrapper over `ziggfreed-common`'s `inventory.InventoryGrant` - superseding the retired
+  `StationCustody.shouldReturnToInventory` all-or-nothing batch check); a NEW
+  `StationCustodyBreakSystem` (`BreakBlockEvent`) covers the
   no-active-session case (placed input, block broken before a session ever starts). Block-state
   flips (`world.setBlockInteractionState`, the kweebec shrine-furnace precedent) are HINT-ONLY
   this leg (mechanism-first ruling; visuals land in a later leg) and self-heal: a Loaded state

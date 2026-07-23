@@ -27,6 +27,8 @@ import javax.annotation.Nonnull;
  * {@code .done} (the toast keys, {@code StationService#retrieveCustody}) and
  * {@code ui.station.retrieve.hint} (the display entity's own {@code Interactions} hint,
  * {@code StationCustodyDisplay#addRetrieveInteraction}).
+ * The round-5 grant-notification round (2026-07-22) adds {@code ui.station.gain.produced} (the
+ * live item-gain toast, {@code StationService#notifyItemGain}).
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -65,6 +67,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.summary.item_produced",
             "rpgstations.ui.station.summary.lucky",
             "rpgstations.ui.station.summary.items_more",
+            "rpgstations.ui.station.gain.produced",
             "rpgstations.station.sawmill.name",
             "rpgstations.station.sawmill.desc",
             "rpgstations.command.desc",
