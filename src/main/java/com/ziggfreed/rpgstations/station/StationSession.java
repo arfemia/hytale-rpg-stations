@@ -206,6 +206,17 @@ final class StationSession {
      * re-resolving the station catalog every beat. Null when {@link #puppetActive} is false.
      */
     @Nullable Puppet.Prop puppetDefaultProp;
+    /**
+     * The item id CURRENTLY mirrored onto the puppet's Hotbar (the dirty-gate's own last-known
+     * value, per {@code ziggfreed-common}'s {@code PlayerPuppetService#updateHeldItem}/{@code
+     * #heldItemChanged} contract - this primitive is stateless, so the session is where that
+     * state lives). Set once at engage to the initial spawn-time mirror
+     * ({@code StationPuppetController#spawnAndHide}), then kept in sync by the per-swing beat
+     * ({@code #playSwing}/{@code #syncProp}) so a mid-work tool switch re-mirrors within one beat
+     * without re-sending an unchanged Hotbar component every beat. Null when
+     * {@link #puppetActive} is false, or the puppet is currently empty-handed.
+     */
+    @Nullable String puppetHeldItemId;
 
     // Item ledger (for the future standalone summary HUD, leg 3): consumedItems covers both
     // the exact-ItemId route AND the ResourceTypeId ("any log" family) route (tallying the

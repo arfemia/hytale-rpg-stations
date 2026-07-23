@@ -10,9 +10,7 @@ import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.protocol.AnimationSlot;
 import com.hypixel.hytale.server.core.entity.entities.Player;
-import com.hypixel.hytale.server.core.inventory.InventoryComponent;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
-import com.hypixel.hytale.server.core.inventory.container.SimpleItemContainer;
 import com.hypixel.hytale.server.core.modules.entity.component.EntityScaleComponent;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.entity.PlayerModelService;
@@ -143,6 +141,7 @@ final class StationPuppetController {
 
             s.puppetRef = puppetRef;
             s.puppetDefaultProp = prop;
+            s.puppetHeldItemId = propItemId;
             s.puppetActive = true;
             Puppet.Hide hide = puppet.getHide();
             s.puppetHideRoute = hide != null ? hide.effectiveRoute() : Puppet.HIDE_ROUTE_SCALE;
@@ -203,6 +202,7 @@ final class StationPuppetController {
         s.puppetHideRoute = null;
         s.puppetSavedScale = null;
         s.puppetDefaultProp = null;
+        s.puppetHeldItemId = null;
     }
 
     @Nullable
@@ -266,13 +266,18 @@ final class StationPuppetController {
     }
 
     /**
-     * Accessor-bug fix (fix round): routes the {@code Hotbar} component swap through {@code
-     * commandBuffer}, never {@code store} - this runs from {@link #playSwing}, reached via {@code
-     * StationService#runSwing} on the heartbeat frame-drain's swing-beat timer, a processing
-     * context (the same class as {@code toggle}). The prior store-routed put/remove threw {@code
-     * IllegalStateException("Store is currently processing!")}, silently swallowed, so a per-step
-     * {@code Puppet.Prop} override (e.g. the anvil's stamp beat swapping to empty-handed) never
-     * actually applied.
+     * P-1 fix (held-item mirror refresh, post-round-5 puppet smoke): resolves the CURRENT
+     * effective prop item id fresh every beat (a station's own {@code Puppet.Prop} may be
+     * {@code MirrorHeld}, so this tracks a live tool switch, e.g. hatchet-for-hammer mid-work) and
+     * hands it to {@code ziggfreed-common}'s {@link PlayerPuppetService#updateHeldItem} - the
+     * dirty-gated primitive that only touches the puppet's {@code Hotbar} component (and so only
+     * fans a per-viewer equipment-update packet) when the resolved id actually CHANGED from
+     * {@link StationSession#puppetHeldItemId} (this session's own last-mirrored value, threaded
+     * back from the primitive's return so it stays authoritative across beats - the primitive
+     * itself is stateless). Accessor-bug fix (fix round, unchanged by this leg): the mutation
+     * still routes through {@code commandBuffer}, never {@code store} - this runs from
+     * {@link #playSwing}, reached via {@code StationService#runSwing} on the heartbeat
+     * frame-drain's swing-beat timer, a processing context (the same class as {@code toggle}).
      */
     private static void syncProp(@Nonnull StationSession s, @Nonnull CommandBuffer<EntityStore> commandBuffer,
             @Nullable Player player, @Nullable StationStep.PuppetOverride override) {
@@ -282,18 +287,7 @@ final class StationPuppetController {
         Puppet.Prop effectiveProp = override != null && override.getProp() != null
                 ? override.getProp() : s.puppetDefaultProp;
         String itemId = resolveEffectivePropItemId(heldItemIdOf(player), effectiveProp);
-        try {
-            if (itemId == null || itemId.isBlank()) {
-                commandBuffer.tryRemoveComponent(s.puppetRef, InventoryComponent.Hotbar.getComponentType());
-                return;
-            }
-            SimpleItemContainer container = new SimpleItemContainer((short) 1);
-            container.setItemStackForSlot((short) 0, new ItemStack(itemId, 1));
-            commandBuffer.putComponent(s.puppetRef, InventoryComponent.Hotbar.getComponentType(),
-                    new InventoryComponent.Hotbar(container, (byte) 0));
-        } catch (Throwable t) {
-            Log.fine("STATION puppet prop sync failed: " + t.getMessage());
-        }
+        s.puppetHeldItemId = PlayerPuppetService.updateHeldItem(commandBuffer, s.puppetRef, s.puppetHeldItemId, itemId);
     }
 
     @Nullable
