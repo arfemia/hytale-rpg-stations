@@ -458,18 +458,17 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
     +48px (`StationSummaryHud.PANEL_WIDTH_PX` 480->528, every `RpgStationSummary.ui` `#Content`
     child 444->492) to restore the headroom the extraction had silently shrunk from the
     pre-extraction MMO panel's 520px.
-  - **R2 (seated swing, [SMOKEDIAG]-instrumented, unresolved pending a boot)**: a full paper
-    trace found the seated-worker swing DISPATCH (`runSwing`/`useActionSlotForSwing`/
+  - **R2 (seated swing, since resolved by the puppet route)**: a full paper trace found the
+    seated-worker swing DISPATCH (`runSwing`/`useActionSlotForSwing`/
     `StationHoldController#playActionSwing`) provably correct and unchanged since the
-    in-game-proven pre-extraction commit - the break, if real, is CLIENT-SIDE rendering of a
-    server-fired `Action`-slot animation on a block-mounted (seated) player, unobservable from
-    server source. Five `[SMOKEDIAG]` `Log.info` lines (tagged, removable in one sweep) pinpoint
-    exactly which link breaks on the next boot: `engage-armed` (session start, `StationService
-    .toggle`), `beat-fired` (the per-swing timer, `tickFrameOnce`), `route-chosen` (`runSwing`),
-    `clip-resolved` (SKIP or success, `StationHoldController.playActionSwing` - THE decisive
-    line), `packet-sent` (after the `AnimationUtils.playAnimation` call). If all five fire with a
-    real clip every boot, the server is proven correct and the fix is client-side (e.g. switch to
-    `Hold.Mount.Surface: "Entity"`), not a server code change.
+    in-game-proven pre-extraction commit - the break was CLIENT-SIDE rendering of a server-fired
+    `Action`-slot animation on a block-mounted (seated) player, unobservable from server source.
+    A subsequent boot's `[SMOKEDIAG]` readout proved every server-side link fired correctly
+    through `packet-sent` each beat, pinning the failure client-side conclusively; the PUPPET
+    presentation route (its own spawned entity animates on the render-guaranteed
+    `ActiveAnimationComponent` path, in-game confirmed 2026-07-23) superseded the seated-swing
+    question for every shipped station, and the five `[SMOKEDIAG]` `Log.info` lines were DELETED
+    in the round-6 cleanup pass (2026-07-23), mirroring the mod-root CLAUDE.md's status wording.
   - **R3 (inventory pull for custody placement)**: `StationService#toggle`'s placed-input custody
     branch only ever tried the ACTIVE HOTBAR SLOT (`custodyAccepts`/`placeIntoCustody`), so
     matching material sitting unheld in storage/backpack was invisible to placement - a false
