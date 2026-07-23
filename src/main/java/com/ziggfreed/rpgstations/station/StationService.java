@@ -1508,12 +1508,20 @@ public final class StationService {
      * The one idempotent exit funnel. Each teardown step is individually guarded so one
      * failure never skips the rest. {@code store} is null on paths where the entity is gone.
      *
-     * <p><b>R4 companion fix</b>: {@code commandBuffer} is nullable - most call sites (the
-     * frame-tick drain, {@code toggle}'s re-press exit) hold one; the shutdown/disconnect/damage/
-     * death sweeps ({@link #onDamage}/{@link #stopForRef}/{@link #stopFor}/{@link #stopAll}) do
-     * not and pass {@code null}, in which case {@link #returnCustody} falls back cleanly (the
+     * <p><b>R4 companion fix, extended (round-6 puppet smoke, D-A secondary)</b>: {@code
+     * commandBuffer} is nullable - most call sites (the frame-tick drain, {@code toggle}'s
+     * re-press exit, and now {@link #onDamage}/{@link #stopForRef} - both DAMAGED and DIED thread
+     * the live {@code CommandBuffer} their own dispatch already receives) hold one, so both the
+     * custody display-prop despawn AND the puppet {@code Scale} reveal apply on those paths
+     * instead of being silently skipped (a damage-interrupt/death used to strand a still-connected
+     * player invisible with no recovery until their next {@code PlayerReadyEvent}). Only the
+     * shutdown/disconnect sweeps ({@link #stopFor}/{@link #stopAll}) genuinely have no live
+     * accessor and still pass {@code null} - {@link #returnCustody} falls back cleanly there (the
      * custody display prop, if any, is left behind - it is {@code NonSerialized} so it never
-     * survives a restart regardless).
+     * survives a restart regardless), and the puppet reveal correctly relies on the production
+     * {@code PlayerReadyEvent} safety net ({@link StationPuppetController#reassertOnReady}) for
+     * those two paths, since a disconnecting/shutting-down player has no live entity left to
+     * network a reveal packet to anyway.
      */
     private void stop(@Nonnull StationSession s, @Nonnull StopReason reason,
                       @Nullable Store<EntityStore> store, @Nullable CommandBuffer<EntityStore> commandBuffer) {
@@ -1605,30 +1613,46 @@ public final class StationService {
 
     // ==================== External exit hooks ====================
 
-    /** Damage interrupt (from {@code StationInterruptDamageSystem}, Inspect group, read-only). */
-    public void onDamage(@Nonnull Ref<EntityStore> victimRef, @Nonnull Store<EntityStore> store) {
+    /**
+     * Damage interrupt (from {@code StationInterruptDamageSystem}, Inspect group, read-only).
+     *
+     * <p><b>Puppet-reveal fix (round-6 puppet smoke, D-A secondary):</b> {@code commandBuffer} is
+     * the SAME live one {@code StationInterruptDamageSystem#handle} already receives from its
+     * {@code DamageEventSystem} dispatch - threading it through here (instead of the prior
+     * always-{@code null}) lets {@link #stop}'s puppet reveal
+     * ({@link StationPuppetController#revealAndDespawn}) actually apply the {@code Scale} un-hide
+     * on this exit path, rather than being skipped entirely (a damage-interrupt left a hidden
+     * player stuck invisible for the rest of the connected session with no recovery until the next
+     * {@code PlayerReadyEvent} - a very common way to end a work session). A placed-input custody
+     * display prop despawn still routes through the same {@code commandBuffer}.
+     */
+    public void onDamage(@Nonnull Ref<EntityStore> victimRef, @Nonnull Store<EntityStore> store,
+            @Nullable CommandBuffer<EntityStore> commandBuffer) {
         if (byPlayer.isEmpty()) {
             return;
         }
         for (StationSession s : byPlayer.values()) {
             if (s.ref != null && s.ref.getStore() == store
                     && s.ref.getIndex() == victimRef.getIndex() && s.interruptOnDamage) {
-                // No live CommandBuffer at this call site (an Inspect-group damage system, not a
-                // frame-tick/interaction handler) - a placed-input custody display prop despawn
-                // here (R4) degrades to "leave it, it's NonSerialized so it dies on restart".
-                stop(s, StopReason.DAMAGED, store, null);
+                stop(s, StopReason.DAMAGED, store, commandBuffer);
                 return;
             }
         }
     }
 
-    /** Death hook - camera reset fires before the respawn screen. */
+    /**
+     * Death hook - camera reset fires before the respawn screen.
+     *
+     * <p><b>Puppet-reveal fix (round-6 puppet smoke, D-A secondary):</b> {@code commandBuffer} is
+     * the SAME live one {@code StationDeathSystem#onComponentAdded} already receives - see
+     * {@link #onDamage}'s javadoc for the identical rationale (death is connected, so no
+     * {@code PlayerReadyEvent} follows to trigger the safety net either).
+     */
     public void stopForRef(@Nonnull Ref<EntityStore> ref, @Nonnull Store<EntityStore> store,
-                           @Nonnull StopReason reason) {
+                           @Nonnull StopReason reason, @Nullable CommandBuffer<EntityStore> commandBuffer) {
         for (StationSession s : byPlayer.values()) {
             if (s.ref != null && s.ref.getStore() == store && s.ref.getIndex() == ref.getIndex()) {
-                // No live CommandBuffer at this call site (death hook) - see onDamage's note.
-                stop(s, reason, store, null);
+                stop(s, reason, store, commandBuffer);
                 return;
             }
         }

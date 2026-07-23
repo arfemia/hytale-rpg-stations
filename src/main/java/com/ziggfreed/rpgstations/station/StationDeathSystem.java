@@ -35,7 +35,7 @@ public class StationDeathSystem extends DeathSystems.OnDeathSystem {
             @Nonnull CommandBuffer<EntityStore> commandBuffer
     ) {
         try {
-            StationService.getInstance().stopForRef(victimRef, store, StationService.StopReason.DIED);
+            StationService.getInstance().stopForRef(victimRef, store, StationService.StopReason.DIED, commandBuffer);
         } catch (Throwable t) {
             Log.warn("StationDeathSystem error: " + t.getMessage());
         }

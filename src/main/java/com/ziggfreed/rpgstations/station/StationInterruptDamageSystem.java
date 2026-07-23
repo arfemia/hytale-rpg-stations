@@ -50,7 +50,7 @@ public final class StationInterruptDamageSystem extends DamageEventSystem {
                 return;
             }
             Ref<EntityStore> victimRef = chunk.getReferenceTo(index);
-            StationService.getInstance().onDamage(victimRef, store);
+            StationService.getInstance().onDamage(victimRef, store, commandBuffer);
         } catch (Exception e) {
             Log.warn("StationInterruptDamageSystem error: " + e.getMessage());
         }

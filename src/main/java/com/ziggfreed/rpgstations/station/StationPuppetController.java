@@ -173,12 +173,20 @@ final class StationPuppetController {
      * processing!")} on every common exit path (re-press F via {@code toggle}, walk-off/
      * tool-changed/out-of-inputs/RITUAL_COMPLETE via the heartbeat), silently swallowed into a
      * fine log, leaving a ghost puppet untracked in the world and (whenever the hide itself HAD
-     * applied) the real player stuck invisible. A {@code null} commandBuffer (the damage/death/
-     * disconnect/shutdown sweeps, which pass {@code null} through {@code stop()} exactly like
-     * {@code returnCustody}'s own accepted tradeoff) leaves the reveal/despawn un-applied for THIS
-     * exit - the puppet is {@code NonSerialized} so a leftover despawn is harmless past a restart,
-     * and a leftover hidden-player scale self-heals on the player's NEXT {@code PlayerReadyEvent}
-     * via {@link #reassertOnReady}.
+     * applied) the real player stuck invisible.
+     *
+     * <p><b>Round-6 puppet smoke (D-A secondary):</b> DAMAGED ({@code onDamage}) and DIED
+     * ({@code stopForRef}) NOW thread the live {@code CommandBuffer} their own dispatch already
+     * receives (both are the common connected-player exit reasons - a station-interrupting hit or
+     * a death mid-work - previously stranding an invisible player until their next reconnect with
+     * no recovery). Only {@code stopFor} (disconnect) and {@code stopAll} (server shutdown)
+     * genuinely have no live accessor and still pass {@code null} through {@code stop()} - a
+     * disconnecting/shutting-down player has no live entity left to network a reveal packet to
+     * anyway, so this is not a gap: {@code #reassertOnReady} unconditionally re-networks the
+     * correct scale/model on that player's NEXT {@code PlayerReadyEvent} (reconnect), independent
+     * of whatever this method did or skipped at disconnect time. A {@code null} commandBuffer here
+     * still leaves the reveal/despawn un-applied for THIS exit - the puppet is {@code
+     * NonSerialized} so a leftover despawn is harmless past a restart.
      */
     static void revealAndDespawn(@Nonnull StationSession s, @Nullable CommandBuffer<EntityStore> commandBuffer) {
         if (!s.puppetActive) {
