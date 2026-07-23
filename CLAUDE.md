@@ -27,9 +27,11 @@ assembled (`../../.claude/plans/work-stations-mod-extraction-prompt.md`'s PHASE-
 CHECKLIST section).
 
 **Since leg H, FIVE more maintainer in-game smoke rounds landed (2026-07-22):** fresh-boot fix
-waves R1-R5 (item localization + HUD width, an unresolved `[SMOKEDIAG]`-instrumented seated-swing
-render mystery, inventory-pull custody placement, the placed-item display entity's `CommandBuffer`
-tick-safety fix, a restart-orphan action-selection recovery), R6 (the anvil's Entity-mount
+waves R1-R5 (item localization + HUD width, a `[SMOKEDIAG]`-instrumented seated-swing render
+mystery since retired by the puppet route's own in-game confirm (the instrumentation itself was
+deleted in the round-6 cleanup pass, 2026-07-23), inventory-pull custody placement, the placed-item
+display entity's `CommandBuffer` tick-safety fix, a restart-orphan action-selection recovery), R6
+(the anvil's Entity-mount
 `NetworkId` fix + graceful degradation, PLUS the NEW press-F custody RETRIEVAL feature -
 `rpg_station_retrieve`, in-game CONFIRMED working), R7 (the station-icon `BlockType#getItem()`
 state-variant fix), the repo-wide deprecation sweep (33 call sites replaced with their
@@ -42,11 +44,13 @@ bullet and `asset/CLAUDE.md`'s `Puppet` bullet) plus a round-5 item-grant UX wav
 if-space grants via common's `inventory.InventoryGrant`, native-pickup-mimic retrieve feedback via
 common's `feedback.PickupMimic`, gold lucky-drop notifications - see `loot/CLAUDE.md` and
 `station/CLAUDE.md`'s custody/retrieval bullets). Full narrative + the CONSOLIDATED next-session
-in-game checklist: `../../.claude/plans/work-stations-mod-extraction-prompt.md`. **A temporary
-`puppetspike/` harness (`/rpgstations puppet <scale|modelswap|hidden|show|off>`, see
-`command/CLAUDE.md`) and five `[SMOKEDIAG]` log lines in `StationService`/`StationHoldController`
-remain live**, both pending deletion once the maintainer confirms the production puppet route
-in-game - do not delete either before that confirm lands.
+in-game checklist: `../../.claude/plans/work-stations-mod-extraction-prompt.md`. **The maintainer's
+FULL in-game puppet confirm landed (2026-07-23)** - held-item mirror updates within a beat, player
+visible after every stop path incl. damage/death/relog, sawmill + anvil positioning good - so the
+temporary `puppetspike/` P0 spike-harness package (`/rpgstations puppet <scale|modelswap|hidden|
+show|off>`, see `command/CLAUDE.md`) and the five `[SMOKEDIAG]` log lines in
+`StationService`/`StationHoldController` were DELETED in the round-6 cleanup pass. The PRODUCTION
+puppet route (`station.StationPuppetController`, legs P3-P5) is unaffected and stays live.
 
 Design
 authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`

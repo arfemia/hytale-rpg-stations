@@ -643,13 +643,16 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   restores the correct cosmetic model on a FRESH `PlayerReadyEvent` ref/store - NOT gated on any
   remembered session (a restart wipes every in-memory `StationSession` by construction), wired via
   a new public `StationService#reassertPuppetOnReady` and a new `RpgStationsPlugin
-  #registerPuppetSafetyNet` registration, independent of the temporary `puppetspike/` harness's own
-  net (which now DELEGATES its scale-clear/model-restore half to this same production method rather
-  than duplicating it, keeping only its own still-live `HiddenPlayersManager` un-hide call - see
-  `puppetspike.PuppetSpikeService#safetyNetOnReady`'s own javadoc). No new player-facing strings
-  (the group adds no UI text, per the design doc's own P6 note). The `puppetspike/` harness itself
-  is UNTOUCHED beyond that one delegation - still the maintainer's live diagnostic tool, still
-  scheduled for deletion once content authoring (P6) and smoke (P7) supersede it.
+  #registerPuppetSafetyNet` registration - originally independent of the temporary `puppetspike/`
+  harness's own net (which had delegated its scale-clear/model-restore half to this same production
+  method rather than duplicating it, keeping only its own `HiddenPlayersManager` un-hide call). No
+  new player-facing strings (the group adds no UI text, per the design doc's own P6 note). **The
+  `puppetspike/` package, its `/rpgstations puppet` subcommand, and the five `[SMOKEDIAG]` log
+  lines in `StationService`/`StationHoldController` were DELETED in the cleanup pass (2026-07-23)**
+  once the maintainer's full in-game puppet confirm landed (held-item mirror updates within a beat,
+  player visible after every stop path incl. damage/death/relog, sawmill + anvil positioning
+  good) - `StationPuppetController` is now the sole puppet-presentation code path, see its own
+  header javadoc.
   - **Puppet fix round (LANDED, this leg)**: two defects the maintainer's fix-round review found
     against the puppet engine above, both source-verified in `hytale-shared-source`'s `Store.java`
     (`putComponent`/`addComponent`/`removeComponent`/`removeComponentIfExists`/`removeEntity` all

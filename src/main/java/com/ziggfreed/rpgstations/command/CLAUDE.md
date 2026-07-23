@@ -5,7 +5,7 @@ design 4.1 scope that stayed unimplemented through phase-1 legs 0-6 (the MMO's o
 `MmoStationCommand` deleted its camera subgroup at the leg-5 bridge cut, pointing here - see that
 class's javadoc/git history in the hyMMO root repo).
 
-- **[`RpgStationsCommand`](RpgStationsCommand.java)** is `/rpgstations <camera|validate|puppet> [action]`,
+- **[`RpgStationsCommand`](RpgStationsCommand.java)** is `/rpgstations <camera|validate> [action]`,
   admin-gated with `setPermissionGroups(HytalePermissionsProvider.GROUP_ADMIN)` at the FRAMEWORK
   level (the `mmo-mob-scaling`/`kweebec-nightmare` sibling-mod idiom - `MobScalingCommand`'s own
   admin group, not a manual runtime `hasPermission` check; this mod's own `util.Permissions` stays
@@ -21,14 +21,12 @@ class's javadoc/git history in the hyMMO root repo).
     `RpgStationsPlugin.onStationAssetsLoaded`'s boot-log audit already prints via
     `StationValidator.runAndLog()` (called again here so the log carries a matching run - the
     MMO's own `/mmoconfig validate` dual-call shape: chat a live run, log a matching one).
-  - `puppet <scale|modelswap|hidden|show|off>` - **TEMPORARY P0 SPIKE HARNESS**, calling-player-only
-    (delegates entirely to `puppetspike.PuppetSpikeService`, hardened round-4 for the `off`
-    random-teleport bug and the puppet-not-despawning bug, see `station/CLAUDE.md`'s puppet-engine
-    bullet). Its own class javadoc says the whole `puppetspike/` package is deleted once the
-    production puppet route (`station.StationPuppetController`, legs P3-P5, landed) is confirmed
-    working in-game - that confirm has not landed yet as of this router pass, so the package and
-    this subcommand are STILL LIVE, kept for isolated route debugging if the production wiring
-    needs it. Do not delete before the maintainer's in-game confirm.
+  - **`puppet <scale|modelswap|hidden|show|off>` was DELETED (cleanup pass, 2026-07-23)** along
+    with the whole temporary `puppetspike.PuppetSpikeService` P0 spike-harness package, once the
+    maintainer's full in-game puppet confirm landed (held-item mirror updates within a beat,
+    player visible after every stop path incl. damage/death/relog, sawmill + anvil positioning
+    good). The PRODUCTION puppet route (`station.StationPuppetController`, legs P3-P5) is
+    unaffected - see `station/CLAUDE.md`'s puppet-engine bullet.
 - Every user-facing string (the command/arg descriptions AND every chat reply) resolves through
   [`i18n.RpgMsg`](../i18n/RpgMsg.java) against the `rpgstations.command.*` keys in
   `Server/Languages/en-US/rpgstations.lang` (en-US authored; the other 8 locales fall back to

@@ -41,9 +41,10 @@ import com.ziggfreed.rpgstations.util.Log;
  * player stays visible, the same degraded posture as {@code "None"}), and {@code "None"} (the
  * deliberate degraded fallback). The design doc's {@code "ModelSwap"}/{@code "HiddenManager"}
  * routes were RETIRED before this schema shipped (buggy/unproven in the P0 spike) - this class
- * therefore never touches {@code HiddenPlayersManager} at all, unlike the temporary {@code
- * puppetspike.PuppetSpikeService} harness, which still exercises those retired routes for
- * diagnostic comparison and is NOT superseded by this class (a separate, still-live spike tool).
+ * therefore never touches {@code HiddenPlayersManager} at all. The temporary {@code
+ * puppetspike.PuppetSpikeService} P0 harness that once exercised those retired routes for
+ * diagnostic comparison was DELETED (cleanup pass, 2026-07-23) after the maintainer's in-game
+ * confirm of this production route; this class is now the sole puppet-presentation code path.
  *
  * <p><b>Animation routing (design 4.3):</b> a puppet ALWAYS plays its clip on the {@code Emote}
  * slot - it has no sit pose to fight (unlike a seat-mounted real player), so it needs none of
@@ -361,12 +362,11 @@ final class StationPuppetController {
      * Unconditionally clears any lingering {@link EntityScaleComponent} and restores the correct
      * cosmetic model on the FRESH ready ref/store - the belt-and-suspenders net design 4.4 calls
      * for ("a spike must never strand an invisible/shrunk player"), generalized from the shape
-     * {@code puppetspike.PuppetSpikeService#safetyNetOnReady} already proved (that class now
-     * delegates its scale-clear/model-restore half to THIS method rather than duplicating it -
-     * see its own javadoc). Deliberately NOT gated on any remembered {@code StationSession}: a
-     * server restart wipes every in-memory session by construction, so the only residual risk is
-     * a PERSISTED component on the player's own entity from an unclean shutdown mid-hide. Never
-     * throws.
+     * the now-deleted {@code puppetspike.PuppetSpikeService#safetyNetOnReady} P0 harness had
+     * already proved during the spike phase. Deliberately NOT gated on any remembered
+     * {@code StationSession}: a server restart wipes every in-memory session by construction, so
+     * the only residual risk is a PERSISTED component on the player's own entity from an unclean
+     * shutdown mid-hide. Never throws.
      */
     static void reassertOnReady(@Nonnull Ref<EntityStore> ref, @Nonnull Store<EntityStore> store) {
         try {

@@ -523,15 +523,6 @@ public final class StationService {
         s.nextCycleAtMs = now + (s.idleMode ? s.idleCycleMs : s.cycleMs);
         s.nextSwingAtMs = now + s.swingIntervalMs;
 
-        // [SMOKEDIAG] R2 seated-swing diagnosis (removable in one sweep after the next boot
-        // confirms/refutes the seated-worker swing dispatch): proves the session engaged with
-        // seatMode/swingIntervalMs at their JSON-authored values (or reveals a runtime
-        // resolution mismatch vs the pack asset).
-        Log.info("[SMOKEDIAG] engage-armed station=" + s.stationId + " action=" + s.actionId
-                + " seatMode=" + s.seatMode + " entityMountMode=" + s.entityMountMode
-                + " puppetActive=" + s.puppetActive
-                + " swingIntervalMs=" + s.swingIntervalMs + " actionClip=" + s.actionClip);
-
         byPlayer.put(playerUuid, s);
         if (exclusive) {
             byBlock.put(blockKey, playerUuid);
@@ -605,14 +596,7 @@ public final class StationService {
                     }
                 }
                 if (s.swingIntervalMs > 0 && now >= s.nextSwingAtMs) {
-                    // [SMOKEDIAG] R2 seated-swing diagnosis: should log ~every swingIntervalMs.
-                    // If it NEVER logs, swingIntervalMs is 0 at runtime (contradicting the
-                    // codec) - re-examine the resolved-action Animation group.
-                    long wasDueSmokediag = s.nextSwingAtMs;
                     s.nextSwingAtMs = now + s.swingIntervalMs;
-                    Log.info("[SMOKEDIAG] beat-fired station=" + s.stationId + " nextSwingAtMs(was)="
-                            + wasDueSmokediag + " now=" + now + " swingIntervalMs=" + s.swingIntervalMs
-                            + " seatMode=" + s.seatMode);
                     runSwing(s, store, commandBuffer);
                 }
                 if (impactDue(now, s.pendingImpactAtMs)) {
@@ -1378,17 +1362,10 @@ public final class StationService {
             // its held prop, instead of routing anything onto the (now possibly hidden) real
             // player.
             StationPuppetController.playSwing(s, store, commandBuffer, swingPlayer);
+        } else if (useActionSlotForSwing(s.seatMode)) {
+            StationHoldController.playActionSwing(s, swingPlayer, store);
         } else {
-            boolean useActionSlotSmokediag = useActionSlotForSwing(s.seatMode);
-            // [SMOKEDIAG] R2 seated-swing diagnosis: confirms the seat route is taken. If it shows
-            // playEmote for a seated session, seatMode is false at runtime - re-examine Mount parse.
-            Log.info("[SMOKEDIAG] route-chosen seatMode=" + s.seatMode + " -> "
-                    + (useActionSlotSmokediag ? "playActionSwing" : "playEmote"));
-            if (useActionSlotSmokediag) {
-                StationHoldController.playActionSwing(s, swingPlayer, store);
-            } else {
-                StationHoldController.playEmote(s, store);
-            }
+            StationHoldController.playEmote(s, store);
         }
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
         emitMoment(store, s, StationFlairs.MOMENT_SWING, s.swingPresentation, blockPos);
@@ -2162,9 +2139,12 @@ public final class StationService {
                     // Round-5 refinement 2: mimic the ENGINE's own native pickup feedback (message +
                     // SFX + item icon) per genuinely-received stack, via common's PickupMimic (which
                     // itself delegates to the real Player#notifyPickupItem - not a re-derived
-                    // lookalike, scout findings 1-4). A stack that dropped at the block instead (no
-                    // room anywhere) falls through to the classic generic toast below - "you picked
-                    // it up" would be a lie for something sitting on the ground.
+                    // lookalike, scout findings 1-4). The classic generic toast below is reached
+                    // only when EVERY stack dropped (landed stays empty) - a PARTIAL drop (some
+                    // stacks landed, one or more overflowed to the block) fires this pickup
+                    // feedback for what landed and gives no separate notice for the dropped
+                    // remainder; "you picked it up" would still be a lie for something sitting on
+                    // the ground, so that gap is accepted rather than mixing both toast shapes.
                     notifyNativePickup(store, ref, landed, claim.blockX, claim.blockY, claim.blockZ);
                 } else {
                     toast(playerRef, RpgMsg.tr("ui.station.retrieve.done"));
