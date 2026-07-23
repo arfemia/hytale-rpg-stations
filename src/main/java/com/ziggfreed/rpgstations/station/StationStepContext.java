@@ -53,10 +53,23 @@ final class StationStepContext {
      */
     @Nullable final ItemStack cycleOutputForBonusCopies;
 
+    /**
+     * The step being RE-ENTERED this dispatch, when this run is a resume of a previously
+     * suspended program ({@code StationService#resumeCycleProgram} -> {@code dispatchProgram}
+     * with {@code resuming=true}); {@code null} for a fresh (non-resuming) dispatch. Identity-
+     * compared (never {@code equals}) against the step {@link StationStepRegistry}'s generic
+     * per-step Presentation hook is about to run for, so the suspend-resume RE-CHECK of the exact
+     * step that already played its own Presentation on first entry never plays it a second time -
+     * see {@code StationStepDecisions#shouldEmitPresentationOnEntry}, the pure decision core this
+     * field feeds.
+     */
+    @Nullable final StationStep resumingStep;
+
     StationStepContext(@Nonnull StationSession session, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull Player player, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull FactorSnapshot snapshot,
-            @Nonnull List<StationStep> steps, int cycleIndex, @Nullable ItemStack cycleOutputForBonusCopies) {
+            @Nonnull List<StationStep> steps, int cycleIndex, @Nullable ItemStack cycleOutputForBonusCopies,
+            @Nullable StationStep resumingStep) {
         this.session = session;
         this.store = store;
         this.commandBuffer = commandBuffer;
@@ -67,5 +80,6 @@ final class StationStepContext {
         this.steps = steps;
         this.cycleIndex = cycleIndex;
         this.cycleOutputForBonusCopies = cycleOutputForBonusCopies;
+        this.resumingStep = resumingStep;
     }
 }

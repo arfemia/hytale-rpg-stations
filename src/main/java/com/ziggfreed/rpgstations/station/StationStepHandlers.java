@@ -196,9 +196,19 @@ final class StationStepHandlers {
                         "Wait step '" + step.getId() + "' has no positive DurationMs");
             }
             long now = System.currentTimeMillis();
-            long deadline = StationStepDecisions.commitOrReadDeadline(now, durationMs, ctx.session.stepDeadlineMs);
+            // [D77DIAG] temporary, one-sweep-removable - storedDeadlineMs is read BEFORE
+            // commitOrReadDeadline can mutate anything, so this line is the ground truth for
+            // whether a fresh entry ever sees a stale nonzero value (the maintainer's leading
+            // suspect for the ~600ms ritual-completion report).
+            long storedDeadlineMs = ctx.session.stepDeadlineMs;
+            long deadline = StationStepDecisions.commitOrReadDeadline(now, durationMs, storedDeadlineMs);
             ctx.session.stepDeadlineMs = deadline;
-            if (!StationStepDecisions.waitDue(now, deadline)) {
+            boolean waitDue = StationStepDecisions.waitDue(now, deadline);
+            Log.info("[D77DIAG] wait-execute station=" + ctx.session.stationId + " action=" + ctx.action.getActionId()
+                    + " idx=" + step.getId() + " durationMs=" + durationMs + " storedDeadline=" + storedDeadlineMs
+                    + " computedDeadline=" + deadline + " waitDue=" + waitDue
+                    + " branch=" + (waitDue ? "complete" : "suspend"));
+            if (!waitDue) {
                 return StationStepResult.suspend(deadline);
             }
             ctx.session.stepDeadlineMs = 0L;
@@ -306,6 +316,9 @@ final class StationStepHandlers {
     static final class StampHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
         @Override
         public StationStepResult execute(StationStepContext ctx, StationStep step) {
+            // [D77DIAG] temporary, one-sweep-removable - proves the moment the Stamp step fires.
+            Log.info("[D77DIAG] stamp-execute station=" + ctx.session.stationId + " action="
+                    + ctx.action.getActionId() + " now=" + System.currentTimeMillis());
             StationStep.Stamp stamp = step.getStamp();
             if (stamp == null) {
                 return StationStepResult.fail(StationService.StopReason.STEP_FAILED,

@@ -5,6 +5,8 @@ import java.util.Locale;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import org.joml.Vector3d;
+
 import com.ziggfreed.common.cast.step.StepHandler;
 import com.ziggfreed.common.cast.step.StepRegistry;
 import com.ziggfreed.rpgstations.asset.StationStep;
@@ -12,8 +14,8 @@ import com.ziggfreed.rpgstations.util.Log;
 
 /**
  * The production {@code station.step} handler registry: registers the seven executable handlers
- * (design 9.3/9.5), each wrapped in TWO layers every registrant goes through, never bypassed by a
- * handler body:
+ * (design 9.3/9.5), each wrapped in THREE layers every registrant goes through, never bypassed by
+ * a handler body:
  *
  * <ol>
  *   <li><b>Conditions gate.</b> A step's {@link StationStep#getConditions()} (if any) are checked
@@ -23,6 +25,14 @@ import com.ziggfreed.rpgstations.util.Log;
  *   {@code "Skip"} short-circuits to {@link StationStepResult#SKIP} WITHOUT calling the inner
  *   handler (the {@code nextIndex} hook in {@link StationStepSemantics} is where an authored
  *   {@code Goto} then jumps); {@code "Fail"} (the default) fails the walk here.</li>
+ *   <li><b>Generic per-step Presentation entry (maintainer-approved extension).</b> ANY step's
+ *   authored {@code Presentation} plays the MOMENT it begins executing - not just the dedicated
+ *   {@code Present} step's - via the SAME {@code StationService#emitMoment} path
+ *   {@code StationStepHandlers.PresentHandler} itself uses. {@link StationStepDecisions
+ *   #shouldEmitPresentationOnEntry} is the pure gate: skipped entirely for a {@code "Present"}-
+ *   typed step (its own handler already emits - never double-play it) and for the suspend-resume
+ *   RE-CHECK of the exact step that already played on its first entry ({@link StationStepContext
+ *   #resumingStep}, identity-compared).</li>
  *   <li><b>Throw guard (design 9.3/M4's binding fix).</b> The inner handler's {@code execute} runs
  *   inside a {@code try/catch(Throwable)} that degrades a throw to
  *   {@code Fail(STEP_FAILED, message)} + a guarded warn log - mirroring
@@ -70,6 +80,7 @@ final class StationStepRegistry extends StepRegistry<String, StationStepContext,
             if (conditionOutcome != null) {
                 return conditionOutcome;
             }
+            emitGenericStepPresentation(ctx, step);
             try {
                 return inner.execute(ctx, step);
             } catch (Throwable t) {
@@ -78,6 +89,28 @@ final class StationStepRegistry extends StepRegistry<String, StationStepContext,
                         "step '" + step.getId() + "' threw: " + t.getMessage());
             }
         };
+    }
+
+    /**
+     * The generic per-step Presentation entry (maintainer-approved extension, same commit as the
+     * round-7 D77 timing instrumentation): plays {@code step}'s OWN authored {@code Presentation}
+     * once, right as it begins executing, reusing the IDENTICAL emission path
+     * {@code StationStepHandlers.PresentHandler} uses ({@code StationService#emitMoment} +
+     * {@code StationStepHandlers#presentMomentId}) - never a second mechanism. No-ops for a step
+     * with no authored {@code Presentation}, a {@code "Present"}-typed step (its own handler
+     * already emits it), or the suspend-resume RE-CHECK of an already-started step (see
+     * {@link StationStepDecisions#shouldEmitPresentationOnEntry}).
+     */
+    private static void emitGenericStepPresentation(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        if (step.getPresentation() == null) {
+            return;
+        }
+        if (!StationStepDecisions.shouldEmitPresentationOnEntry(step, ctx.resumingStep)) {
+            return;
+        }
+        Vector3d blockPos = new Vector3d(ctx.session.blockX + 0.5, ctx.session.blockY + 0.5, ctx.session.blockZ + 0.5);
+        StationService.emitMoment(ctx.store, ctx.session, StationStepHandlers.presentMomentId(ctx, step),
+                step.getPresentation(), blockPos);
     }
 
     /** {@code null} = every condition passed (or none authored) - proceed to the inner handler. */

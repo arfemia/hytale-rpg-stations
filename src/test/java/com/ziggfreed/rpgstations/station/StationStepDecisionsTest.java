@@ -59,6 +59,41 @@ public class StationStepDecisionsTest {
         assertTrue(StationStepDecisions.waitDue(tick3Now, storedDeadline));
     }
 
+    // ==================== Generic per-step Presentation entry (maintainer-approved extension) ====================
+
+    @Test
+    void presentationEntry_freshDispatch_playsForAnyNonPresentStep() {
+        StationStep wait = StationStep.of("strike1", StationStep.TYPE_WAIT);
+        assertTrue(StationStepDecisions.shouldEmitPresentationOnEntry(wait, null),
+                "a fresh (non-resuming) dispatch has no resumingStep - every step plays its own Presentation");
+    }
+
+    @Test
+    void presentationEntry_presentTypedStep_neverPlaysGenerically_evenFresh() {
+        StationStep present = StationStep.of("finale", StationStep.TYPE_PRESENT);
+        assertFalse(StationStepDecisions.shouldEmitPresentationOnEntry(present, null),
+                "a Present-typed step's OWN handler already emits - the generic hook must not double-play it");
+    }
+
+    @Test
+    void presentationEntry_resumeReCheckOfTheSuspendedStep_doesNotReplay() {
+        StationStep wait = StationStep.of("strike1", StationStep.TYPE_WAIT);
+        // The exact SAME object identity as the step a resume re-enters (StationSession
+        // .activeProgramSteps is the same List reference across a suspend/resume pair).
+        assertFalse(StationStepDecisions.shouldEmitPresentationOnEntry(wait, wait),
+                "the resume re-check of an already-started Wait must not replay its Presentation");
+    }
+
+    @Test
+    void presentationEntry_resumeDispatch_stillPlaysForALaterFreshStep() {
+        StationStep resumedWait = StationStep.of("strike1", StationStep.TYPE_WAIT);
+        StationStep laterWait = StationStep.of("strike2", StationStep.TYPE_WAIT);
+        // Within the SAME resumed walk, once the resumed step succeeds and the walk advances to a
+        // DIFFERENT step object, that later step is a genuine fresh entry and must still play.
+        assertTrue(StationStepDecisions.shouldEmitPresentationOnEntry(laterWait, resumedWait),
+                "a later step reached within a resumed walk is still its OWN fresh entry");
+    }
+
     // ==================== Conditions gate (design 9.3's "Branch is NOT a step type") ====================
 
     private static final StationService.FactorLookup ALWAYS_TEN = (factorId, param) -> 10.0;

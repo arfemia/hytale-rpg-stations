@@ -191,6 +191,14 @@ public final class StationService {
     private final ConcurrentHashMap<String, StationCustodyClaim> custodyByBlock = new ConcurrentHashMap<>();
 
     /**
+     * [D77DIAG] temporary, one-sweep-removable (same pattern as the retired [SMOKEDIAG] lines) -
+     * last-logged timestamp per player for the resume-check throttle in {@link #tickFrameOnce},
+     * so the per-heartbeat-frame suspended-branch diag caps at ~250ms per session instead of
+     * spamming every frame.
+     */
+    private static final ConcurrentHashMap<UUID, Long> d77diagLastResumeLogMs = new ConcurrentHashMap<>();
+
+    /**
      * A single-shot {@code (factorId, param) -> value} lookup, pure/testable independent of the
      * live api registry (used by {@link #conditionPasses}). {@link #checkRequires} builds one
      * inline against {@link FactorRegistryImpl} + a fresh {@link FactorContext} (leg 4 - replaces
@@ -531,7 +539,16 @@ public final class StationService {
         long now = System.currentTimeMillis();
         s.startedAtMs = now;
         s.nextHeartbeatAtMs = now + HEARTBEAT_MS;
-        s.nextCycleAtMs = now + (s.idleMode ? s.idleCycleMs : s.cycleMs);
+        // Instant dispatch for a non-repeating authored Steps program (maintainer-approved,
+        // round-7 D77): a ritual-shaped action (Work.Repeat: false, e.g. the anvil's Enhance)
+        // has exactly ONE program run to make, so waiting a full CycleMs before ever attempting
+        // it is pure latency with no gameplay purpose - fire the first (and only) cycle
+        // immediately at engage. A REPEATING program (the sawmill's classic loop, or any
+        // Repeat: true steps program) keeps the existing CycleMs pre-delay unchanged; idle mode
+        // never applies to a Steps program (idleEnabled is forced false above), so this never
+        // races s.idleMode's own cadence.
+        boolean instantFirstDispatch = stepsProgram && work != null && !work.effectiveRepeat();
+        s.nextCycleAtMs = instantFirstDispatch ? now : now + (s.idleMode ? s.idleCycleMs : s.cycleMs);
         s.nextSwingAtMs = now + s.swingIntervalMs;
 
         byPlayer.put(playerUuid, s);
@@ -595,7 +612,22 @@ public final class StationService {
                     // passes (never re-derived here, matching the kernel's resume contract). The
                     // phase-1 implicit program has no Wait step, so this branch is unreached by
                     // the shipped sawmill; it exists for a future authored Wait-bearing program.
-                    if (now >= s.stepDeadlineMs && !resumeCycleProgram(s, store, commandBuffer)) {
+                    // [D77DIAG] temporary, one-sweep-removable - logs the ACTUAL deadline value
+                    // the gate below compares against, throttled to ~250ms per session so the
+                    // per-heartbeat-frame cadence doesn't spam the log.
+                    long d77DiagDeadline = s.stepDeadlineMs;
+                    long d77DiagLastLoggedAt = d77diagLastResumeLogMs.getOrDefault(s.playerUuid, 0L);
+                    if (now - d77DiagLastLoggedAt >= 250L) {
+                        d77diagLastResumeLogMs.put(s.playerUuid, now);
+                        Log.info("[D77DIAG] resume-check station=" + s.stationId + " action=" + s.actionId
+                                + " now=" + now + " deadline=" + d77DiagDeadline);
+                    }
+                    boolean d77DiagDue = now >= d77DiagDeadline;
+                    if (d77DiagDue) {
+                        Log.info("[D77DIAG] resume-fire station=" + s.stationId + " action=" + s.actionId
+                                + " now=" + now);
+                    }
+                    if (d77DiagDue && !resumeCycleProgram(s, store, commandBuffer)) {
                         it.remove();
                         continue;
                     }
@@ -776,7 +808,7 @@ public final class StationService {
                 action.getPresentation());
         ItemStack cycleOutput = new ItemStack(check.outputItem, check.outputCount);
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, cycleOutput,
-                attemptCycleIndex, 0);
+                attemptCycleIndex, 0, false);
     }
 
     /**
@@ -791,9 +823,16 @@ public final class StationService {
     private boolean runAuthoredProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player) {
+        // [D77DIAG] temporary, one-sweep-removable (see StationStepHandlers/stop() siblings) -
+        // proves the moment a stepped program is actually dispatched for a cycle, PLUS the
+        // stepDeadlineMs value at that instant (maintainer's leading-suspect check: a fresh
+        // dispatch must never inherit a stale nonzero deadline from a prior run - dispatchProgram
+        // itself now asserts this explicitly, see its own [D77DIAG] STALE warn).
+        Log.info("[D77DIAG] program-dispatch station=" + asset.getId() + " action=" + action.getActionId()
+                + " stepDeadlineMsAtEntry=" + s.stepDeadlineMs + " now=" + System.currentTimeMillis());
         List<StationStep> steps = Arrays.asList(action.getSteps());
         int attemptCycleIndex = s.cyclesDone + 1;
-        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, null, attemptCycleIndex, 0);
+        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, null, attemptCycleIndex, 0, false);
     }
 
     /**
@@ -826,7 +865,7 @@ public final class StationService {
         }
         ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, s.actionId);
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, s.activeProgramCycleOutput,
-                s.activeProgramCycleIndex, s.programIndex);
+                s.activeProgramCycleIndex, s.programIndex, true);
     }
 
     /**
@@ -845,14 +884,45 @@ public final class StationService {
      * SESSION" - the anvil's Enhance ritual): a COMPLETED program under a non-repeating action
      * stops the session right here, non-silent, immediately after the cycle-completed event fires
      * (so XP/luck listeners still see it) - never schedules another cycle attempt.
+     *
+     * <p><b>[D77DIAG] {@code resuming} + the stepDeadlineMs hardening (maintainer-flagged leading
+     * suspect, round-7 D77):</b> {@code false} from {@link #runRealCycle}/{@link #runAuthoredProgram}
+     * (a FRESH cycle attempt, {@code startIndex} always 0), {@code true} from
+     * {@link #resumeCycleProgram} (re-entering a previously suspended program at
+     * {@code s.programIndex}, which can itself legally be 0 - so {@code startIndex == 0} alone
+     * can NEVER distinguish a fresh dispatch from a resume, this explicit flag is the only
+     * reliable signal). A FRESH dispatch now EXPLICITLY resets {@code s.stepDeadlineMs} to 0
+     * before the walk starts - this used to be an IMPLICIT invariant only (every {@code Wait}
+     * step resets its own committed deadline to 0 the instant it succeeds, so a fresh dispatch
+     * "should" already read 0 by construction), made explicit + logged here so a fresh program's
+     * very first {@code Wait} step can never inherit a stale nonzero value from anywhere. Also
+     * feeds {@link StationStepContext#resumingStep} (the step object at {@code startIndex} when
+     * {@code resuming} is true, else {@code null}) - {@code StationStepRegistry}'s generic
+     * per-step Presentation entry reads it to skip the suspend-resume RE-CHECK of an
+     * already-played step.
      */
     private boolean dispatchProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
-            @Nullable ItemStack cycleOutput, int attemptCycleIndex, int startIndex) {
+            @Nullable ItemStack cycleOutput, int attemptCycleIndex, int startIndex, boolean resuming) {
+        if (!resuming) {
+            if (s.stepDeadlineMs != 0L) {
+                // [D77DIAG] this is the exact staleness the maintainer flagged as the leading
+                // suspect for the ~600ms ritual-completion report - a fresh cycle attempt reading
+                // a nonzero stepDeadlineMs left over from somewhere else. Should never fire given
+                // every Wait step's own success-path reset; a WARN here on a live run is the
+                // smoking gun if it ever does.
+                Log.warn("[D77DIAG] program-dispatch station=" + asset.getId() + " action=" + action.getActionId()
+                        + " STALE stepDeadlineMs=" + s.stepDeadlineMs + " reset to 0 at fresh dispatch, now="
+                        + System.currentTimeMillis());
+            }
+            s.stepDeadlineMs = 0L;
+        }
+        StationStep resumingStep = resuming && startIndex >= 0 && startIndex < steps.size()
+                ? steps.get(startIndex) : null;
         FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, action, attemptCycleIndex));
         StationStepContext ctx = new StationStepContext(s, store, commandBuffer, player, asset, action, snapshot,
-                steps, attemptCycleIndex, cycleOutput);
+                steps, attemptCycleIndex, cycleOutput, resumingStep);
 
         CastKernel.Walk<StationStepResult> walk = StationStepKernel.runResumable(ctx, startIndex);
         if (walk instanceof CastKernel.Walk.Suspended<StationStepResult> suspended) {
@@ -1551,6 +1621,9 @@ public final class StationService {
         if (!s.stopped.compareAndSet(false, true)) {
             return;
         }
+        // [D77DIAG] temporary, one-sweep-removable - one line in the existing stop funnel.
+        Log.info("[D77DIAG] stop station=" + s.stationId + " action=" + s.actionId + " reason=" + reason
+                + " now=" + System.currentTimeMillis());
         byPlayer.remove(s.playerUuid, s);
         if (s.blockKey != null) {
             byBlock.remove(s.blockKey, s.playerUuid);

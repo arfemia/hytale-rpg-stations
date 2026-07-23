@@ -72,6 +72,30 @@ final class StationStepDecisions {
         return ConditionOutcome.PASS;
     }
 
+    // ==================== Generic per-step Presentation entry (maintainer-approved extension) ====================
+
+    /**
+     * Whether a step's authored {@code Presentation} should play GENERICALLY as this handler call
+     * begins - the maintainer-approved wiring that makes ANY step type's own {@code Presentation}
+     * fire once, not just the dedicated {@code Present} step's. {@code false} when {@code step} IS
+     * {@code resumingStep} (the suspend-resume RE-CHECK of the exact step that already played its
+     * Presentation on its first entry - a {@code Wait} step must never replay it on every
+     * heartbeat re-check while suspended, only once when it BEGINS); {@code false} for a
+     * {@code "Present"}-typed step (its own {@code PresentHandler} already emits this exact
+     * Presentation - this generic hook would otherwise double-play it). {@code resumingStep} is
+     * {@code null} for a fresh (non-resuming) dispatch, so every step it walks answers
+     * {@code true} here (subject to the Present-type exclusion). Identity comparison (never
+     * {@code equals}) - {@code resumingStep} and a later step in the SAME authored steps list are
+     * the exact same object reference across a suspend/resume pair (see
+     * {@code StationSession#activeProgramSteps}), so {@code ==} is the correct, intentional test.
+     */
+    static boolean shouldEmitPresentationOnEntry(@Nonnull StationStep step, @Nullable StationStep resumingStep) {
+        if (step == resumingStep) {
+            return false;
+        }
+        return !StationStep.TYPE_PRESENT.equalsIgnoreCase(step.getType());
+    }
+
     /** The index of the step whose {@code Id} equals {@code gotoId} (case-insensitive), or -1 when absent/not found. */
     static int resolveGotoTarget(@Nonnull List<StationStep> steps, @Nullable String gotoId) {
         if (gotoId == null || gotoId.isBlank()) {
