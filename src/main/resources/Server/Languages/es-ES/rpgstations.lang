@@ -35,6 +35,7 @@ ui.station.summary.item_produced = +{1} {0}
 ui.station.gain.produced = {0}
 ui.station.summary.lucky =  (¡Suerte!)
 ui.station.summary.items_more = +{0} más
+ui.station.summary.enhance_durability = Durabilidad +{0}
 station.sawmill.name = Aserradero
 station.sawmill.desc = Sierra troncos de tu inventario para hacer tablones, un ciclo a la vez.
 command.desc = Herramientas de administración RpgStations: ajusta tu preset de cámara para estaciones o valida el contenido de estaciones creadas.

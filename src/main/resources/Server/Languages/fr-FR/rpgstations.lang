@@ -35,6 +35,7 @@ ui.station.summary.item_produced = +{1} {0}
 ui.station.gain.produced = {0}
 ui.station.summary.lucky =  (Chanceux !)
 ui.station.summary.items_more = +{0} de plus
+ui.station.summary.enhance_durability = Durabilité +{0}
 station.sawmill.name = Scierie
 station.sawmill.desc = Sciez les rondins de votre inventaire en planches, un cycle à la fois.
 command.desc = Outils administrateur RpgStations: réglez votre preset caméra-recette de station ou validez le contenu de la station créée.

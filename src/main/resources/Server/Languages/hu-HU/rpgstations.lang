@@ -33,6 +33,7 @@ ui.station.summary.cycles = {0} ciklus végrehajtva
 ui.station.summary.item_consumed = -{1} {0}
 ui.station.summary.item_produced = +{1} {0}
 ui.station.gain.produced = {0}
+ui.station.summary.enhance_durability = Tartósság +{0}
 ui.station.summary.lucky =  (Szerencse!)
 ui.station.summary.items_more = +{0} további
 station.sawmill.name = Fűrészmalom

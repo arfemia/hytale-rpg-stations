@@ -35,6 +35,7 @@ ui.station.summary.item_produced = +{1} {0}
 ui.station.gain.produced = {0}
 ui.station.summary.lucky =  (Glückstreffer!)
 ui.station.summary.items_more = +{0} weitere
+ui.station.summary.enhance_durability = Haltbarkeit +{0}
 station.sawmill.name = Sägewerk
 station.sawmill.desc = Säge Baumstämme aus deinem Inventar Zyklus um Zyklus zu Brettern.
 command.desc = RpgStations Admin-Tools: Passe deine Stations-Kamera-Rezept-Voreinstellung an oder validiere autorengeführte Stationsinhalte.

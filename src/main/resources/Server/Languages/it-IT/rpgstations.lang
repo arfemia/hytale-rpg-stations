@@ -35,6 +35,7 @@ ui.station.summary.item_produced = +{1} {0}
 ui.station.gain.produced = {0}
 ui.station.summary.lucky =  (Fortunato!)
 ui.station.summary.items_more = +{0} altri
+ui.station.summary.enhance_durability = Durabilità +{0}
 station.sawmill.name = Segheria
 station.sawmill.desc = Sega i tronchi dal tuo inventario in assi, un ciclo alla volta.
 command.desc = Strumenti admin RpgStations: personalizza il tuo preset macchina fotografica della stazione o convalida il contenuto della stazione autorizzato.

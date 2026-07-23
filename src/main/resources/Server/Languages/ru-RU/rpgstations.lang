@@ -35,6 +35,7 @@ ui.station.summary.item_produced = +{1} {0}
 ui.station.gain.produced = {0}
 ui.station.summary.lucky =  (Повезло!)
 ui.station.summary.items_more = +{0} ещё
+ui.station.summary.enhance_durability = Прочность +{0}
 station.sawmill.name = Лесопилка
 station.sawmill.desc = Распилите брёвна из вашего инвентаря на доски, по одному циклу за раз.
 command.desc = Инструменты администратора RpgStations: настройте предустановку камеры на станции или проверьте написанный контент станции.
