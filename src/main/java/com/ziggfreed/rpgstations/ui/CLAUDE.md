@@ -13,7 +13,10 @@ Router for `ui/`.
   title/text/ledger instead of a fixed box).
 - **What this leg's panel renders**: title + crest (`Identity.Icon`, else the anchor block's own
   item id captured at engage) + the cycles line + a capped item ledger (consumed/produced/lucky
-  rows over common's `ui.rows.SummaryRow`/`SummaryRowRenderer`). **NO per-skill XP rows** - those
+  rows over common's `ui.rows.SummaryRow`/`SummaryRowRenderer`, plus round-7 D-6 `ENHANCE` rows -
+  one per stamped stat, rendered verbatim from the provider's label, plus an engine-owned
+  `Durability +N` row; `buildItemRow`'s `ENHANCE` case never recolors, the line arrives pre-styled).
+  **NO per-skill XP rows** - those
   are MMO-policy (icon via `RewardIconResolver`, base x tool x named-factor breakdown) and live in
   the MMO bridge's OWN `StationSummaryEnricher`, reached through the api `SummaryEnricherRegistry`
   (see `../../../../../../src/main/java/com/ziggfreed/mmoskilltree/integration/stations/CLAUDE.md`).

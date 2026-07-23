@@ -36,18 +36,22 @@ static [`RpgStationsApi`](RpgStationsApi.java) holder.
   presentations only. Persistence is the REGISTERING mod's own concern - RpgStations never stores
   a per-player fact.
 - **[`EnhanceStamperRegistry`](EnhanceStamperRegistry.java)** / **[`EnhanceStamper`](EnhanceStamper.java)**
-  / **[`StampInspection`](StampInspection.java)** / **[`StatRoll`](StatRoll.java)** (design section
-  9.5, phase 2 leg E) - the anvil Stamp step's `Stats`-leaf delegate: a SINGLE active slot
-  (last-registration-wins, `FactorRegistry`'s discipline, NOT `FlairUnlockRegistry`'s union-of-all
-  shape - there is one "how does this server encode enhancement points" answer at a time).
-  `EnhanceStamper` is a lean 2-method contract RpgStations' own `station.StampCapEngine` calls:
-  `inspect(stack)` reads the stack's CURRENT enhancement state (format-opaque to RpgStations - the
-  MMO's registered stamper reads `item.ItemStatsMeta`) BEFORE any roll/cap math runs (zero
-  mutation); `apply(stack, entries)` writes the ALREADY rolled + cap-clamped entries (RpgStations
-  never re-derives a cap here) and returns the new stack, called only after every compute-phase
-  validation already passed. `null` from `active()` = no stamper registered = the Stats leaf
-  no-ops (Durability still lands). Deliberately simpler than the design doc's literal
-  `StampContext`/`StampResult` prose - unfrozen pre-1.0.0, free to reshape.
+  / **[`StampInspection`](StampInspection.java)** / **[`StatRoll`](StatRoll.java)** /
+  **[`StampResult`](StampResult.java)** / **[`EnhanceLine`](EnhanceLine.java)** (design section 9.5,
+  phase 2 leg E; `StampResult`/`EnhanceLine` added round-7 D-6) - the anvil Stamp step's
+  `Stats`-leaf delegate: a SINGLE active slot (last-registration-wins, `FactorRegistry`'s discipline,
+  NOT `FlairUnlockRegistry`'s union-of-all shape - there is one "how does this server encode
+  enhancement points" answer at a time). `EnhanceStamper` is a lean 2-method contract RpgStations'
+  own `station.StampCapEngine` calls: `inspect(stack)` reads the stack's CURRENT enhancement state
+  (format-opaque to RpgStations - the MMO's registered stamper reads `item.ItemStatsMeta`) BEFORE
+  any roll/cap math runs (zero mutation); `apply(stack, entries)` writes the ALREADY rolled +
+  cap-clamped entries (RpgStations never re-derives a cap here) and returns a **`StampResult`** (the
+  mutated stack PLUS a `List<EnhanceLine>` enhancements-metadata report - one line per stat actually
+  written, each a `{statId, points, Message label}` the provider composes and RpgStations renders
+  VERBATIM in the session summary, so no stat vocabulary leaks into this mod; empty = durability-only
+  / silent), called only after every compute-phase validation already passed. Round-7 D-6 reshaped
+  the return from a bare `ItemStack` to `StampResult` (a legal pre-1.0.0 break). `null` from
+  `active()` = no stamper registered = the Stats leaf no-ops (Durability still lands).
 - **[`SummaryEnricherRegistry`](SummaryEnricherRegistry.java)** / **[`SummaryEnricher`](SummaryEnricher.java)**
   / **[`SummaryContext`](SummaryContext.java)** / **[`SummaryDecorateContext`](SummaryDecorateContext.java)**
   - `rows(ctx)` returns extra ledger rows PREPENDED before the engine's own item rows
@@ -61,15 +65,21 @@ static [`RpgStationsApi`](RpgStationsApi.java) holder.
 - **[`XpAsk`](XpAsk.java)** - `(skillId, perCycleBase)` record; the engine forwards a station's
   authored `Work.Xp` declarations verbatim on `StationCycleCompletedEvent` and never interprets
   them itself. Whatever progression mod listens decides what an ask means.
-- **`event/`** - the four `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
-  `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`), immutable,
+- **`event/`** - the five `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
+  `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`/
+  `StationEnhanceCompletedEvent`), immutable,
   dispatched via `HytaleServer.get().getEventBus().dispatchFor(...)` + `hasListener()` on the
   owning world thread - see `../../station/CLAUDE.md` for the concrete firing rules and
   `com.ziggfreed.rpgstations.station.StationEvents` (the implementation). Each event's javadoc
   states which fields are plain data (safe to retain) vs. live world-thread context (`Store`/`Ref`/
   `CommandBuffer` - valid ONLY synchronously during dispatch; a listener that defers work must
-  capture the plain fields and re-resolve).
+  capture the plain fields and re-resolve). **`StationEnhanceCompletedEvent`** (round-7 D-6) fires
+  from the Stamp path AFTER the mutated item is committed to custody, carrying BOTH maintainer-named
+  reporting shapes MMO-agnostically: the provider's own opaque `List<EnhanceLine>` metadata report
+  AND immutable `before`/`after` `ItemStack` copies (the engine snapshots them around the apply, so
+  a consumer diffs/inspects without RpgStations learning any stat vocabulary), plus the native
+  `durabilityAdded` delta. Nothing listens MMO-side this round; the seam is future-proof.
 
 api `compileOnly` deps: the Hytale server jar (`IEvent`, `Store`/`Ref`/`CommandBuffer`,
-`UICommandBuilder`) + the `ziggfreed-common` jar (`SummaryRow`). jsr305 ships `api` (a consumer's
-`@Nonnull`/`@Nullable` annotations resolve without a separate dependency).
+`UICommandBuilder`, `Message`, `ItemStack`) + the `ziggfreed-common` jar (`SummaryRow`). jsr305
+ships `api` (a consumer's `@Nonnull`/`@Nullable` annotations resolve without a separate dependency).

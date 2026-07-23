@@ -161,3 +161,30 @@ policy):
   copy or rare-find) each show WHAT was gained, with the item's own icon and name; a lucky drop
   renders in GOLD text, replacing the old generic "Lucky!"/"You find something extra!" toasts.
   New key `ui.station.gain.produced` (9 locales).
+
+### Round-7: maintainer in-game smoke fixes (2026-07-23)
+
+Fixes and additions from the maintainer's round-7 in-game smoke, scoped to this mod (D-1 the
+placed-prop rotation, D-4 the item-gain toast copy, D-6 the enhancement session-summary + api
+outcome; the sibling CustomSkill migration and XP-toast-stacking defects land MMO-side).
+
+- Adds a nested `Custody.Display.Rotation` `{X, Y, Z}` degrees group (D-1), replacing the single
+  scalar world-space yaw: the placed prop can now tip about all three axes (`X` pitch lays a placed
+  weapon flat on an anvil, `Y` yaw turns it, `Z` roll tips it sideways), applied to the prop's
+  `TransformComponent` on both spawn routes and mirrored onto `HeadRotation` for the item-entity
+  route. The retired scalar form is tolerated on load - a stale bare-number `Rotation` decodes as
+  the legacy Y-only yaw with a WARN naming the migration, never aborting the asset load.
+- Adds an MMO-agnostic enhancement outcome to the session summary and the `api` (D-6): a Stamp step
+  now records what it actually applied (the provider's own opaque per-stat report PLUS immutable
+  before/after item snapshots) and reports it two ways - one `ENHANCE` summary row per stat
+  (rendered verbatim, the provider owns the vocabulary/wording/color) plus one engine-owned
+  `Durability +N` row (durability is RpgStations-native, so a bare anvil with no stamper still
+  reports its enhancement) - and a new native `StationEnhanceCompletedEvent` carrying both reporting
+  shapes for any future consumer, with zero MMO stat vocabulary entering this mod. The
+  `EnhanceStamper.apply` contract now returns a `StampResult` (mutated stack + `EnhanceLine` report)
+  instead of a bare stack (a pre-1.0.0 api reshape). New key `ui.station.summary.enhance_durability`.
+- Fixes the live item-gain toast to read exactly like a native pickup (D-4): the produced/lucky
+  toast value is now the bare item name, with the quantity riding the item-slot count badge (the
+  same packet field a native pickup uses, routed through `ziggfreed-common`'s shared
+  `feedback.Notify#itemKeyed`), instead of a leading `+N` in the text that froze stale when the
+  client coalesced consecutive grants.

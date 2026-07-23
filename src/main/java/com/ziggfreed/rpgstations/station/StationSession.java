@@ -1,5 +1,6 @@
 package com.ziggfreed.rpgstations.station;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -226,6 +227,14 @@ final class StationSession {
     final Map<String, Integer> consumedItems = new LinkedHashMap<>();
     final Map<String, Integer> producedItems = new LinkedHashMap<>();
     final Map<String, Integer> luckItems = new LinkedHashMap<>();
+
+    /**
+     * Committed enhancement stamps this session (design section 9.5, phase 2 round-7 D-6): appended
+     * by {@code StationStepHandlers.StampHandler} after each Stamp step writes its mutated item back
+     * to custody, drained by {@code StationService#enhanceLedgerRows} into the end-of-session
+     * summary. Session-scoped, never persisted, like every other ledger here.
+     */
+    final List<StationEnhanceOutcome> enhanceOutcomes = new ArrayList<>();
 
     /** Idempotency gate: the first {@code compareAndSet(false, true)} wins the teardown. */
     final AtomicBoolean stopped = new AtomicBoolean(false);

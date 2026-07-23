@@ -18,8 +18,10 @@ import com.hypixel.hytale.server.core.inventory.ResourceQuantity;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransaction;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.ziggfreed.common.cast.step.StepHandler;
+import com.ziggfreed.rpgstations.api.EnhanceLine;
 import com.ziggfreed.rpgstations.api.EnhanceStamper;
 import com.ziggfreed.rpgstations.api.StampInspection;
+import com.ziggfreed.rpgstations.api.StampResult;
 import com.ziggfreed.rpgstations.api.StatRoll;
 import com.ziggfreed.rpgstations.api.impl.EnhanceStamperRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Custody;
@@ -401,40 +403,68 @@ final class StationStepHandlers {
                         "Stamp step '" + step.getId() + "' reagent consumption failed: " + t.getMessage());
             }
 
-            ItemStack mutated;
+            Mutation mutation;
             try {
-                mutated = applyStampMutation(weaponStack, stamp.getDurability(), plan, stamper);
+                mutation = applyStampMutation(weaponStack, stamp.getDurability(), plan, stamper);
             } catch (Throwable t) {
                 restoreReagents(ctx.player, consumedForRestore);
                 Log.warn("STAMP step '" + step.getId() + "' mutation failed, restored reagents: " + t.getMessage(), t);
                 return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
                         "Stamp step '" + step.getId() + "' mutation failed: " + t.getMessage());
             }
-            claim.setUniqueStack(mutated);
+            claim.setUniqueStack(mutation.stack());
+
+            // D-6: capture the committed outcome AFTER the ONE custody write, so a session summary
+            // + the api event report only a fully-committed enhancement (never a denied ritual).
+            // `weaponStack` is the immutable pre-mutation "before" copy; mutation.stack() is "after".
+            String weaponId = weaponStack.getItemId() != null ? weaponStack.getItemId() : "";
+            StationEnhanceOutcome outcome = new StationEnhanceOutcome(weaponId, weaponStack, mutation.stack(),
+                    mutation.lines(), mutation.durabilityAdded());
+            ctx.session.enhanceOutcomes.add(outcome);
+            if (ctx.session.playerRef != null) {
+                StationEvents.fireEnhanceCompleted(ctx.store, ctx.session.playerRef, ctx.session.playerUuid,
+                        ctx.session.sessionId, ctx.session.stationId, ctx.action.getActionId(), outcome);
+            }
             return StationStepResult.SUCCESS;
         }
 
         /**
          * PURE: applies {@code Durability.AddMax} then the (already rolled + cap-clamped)
-         * {@code plan} entries via {@code stamper}, in that order - both are {@code ItemStack}
-         * with-copy operations, so no live server/Player is needed here (unit-tested directly,
-         * incl. a THROWING stamper - proves a mutation failure never reaches
-         * {@link StationCustodyClaim#setUniqueStack}, the caller's job, never this method's).
+         * {@code plan} entries via {@code stamper}, in that order, returning a {@link Mutation}
+         * (the new stack + the provider's {@link EnhanceLine} report + the max-durability delta) -
+         * both mutations are {@code ItemStack} with-copy operations, so no live server/Player is
+         * needed here (unit-tested directly, incl. a THROWING stamper - proves a mutation failure
+         * never reaches {@link StationCustodyClaim#setUniqueStack}, the caller's job, never this
+         * method's).
          */
         @Nonnull
-        static ItemStack applyStampMutation(@Nonnull ItemStack weaponStack,
+        static Mutation applyStampMutation(@Nonnull ItemStack weaponStack,
                 @Nullable StationStep.Stamp.Durability durabilityGroup, @Nonnull StampCapEngine.Plan plan,
                 @Nullable EnhanceStamper stamper) {
             ItemStack mutated = weaponStack;
+            double durabilityAdded = 0.0;
             if (durabilityGroup != null && durabilityGroup.getAddMax() != null && durabilityGroup.getAddMax() > 0) {
                 double addMax = durabilityGroup.getAddMax();
+                durabilityAdded = addMax;
                 mutated = mutated.withMaxDurability(mutated.getMaxDurability() + addMax)
                         .withIncreasedDurability(addMax);
             }
+            List<EnhanceLine> lines = List.of();
             if (!plan.entries().isEmpty() && stamper != null) {
-                mutated = stamper.apply(mutated, plan.entries());
+                StampResult result = stamper.apply(mutated, plan.entries());
+                mutated = result.stack();
+                lines = result.lines();
             }
-            return mutated;
+            return new Mutation(mutated, lines, durabilityAdded);
+        }
+
+        /**
+         * The pure result of {@link #applyStampMutation}: the mutated stack, the provider's
+         * verbatim {@link EnhanceLine} report (empty = durability-only / silent), and the
+         * max-durability delta the station's own {@code Durability.AddMax} added (for the engine-
+         * owned durability summary row + the api event).
+         */
+        record Mutation(@Nonnull ItemStack stack, @Nonnull List<EnhanceLine> lines, double durabilityAdded) {
         }
 
         /** Best-effort restore: each stack failing independently is logged, never re-thrown (a restore must not itself crash the drain). */

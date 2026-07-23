@@ -47,7 +47,7 @@ import com.ziggfreed.rpgstations.util.Log;
  * ({@code StationService#toggle}) covers the whole picture.
  *
  * <p><b>Offset/Scale/Rotation math is kept PRIMITIVE-typed</b> ({@link #resolvePosition}/
- * {@link #resolveYawRadians}/{@link #resolveScale} take/return only doubles/floats, never touch
+ * {@link #resolveRotationRadians}/{@link #resolveScale} take/return only doubles/floats, never touch
  * {@link Vector3d}/{@link Rotation3f}) so it stays unit-testable without a running Hytale server -
  * the same discipline {@code StationEntityMountController#resolveAttachmentOffset} established.
  *
@@ -125,7 +125,11 @@ final class StationCustodyDisplay {
         try {
             double[] pos = resolvePosition(display, blockX, blockY, blockZ);
             Vector3d position = new Vector3d(pos[0], pos[1], pos[2]);
-            Rotation3f rotation = new Rotation3f(0f, resolveYawRadians(display), 0f);
+            float[] rot = resolveRotationRadians(display);
+            // Rotation3f's 3-arg ctor order is (pitch, yaw, roll) = (X, Y, Z) radians. Applied to
+            // TransformComponent on both prop routes; MIRRORED onto HeadRotation for the item route
+            // ONLY (block-shaped items skip it) - see Custody.Display's own m5 caveat javadoc.
+            Rotation3f rotation = new Rotation3f(rot[0], rot[1], rot[2]);
             float scale = resolveScale(display);
 
             Holder<EntityStore> holder = ItemPropEntityService.buildHolder(commandBuffer, itemId, position, rotation, scale);
@@ -171,10 +175,18 @@ final class StationCustodyDisplay {
         return new double[] {blockX + 0.5 + ox, blockY + 0.5 + oy, blockZ + 0.5 + oz};
     }
 
-    /** Pure: {@code display}'s authored {@code Rotation} (degrees, world-space yaw) converted to radians. */
-    static float resolveYawRadians(@Nullable Custody.Display display) {
-        double degrees = display != null ? display.effectiveRotationDegrees() : 0.0;
-        return (float) Math.toRadians(degrees);
+    /**
+     * Pure: {@code display}'s authored {@code Rotation} group ({@code {X,Y,Z}} degrees, world-space)
+     * as {@code [pitchRad, yawRad, rollRad]}; each axis zero when absent. Kept primitive so it needs
+     * no live Hytale type - the 3-axis successor to the pre-round-7 single-yaw {@code resolveYawRadians}.
+     */
+    @Nonnull
+    static float[] resolveRotationRadians(@Nullable Custody.Display display) {
+        Custody.Display.Rotation r = display != null ? display.getRotation() : null;
+        double x = r != null && r.getX() != null ? r.getX() : 0.0;
+        double y = r != null && r.getY() != null ? r.getY() : 0.0;
+        double z = r != null && r.getZ() != null ? r.getZ() : 0.0;
+        return new float[] {(float) Math.toRadians(x), (float) Math.toRadians(y), (float) Math.toRadians(z)};
     }
 
     /** Pure: {@code display}'s authored {@code Scale}, defaulted to {@code 1.0} when absent/non-positive. */

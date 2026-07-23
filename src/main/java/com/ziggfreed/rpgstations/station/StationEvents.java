@@ -14,6 +14,7 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.api.XpAsk;
 import com.ziggfreed.rpgstations.api.event.StationCycleCompletedEvent;
+import com.ziggfreed.rpgstations.api.event.StationEnhanceCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationSessionCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationSessionStartedEvent;
 import com.ziggfreed.rpgstations.api.event.StationToolBrokeEvent;
@@ -78,6 +79,28 @@ final class StationEvents {
             }
         } catch (Throwable t) {
             log("StationSessionCompleted", t);
+        }
+    }
+
+    /**
+     * Fires the D-6 enhancement-completed event from {@code StationStepHandlers.StampHandler}, after
+     * the mutated stack is committed to custody (so it reports a committed enhancement only). Plain
+     * data + immutable {@code ItemStack} copies travel on {@link StationEnhanceOutcome}; the live
+     * {@code store}/{@code playerRef} are dispatch-synchronous only (see the event's javadoc).
+     */
+    static void fireEnhanceCompleted(@Nonnull Store<EntityStore> store, @Nonnull PlayerRef playerRef,
+            @Nonnull UUID playerId, @Nonnull UUID sessionId, @Nonnull String stationId, @Nonnull String actionId,
+            @Nonnull StationEnhanceOutcome outcome) {
+        try {
+            IEventDispatcher<StationEnhanceCompletedEvent, StationEnhanceCompletedEvent> d =
+                    HytaleServer.get().getEventBus().dispatchFor(StationEnhanceCompletedEvent.class);
+            if (d.hasListener()) {
+                d.dispatch(new StationEnhanceCompletedEvent(store, playerRef, playerId, sessionId, stationId,
+                        actionId, outcome.itemId(), outcome.before(), outcome.after(), outcome.lines(),
+                        outcome.durabilityAdded()));
+            }
+        } catch (Throwable t) {
+            log("StationEnhanceCompleted", t);
         }
     }
 

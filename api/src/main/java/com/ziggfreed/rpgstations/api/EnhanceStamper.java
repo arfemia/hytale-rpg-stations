@@ -32,12 +32,16 @@ public interface EnhanceStamper {
 
     /**
      * Apply {@code entries} (already rolled + cap-clamped by RpgStations - the stamper never
-     * re-derives caps) to a stack, returning the NEW stack (matches {@code ItemStack}'s own
-     * immutable with-copy convention, e.g. {@code withMaxDurability}). Called ONLY inside the
-     * Stamp step's COMMIT phase, after every compute-phase validation already passed - a throw
-     * here is caught by the caller and the whole step fails with custody restored to its exact
-     * pre-step contents (design 9.5's M5 fix).
+     * re-derives caps) to a stack, returning a {@link StampResult}: the NEW stack (matches
+     * {@code ItemStack}'s own immutable with-copy convention, e.g. {@code withMaxDurability}) PLUS
+     * one {@link EnhanceLine} per stat actually written (empty = nothing reportable - the
+     * enhancements-metadata report the standalone session summary renders and
+     * {@code StationEnhanceCompletedEvent} carries). Called ONLY inside the Stamp step's COMMIT
+     * phase, after every compute-phase validation already passed - a throw here is caught by the
+     * caller and the whole step fails with custody restored to its exact pre-step contents (design
+     * 9.5's M5 fix); RpgStations never inspects the returned lines' meaning, it renders their
+     * provider-composed labels verbatim.
      */
     @Nonnull
-    ItemStack apply(@Nonnull ItemStack stack, @Nonnull List<StatRoll> entries);
+    StampResult apply(@Nonnull ItemStack stack, @Nonnull List<StatRoll> entries);
 }

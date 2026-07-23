@@ -73,11 +73,18 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   `CUSTODY_NO_INPUT_MATCHER` flags authoring neither). `States` (`{Empty?, Loaded?}`) names the
   block's own `State.Definitions` entries the engine flips between
   (`world.setBlockInteractionState`); null = custody works mechanically with no visual/hint flip.
-  `Display` (`{Offset{X,Y,Z}, Scale, Rotation}`, every leaf `appendInherited`, null = no visual -
-  the leg-C default) opts the placed input into a PLACED-AS-ENTITY visual at the station's
+  `Display` (`{Offset{X,Y,Z}, Scale, Rotation{X,Y,Z}}`, every leaf `appendInherited`, null = no
+  visual - the leg-C default) opts the placed input into a PLACED-AS-ENTITY visual at the station's
   block-top anchor - see `../station/CLAUDE.md`'s dedicated bullet for the full engine-side
   mechanism (`StationCustodyDisplay`). Every leaf whole-GROUP overridable on `ActionDef` same as
-  every other group. See `../station/CLAUDE.md` for the full engine-side behavior
+  every other group. **Round-7 D-1**: `Rotation` is a nested `{X, Y, Z}` DEGREES group (X pitch,
+  Y yaw, Z roll), replacing the pre-round-7 scalar world-space yaw - so a placed weapon can lie
+  FLAT on an anvil (`{"X": 90}`), not just spin about vertical. Applied to the prop's
+  `TransformComponent` on both spawn routes and mirrored onto `HeadRotation` for the item-entity
+  route ONLY (a block-shaped custody item skips the `HeadRotation` mirror - see the codec's own m5
+  caveat javadoc). The retired scalar form is migration-tolerated: a stale bare-number `Rotation`
+  decodes as legacy Y-only yaw with a WARN, never aborting the asset load (m6, via a small
+  `InheritCodec` wrapper over the `{X,Y,Z}` group codec). See `../station/CLAUDE.md` for the full engine-side behavior
   (`StationCustody`/`StationCustodyClaim`/`StationCustodyBreakSystem`/`StationCustodyDisplay`).
 - **[`ActionInput`](ActionInput.java)** (design 9.1) - the diegetic action-selection matcher:
   `{ItemId?, ResourceTypeId?, Tags?, Function?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, resolved

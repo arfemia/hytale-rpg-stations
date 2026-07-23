@@ -378,8 +378,11 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   [`StationCustodyDisplay`](StationCustodyDisplay.java) spawns a static, network-replicated,
   pickup-immune, physics-free prop entity rendering the claim's placed item at the station's
   block-top anchor (the SAME point every cycle/swing/impact/rare-find moment already targets),
-  gated on a new nullable `asset.Custody.Display` group (`{Offset{X,Y,Z}, Scale, Rotation}`, every
-  leaf `appendInherited`, null = no visual - the leg-C default). **Mechanism (fix round: delegated
+  gated on a new nullable `asset.Custody.Display` group (`{Offset{X,Y,Z}, Scale, Rotation{X,Y,Z}}`,
+  every leaf `appendInherited`, null = no visual - the leg-C default; **round-7 D-1** made
+  `Rotation` a nested `{X,Y,Z}` DEGREES group, X pitch/Y yaw/Z roll, so a placed weapon lies flat
+  on an anvil via `{"X":90}` - a bare-number `Rotation` is migration-tolerated as legacy Y-only yaw
+  with a WARN). **Mechanism (fix round: delegated
   to `ziggfreed-common`'s `entity.ItemPropEntityService`, lifted config-free out of this class's
   own prior verbatim copy)**: originally copied verbatim from the engine's own sanctioned exemplar,
   the admin "Entity Spawn Page" Items tab
@@ -410,7 +413,7 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   zero items mid-session - the only site left to reach it in that case). The ref lives ON the
   claim (`StationCustodyClaim#displayRef`/`#setDisplayRef`, mirroring the `uniqueStack` field's own
   pattern) - no second tracking map. Offset/Scale/Rotation math
-  (`StationCustodyDisplay#resolvePosition`/`#resolveYawRadians`/`#resolveScale`) is kept
+  (`StationCustodyDisplay#resolvePosition`/`#resolveRotationRadians`/`#resolveScale`) is kept
   PRIMITIVE-typed (doubles/floats only, no `Vector3d`/`Rotation3f` touch) so it stays unit-tested
   without a running Hytale server, the same discipline
   `StationEntityMountController#resolveAttachmentOffset` established. **Documented simplification**:
@@ -439,6 +442,20 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   `Recipe` override needs its OWN derived-conversion cache entry). `StationService.dispatchProgram`
   reads the resolved action's `Work.effectiveRepeat()` and calls `stop(..., StopReason.RITUAL_COMPLETE, ...)`
   on a completed non-repeating program.
+- **Enhancement outcome reporting (round-7 D-6, MMO-agnostic)**: after the Stamp step's ONE custody
+  write (`claim.setUniqueStack`), `StampHandler#execute` captures a
+  [`StationEnhanceOutcome`](StationEnhanceOutcome.java) (`itemId` + immutable before/after
+  `ItemStack` copies + the stamper's `List<EnhanceLine>` report + the native `Durability.AddMax`
+  delta) onto `StationSession#enhanceOutcomes` and fires the api `StationEnhanceCompletedEvent`
+  (`StationEvents#fireEnhanceCompleted`, `hasListener`-gated). `applyStampMutation` now returns a
+  pure `Mutation(stack, lines, durabilityAdded)` record - the stamper's `EnhanceStamper.apply`
+  returns a `StampResult` (mutated stack + `EnhanceLine` report) instead of a bare stack (the
+  pre-1.0.0 api reshape). `StationService#enhanceLedgerRows` (extracted pure/static, unit-tested)
+  turns each outcome into summary rows: one `SummaryRow.Kind.ENHANCE` row per `EnhanceLine`
+  (label rendered VERBATIM - the provider owns stat vocabulary/wording/color) PLUS one engine-owned
+  `Durability +N` row (durability is RpgStations-native, so a bare anvil with NO stamper still
+  reports its enhancement) accent-colored `#c9a2ff` at composition; `StationSummaryHud`'s
+  `ENHANCE` case renders both without recolor. Zero MMO stat vocabulary enters this mod.
 - **Phase 2 legs A-G are all LANDED** - see the "Loot + flairs" and "placed-input
   PLACED-AS-ENTITY visual" bullets above for F/G's file-by-file detail. **Leg H (the phase-2
   smoke round) is docs-landed** (see the mod-root `CLAUDE.md`'s Phase 2 section and

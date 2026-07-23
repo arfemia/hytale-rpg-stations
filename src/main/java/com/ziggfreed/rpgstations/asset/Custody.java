@@ -1,11 +1,22 @@
 package com.ziggfreed.rpgstations.asset;
 
+import java.io.IOException;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import org.bson.BsonDocument;
+import org.bson.BsonValue;
+
 import com.hypixel.hytale.codec.Codec;
+import com.hypixel.hytale.codec.ExtraInfo;
+import com.hypixel.hytale.codec.InheritCodec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.hypixel.hytale.codec.schema.SchemaContext;
+import com.hypixel.hytale.codec.schema.config.Schema;
+import com.hypixel.hytale.codec.util.RawJsonReader;
+import com.ziggfreed.rpgstations.util.Log;
 
 /**
  * Session-scoped PLACED-INPUT custody (design section 9.4, phase-2 leg C): an authored group
@@ -146,7 +157,8 @@ public final class Custody {
      * anchor - the same point every cycle/swing/impact/rare-find moment already targets
      * ({@code blockX+0.5, blockY+0.5, blockZ+0.5}). All three leaves are nullable/orthogonal
      * (independently composable, never a mode): {@link #offset} shifts the anchor,
-     * {@link #scale} resizes the prop, {@link #rotation} (degrees, world-space yaw) turns it.
+     * {@link #scale} resizes the prop, {@link #rotation} (a nested {@code {X,Y,Z}} degrees group)
+     * turns it about all three axes.
      *
      * <p><b>World-space, not block-facing-relative (a documented simplification):</b> a station
      * block placed with a non-default {@code VariantRotation} orientation is NOT compensated for
@@ -159,23 +171,34 @@ public final class Custody {
      * exactly this reason. A future leg can compose the offset against the block's own rotation
      * (see {@code BlockRotationUtil}/{@code RotationTuple} in the shared source) if a station
      * needs a large facing-relative offset.
+     *
+     * <p><b>Rotation applies through {@code TransformComponent} on BOTH spawn routes, but is only
+     * MIRRORED onto {@code HeadRotation} for the ITEM-entity route (critique m5):</b> the anvil's
+     * placed weapon takes {@code ItemPropEntityService.buildHolder}'s item route, which writes the
+     * full {@code Rotation3f} to the {@code TransformComponent} AND mirrors it onto a
+     * {@code HeadRotation} component (matching the first-party bare-{@code ItemComponent} prop
+     * parity). A block-shaped custody item (the sawmill's placed logs) takes the {@code BlockEntity}
+     * route, which writes {@code TransformComponent} ONLY (no {@code HeadRotation}). So a future
+     * block-shaped custody prop authoring a non-zero pitch/roll gets whatever the block-entity
+     * transform renders, NOT the item-prop head-rotation path - do not assume the two routes tilt
+     * identically.
      */
     public static final class Display {
         @Nullable protected Offset offset;
         @Nullable protected Double scale;
-        @Nullable protected Double rotation;
+        @Nullable protected Rotation rotation;
 
         public static final BuilderCodec<Display> CODEC = BuilderCodec.builder(Display.class, Display::new)
                 .appendInherited(new KeyedCodec<>("Offset", Offset.CODEC, false),
                         (o, v) -> o.offset = v, o -> o.offset, (o, p) -> o.offset = p.offset).add()
                 .appendInherited(new KeyedCodec<>("Scale", Codec.DOUBLE, false),
                         (o, v) -> o.scale = v, o -> o.scale, (o, p) -> o.scale = p.scale).add()
-                .appendInherited(new KeyedCodec<>("Rotation", Codec.DOUBLE, false),
+                .appendInherited(new KeyedCodec<>("Rotation", Rotation.CODEC, false),
                         (o, v) -> o.rotation = v, o -> o.rotation, (o, p) -> o.rotation = p.rotation).add()
                 .build();
 
         @Nonnull
-        public static Display of(@Nullable Offset offset, @Nullable Double scale, @Nullable Double rotation) {
+        public static Display of(@Nullable Offset offset, @Nullable Double scale, @Nullable Rotation rotation) {
             Display d = new Display();
             d.offset = offset;
             d.scale = scale;
@@ -194,7 +217,7 @@ public final class Custody {
         }
 
         @Nullable
-        public Double getRotation() {
+        public Rotation getRotation() {
             return rotation;
         }
 
@@ -203,9 +226,153 @@ public final class Custody {
             return scale != null && scale > 0 ? scale : 1.0;
         }
 
-        /** {@link #rotation} (degrees), reader-defaulted to {@code 0.0} when null. */
-        public double effectiveRotationDegrees() {
-            return rotation != null ? rotation : 0.0;
+        /**
+         * World-space rotation of the display prop, in DEGREES per axis (engine default 0 per
+         * leaf). {@code X} = pitch (tips the prop forward/back about the horizontal axis - the
+         * "lay it flat" axis), {@code Y} = yaw (turns it about the vertical axis), {@code Z} =
+         * roll (tips it sideways about its own long axis). Applied engine-side as radians in the
+         * engine's Y-X-Z (yaw, then pitch, then roll) intrinsic euler order
+         * ({@code Rotation3f.getQuaternion} composes {@code rotationYXZ}). Authored in DEGREES (the
+         * {@code BlockMountPoint}/{@code EntitySpawnPage} human-authoring precedent), never raw
+         * {@code Rotation3f.CODEC} radians. Every leaf is independently nullable (partial owner
+         * overlays and native {@code Parent} reuse), mirroring {@link Offset}.
+         *
+         * <p><b>Migration tolerance (critique m6):</b> the {@code "Rotation"} leaf USED to be a
+         * bare {@code Codec.DOUBLE} (a single world-space yaw). This unreleased-cycle swap to the
+         * nested group is a hard break with no shipped JSON authoring the old form, but a stale
+         * dev-world override authoring {@code "Rotation": 90} would otherwise {@code asDocument()}-
+         * throw and abort the WHOLE asset load. {@link #CODEC} therefore tolerates a bare NUMBER,
+         * decoding it as the legacy Y-only world-space yaw ({@code of(null, yaw, null)}) with a
+         * WARN naming the {@code {X,Y,Z}} migration - a bare-number Rotation never aborts the load.
+         */
+        public static final class Rotation {
+            @Nullable protected Double x;
+            @Nullable protected Double y;
+            @Nullable protected Double z;
+
+            /** The structured {@code {X,Y,Z}} group codec (mirrors {@link Offset#CODEC} verbatim). */
+            static final BuilderCodec<Rotation> GROUP_CODEC = BuilderCodec.builder(Rotation.class, Rotation::new)
+                    .appendInherited(new KeyedCodec<>("X", Codec.DOUBLE, false),
+                            (o, v) -> o.x = v, o -> o.x, (o, p) -> o.x = p.x).add()
+                    .appendInherited(new KeyedCodec<>("Y", Codec.DOUBLE, false),
+                            (o, v) -> o.y = v, o -> o.y, (o, p) -> o.y = p.y).add()
+                    .appendInherited(new KeyedCodec<>("Z", Codec.DOUBLE, false),
+                            (o, v) -> o.z = v, o -> o.z, (o, p) -> o.z = p.z).add()
+                    .build();
+
+            /**
+             * The migration-tolerant codec the {@code "Rotation"} leaf actually uses (critique m6):
+             * a bare NUMBER decodes as the legacy Y-only world-space yaw with a WARN; a document
+             * ({@code {X,Y,Z}}) and native {@code Parent} inheritance delegate straight to
+             * {@link #GROUP_CODEC}.
+             */
+            public static final Codec<Rotation> CODEC = new LegacyTolerantCodec();
+
+            @Nonnull
+            public static Rotation of(@Nullable Double x, @Nullable Double y, @Nullable Double z) {
+                Rotation r = new Rotation();
+                r.x = x;
+                r.y = y;
+                r.z = z;
+                return r;
+            }
+
+            @Nullable
+            public Double getX() {
+                return x;
+            }
+
+            @Nullable
+            public Double getY() {
+                return y;
+            }
+
+            @Nullable
+            public Double getZ() {
+                return z;
+            }
+
+            /**
+             * Wraps {@link Rotation#GROUP_CODEC} so a bare NUMBER (the legacy scalar-yaw form,
+             * critique m6) decodes as {@code of(null, yaw, null)} with a WARN instead of throwing;
+             * every document/inheritance path forwards verbatim to the group codec (so native
+             * {@code Parent} per-leaf reuse is unchanged). An {@link InheritCodec} so the enclosing
+             * {@code appendInherited} leaf keeps per-leaf inheritance of the sub-group.
+             */
+            private static final class LegacyTolerantCodec implements InheritCodec<Rotation> {
+
+                private static boolean isNumberStart(int c) {
+                    return c == '-' || c == '+' || c == '.' || (c >= '0' && c <= '9');
+                }
+
+                @Nonnull
+                private static Rotation legacyYaw(double yaw) {
+                    Log.warn("STATION Custody.Display.Rotation authored as a bare number (" + yaw
+                            + ") - the scalar world-space yaw form is retired; migrate to the nested {X,Y,Z}"
+                            + " degrees group. Decoding as Y-only (yaw) for this load.");
+                    return Rotation.of(null, yaw, null);
+                }
+
+                @Override
+                public Rotation decode(BsonValue bsonValue, ExtraInfo extraInfo) {
+                    if (bsonValue != null && bsonValue.isNumber()) {
+                        return legacyYaw(bsonValue.asNumber().doubleValue());
+                    }
+                    return GROUP_CODEC.decode(bsonValue, extraInfo);
+                }
+
+                @Override
+                public BsonValue encode(Rotation t, ExtraInfo extraInfo) {
+                    return GROUP_CODEC.encode(t, extraInfo);
+                }
+
+                @Override
+                public Rotation decodeJson(RawJsonReader reader, ExtraInfo extraInfo) throws IOException {
+                    reader.consumeWhiteSpace();
+                    if (isNumberStart(reader.peek())) {
+                        return legacyYaw(reader.readDoubleValue());
+                    }
+                    return GROUP_CODEC.decodeJson(reader, extraInfo);
+                }
+
+                @Nonnull
+                @Override
+                public Schema toSchema(@Nonnull SchemaContext context) {
+                    return GROUP_CODEC.toSchema(context);
+                }
+
+                @Override
+                public Rotation decodeAndInherit(BsonDocument document, Rotation parent, ExtraInfo extraInfo) {
+                    return GROUP_CODEC.decodeAndInherit(document, parent, extraInfo);
+                }
+
+                @Override
+                public void decodeAndInherit(BsonDocument document, Rotation t, Rotation parent, ExtraInfo extraInfo) {
+                    GROUP_CODEC.decodeAndInherit(document, t, parent, extraInfo);
+                }
+
+                @Override
+                public Rotation decodeAndInheritJson(RawJsonReader reader, Rotation parent, ExtraInfo extraInfo)
+                        throws IOException {
+                    reader.consumeWhiteSpace();
+                    if (isNumberStart(reader.peek())) {
+                        return legacyYaw(reader.readDoubleValue());
+                    }
+                    return GROUP_CODEC.decodeAndInheritJson(reader, parent, extraInfo);
+                }
+
+                @Override
+                public void decodeAndInheritJson(RawJsonReader reader, Rotation t, Rotation parent, ExtraInfo extraInfo)
+                        throws IOException {
+                    reader.consumeWhiteSpace();
+                    if (isNumberStart(reader.peek())) {
+                        t.y = reader.readDoubleValue();
+                        legacyYaw(t.y);
+                        return;
+                    }
+                    GROUP_CODEC.decodeAndInheritJson(reader, t, parent, extraInfo);
+                }
+            }
         }
 
         /** A relative {@code X}/{@code Y}/{@code Z} shift off the block-top anchor, each leaf independently nullable (default 0). */

@@ -9,7 +9,7 @@ import com.ziggfreed.rpgstations.asset.Custody;
 
 /**
  * Pure tests for {@link StationCustodyDisplay}'s ONLY unit-JVM-safe logic -
- * {@link StationCustodyDisplay#resolvePosition}/{@link StationCustodyDisplay#resolveYawRadians}/
+ * {@link StationCustodyDisplay#resolvePosition}/{@link StationCustodyDisplay#resolveRotationRadians}/
  * {@link StationCustodyDisplay#resolveScale} (design section 9, phase 2 leg G: the placed-input
  * PLACED-AS-ENTITY visual's Offset/Scale/Rotation math, kept primitive-typed so it needs no live
  * Hytale ECS type - the same discipline {@code StationEntityMountControllerTest} establishes for
@@ -49,22 +49,47 @@ class StationCustodyDisplayTest {
                 StationCustodyDisplay.resolvePosition(display, 10, 64, -4));
     }
 
-    // ==================== resolveYawRadians ====================
+    // ==================== resolveRotationRadians (D-1: nested {X,Y,Z} degrees group) ====================
 
     @Test
-    void resolveYawRadians_noDisplay_isZero() {
-        assertEquals(0f, StationCustodyDisplay.resolveYawRadians(null));
+    void resolveRotationRadians_noDisplay_allZero() {
+        assertArrayEquals(new float[] {0f, 0f, 0f}, StationCustodyDisplay.resolveRotationRadians(null));
     }
 
     @Test
-    void resolveYawRadians_noRotationAuthored_isZero() {
-        assertEquals(0f, StationCustodyDisplay.resolveYawRadians(Custody.Display.of(null, null, null)));
+    void resolveRotationRadians_noRotationGroup_allZero() {
+        assertArrayEquals(new float[] {0f, 0f, 0f},
+                StationCustodyDisplay.resolveRotationRadians(Custody.Display.of(null, null, null)));
     }
 
     @Test
-    void resolveYawRadians_authoredDegrees_convertsToRadians() {
-        Custody.Display display = Custody.Display.of(null, null, 180.0);
-        assertEquals((float) Math.PI, StationCustodyDisplay.resolveYawRadians(display), 1e-5f);
+    void resolveRotationRadians_yawOnly_convertsYToRadians() {
+        Custody.Display display = Custody.Display.of(null, null, Custody.Display.Rotation.of(null, 180.0, null));
+        assertArrayEquals(new float[] {0f, (float) Math.PI, 0f},
+                StationCustodyDisplay.resolveRotationRadians(display), 1e-5f);
+    }
+
+    @Test
+    void resolveRotationRadians_pitchOnly_convertsXToRadians() {
+        // The reported anvil defect's fix: X (pitch) = 90 lays the weapon flat.
+        Custody.Display display = Custody.Display.of(null, null, Custody.Display.Rotation.of(90.0, null, null));
+        assertArrayEquals(new float[] {(float) (Math.PI / 2.0), 0f, 0f},
+                StationCustodyDisplay.resolveRotationRadians(display), 1e-5f);
+    }
+
+    @Test
+    void resolveRotationRadians_fullXYZ_convertsEachAxisInOrder() {
+        Custody.Display display = Custody.Display.of(null, null, Custody.Display.Rotation.of(90.0, 180.0, 45.0));
+        assertArrayEquals(
+                new float[] {(float) Math.toRadians(90.0), (float) Math.toRadians(180.0), (float) Math.toRadians(45.0)},
+                StationCustodyDisplay.resolveRotationRadians(display), 1e-5f);
+    }
+
+    @Test
+    void resolveRotationRadians_partialGroup_missingLeavesDefaultToZero() {
+        Custody.Display display = Custody.Display.of(null, null, Custody.Display.Rotation.of(null, null, 90.0));
+        assertArrayEquals(new float[] {0f, 0f, (float) (Math.PI / 2.0)},
+                StationCustodyDisplay.resolveRotationRadians(display), 1e-5f);
     }
 
     // ==================== resolveScale ====================

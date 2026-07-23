@@ -26,6 +26,10 @@ import javax.annotation.Nonnull;
  * {@code StationCustodyDisplay#addRetrieveInteraction}).
  * The round-5 grant-notification round (2026-07-22) adds {@code ui.station.gain.produced} (the
  * live item-gain toast, {@code StationService#notifyItemGain}).
+ * Round-7 (D-6) adds {@code ui.station.summary.enhance_durability} (the engine-owned durability
+ * row of the enhancement session summary, {@code StationService#enhanceLedgerRows}); round-7 (D-4)
+ * also drops the quantity from {@code ui.station.gain.produced}'s value (now bare {@code {0}}) so
+ * the toast matches a native pickup exactly - the quantity rides the item-slot count badge.
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -64,6 +68,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.summary.item_produced",
             "rpgstations.ui.station.summary.lucky",
             "rpgstations.ui.station.summary.items_more",
+            "rpgstations.ui.station.summary.enhance_durability",
             "rpgstations.ui.station.gain.produced",
             "rpgstations.station.sawmill.name",
             "rpgstations.station.sawmill.desc",

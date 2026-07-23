@@ -53,12 +53,15 @@ import com.ziggfreed.common.cast.ModelParticleService;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.cast.WorldKeyedQueues;
 import com.ziggfreed.common.cast.step.CastKernel;
+import com.ziggfreed.common.feedback.Notify;
 import com.ziggfreed.common.feedback.PickupMimic;
 import com.ziggfreed.common.i18n.Msg;
 import com.ziggfreed.common.i18n.NativeNames;
 import com.ziggfreed.common.inventory.InventoryGrant;
 import com.ziggfreed.common.sound.Sound3D;
 import com.ziggfreed.common.ui.rows.SummaryRow;
+import com.ziggfreed.common.util.NumberFormatter;
+import com.ziggfreed.rpgstations.api.EnhanceLine;
 import com.ziggfreed.rpgstations.api.FactorContext;
 import com.ziggfreed.rpgstations.api.SummaryContext;
 import com.ziggfreed.rpgstations.api.SummaryDecorateContext;
@@ -133,6 +136,14 @@ public final class StationService {
 
     /** Round-5 refinement 3: the "lucky grant" notification color (distinct from {@link #toast}'s plain YELLOW). */
     private static final Color GOLD = new Color(0xFFD700);
+
+    /**
+     * D-6: the enhance summary accent (design section 9.5, phase 2 round-7). The engine's OWN
+     * durability row bakes this into its Message at composition ({@link #enhanceLedgerRows}); a
+     * per-stat enhance row keeps the provider's own pre-styled color instead (the summary HUD's
+     * {@code ENHANCE} case never recolors).
+     */
+    private static final Color ENHANCE_ROW_COLOR = Color.decode("#c9a2ff");
 
     /** Every teardown path a session can leave through; drives the localized stop toast. */
     public enum StopReason {
@@ -1293,7 +1304,42 @@ public final class StationService {
                     RpgMsg.tr("ui.station.summary.lucky"));
             rows.add(new StationSummaryHud.LedgerRow(e.getKey(), e.getValue(), line, SummaryRow.Kind.LUCKY));
         }
+        rows.addAll(enhanceLedgerRows(s.enhanceOutcomes));
         return rows;
+    }
+
+    /**
+     * The enhance ledger rows for the summary panel (design section 9.5, phase 2 round-7 D-6):
+     * per committed {@link StationEnhanceOutcome}, one row per {@link EnhanceLine} the registered
+     * stamper reported (the {@code line.label()} renders VERBATIM - the provider owns the stat
+     * vocabulary, wording, and per-stat color, so RpgStations stays free of MMO stat vocabulary),
+     * plus, when a stamp added max durability, ONE engine-owned durability row the engine composes
+     * AND colors itself ({@link #ENHANCE_ROW_COLOR} - durability is RpgStations-native, real even
+     * with no stamper registered). Extracted pure/static so it unit-tests without a live session
+     * service; the icon is the enhanced item itself.
+     */
+    @Nonnull
+    static List<StationSummaryHud.LedgerRow> enhanceLedgerRows(@Nonnull List<StationEnhanceOutcome> outcomes) {
+        List<StationSummaryHud.LedgerRow> rows = new ArrayList<>();
+        for (StationEnhanceOutcome outcome : outcomes) {
+            for (EnhanceLine line : outcome.lines()) {
+                rows.add(new StationSummaryHud.LedgerRow(outcome.itemId(), line.points(), line.label(),
+                        SummaryRow.Kind.ENHANCE));
+            }
+            if (outcome.durabilityAdded() > 0) {
+                Message line = RpgMsg.tr("ui.station.summary.enhance_durability",
+                        formatDurability(outcome.durabilityAdded())).color(ENHANCE_ROW_COLOR);
+                rows.add(new StationSummaryHud.LedgerRow(outcome.itemId(),
+                        (int) Math.round(outcome.durabilityAdded()), line, SummaryRow.Kind.ENHANCE));
+            }
+        }
+        return rows;
+    }
+
+    /** Formats a durability delta for the summary row: a whole number drops its trailing {@code .0}. */
+    @Nonnull
+    private static String formatDurability(double amount) {
+        return amount == Math.rint(amount) ? NumberFormatter.grouped((long) amount) : String.valueOf(amount);
     }
 
     /**
@@ -2492,10 +2538,11 @@ public final class StationService {
 
     /**
      * Round-5 refinement 3 (maintainer, 2026-07-22): a live, item-specific "what you gained"
-     * notification - icon + client-resolved name + quantity, via the SAME
-     * {@code NotificationUtil.sendNotification(handler, message, secondaryMessage, item)} shape
-     * the native pickup notification uses (scout finding 2), so the item icon renders the same
-     * way. Deliberately LIGHTER than {@link #notifyNativePickup}/{@code PickupMimic}: no SFX and
+     * notification - icon + client-resolved name, with the quantity riding the item-slot count
+     * badge (round-7 D-4 - the value is now the bare item name so this reads EXACTLY like a native
+     * pickup), routed through {@code ziggfreed-common}'s {@code feedback.Notify#itemKeyed} (the SAME
+     * item-slot packet shape a native pickup uses; leg A's shared lift). Deliberately LIGHTER than
+     * {@link #notifyNativePickup}/{@code PickupMimic}: no SFX and
      * no {@code ShowItemPickupNotifications} gate - this fires ambiently roughly once per work
      * cycle, not for a one-shot deliberate pickup action, so it skips the sound cue that primitive
      * layers on. {@code lucky=true} appends the ALREADY-9-locale {@code ui.station.summary.lucky}
@@ -2510,8 +2557,10 @@ public final class StationService {
             if (lucky) {
                 line = Msg.cat(line, RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
             }
-            NotificationUtil.sendNotification(playerRef.getPacketHandler(), line, null,
-                    new ItemStack(itemId, Math.max(1, quantity)).toPacket());
+            // D-4: the value is now the bare item name ({0}); the quantity rides the item-slot count
+            // badge, matching a native pickup exactly (the unused quantity arg above is harmless).
+            // Routed through the shared item-keyed helper (identical packet shape) - leg A's lift.
+            Notify.itemKeyed(playerRef, line, null, itemId, quantity);
         } catch (Throwable t) {
             Log.fine("STATION item-gain notify failed: " + t.getMessage());
         }

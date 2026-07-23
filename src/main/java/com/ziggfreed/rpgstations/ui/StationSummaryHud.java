@@ -105,6 +105,25 @@ public final class StationSummaryHud extends KeyedCustomHud {
             this.line = line;
             this.kind = kind;
         }
+
+        @Nonnull
+        public String itemId() {
+            return itemId;
+        }
+
+        public int quantity() {
+            return quantity;
+        }
+
+        @Nonnull
+        public Message line() {
+            return line;
+        }
+
+        @Nonnull
+        public SummaryRow.Kind kind() {
+            return kind;
+        }
     }
 
     /** Fallback default: top-center, offset down to clear the native top-bar cluster. */
@@ -226,6 +245,13 @@ public final class StationSummaryHud extends KeyedCustomHud {
 
     @Nonnull
     private static SummaryRow buildItemRow(@Nonnull LedgerRow row) {
+        // An ENHANCE row (design section 9.5, round-7 D-6 / critique m11) is NEVER recolored here:
+        // a per-stat enhance line arrives pre-styled by its provider (per-stat school colors) and
+        // the engine's own durability row bakes its accent at composition - so its Message renders
+        // verbatim. CONSUMED/LUCKY/PRODUCED/XP bake a per-kind color onto their line.
+        if (row.kind == SummaryRow.Kind.ENHANCE) {
+            return new SummaryRow(row.itemId, row.line, row.kind);
+        }
         Color color = switch (row.kind) {
             case CONSUMED -> CONSUMED_ROW_COLOR;
             case LUCKY -> LUCKY_ROW_COLOR;
