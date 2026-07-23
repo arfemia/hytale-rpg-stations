@@ -680,3 +680,34 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
       tracking the puppet between swing beats saw it frozen until the next swing. Fixed by moving
       the `Animation` group's field assignment (`s.emoteId`/`s.actionClip`) to run BEFORE the
       `spawnAndHide` call.
+- **Round-5 item-grant UX refinements (LANDED, notification half of the round-5 wave; the
+  hotbar-first-then-backpack-then-drop custody-return ORDERING itself is already documented in the
+  "Placed-input custody" bullet above)**: two notification changes on top of that ordering,
+  both routed through `ziggfreed-common`'s `feedback.PickupMimic`. **Retrieve feedback mimics a
+  real item pickup**: `StationService#notifyNativePickup` (called from `retrieveCustody`) loops
+  `PickupMimic.notifyLikeNativePickup(ref, store, stack, pos)` once per stack that genuinely
+  landed in inventory - the exact native item-icon `Notification` + `SFX_Player_Pickup_Item` cue a
+  real ground-item pickup fires, never a generic toast; a stack that fell through to a
+  drop-at-block instead (inventory full) falls back to the plain "materials retrieved" toast
+  rather than falsely claiming a pickup. **Item-gain notifications while working**:
+  `StationService#notifyItemGain(playerRef, itemId, quantity, lucky)` fires per distinct item id
+  for both produced-material grants and lucky/rare-find bonus grants (`applyGrantResult`,
+  `RollEvaluator`'s bonus-copy + droplist paths), showing WHAT was gained with the item icon
+  (`ui.station.gain.produced`); `lucky=true` appends the existing `ui.station.summary.lucky` tag
+  and styles the WHOLE line `GOLD` (a distinct `Color` constant from the plain-toast YELLOW) -
+  REPLACING the old two generic `ui.station.lucky`/`ui.station.rare_find` toasts. Deliberately
+  LIGHTER than `notifyNativePickup`/`PickupMimic` (no SFX, no pickup-packet mimicry) since it fires
+  mid-session, potentially every cycle, layered on top of whatever moment/particle presentation
+  `emitMoment` already plays for the same event.
+- **Deprecation sweep (LANDED, repo-wide edict close-out, 2026-07-22)**: compiled with
+  `-Xlint:deprecation` to enumerate every call site across this package plus `StationStepHandlers`/
+  `StationHoldController`/`interaction.StationUseInteraction` (33 total), each replaced with the
+  exact non-deprecated replacement its own engine javadoc names (`InventoryComponent.Storage`
+  component fetch instead of `Player.getInventory().getStorage()`; `InventoryComponent.Hotbar
+  #getActiveItem()` instead of `getActiveHotbarItem()` - deliberately NOT `getItemInHand()`, a
+  different semantic that also folds in `Tool`; `InventoryComponent#getCombined(...,
+  BACKPACK_STORAGE_HOTBAR)` instead of `getCombinedBackpackStorageHotbar()`; a manually-fetched
+  `PlayerRef` component instead of `Player.getPlayerRef()`). New `util.InventoryAccess` DRYs every
+  call site (replaces `loot.LootEngine`'s own private `storageContainerOf`). Zero deprecated calls
+  remain in this package, `loot/`, or `interaction/`; both build and the full test suite stayed
+  green through the sweep.

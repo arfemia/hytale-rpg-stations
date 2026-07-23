@@ -25,12 +25,38 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   `Swing`/`Impact`/`ActionClip`), `Presentation` (per-cycle moment), `Completion` (session-end
   moment, a second `Presentation` instance), `Requires` (permission + factor-`Condition` gate),
   `Flairs` (per-flair-id cosmetic overrides, an authoring convenience - see
-  [`FlairAsset`](FlairAsset.java) below for the standalone, third-party-authorable route), and
+  [`FlairAsset`](FlairAsset.java) below for the standalone, third-party-authorable route),
+  `Puppet` (round-4 design, landed - see [`Puppet`](Puppet.java) below), and
   (phase 2 leg B) `Actions` - a named,
   authored-order map of [`ActionDef`](ActionDef.java) whole-GROUP overrides (design 9.1; native
   `Parent` inherits the WHOLE map, same as `Flairs` - no per-key merge), absent/empty meaning the
   single implicit `"work"` action built from this asset's own groups. See `../station/CLAUDE.md`
   for how every group drives the engine (`station.ActionResolver` is the resolution choke point).
+- **[`Puppet`](Puppet.java)** (round-4 design, "mount the player, hide their player model, and
+  spawn/display a visual of their character model performing the steps", landed) - a top-level
+  group sibling to `Hold`/`Camera`/`Animation`/`Custody` (ORTHOGONAL to whichever `Hold.Mount`
+  holds the real player, never nested under `Hold`), whole-GROUP overridable per `ActionDef`:
+  `{Enabled?, Hide{Route,EffectId?}, Look{Source,ModelId?,FallbackModelId?}, Offset{X,Y,Z},
+  Yaw, Prop{Source,ItemId?,Slot?}}`. `Enabled` reader-defaults `true` whenever the group is
+  present (a child station can flip it `false` via `Parent` inheritance to fall back to the
+  classic in-body worker). `Hide.Route` is a THREE-arm union: **`"Scale"` is the in-game-crowned
+  default** (fully hides the puppeteer's own body, first- and third-person, via
+  `ziggfreed-common`'s `entity.PlayerPuppetService#hideByScale`/`#revealByScale`); `"Effect"` is
+  schema-reserved future work (the shadowstep/native `Portal_Teleport` EntityEffect pointer);
+  `"None"` is the deliberate degraded fallback (puppet spawns, real player stays visible - the
+  validator's `PUPPET_WITHOUT_HIDE` warns, never blocks). The design doc's original `"ModelSwap"`/
+  `"HiddenManager"` routes were retired before this schema shipped. `Look.Source` defaults
+  `"PlayerClone"` (clones the live player skin) with `"Model"` (a fixed authored look) as an open
+  performer seam for a future minion/provider route. `Offset`/`Yaw` place the puppet relative to
+  the station's block-top anchor (world-space, same simplification as `Custody.Display`).
+  `Prop.Source` defaults `"MirrorHeld"` (copies the player's live hotbar item onto the puppet);
+  `"ItemId"` forces a specific prop, `"None"` empties the puppet's hands (the anvil's `enhance`
+  stamp step uses this per-step). A `StationStep` carries its own small `{Clip, Prop}` override
+  reusing this exact `Prop` codec (see `StationStep.PuppetOverride`) for moment-to-moment swaps
+  without touching the session-scoped hide/look/spawn knobs. Engine-side: see
+  `../station/CLAUDE.md`'s puppet-engine bullet (`StationPuppetController`); both shipped stations
+  (Sawmill, Anvil) author `Puppet` in `content-packs/skill-stations-pack` - see that pack's own
+  `CLAUDE.md`.
 - **[`ActionDef`](ActionDef.java)** (design 9.1) - one `Actions` map entry: nullable overrides of
   every `StationAsset` group (`Input`/`Custody`/`Work`/`Recipe`/`Tool`/`Hold`/`Camera`/`Animation`/
   `Presentation`/`Completion`/`Loot`/`Requires`) PLUS `Label` (an advisory display key) and

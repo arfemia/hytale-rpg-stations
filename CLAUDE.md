@@ -24,8 +24,31 @@ physics-free prop entity at the station's block-top anchor via `StationCustodyDi
 maintainer's directed route over a Blockbench baked-node model swap) - see the "Phase 2" section
 below); **leg H (the phase-2 smoke round) is DOCS-LANDED** - the smoke checklist itself is
 assembled (`../../.claude/plans/work-stations-mod-extraction-prompt.md`'s PHASE-2 SMOKE
-CHECKLIST section) but the in-game confirmation pass stays batched/pending, same posture as the
-still-outstanding phase-1 parity gate. Design
+CHECKLIST section).
+
+**Since leg H, FIVE more maintainer in-game smoke rounds landed (2026-07-22):** fresh-boot fix
+waves R1-R5 (item localization + HUD width, an unresolved `[SMOKEDIAG]`-instrumented seated-swing
+render mystery, inventory-pull custody placement, the placed-item display entity's `CommandBuffer`
+tick-safety fix, a restart-orphan action-selection recovery), R6 (the anvil's Entity-mount
+`NetworkId` fix + graceful degradation, PLUS the NEW press-F custody RETRIEVAL feature -
+`rpg_station_retrieve`, in-game CONFIRMED working), R7 (the station-icon `BlockType#getItem()`
+state-variant fix), the repo-wide deprecation sweep (33 call sites replaced with their
+javadoc-named non-deprecated equivalents, a new `util.InventoryAccess` DRYing every one), and the
+FULL PUPPET PRESENTATION BUILD (round-4: "mount the player, hide their player model, spawn a
+skinned puppet performing the work" - `StationAsset.Puppet`, `station.StationPuppetController`,
+`Hide.Route:"Scale"` in-game-CROWNED, primitives lifted to `ziggfreed-common`'s
+`entity.PlayerPuppetService`/`ItemPropEntityService` - see `station/CLAUDE.md`'s puppet-engine
+bullet and `asset/CLAUDE.md`'s `Puppet` bullet) plus a round-5 item-grant UX wave (hotbar-first-
+if-space grants via common's `inventory.InventoryGrant`, native-pickup-mimic retrieve feedback via
+common's `feedback.PickupMimic`, gold lucky-drop notifications - see `loot/CLAUDE.md` and
+`station/CLAUDE.md`'s custody/retrieval bullets). Full narrative + the CONSOLIDATED next-session
+in-game checklist: `../../.claude/plans/work-stations-mod-extraction-prompt.md`. **A temporary
+`puppetspike/` harness (`/rpgstations puppet <scale|modelswap|hidden|show|off>`, see
+`command/CLAUDE.md`) and five `[SMOKEDIAG]` log lines in `StationService`/`StationHoldController`
+remain live**, both pending deletion once the maintainer confirms the production puppet route
+in-game - do not delete either before that confirm lands.
+
+Design
 authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
 (grounded by the decision log `../../.claude/research/rpg-stations-extraction-design.md` and the
 adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-2026-07-21.md`, ALL
