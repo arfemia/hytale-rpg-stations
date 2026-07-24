@@ -960,6 +960,20 @@ public final class StationService {
      */
     static void tallyConsumedResource(@Nonnull Map<String, Integer> tally, @Nonnull List<ConsumedSlot> consumedSlots,
                                       @Nonnull String resourceTypeId) {
+        if (!mergeConsumedSlots(tally, consumedSlots)) {
+            tally.merge(resourceTypeId, 1, Integer::sum);
+        }
+    }
+
+    /**
+     * PURE: merge each usable {@code (itemId, consumed)} slot into {@code tally} (summing per item
+     * id); returns {@code true} when at least one slot merged. The shared fold every consume-ledger
+     * path routes through - the {@code ResourceTypeId} family route ({@link #tallyConsumedResource},
+     * which adds the raw-type fallback on an empty result) AND the Stamp reagent route
+     * ({@link #tallyConsumedStacks}, whose reagents always carry concrete drained ids, so it needs
+     * no fallback). ONE consumed-ledger authority, no parallel bookkeeping.
+     */
+    static boolean mergeConsumedSlots(@Nonnull Map<String, Integer> tally, @Nonnull List<ConsumedSlot> consumedSlots) {
         boolean any = false;
         for (ConsumedSlot slot : consumedSlots) {
             if (slot == null || slot.itemId == null || slot.consumed <= 0) {
@@ -968,9 +982,27 @@ public final class StationService {
             tally.merge(slot.itemId, slot.consumed, Integer::sum);
             any = true;
         }
-        if (!any) {
-            tally.merge(resourceTypeId, 1, Integer::sum);
+        return any;
+    }
+
+    /**
+     * Consume-ledger tally for the Stamp step's committed reagents ({@code StationStepHandlers
+     * .StampHandler}): the anvil's Enhance ritual drains its sharpened bars via {@code Stamp
+     * .Reagents} (never a {@code Consume} step), so without this the end-of-session summary showed
+     * the enhancement stat / durability rows but NO consumed row for the reagents the ritual ate.
+     * Routes the REAL drained stacks ({@code consumeReagent}'s per-slot reads, already computed for
+     * restore-on-failure) into the SAME {@code s.consumedItems} ledger {@link #tallyResourceConsumption}
+     * / the implicit-program {@code Consume} step feed, so {@link #ledgerRows} renders one
+     * {@code SummaryRow.Kind.CONSUMED} row per input stack through the existing pipeline.
+     */
+    static void tallyConsumedStacks(@Nonnull StationSession s, @Nonnull List<ItemStack> stacks) {
+        List<ConsumedSlot> slots = new ArrayList<>();
+        for (ItemStack stack : stacks) {
+            if (stack != null && stack.getItemId() != null && stack.getQuantity() > 0) {
+                slots.add(new ConsumedSlot(stack.getItemId(), stack.getQuantity()));
+            }
         }
+        mergeConsumedSlots(s.consumedItems, slots);
     }
 
     /**

@@ -483,6 +483,17 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   `Durability +N` row (durability is RpgStations-native, so a bare anvil with NO stamper still
   reports its enhancement) accent-colored `#c9a2ff` at composition; `StationSummaryHud`'s
   `ENHANCE` case renders both without recolor. Zero MMO stat vocabulary enters this mod.
+  **Round-8b consumed-ledger fix**: the `Stamp` step drains its reagents via `consumeReagent` (the
+  anvil's sharpened bars come from `Stamp.Reagents`, NOT a `Consume` step), which formerly built a
+  restore-on-failure list only and never recorded into `s.consumedItems`, so the enhance summary
+  showed the stat/durability/XP rows but no CONSUMED row. `StampHandler` now calls
+  `StationService.tallyConsumedStacks(session, consumedForRestore)` right after `claim.setUniqueStack`
+  (the commit's point of no return) so `ledgerRows` renders one `SummaryRow.Kind.CONSUMED` row per
+  reagent stack through the existing pipeline. ONE consume-ledger authority: the shared pure
+  `StationService.mergeConsumedSlots` fold backs both `tallyConsumedResource` (the `ResourceTypeId`
+  family route, with its raw-type fallback) and `tallyConsumedStacks` (the Stamp route, concrete
+  drained ids). `tallyResourceConsumption` is NOT orphaned (the `ConsumeHandler` inventory-resource
+  route calls it, `StationStepHandlers`); `ProduceHandler` already tallied `producedItems`, no gap.
 - **Phase 2 legs A-G are all LANDED** - see the "Loot + flairs" and "placed-input
   PLACED-AS-ENTITY visual" bullets above for F/G's file-by-file detail. **Leg H (the phase-2
   smoke round) is docs-landed** (see the mod-root `CLAUDE.md`'s Phase 2 section and

@@ -224,3 +224,18 @@ outcome; the sibling CustomSkill migration and XP-toast-stacking defects land MM
   unaffected), the explicit `dispatchProgram` `resuming` flag with fresh-dispatch `stepDeadlineMs`
   zeroing, and the generic per-step Presentation emission (any step's own authored `Presentation`
   plays once when it begins executing, not just the dedicated `Present` step's).
+
+### Round-8b: Stamp reagents in the session-summary consumed ledger (2026-07-23)
+
+- Fixes the anvil Enhance summary omitting a consumed row for the reagents the ritual ate: the
+  `Stamp` step drains its reagents (the sharpened bars) directly through `consumeReagent`, which only
+  built a restore-on-failure list and never recorded into the session's `consumedItems` ledger, so
+  the summary showed the Smithing XP, enhancement stat, and durability rows but NO consumed row. The
+  `StampHandler` now tallies its committed reagents into the SAME `s.consumedItems` ledger the
+  implicit-program `Consume` step feeds (recorded only after `claim.setUniqueStack`, the commit's
+  point of no return, so a restore-on-failure refund is never counted as consumed), and
+  `ledgerRows` renders one `SummaryRow.Kind.CONSUMED` row per input stack (e.g. the 2 sharpened
+  bars) through the existing pipeline - zero HUD change. The consume tally now has one authority: a
+  shared pure `StationService.mergeConsumedSlots` fold backs both the `ResourceTypeId` family route
+  (`tallyConsumedResource`, with its raw-type fallback) and the new Stamp reagent route
+  (`tallyConsumedStacks`). Produce was already tallied by `ProduceHandler`; no gap there.

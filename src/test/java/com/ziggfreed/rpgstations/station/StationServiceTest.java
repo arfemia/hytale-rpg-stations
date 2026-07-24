@@ -99,6 +99,64 @@ public class StationServiceTest {
         assertEquals(1, tally.get("Wood_Hardwood_Trunk"));
     }
 
+    // ==================== Stamp-reagent consumed tally (shared mergeConsumedSlots core) ====================
+    // The pure core StationService#tallyConsumedStacks folds a Stamp step's committed reagents into
+    // s.consumedItems so the enhance summary shows a CONSUMED row per input stack (e.g. the 2
+    // sharpened bars). The ItemStack-reading adapter itself needs a live JVM (ItemStack's static
+    // init fails in unit tests, per StationStampMutationTest), so these target its shared fold core.
+
+    @Test
+    void mergeConsumedSlots_sumsReagentStacksPerItemIdAndReportsAny() {
+        Map<String, Integer> tally = new LinkedHashMap<>();
+        List<StationService.ConsumedSlot> reagents = List.of(
+                new StationService.ConsumedSlot("MMO_Sharpened_Iron_Bar", 1),
+                new StationService.ConsumedSlot("MMO_Sharpened_Iron_Bar", 1));
+
+        boolean any = StationService.mergeConsumedSlots(tally, reagents);
+
+        assertTrue(any);
+        assertEquals(1, tally.size());
+        assertEquals(2, tally.get("MMO_Sharpened_Iron_Bar"));
+    }
+
+    @Test
+    void mergeConsumedSlots_mixedReagentFamilyKeepsDistinctDrainedIds() {
+        Map<String, Integer> tally = new LinkedHashMap<>();
+        List<StationService.ConsumedSlot> reagents = List.of(
+                new StationService.ConsumedSlot("MMO_Sharpened_Iron_Bar", 1),
+                new StationService.ConsumedSlot("MMO_Sharpened_Gold_Bar", 1));
+
+        StationService.mergeConsumedSlots(tally, reagents);
+
+        assertEquals(2, tally.size());
+        assertEquals(1, tally.get("MMO_Sharpened_Iron_Bar"));
+        assertEquals(1, tally.get("MMO_Sharpened_Gold_Bar"));
+    }
+
+    @Test
+    void mergeConsumedSlots_accumulatesOntoAnExistingConsumedLedger() {
+        Map<String, Integer> tally = new LinkedHashMap<>();
+        tally.put("Wood_Oak_Log", 4); // a prior implicit-program Consume already tallied here
+        StationService.mergeConsumedSlots(tally,
+                List.of(new StationService.ConsumedSlot("MMO_Sharpened_Iron_Bar", 2)));
+
+        assertEquals(4, tally.get("Wood_Oak_Log"));
+        assertEquals(2, tally.get("MMO_Sharpened_Iron_Bar"));
+    }
+
+    @Test
+    void mergeConsumedSlots_emptyOrUnusable_reportsNoneAndAddsNoFallback() {
+        Map<String, Integer> tally = new LinkedHashMap<>();
+        List<StationService.ConsumedSlot> slots = List.of(
+                new StationService.ConsumedSlot(null, 3),
+                new StationService.ConsumedSlot("MMO_Sharpened_Iron_Bar", 0));
+
+        boolean any = StationService.mergeConsumedSlots(tally, slots);
+
+        assertFalse(any);
+        assertTrue(tally.isEmpty()); // no raw-resource-type fallback on this path, unlike tallyConsumedResource
+    }
+
     // ==================== Held-tool gate decision ====================
 
     @Test

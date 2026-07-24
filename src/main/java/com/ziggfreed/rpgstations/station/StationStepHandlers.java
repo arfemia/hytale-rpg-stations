@@ -414,6 +414,15 @@ final class StationStepHandlers {
             }
             claim.setUniqueStack(mutation.stack());
 
+            // Record the ritual's committed reagents into the session's consumed ledger, the SAME
+            // s.consumedItems the implicit-program Consume step feeds, so the end-of-session summary
+            // renders one CONSUMED row per reagent stack (e.g. the 2 sharpened bars) through the
+            // existing ledgerRows pipeline. Tallied only AFTER claim.setUniqueStack (the point of no
+            // return - a restore-on-failure earlier would have refunded these, so they must not be
+            // counted as consumed until the commit is final). `consumedForRestore` already holds the
+            // REAL drained stacks a ResourceTypeId reagent family resolved to.
+            StationService.tallyConsumedStacks(ctx.session, consumedForRestore);
+
             // D-6: capture the committed outcome AFTER the ONE custody write, so a session summary
             // + the api event report only a fully-committed enhancement (never a denied ritual).
             // `weaponStack` is the immutable pre-mutation "before" copy; mutation.stack() is "after".
