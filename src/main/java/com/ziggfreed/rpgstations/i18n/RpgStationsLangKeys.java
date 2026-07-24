@@ -43,6 +43,9 @@ import javax.annotation.Nonnull;
  * {@code .desc}, {@code station.cookingfire.name}/{@code .desc}, {@code action.prepfish.label}),
  * and adds {@code ui.station.bench.hint} (the decision-51a native SNEAK+F bench-window advertise
  * hint, the {@code retrieve.hint} sibling).
+ * The scope-3 standing-mount verify PREP adds {@code station.mountspike.name}/{@code .desc} (the
+ * throwaway {@code MountSpike.json} dev station, {@code Hold.Mount.Surface: "Entity"}); remove
+ * alongside the station/item/interaction files once the maintainer's in-game smoke is done.
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -131,7 +134,11 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.picker.title",
             "rpgstations.ui.station.picker.hint",
             "rpgstations.ui.station.picker.locked",
-            "rpgstations.ui.station.picker.locked_generic");
+            "rpgstations.ui.station.picker.locked_generic",
+            // SCOPE-3 standing-mount verify PREP (throwaway dev spike, /rpgstations - the block's
+            // own Use interaction, no new command). Delete alongside MountSpike.json.
+            "rpgstations.station.mountspike.name",
+            "rpgstations.station.mountspike.desc");
 
     private RpgStationsLangKeys() {
     }

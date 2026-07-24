@@ -1,0 +1,32 @@
+{
+  "$Comment": "SCOPE-3 DEV SPIKE, throwaway (design decisions 6/17): the standing-mount (Hold.Mount.Surface: 'Entity') verify PREP the Anvil arc deferred - the entity-mount machinery (StationEntityMountController, phase-2 leg D + the round-3 NetworkId/CommandBuffer-despawn fixes) was built and unit-tested but never confirmed in-game. Self-contained (no Parent reuse, to keep this spike trivially reviewable) - mirrors the shipped Sawmill's Work/Recipe/Custody shape (same easily-obtainable WoodPlanks input, no Tool requirement so no hatchet is needed either) with ONLY the Hold.Mount group swapped from Block/Seats to Entity/Offset. Delete this file (+ its Item/RootInteraction pair) once the maintainer's in-game smoke confirms or falsifies the standing pose; nothing else in the mod references it.",
+  "Identity": {
+    "NameKey": "rpgstations.station.mountspike.name",
+    "DescKey": "rpgstations.station.mountspike.desc"
+  },
+  "Work": {
+    "CycleMs": 4665,
+    "MaxDurationMs": 600000,
+    "MaxMoveMeters": 1.5,
+    "Exclusive": true
+  },
+  "Recipe": {
+    "FromCrafting": { "Categories": ["WoodPlanks"] }
+  },
+  "Custody": {
+    "MaxQuantity": 100,
+    "States": { "Empty": "Default", "Loaded": "Loaded" }
+  },
+  "Hold": {
+    "MovementLock": true,
+    "EffectId": "RPG_Station_Hold",
+    "InterruptOnDamage": true,
+    "Mount": {
+      "Surface": "Entity",
+      "Entity": { "Offset": { "X": 0.0, "Y": 0.0, "Z": 0.6 } }
+    }
+  },
+  "Presentation": {
+    "Sound": "SFX_Wood_Break"
+  }
+}

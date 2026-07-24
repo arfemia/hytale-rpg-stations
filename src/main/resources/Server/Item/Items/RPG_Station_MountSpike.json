@@ -1,0 +1,67 @@
+{
+  "$Comment": "SCOPE-3 DEV SPIKE, throwaway (design decisions 6/17, standing-mount verify PREP): a NEW block/item id so this can be placed and pressed WITHOUT touching the shipped Sawmill's block/interaction at all (the shipped RPG_Station_Sawmill_Use RootInteraction keeps pointing at Station 'sawmill', unchanged). Visuals/hitbox are reused verbatim from the shipped Sawmill (no new art for a throwaway spike); only the Use RootInteraction differs, routing to Station 'mountspike' (Server/RpgStations/Stations/MountSpike.json, Hold.Mount.Surface Entity). Delete alongside MountSpike.json once the maintainer's in-game smoke is done.",
+  "TranslationProperties": {
+    "Name": "items.RPG_Station_MountSpike.name",
+    "Description": "items.RPG_Station_MountSpike.description"
+  },
+  "PlayerAnimationsId": "Block",
+  "Categories": ["Furniture.Furniture"],
+  "Icon": "Icons/ItemsGenerated/Bench_Lumbermill.png",
+  "MaxStack": 1,
+  "Interactions": {
+    "Primary": "Block_Primary",
+    "Secondary": "Block_Secondary"
+  },
+
+  "BlockType": {
+    "BlockParticleSetId": "Wood",
+    "BlockSoundSetId": "Wood",
+    "PhysicalMaterialId": "Wood",
+    "CustomModel": "Blocks/Benches/Lumbermill.blockymodel",
+    "CustomModelTexture": [
+      {
+        "Texture": "Blocks/Benches/Lumbermill_Texture.png",
+        "Weight": 1
+      }
+    ],
+    "DrawType": "Model",
+    "Flags": {
+      "IsUsable": true
+    },
+    "Gathering": {
+      "Soft": {
+        "IsWeaponBreakable": false
+      }
+    },
+    "HitboxType": "Bench_Lumbermill",
+    "Material": "Solid",
+    "Opacity": "Transparent",
+    "Support": {
+      "Down": [
+        {
+          "FaceType": "Full"
+        }
+      ]
+    },
+    "VariantRotation": "NESW",
+    "InteractionHint": "items.RPG_Station_MountSpike.hint.empty",
+    "Interactions": {
+      "Use": "RPG_Station_MountSpike_Use"
+    },
+    "State": {
+      "Definitions": {
+        "Default": {
+          "InteractionHint": "items.RPG_Station_MountSpike.hint.empty"
+        },
+        "Loaded": {
+          "InteractionHint": "items.RPG_Station_MountSpike.hint.loaded"
+        }
+      }
+    }
+  },
+  "Tags": {
+    "Type": ["Furniture"],
+    "Family": ["RpgStations"]
+  },
+  "ItemSoundSetId": "ISS_Blocks_Wood"
+}
