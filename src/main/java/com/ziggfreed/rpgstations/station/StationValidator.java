@@ -69,16 +69,18 @@ import com.ziggfreed.rpgstations.validation.Report;
  * {@code UNIMPLEMENTED_PRODUCE_DEST}, {@code WAIT_BOTH_ROUTES}, {@code UNIMPLEMENTED_WAIT_BEATS}
  * (the {@code Type} union, the {@code Wait} type, and the reserved {@code Mount} type are gone).
  *
- * <p><b>Wave boundary for the two new standalone asset types</b> ({@link ActionAsset},
- * {@link ExtensionAsset}): {@code ActionCatalog}/{@code ExtensionCatalog} (leg A3's scope) do not
- * exist yet at the time of this leg, so {@link #validateActionAssets} and
- * {@link #validateExtensions} are pure, singleton-free, fully unit-tested collection validators
- * NOT YET wired into the live {@link #validate()}/{@link #validateStructural()} singleton entry
- * points - a follow-up leg (A3 or the join/seal leg) wires them once the catalogs land. The
- * {@code actionAssetKnown} predicate the main per-station walk needs for {@code ACTION_REF_UNKNOWN}
- * is likewise wired fail-open ({@code id -> true}) in the live singleton until then; the
- * {@code stationKnown} predicate for {@code ANCHOR_STATION_UNKNOWN} IS live-wired today (against
- * the already-existing {@link StationCatalog}).
+ * <p><b>Standalone asset types</b> ({@link ActionAsset}, {@link ExtensionAsset}):
+ * {@link #validateActionAssets} and {@link #validateExtensions} are pure, singleton-free, fully
+ * unit-tested collection validators, and (review minor: validator-standalone-action-unwired) they
+ * are now WIRED into the live {@link #validate()} full post-load pass against {@code ActionCatalog}/
+ * {@code ExtensionCatalog}, so the flagship standalone {@code prepfish} action Ref'd from
+ * {@code CuttingBoard} actually gets its anchor/walk checks at load. They are deliberately NOT run
+ * from {@link #validateStructural()} (the per-fold pass defers every cross-layer reference check; a
+ * {@code Target:{Station}} extension validated before its target station's layer folds would
+ * false-flag {@code EXTENSION_TARGET_UNKNOWN}). The {@code actionAssetKnown} predicate the main
+ * per-station walk needs for {@code ACTION_REF_UNKNOWN} is now live-wired in {@link #validate()}
+ * too (against {@code ActionCatalog}), alongside {@code stationKnown} for
+ * {@code ANCHOR_STATION_UNKNOWN} (against {@link StationCatalog}).
  *
  * <p>Pure and side-effect-free (apart from {@link #runAndLog}); never throws.
  */
@@ -103,19 +105,38 @@ public final class StationValidator {
     @Nonnull
     public static List<Finding> validate() {
         try {
-            List<Finding> out = new ArrayList<>(validate(StationCatalog.getInstance().all().values(),
+            Collection<StationAsset> stations = StationCatalog.getInstance().all().values();
+            Collection<ActionAsset> actionAssets = ActionCatalog.getInstance().all().values();
+            Collection<ExtensionAsset> extensions = ExtensionCatalog.getInstance().all().values();
+            Predicate<String> factorKnown = FactorRegistryImpl.getInstance()::isKnown;
+            Predicate<String> lootableKnown = id -> LootableCatalog.getInstance().get(id) != null;
+            Predicate<String> rollPoolKnown = id -> RollPoolCatalog.getInstance().get(id) != null;
+            Predicate<String> stationKnown = id -> StationCatalog.getInstance().getStation(id) != null;
+            Predicate<String> actionAssetKnown = id -> ActionCatalog.getInstance().get(id) != null;
+
+            List<Finding> out = new ArrayList<>(validate(stations,
                     StationValidator::langKeyKnownLive,
                     StationValidator::dropListKnownLive,
-                    FactorRegistryImpl.getInstance()::isKnown,
-                    id -> LootableCatalog.getInstance().get(id) != null,
-                    id -> RollPoolCatalog.getInstance().get(id) != null,
+                    factorKnown,
+                    lootableKnown,
+                    rollPoolKnown,
                     StationValidator::modelKnownLive,
-                    id -> StationCatalog.getInstance().getStation(id) != null,
-                    ALWAYS_KNOWN));
+                    stationKnown,
+                    actionAssetKnown));
             out.addAll(validateLootables(LootableCatalog.getInstance().all().values(),
-                    StationValidator::dropListKnownLive, FactorRegistryImpl.getInstance()::isKnown));
-            out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(),
-                    id -> StationCatalog.getInstance().getStation(id) != null));
+                    StationValidator::dropListKnownLive, factorKnown));
+            out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), stationKnown));
+            // Review minor (validator-standalone-action-unwired): the flagship standalone prepfish
+            // ActionAsset (Ref'd from CuttingBoard) and every ExtensionAsset are validated HERE, in
+            // the FULL post-load pass, now that ActionCatalog/ExtensionCatalog exist. Deliberately NOT
+            // added to validateStructural(): that per-fold pass defers every cross-layer reference
+            // check, and a Target:{Station} extension validated before its target station's layer
+            // folds would false-flag EXTENSION_TARGET_UNKNOWN.
+            out.addAll(validateActionAssets(actionAssets,
+                    StationValidator::dropListKnownLive, factorKnown, lootableKnown, rollPoolKnown,
+                    StationValidator::modelKnownLive, stationKnown));
+            out.addAll(validateExtensions(extensions, stations, actionAssets,
+                    StationValidator::dropListKnownLive, factorKnown, lootableKnown, rollPoolKnown));
             return out;
         } catch (Throwable t) {
             Log.warn("Station validation aborted: " + t.getMessage());
@@ -301,8 +322,8 @@ public final class StationValidator {
      * checks {@link #checkActions} runs on an inline {@code Actions} map entry, applied to a
      * standalone action's own {@link ActionAsset#getBody()} - no station-level Puppet/Hold/Recipe
      * fallback exists for a standalone action (it IS the base), so the resolved groups are its own
-     * only. NOT yet wired into {@link #validate()}/{@link #validateStructural()} - see this class's
-     * header javadoc (leg A3's {@code ActionCatalog} does not exist yet).
+     * only. Wired into the live {@link #validate()} full pass (over {@code ActionCatalog}); NOT
+     * into {@link #validateStructural()} - see this class's header javadoc.
      */
     @Nonnull
     public static List<Finding> validateActionAssets(@Nonnull Collection<ActionAsset> actionAssets,
@@ -348,9 +369,9 @@ public final class StationValidator {
      * {@code ExtensionCatalog}). {@code EXTENSION_ANCHOR_MISSING} for a dangling {@code After}/
      * {@code Before} step id is checked ONLY when the target step program is resolvable from the
      * passed-in {@code stations}/{@code actionAssets} collections (an ambiguous/missing placement
-     * leaf is ALWAYS checked regardless). NOT yet wired into {@link #validate()}/
-     * {@link #validateStructural()} - see this class's header javadoc (leg A3's
-     * {@code ExtensionCatalog} does not exist yet).
+     * leaf is ALWAYS checked regardless). Wired into the live {@link #validate()} full pass (over
+     * {@code ExtensionCatalog} + the folded station/action collections); NOT into
+     * {@link #validateStructural()} - see this class's header javadoc.
      */
     @Nonnull
     public static List<Finding> validateExtensions(@Nonnull Collection<ExtensionAsset> extensions,

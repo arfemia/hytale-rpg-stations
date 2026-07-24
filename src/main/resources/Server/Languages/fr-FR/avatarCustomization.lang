@@ -1,0 +1,10 @@
+# RPG Stations - avatarCustomization-namespace additions, fr-FR (localisation).
+# Ce fichier cible l'espace de noms "avatarCustomization" de Hytale (l'espace de noms que
+# l'interface d'emote du client lit pour les noms d'émotes - les émotes vanilla utilisent
+# avatarCustomization.emotes.<Id>.name). Les fichiers .lang expédiés par le serveur fusionnent
+# par clé-additivement dans un espace de noms, donc ce fichier ajoute UNIQUEMENT les clés
+# nouvelles pour les EmoteAssets propres à ce mod (Server/Emote/*.json) et ne remplace jamais
+# une clé appartenant au client.
+
+emotes.RPG_Emote_Saw.name = Sciage
+emotes.RPG_Emote_Knife.name = Écaillage de Poisson

@@ -2234,7 +2234,7 @@ public final class StationService {
                         anchorStationNameMsg(anchor.getStation())));
             }
             claimed.add(blockKey);
-            resolved.put(anchorId, blockKey);
+            resolved.put(normAnchorId(anchorId), blockKey);
         }
         return AnchorResolution.ok(resolved);
     }
@@ -2275,7 +2275,20 @@ public final class StationService {
         if (anchorId == null || anchorId.isBlank() || ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(anchorId)) {
             return s.blockKey;
         }
-        return s.anchorBlocks.get(anchorId);
+        return s.anchorBlocks.get(normAnchorId(anchorId));
+    }
+
+    /**
+     * The ONE anchor-id case rule (review minor: validator/runtime case divergence): anchor ids are
+     * matched LOWERCASE everywhere. The validator already lowercases both the declared keys and the
+     * step {@code At}/{@code Walk.To} references, so the runtime {@link StationSession#anchorBlocks}
+     * map is keyed AND queried lowercase - an author declaring anchor {@code "Fire"} but referencing
+     * {@code At:"fire"} passes validation and now resolves at runtime too, instead of a silent
+     * {@code null} -> {@code PATH_BLOCKED}/{@code STEP_FAILED}.
+     */
+    @Nonnull
+    private static String normAnchorId(@Nonnull String anchorId) {
+        return anchorId.toLowerCase(java.util.Locale.ROOT);
     }
 
     /** The live custody claim at a step's {@code At} anchor (or the primary block for {@code "self"}/absent). */
@@ -2338,7 +2351,7 @@ public final class StationService {
             return asset != null && s.actionId != null
                     ? ActionResolver.resolve(asset, s.actionId).getCustody() : null;
         }
-        String blockKey = s.anchorBlocks.get(anchorId);
+        String blockKey = s.anchorBlocks.get(normAnchorId(anchorId));
         String anchorStationId = blockKey != null ? knownStationBlocks.get(blockKey) : null;
         if (anchorStationId != null) {
             StationAsset anchorAsset = StationCatalog.getInstance().getStation(anchorStationId);
@@ -2508,11 +2521,16 @@ public final class StationService {
     }
 
     /**
-     * The M1 single rule (design 2.5): ANY {@code Produce.To:"Custody"} clears the ENTIRE current
-     * iteration's consumed ledger (the consumed inputs became the custody item {@code returnCustody}
-     * now hands back). Refund and custody-return are mutually exclusive per iteration.
+     * The M1 single rule (design 2.5, extended for review minor m1): ANY committed produce - a
+     * {@code Produce.To:"Custody"} OR a {@code Produce.To:"Inventory"} - clears the ENTIRE current
+     * iteration's consumed ledger. The consumed inputs BECAME the produced output (handed back by
+     * {@code returnCustody} for a custody produce, already in the player's inventory for an
+     * inventory produce), so refund and the committed output stay mutually exclusive per iteration.
+     * Without the inventory case a {@code Consume + Produce(To:Inventory) + Duration} step stopped
+     * mid-{@code Duration} would refund the consumed inputs while the produced item is already in
+     * the inventory - a double-grant.
      */
-    static void clearIterationLedgerOnCustodyProduce(@Nonnull StationSession s) {
+    static void clearIterationLedgerOnCommittedProduce(@Nonnull StationSession s) {
         s.iterationConsumed.clear();
     }
 

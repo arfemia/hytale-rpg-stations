@@ -1445,6 +1445,27 @@ public class StationValidatorTest {
         assertFalse(codes(findings).contains("ANCHOR_STATION_UNKNOWN"));
     }
 
+    @Test
+    void liveValidate_validatesStandaloneActions_theWiring() throws Exception {
+        // Review minor (validator-standalone-action-unwired): the singleton validate() now folds the
+        // standalone ActionAsset store through validateActionAssets, so a broken standalone action
+        // (the flagship prepfish shape) actually gets its anchor checks at load. Inject a broken
+        // action (anchor -> unknown station) into the LIVE ActionCatalog and confirm the singleton
+        // full pass surfaces ANCHOR_STATION_UNKNOWN (an empty unit-JVM StationCatalog knows no
+        // station, so the unknown-anchor-station check fires). Cleared in finally so the
+        // process-wide singleton is not left polluted for other tests.
+        ActionAsset broken = actionAsset("brokenwiredaction",
+                "{ \"Anchors\": { \"fire\": { \"Station\": \"ghoststation\" } }, \"Steps\": [ { \"Id\": \"s\" } ] }");
+        try {
+            ActionCatalog.getInstance().fold(Map.of("brokenwiredaction", broken), true);
+            Set<String> codes = codes(StationValidator.validate());
+            assertTrue(codes.contains("ANCHOR_STATION_UNKNOWN"),
+                    "the live validate() pass validates standalone actions, got: " + codes);
+        } finally {
+            ActionCatalog.getInstance().fold(Map.of(), true);
+        }
+    }
+
     // ==================== validateExtensions (scope-2 design 1.8/1.9) ====================
 
     @Test

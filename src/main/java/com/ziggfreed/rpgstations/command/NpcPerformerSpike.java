@@ -264,13 +264,48 @@ public final class NpcPerformerSpike {
     }
 
     private void doStop(@Nonnull PlayerRef player, @Nonnull Store<EntityStore> store) {
-        if (!byPlayer.containsKey(player.getUuid())) {
-            player.sendMessage(RpgMsg.tr("command.npcspike.stop_none").color(Color.YELLOW));
-            return;
-        }
+        boolean tracked = byPlayer.containsKey(player.getUuid());
+        // Tear down whatever THIS player's map tracks (NPC + its walk marker), if anything.
         despawnFor(player.getUuid(), store);
-        player.sendMessage(RpgMsg.tr("command.npcspike.stopped").color(Color.GREEN));
-        Log.info("[npcspike] despawned performer for " + player.getUuid());
+        // Sweep fallback (feasibility 4d "SPIKE MERGE HARDENING" + decision 46): the per-player
+        // map is empty after a server restart, so the DEFAULT (serialized) spawn variant leaves a
+        // PERSISTED spike NPC with no tracking ref - it would strand forever. Despawn ANY entity
+        // whose NPCEntity role is the throwaway spike role, so a stale map never orphans one. A
+        // registered tag component would be gold-plating; the role-name match suffices for a
+        // throwaway. Markers need no separate sweep: they are NonSerialized (they never survive
+        // the restart that stales the map) and are torn down with the tracked owner above.
+        int swept = sweepStrandedPerformers(store);
+        if (tracked || swept > 0) {
+            player.sendMessage(RpgMsg.tr("command.npcspike.stopped").color(Color.GREEN));
+            Log.info("[npcspike] despawned performer for " + player.getUuid() + " (swept=" + swept + ")");
+        } else {
+            player.sendMessage(RpgMsg.tr("command.npcspike.stop_none").color(Color.YELLOW));
+        }
+    }
+
+    /**
+     * Despawns every {@link NPCEntity} in {@code store} whose role is {@link #ROLE_ID}, returning
+     * how many matched. Runs on the world thread (the caller is inside {@code world.execute}); the
+     * removal is queued through the parallel iteration's {@code CommandBuffer} (the
+     * {@code NPCCleanCommand} first-party precedent) and applied when the sweep completes, so a
+     * ref this player's own {@link #despawnFor} already removed is a no-op via
+     * {@code tryRemoveEntity}. Never throws.
+     */
+    private static int sweepStrandedPerformers(@Nonnull Store<EntityStore> store) {
+        java.util.concurrent.atomic.AtomicInteger matched = new java.util.concurrent.atomic.AtomicInteger();
+        try {
+            store.forEachEntityParallel(NPCEntity.getComponentType(), (index, chunk, cmdBuffer) -> {
+                NPCEntity npc = chunk.getComponent(index, NPCEntity.getComponentType());
+                if (npc == null || !ROLE_ID.equals(npc.getRoleName())) {
+                    return;
+                }
+                matched.incrementAndGet();
+                cmdBuffer.tryRemoveEntity(chunk.getReferenceTo(index), RemoveReason.REMOVE);
+            });
+        } catch (Throwable t) {
+            Log.warn("[npcspike] performer sweep failed: " + t.getMessage());
+        }
+        return matched.get();
     }
 
     // ==================== helpers ====================

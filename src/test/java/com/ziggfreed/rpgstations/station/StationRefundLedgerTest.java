@@ -38,9 +38,26 @@ class StationRefundLedgerTest {
         StationSession s = session();
         StationService.recordIterationConsumedItem(s, "Fish", 2);
         StationService.recordIterationConsumedItem(s, "Salt", 1);
-        // Any Produce.To:Custody clears the ENTIRE current iteration's ledger (M1).
-        StationService.clearIterationLedgerOnCustodyProduce(s);
+        // Any committed produce clears the ENTIRE current iteration's ledger (M1).
+        StationService.clearIterationLedgerOnCommittedProduce(s);
         assertTrue(s.iterationConsumed.isEmpty(), "a custody produce clears the whole ledger");
+    }
+
+    @Test
+    void produceToInventoryClearsLedger_noMidDurationDoubleGrant() {
+        // Review minor m1: a step authoring Consume + Produce(To:Inventory) + Duration commits the
+        // output to the player's inventory, THEN suspends on the Duration. A stop during that suspend
+        // must NOT refund the consumed inputs (the output already went to the player) - the SAME M1
+        // clear the To:Custody branch does. The grant itself needs a live server, so this locks the
+        // pure ledger contract the inventory-produce branch now invokes (StationStepHandlers
+        // .producePhase -> clearIterationLedgerOnCommittedProduce): the refund source is emptied, so
+        // refundIterationLedger re-grants nothing.
+        StationSession s = session();
+        StationService.recordIterationConsumedItem(s, "Fish", 1);   // Consume phase
+        assertTrue(s.iterationConsumed.containsKey("Fish"));
+        StationService.clearIterationLedgerOnCommittedProduce(s);    // Produce To:Inventory commit
+        assertTrue(s.iterationConsumed.isEmpty(),
+                "an inventory produce clears the refund ledger - a mid-Duration stop never double-grants");
     }
 
     @Test
@@ -55,7 +72,7 @@ class StationRefundLedgerTest {
         assertTrue(s.iterationConsumed.containsKey("Fish"));
 
         // placeraw step: Produce Food_Fish_Raw To:Custody -> clears the ledger (the transform commit).
-        StationService.clearIterationLedgerOnCustodyProduce(s);
+        StationService.clearIterationLedgerOnCommittedProduce(s);
 
         // Mid-cook stop: the refund source is empty, so the Fish is NOT refunded (the custody
         // return, not modelled here, hands back the raw fish standing in the fire's custody).

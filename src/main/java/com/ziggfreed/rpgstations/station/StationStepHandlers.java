@@ -366,10 +366,12 @@ final class StationStepHandlers {
     // ==================== Produce phase ====================
 
     /**
-     * Adds {@code Produce.Quantity} of {@code Produce.ItemId} to the player, hotbar-first then
-     * backpack storage then drop-at-block. {@code To:"Custody"} is a wave-3 phase (caught upstream
-     * by {@link StationStep#authorsWave3OnlyPhase()}); this body only ever sees {@code To:"Inventory"}
-     * and defends against anything else. Returns {@code null} on success/no-op.
+     * Commits a produce phase. {@code To:"Custody"} (wave 3) stores into the step's {@code At}-anchor
+     * custody claim; {@code To:"Inventory"} adds {@code Produce.Quantity} of {@code Produce.ItemId} to
+     * the player, hotbar-first then backpack storage then drop-at-block. EITHER committed destination
+     * clears the current iteration's refund ledger (review minor m1) - the consumed inputs became the
+     * produced output, so a later stop never both refunds the inputs AND keeps the output. Returns
+     * {@code null} on success/no-op.
      */
     @Nullable
     static StationStepResult producePhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
@@ -398,7 +400,7 @@ final class StationStepHandlers {
                                     + step.getAt() + "'");
                 }
                 ctx.session.producedItems.merge(produce.getItemId(), quantity, Integer::sum);
-                StationService.clearIterationLedgerOnCustodyProduce(ctx.session);
+                StationService.clearIterationLedgerOnCommittedProduce(ctx.session);
             } catch (Throwable t) {
                 Log.warn("STATION Produce To:Custody step failed for '" + ctx.session.stationId + "': "
                         + t.getMessage());
@@ -416,6 +418,10 @@ final class StationStepHandlers {
             ItemGrantUtil.grant(ctx.player, new ItemStack(produce.getItemId(), quantity), ctx.store,
                     ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
             ctx.session.producedItems.merge(produce.getItemId(), quantity, Integer::sum);
+            // M1 (review minor m1): the output is now committed to the inventory, so the consumed
+            // inputs are spent - clear the refund ledger, exactly as the To:Custody branch does, or a
+            // stop on a later Duration suspend in this same iteration would double-grant.
+            StationService.clearIterationLedgerOnCommittedProduce(ctx.session);
             if (ctx.session.playerRef != null) {
                 StationService.notifyItemGain(ctx.session.playerRef, produce.getItemId(), quantity, false);
             }
