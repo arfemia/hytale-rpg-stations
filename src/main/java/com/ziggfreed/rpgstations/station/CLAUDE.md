@@ -686,12 +686,21 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   double-fire, `StationService#runSwing`/`start` SUPPRESS the generic engage/swing puppet CLIP for a
   stepped program whose steps author any `Clip` (`StationSession.stepProgramAuthorsClip`, resolved
   once at engage via `StationStepDecisions.programAuthorsAnyStepClip`; a stepped program with NO step
-  clips keeps its one generic engage swing). The per-step **`Prop`** override is UNCHANGED - still
-  read off the session's step-resume state (`programSuspended`/`activeProgramSteps`/`programIndex`)
-  via `#playSwing`'s prop sync (which always runs, even when the clip is suppressed - `playSwing`'s
-  `playClip` param gates only the clip). `resolveEffectiveClip`/`resolveEffectivePropItemId`/
-  `shouldPlayClipOnEntry`/`programAuthorsAnyStepClip` are the pure decision cores, unit-tested
-  (`StationPuppetControllerTest`/`StationStepDecisionsTest`). The shipped anvil authors
+  clips keeps its one generic engage swing). The per-step **`Prop`** override now ALSO syncs at STEP
+  ENTRY (round-8 continuation), mirroring the clip's entry hook exactly: `StationStepRegistry`'s guard
+  calls `StationPuppetController#syncStepProp` when `StationStepDecisions.shouldSyncPropOnEntry(step,
+  resumingStep)` passes (the SAME `resumingStep` identity guard), so a step's own `Puppet.Prop`
+  override fires the moment it begins executing - the anvil's `stamp` beat's `Prop.Source:"None"`
+  empty-hands swap finally shows (the enhance action has NO swing beats, so the prior swing-beat-only
+  sync never visibly fired). Unlike the clip gate, this is NOT gated on the step authoring an override:
+  EVERY fresh step entry syncs to that step's effective prop (its override when authored, ELSE the
+  session default), so moving PAST a prop-overriding step reverts the prop to the default (the exit
+  edge, one rule, no separate revert path). `#syncStepProp` delegates to the SAME `#syncProp` plumbing
+  the swing beat uses, which STILL also runs every beat off the session's step-resume state
+  (`programSuspended`/`activeProgramSteps`/`programIndex`, holding a suspended step's prop across
+  heartbeats - that is why the entry sync is safely skipped on a resume re-check). `resolveEffectiveClip`/
+  `resolveEffectivePropItemId`/`shouldPlayClipOnEntry`/`shouldSyncPropOnEntry`/`programAuthorsAnyStepClip`
+  are the pure decision cores, unit-tested (`StationPuppetControllerTest`/`StationStepDecisionsTest`). The shipped anvil authors
   `MMO_Emote_Hammer` on its `strike1`/`strike2` steps (the same clip the generic swing route resolves
   for the held hammer) so the puppet visibly hammers on both strike beats. **Safety net** (design
   4.4/leg P5): `reassertOnReady` unconditionally clears any lingering `EntityScaleComponent` and

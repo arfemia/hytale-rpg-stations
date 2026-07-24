@@ -149,6 +149,39 @@ final class StationStepDecisions {
         return clip != null && !clip.isBlank();
     }
 
+    /**
+     * Whether the puppet's held PROP should be re-synced to THIS step's own effective prop the
+     * moment the step begins EXECUTING - the step-synced prop swap (round-8 continuation, mirroring
+     * {@link #shouldPlayClipOnEntry}'s once-per-ITERATION-entry, never-on-resume-recheck trigger via
+     * the SAME {@link StationStepContext#resumingStep} identity guard). {@code false} when
+     * {@code step} IS {@code resumingStep} (the suspend-resume RE-CHECK of a step that already
+     * synced its prop on its first entry - the swing-beat suspension-gated sync
+     * ({@code StationPuppetController#playSwing}'s {@code activeStepPuppetOverride} read) HOLDS the
+     * suspended step's prop across every heartbeat while it waits, so re-syncing it on each re-check
+     * would be redundant, exactly as replaying its clip would be); {@code true} for every FRESH step
+     * entry (identity comparison, never {@code equals}, for the same object-reference reason the
+     * clip/Presentation hooks use it).
+     *
+     * <p><b>Deliberately NOT gated on the step authoring a prop override</b> (the load-bearing
+     * difference from {@link #shouldPlayClipOnEntry}, which DOES require an authored clip). Every
+     * fresh entry syncs the prop to the step's own effective resolution - the step's {@code
+     * Puppet.Prop} override when it authors one, ELSE the session default ({@code
+     * StationPuppetController#syncProp}'s own {@code override != null && override.getProp() != null ?
+     * override.getProp() : puppetDefaultProp} fallback). This ONE rule handles both edges with no
+     * separate revert path: entering a prop-overriding step swaps TO the override (e.g. the anvil's
+     * {@code stamp} step's {@code Prop.Source:"None"} empties the puppet's hands), and entering ANY
+     * later step that authors no override reverts the prop BACK to the session default - the exit
+     * edge, made consistent with how the swing-beat suspension-gated sync already reverts to the
+     * default whenever the program is not suspended on an override-bearing step. A gate on "authors
+     * an override" would leave the prop STUCK on a spent override once the program moves past that
+     * step (a non-override next step would do nothing), which is the bug this rule avoids. The sync
+     * itself is dirty-gated ({@code PlayerPuppetService#updateHeldItem} only mutates when the
+     * resolved item id actually CHANGED), so a same-prop entry is a cheap no-op.
+     */
+    static boolean shouldSyncPropOnEntry(@Nonnull StationStep step, @Nullable StationStep resumingStep) {
+        return step != resumingStep;
+    }
+
     /** The index of the step whose {@code Id} equals {@code gotoId} (case-insensitive), or -1 when absent/not found. */
     static int resolveGotoTarget(@Nonnull List<StationStep> steps, @Nullable String gotoId) {
         if (gotoId == null || gotoId.isBlank()) {

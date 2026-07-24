@@ -303,6 +303,27 @@ final class StationPuppetController {
     }
 
     /**
+     * The step-synced prop swap (round-8 continuation): re-syncs the puppet's held PROP to
+     * {@code step}'s OWN effective prop the moment the step begins executing ({@link
+     * StationStepRegistry}'s per-step entry hook, gated by {@link
+     * StationStepDecisions#shouldSyncPropOnEntry}). Delegates to the SAME {@link #syncProp} plumbing
+     * the per-swing beat uses - passing {@code step.getPuppet()} as the override, so a step that
+     * authors a {@code Puppet.Prop} swaps to it (the anvil's {@code stamp} beat's {@code
+     * Prop.Source:"None"} empties the puppet's hands) and a step authoring none reverts to the
+     * session default (the exit edge - see {@link StationStepDecisions#shouldSyncPropOnEntry}'s
+     * javadoc). No-op when the puppet is not active (mirrors {@link #playStepClip}'s own guard);
+     * {@code syncProp} additionally guards a null/invalid puppet ref. The mutation routes through
+     * {@code commandBuffer} for the same accessor-bug reason {@link #syncProp} documents.
+     */
+    static void syncStepProp(@Nonnull StationSession s, @Nonnull CommandBuffer<EntityStore> commandBuffer,
+            @Nullable Player player, @Nonnull StationStep step) {
+        if (!s.puppetActive) {
+            return;
+        }
+        syncProp(s, commandBuffer, player, step.getPuppet());
+    }
+
+    /**
      * P-1 fix (held-item mirror refresh, post-round-5 puppet smoke): resolves the CURRENT
      * effective prop item id fresh every beat (a station's own {@code Puppet.Prop} may be
      * {@code MirrorHeld}, so this tracks a live tool switch, e.g. hatchet-for-hammer mid-work) and

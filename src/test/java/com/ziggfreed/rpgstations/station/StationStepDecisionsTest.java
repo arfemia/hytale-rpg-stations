@@ -9,6 +9,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**
@@ -163,6 +164,51 @@ public class StationStepDecisionsTest {
                 StationStep.of("settle", StationStep.TYPE_WAIT));
         assertTrue(StationStepDecisions.programAuthorsAnyStepClip(steps),
                 "one clip-authoring step is enough to suppress the generic swing for the whole program");
+    }
+
+    // ==================== Step-synced puppet PROP swap (round-8 continuation) ====================
+
+    private static StationStep waitWithProp(String id, String propSource) {
+        return StationStep.of(id, StationStep.TYPE_WAIT)
+                .withPuppet(StationStep.PuppetOverride.of(null, Puppet.Prop.of(propSource, null, null)));
+    }
+
+    @Test
+    void propSync_freshDispatch_propOverridingStep_syncs() {
+        StationStep stamp = waitWithProp("stamp", Puppet.PROP_SOURCE_NONE);
+        assertTrue(StationStepDecisions.shouldSyncPropOnEntry(stamp, null),
+                "a fresh (non-resuming) dispatch syncs a step's own Puppet.Prop override at its iteration entry");
+    }
+
+    @Test
+    void propSync_freshDispatch_stepAuthorsNoPropOverride_stillSyncsToRevertToDefault() {
+        // The load-bearing difference from the clip gate: even a step authoring NO prop override
+        // syncs on fresh entry - that is how the prop reverts to the session default when the program
+        // moves PAST a prop-overriding step (the exit edge), made consistent with the swing-beat sync.
+        StationStep plain = StationStep.of("settle", StationStep.TYPE_WAIT);
+        assertTrue(StationStepDecisions.shouldSyncPropOnEntry(plain, null),
+                "a step authoring no Puppet.Prop still syncs on fresh entry (reverts the prop to the session default)");
+        StationStep clipOnly = waitWithClip("strike1", "MMO_Emote_Hammer");
+        assertTrue(StationStepDecisions.shouldSyncPropOnEntry(clipOnly, null),
+                "a clip-only step (Prop absent) still syncs on fresh entry - the exit edge is not gated on authoring a prop");
+    }
+
+    @Test
+    void propSync_resumeReCheckOfTheSuspendedStep_doesNotReSync() {
+        StationStep stamp = waitWithProp("stamp", Puppet.PROP_SOURCE_NONE);
+        // The exact SAME object identity as the step a resume re-enters must not re-sync its prop on
+        // every heartbeat re-check while suspended - the swing-beat suspension-gated sync already
+        // HOLDS the suspended step's prop, so re-syncing here would be redundant.
+        assertFalse(StationStepDecisions.shouldSyncPropOnEntry(stamp, stamp),
+                "the resume re-check of an already-started step must not re-sync its Puppet.Prop");
+    }
+
+    @Test
+    void propSync_resumeDispatch_stillSyncsForALaterFreshStep() {
+        StationStep resumedStrike = waitWithClip("strike1", "MMO_Emote_Hammer");
+        StationStep laterStamp = waitWithProp("stamp", Puppet.PROP_SOURCE_NONE);
+        assertTrue(StationStepDecisions.shouldSyncPropOnEntry(laterStamp, resumedStrike),
+                "a later step reached within a resumed walk is its OWN fresh entry - it syncs its prop (the empty-hands swap)");
     }
 
     // ==================== Conditions gate (design 9.3's "Branch is NOT a step type") ====================

@@ -82,6 +82,7 @@ final class StationStepRegistry extends StepRegistry<String, StationStepContext,
             }
             emitGenericStepPresentation(ctx, step);
             emitStepPuppetClip(ctx, step);
+            syncStepPuppetProp(ctx, step);
             try {
                 return inner.execute(ctx, step);
             } catch (Throwable t) {
@@ -133,6 +134,27 @@ final class StationStepRegistry extends StepRegistry<String, StationStepContext,
             return;
         }
         StationPuppetController.playStepClip(ctx.session, ctx.store, step.getPuppet().getClip());
+    }
+
+    /**
+     * The step-synced puppet PROP swap (round-8 continuation): re-syncs the session puppet's held
+     * prop to {@code step}'s OWN effective prop the moment the step begins EXECUTING - mirroring
+     * {@link #emitStepPuppetClip} exactly (same per-ITERATION-entry trigger, same {@link
+     * StationStepContext#resumingStep} identity guard via {@link StationStepDecisions
+     * #shouldSyncPropOnEntry}), but on EVERY fresh entry rather than only a clip-authoring one: a
+     * step authoring a {@code Puppet.Prop} override swaps to it (the anvil's {@code stamp} beat's
+     * {@code Prop.Source:"None"} empty-hands override finally FIRES visibly here - the enhance action
+     * has no swing beats to carry the prior swing-beat-only sync), and a step authoring none reverts
+     * the prop to the session default (the exit edge). Threads {@link StationStepContext#commandBuffer}
+     * (the {@code Hotbar}-component mutation is tick-safety-sensitive) and {@link
+     * StationStepContext#player} (the live held item a {@code MirrorHeld} prop reads); no-op when the
+     * session runs no puppet ({@link StationPuppetController#syncStepProp}'s own guard).
+     */
+    private static void syncStepPuppetProp(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        if (!StationStepDecisions.shouldSyncPropOnEntry(step, ctx.resumingStep)) {
+            return;
+        }
+        StationPuppetController.syncStepProp(ctx.session, ctx.commandBuffer, ctx.player, step);
     }
 
     /** {@code null} = every condition passed (or none authored) - proceed to the inner handler. */
