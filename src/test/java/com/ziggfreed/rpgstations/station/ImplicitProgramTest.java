@@ -13,27 +13,26 @@ import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**
- * The implicit-program equivalence test the design's byte-stable-regression claim rests on
- * (design section 9.3/10 leg B): "the classic convert loop re-expressed as an IMPLICIT program"
- * means EXACTLY {@code [Consume, Produce, Roll, Present]}, in this order, every time, with the
- * caller's already-resolved value objects carried verbatim onto each step's own group - no
- * silent reordering, no dropped groups.
+ * The implicit-program equivalence test the scope-2 byte-stable-regression claim rests on (design
+ * 2.1): the classic convert loop COLLAPSES onto ONE orthogonal-phase step composing {@code Consume}
+ * + {@code Produce} + {@code Roll} + {@code Presentation}, with the caller's already-resolved value
+ * objects carried verbatim onto the step's own phase groups - no dropped groups, the phases execute
+ * in the composite handler's fixed order (Consume -> Produce -> Roll -> Presentation).
  */
 public class ImplicitProgramTest {
 
     @Test
-    void build_producesExactlyFourStepsInTheClassicOrder() {
+    void build_producesOneStepWithEveryClassicPhase() {
         StationStep.Consume consume = StationStep.Consume.of("Wood_Oak_Trunk", null, 1, "Inventory");
         StationStep.Produce produce = StationStep.Produce.of("Wood_Hardwood_Planks", 2, "Inventory");
         Presentation cyclePresentation = Presentation.ofSound("SFX_Wood_Break");
 
         List<StationStep> steps = ImplicitProgram.build(consume, produce, new Roll[0], cyclePresentation);
 
-        assertEquals(4, steps.size());
-        assertEquals(StationStep.TYPE_CONSUME, steps.get(0).getType());
-        assertEquals(StationStep.TYPE_PRODUCE, steps.get(1).getType());
-        assertEquals(StationStep.TYPE_ROLL, steps.get(2).getType());
-        assertEquals(StationStep.TYPE_PRESENT, steps.get(3).getType());
+        assertEquals(1, steps.size(), "scope-2 collapses the four-step program onto ONE step");
+        StationStep step = steps.get(0);
+        assertNull(step.getStamp(), "the implicit program never stamps");
+        assertNull(step.getWalk(), "the implicit program never walks");
     }
 
     @Test
@@ -44,34 +43,33 @@ public class ImplicitProgramTest {
         Presentation cyclePresentation = Presentation.ofSound("SFX_Wood_Break");
 
         List<StationStep> steps = ImplicitProgram.build(consume, produce, rolls, cyclePresentation);
+        StationStep step = steps.get(0);
 
-        assertSame(consume, steps.get(0).getConsume());
-        assertSame(produce, steps.get(1).getProduce());
-        assertSame(rolls, steps.get(2).getRoll().getRolls());
-        assertNull(steps.get(2).getRoll().getLootable(), "the implicit program pre-resolves Loot.Tables - no Lootable ref on the built step");
-        assertSame(cyclePresentation, steps.get(3).getPresentation());
+        assertSame(consume, step.getConsume());
+        assertSame(produce, step.getProduce());
+        assertSame(rolls, step.getRoll().getRolls());
+        assertNull(step.getRoll().getLootables(),
+                "the implicit program pre-resolves lootable refs - no Lootables ref on the built step");
+        assertSame(cyclePresentation, step.getPresentation());
     }
 
     @Test
-    void build_withNullCyclePresentation_presentStepCarriesNull() {
+    void build_withNullCyclePresentation_carriesNull() {
         StationStep.Consume consume = StationStep.Consume.of("X", null, 1, "Inventory");
         StationStep.Produce produce = StationStep.Produce.of("Y", 1, "Inventory");
 
         List<StationStep> steps = ImplicitProgram.build(consume, produce, new Roll[0], null);
 
-        assertNull(steps.get(3).getPresentation(), "a station with no cycle Presentation authors a no-op Present step");
+        assertNull(steps.get(0).getPresentation(), "a station with no cycle Presentation authors no presentation phase");
     }
 
     @Test
-    void build_stepIdsAreStableAndUnique() {
+    void build_stepIdIsStable() {
         StationStep.Consume consume = StationStep.Consume.of("X", null, 1, "Inventory");
         StationStep.Produce produce = StationStep.Produce.of("Y", 1, "Inventory");
 
         List<StationStep> steps = ImplicitProgram.build(consume, produce, new Roll[0], null);
 
-        assertEquals(ImplicitProgram.ID_CONSUME, steps.get(0).getId());
-        assertEquals(ImplicitProgram.ID_PRODUCE, steps.get(1).getId());
-        assertEquals(ImplicitProgram.ID_ROLL, steps.get(2).getId());
-        assertEquals(ImplicitProgram.ID_PRESENT, steps.get(3).getId());
+        assertEquals(ImplicitProgram.ID_WORK, steps.get(0).getId());
     }
 }

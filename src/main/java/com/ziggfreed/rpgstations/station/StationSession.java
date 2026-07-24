@@ -177,6 +177,27 @@ final class StationSession {
     boolean programSuspended;
     int programIndex;
     long stepDeadlineMs;
+    /**
+     * The current {@code Repeat} iteration index within the step at {@link #programIndex} (scope-2
+     * design 2.1, decision 34): survives across ticks so a REPEATING, {@code Duration}-holding step
+     * resumes at the correct iteration without re-running its earlier iterations' mutations. 0 for a
+     * single-iteration step (every shipped wave-2 program) and reset to 0 the instant a step
+     * completes - the composite handler is its sole reader/writer. Dormant for the sawmill (its
+     * one-step implicit program never repeats and never holds a Duration), exactly like
+     * {@link #programIndex}/{@link #stepDeadlineMs} are dormant for it.
+     */
+    int stepIteration;
+    /**
+     * The {@code Repeat} count resolved ONCE at the step's fresh entry (scope-2 design 2.1's
+     * "Repeat resolves once at step entry" invariant, m1): cached here the instant a {@code Duration}
+     * hold suspends the step and read back verbatim on the resume, so a factor-scaled {@code Repeat}
+     * combined with a {@code Duration} hold cannot re-resolve its iteration count mid-loop if the
+     * underlying factor mutates during the hold. Paired 1:1 with {@link #stepDeadlineMs} (written
+     * together at the hold; only read while a deadline is live), so a stale value can never be read.
+     * The composite handler is its sole reader/writer; dormant for every shipped wave-2 program
+     * (none combines a factor-scaled Repeat with a Duration hold).
+     */
+    int stepRepeatCount;
 
     // The IN-FLIGHT program's rebuild-avoiding snapshot, set only while programSuspended (design
     // 9.3): a resume must NOT re-derive which conversion is running (the live inventory may have

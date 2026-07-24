@@ -8,6 +8,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.ziggfreed.rpgstations.asset.ActionInput;
+import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
@@ -169,7 +170,7 @@ final class StationCustody {
             if (c == null || c.getInput() == null) {
                 continue;
             }
-            StationAsset.Ingredient in = c.getInput();
+            Ingredient in = c.getInput();
             String resourceId = in.getResourceTypeId();
             if (resourceId != null && !resourceId.isBlank()) {
                 if (heldResourceTypeIds != null) {

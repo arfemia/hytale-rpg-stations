@@ -8,6 +8,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.station.StationRecipeDeriver.CraftingCandidate;
 
@@ -33,7 +34,7 @@ public class StationRecipeDeriverTest {
 
     private static CraftingCandidate resourceCandidate(String itemId, String category, String resourceTypeId, int qty) {
         return new CraftingCandidate(itemId, List.of(category),
-                List.of(StationAsset.Ingredient.resource(resourceTypeId, qty)));
+                List.of(Ingredient.resource(resourceTypeId, qty)));
     }
 
     private static StationAsset.FromCrafting spec(Integer outputPerInput, String... categories) {
@@ -71,7 +72,7 @@ public class StationRecipeDeriverTest {
     @Test
     void exactItemInput_isDerivedVerbatim() {
         CraftingCandidate itemInput = new CraftingCandidate("Some_Modded_Plank", List.of("WoodPlanks"),
-                List.of(StationAsset.Ingredient.item("Some_Modded_Log", 2)));
+                List.of(Ingredient.item("Some_Modded_Log", 2)));
         List<StationAsset.Conversion> derived =
                 StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), List.of(itemInput));
         assertEquals(1, derived.size());
@@ -88,8 +89,8 @@ public class StationRecipeDeriverTest {
                 resourceCandidate("Wood_Hardwood_Planks", "WoodPlanks", "Wood_Hardwood_Trunk", 1),
                 resourceCandidate("Stone_Bricks", "StoneBricks", "Rock", 1),
                 new CraftingCandidate("Bench_Builders", List.of("WoodPlanks"), List.of(
-                        StationAsset.Ingredient.resource("Wood_Trunk", 6),
-                        StationAsset.Ingredient.item("Rock", 3))),
+                        Ingredient.resource("Wood_Trunk", 6),
+                        Ingredient.item("Rock", 3))),
                 new CraftingCandidate("Empty_Recipe", List.of("WoodPlanks"), List.of()));
         List<StationAsset.Conversion> derived =
                 StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
@@ -125,8 +126,8 @@ public class StationRecipeDeriverTest {
     @Test
     void resolve_authoredFirstAndOverridesDerivedByInputRef() {
         StationAsset.Conversion authored = StationAsset.Conversion.of(
-                StationAsset.Ingredient.resource("Wood_Hardwood_Trunk", 1),
-                StationAsset.Ingredient.item("Custom_Beam", 4));
+                Ingredient.resource("Wood_Hardwood_Trunk", 1),
+                Ingredient.item("Custom_Beam", 4));
         StationAsset.Recipe recipe = StationAsset.Recipe.of(
                 new StationAsset.Conversion[]{authored},
                 spec(null, "WoodPlanks"));
@@ -157,8 +158,8 @@ public class StationRecipeDeriverTest {
             candidates.add(resourceCandidate(fam[1], "WoodPlanks", fam[0], 1));
         }
         candidates.add(new CraftingCandidate("Bench_Builders", List.of("Tools", "Workbench_Crafting"), List.of(
-                StationAsset.Ingredient.resource("Wood_Trunk", 6),
-                StationAsset.Ingredient.item("Rock", 3))));
+                Ingredient.resource("Wood_Trunk", 6),
+                Ingredient.item("Rock", 3))));
 
         List<StationAsset.Conversion> derived =
                 StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);

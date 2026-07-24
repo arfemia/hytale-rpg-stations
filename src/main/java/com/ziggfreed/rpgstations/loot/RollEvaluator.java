@@ -8,6 +8,7 @@ import javax.annotation.Nullable;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Roll;
+// FactorMath is in this same package (loot) - no import needed.
 
 /**
  * The PURE {@link Roll} decision core (design section 4.5.1, unit-tested without a live server
@@ -136,24 +137,18 @@ public final class RollEvaluator {
         return c.getMax() == null || value <= c.getMax();
     }
 
-    /** Absent = always (deterministic pass); {@code effective = clamp(BasePercent + sum(AddFactors), 0, CapPercent)}. */
+    /**
+     * Absent = always (deterministic pass); {@code effective = clamp(BasePercent + sum(resolve(f) *
+     * f.Weight for f in AddFactors), 0, CapPercent)}. Scope-2: {@code AddFactors} entries are now
+     * weighted {@link com.ziggfreed.rpgstations.asset.FactorRef}s summed via {@link FactorMath}.
+     */
     static boolean chancePasses(@Nullable Roll.Chance chance, @Nonnull FactorLookup lookup,
             @Nonnull DoubleSupplier chanceRoll) {
         if (chance == null) {
             return true;
         }
         double base = chance.getBasePercent() != null ? chance.getBasePercent() : 0.0;
-        double sum = 0.0;
-        Condition[] addFactors = chance.getAddFactors();
-        if (addFactors != null) {
-            for (Condition c : addFactors) {
-                if (c == null || c.getFactor() == null || c.getFactor().isBlank()) {
-                    continue;
-                }
-                Double v = lookup.resolve(c.getFactor(), c.getParam());
-                sum += v != null ? v : 0.0;
-            }
-        }
+        double sum = FactorMath.sum(chance.getAddFactors(), lookup::resolve);
         double cap = chance.getCapPercent() != null ? chance.getCapPercent() : 100.0;
         double effective = clamp(base + sum, 0.0, cap);
         if (effective <= 0.0) {
@@ -170,14 +165,12 @@ public final class RollEvaluator {
      */
     @Nullable
     static Roll.Ladder.Floor highestFloor(@Nonnull Roll.Ladder ladder, @Nonnull FactorLookup lookup) {
-        Condition valueRef = ladder.getValue();
-        if (valueRef == null || valueRef.getFactor() == null || valueRef.getFactor().isBlank()) {
+        com.ziggfreed.rpgstations.asset.FactorRef[] values = ladder.getValues();
+        if (values == null || values.length == 0) {
             return null;
         }
-        Double resolved = lookup.resolve(valueRef.getFactor(), valueRef.getParam());
-        if (resolved == null) {
-            return null;
-        }
+        // Scope-2: the ladder value is the SUMMED weighted FactorRefs (Ladder.Value -> Ladder.Values[]).
+        double resolved = FactorMath.sum(values, lookup::resolve);
         Roll.Ladder.Floor[] floors = ladder.getFloors();
         if (floors == null || floors.length == 0) {
             return null;

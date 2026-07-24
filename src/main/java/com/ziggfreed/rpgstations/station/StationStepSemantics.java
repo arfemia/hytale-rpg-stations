@@ -1,7 +1,5 @@
 package com.ziggfreed.rpgstations.station;
 
-import java.util.Locale;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -11,17 +9,22 @@ import com.ziggfreed.rpgstations.util.Log;
 
 /**
  * The consumer-supplied {@link StepSemantics} adapter wiring {@link StationStepContext}/
- * {@link StationStep}/{@link StationStepResult} into {@link StationStepKernel}'s
- * {@code CastKernel} instance (design section 9.3). Stateless singleton.
+ * {@link StationStep}/{@link StationStepResult} into {@link StationStepKernel}'s {@code CastKernel}
+ * instance. Stateless singleton.
  *
- * <p><b>{@link #nextIndex} is the "Branch is NOT a step type" mechanism</b> (design 9.3): a step
+ * <p><b>Scope-2 (design 2.1): the {@code Type} union is GONE.</b> Every step is now an
+ * orthogonal-phase record dispatched to the ONE composite handler
+ * ({@link StationStepRegistry#STEP_KEY}), so {@link #keyOf} returns that single constant key for
+ * EVERY step (never a per-type discriminator).
+ *
+ * <p><b>{@link #nextIndex} is the "Branch is NOT a step type" mechanism</b> (design 2.1): a step
  * whose {@link StationStep#getConditions()} failed AND whose
  * {@link StationStep.OnConditionFail#effectiveResult()} is {@code "Skip"} (the
- * {@link StationStepResult.Skip} case a guarded handler returns - see
- * {@link StationStepRegistry}) checks {@link StationStep.OnConditionFail#getGoto()}: authored ->
- * jump to that step's {@code Id} within the SAME program (an authored content-level branch,
- * unknown target id logs a warning and falls back to the classic linear advance); absent -> the
- * classic {@code currentIndex + 1} advance, same as every other success-continuing step.
+ * {@link StationStepResult.Skip} case the guard returns - see {@link StationStepRegistry}) checks
+ * {@link StationStep.OnConditionFail#getGoto()}: authored -&gt; jump to that step's {@code Id}
+ * within the SAME program (an authored content-level branch, unknown target id logs a warning and
+ * falls back to the classic linear advance); absent -&gt; the classic {@code currentIndex + 1}
+ * advance, same as every other success-continuing step.
  */
 final class StationStepSemantics implements StepSemantics<StationStepContext, StationStep, String, StationStepResult> {
 
@@ -36,11 +39,11 @@ final class StationStepSemantics implements StepSemantics<StationStepContext, St
         return ctx.steps;
     }
 
-    @Nullable
+    @Nonnull
     @Override
     public String keyOf(@Nonnull StationStep step) {
-        String type = step.getType();
-        return type == null || type.isBlank() ? null : type.toLowerCase(Locale.ROOT);
+        // The Type union is gone (scope-2): one composite handler serves every step.
+        return StationStepRegistry.STEP_KEY;
     }
 
     @Override
@@ -58,10 +61,12 @@ final class StationStepSemantics implements StepSemantics<StationStepContext, St
     @Override
     public StationStepResult onMissingHandler(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
             @Nullable String key) {
+        // Unreachable in practice (keyOf always returns the one registered key); guarded per the
+        // kernel's contract so a registry misconfiguration degrades to a clean stop, never a crash.
         Log.warn("STATION step program '" + ctx.action.getActionId() + "' at station '" + ctx.session.stationId
-                + "' has no registered handler for step Type '" + step.getType() + "' (Id '" + step.getId() + "')");
+                + "' has no registered handler for key '" + key + "' (Id '" + step.getId() + "')");
         return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                "unhandled step type '" + step.getType() + "'");
+                "unhandled step key '" + key + "'");
     }
 
     @Override

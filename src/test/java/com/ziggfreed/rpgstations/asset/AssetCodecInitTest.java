@@ -41,6 +41,32 @@ public class AssetCodecInitTest {
         assertDoesNotThrow(() -> assertNotNull(Roll.Grants.CODEC));
     }
 
+    /** Scope-2 shared leaves (design 1.3): the ONE Ingredient / FactorRef / LootRef codecs. */
+    @Test
+    void sharedLeafCodecs_initializeWithoutThrowing() {
+        assertDoesNotThrow(() -> assertNotNull(Ingredient.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(FactorRef.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(LootRef.CODEC));
+    }
+
+    /** Scope-2 new Pattern-A types (design 1.5/1.8): ActionAsset + ExtensionAsset and their nested groups. */
+    @Test
+    void actionAssetAndExtensionAssetCodecs_initializeWithoutThrowing() {
+        assertDoesNotThrow(() -> assertNotNull(ActionAsset.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(ActionDef.Anchor.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(ExtensionAsset.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(ExtensionAsset.Target.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(ExtensionAsset.StepInsertion.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(ExtensionAsset.StepInsertion.Anchor.CODEC));
+    }
+
+    @Test
+    void rollPoolAndStatRollEntryCodecs_initializeWithoutThrowing() {
+        assertDoesNotThrow(() -> assertNotNull(RollPool.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StatRollEntry.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StatRollEntry.Points.CODEC));
+    }
+
     @Test
     void lootableAssetCodec_initializesWithoutThrowing() {
         assertDoesNotThrow(() -> assertNotNull(LootableAsset.CODEC));
@@ -72,9 +98,14 @@ public class AssetCodecInitTest {
         assertDoesNotThrow(() -> assertNotNull(StationStep.OnConditionFail.CODEC));
         assertDoesNotThrow(() -> assertNotNull(StationStep.Consume.CODEC));
         assertDoesNotThrow(() -> assertNotNull(StationStep.Produce.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(StationStep.Wait.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(StationStep.RollGroup.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(StationStep.CommandGroup.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.Walk.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.Repeat.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.Duration.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.Stamp.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.Stamp.Stats.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.Stamp.Stats.Caps.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.Stamp.Stats.Budget.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.PuppetOverride.CODEC));
     }
 
     /**

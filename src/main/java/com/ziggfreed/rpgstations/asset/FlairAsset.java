@@ -66,11 +66,11 @@ public final class FlairAsset implements JsonAssetWithMap<String, DefaultAssetMa
             .add()
             .appendInherited(new KeyedCodec<>("Stations", new ArrayCodec<>(Codec.STRING, String[]::new), false),
                     (a, v) -> a.stations = v, a -> a.stations, (a, p) -> a.stations = p.stations)
-            .add()
+            .documentation("Station ids this flair applies to; null/empty = every station.").add()
             .appendInherited(new KeyedCodec<>("Moments",
                             new MapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.moments = v, a -> a.moments, (a, p) -> a.moments = p.moments)
-            .add()
+            .documentation("Moment id (cycle/swing/impact/rare_find/completion or step:<action>:<step>) -> the presentation overlay.").add()
             .build();
 
     public FlairAsset() {

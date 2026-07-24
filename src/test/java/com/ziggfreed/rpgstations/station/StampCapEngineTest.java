@@ -12,19 +12,32 @@ import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.rpgstations.api.StampInspection;
 import com.ziggfreed.rpgstations.api.StatRoll;
+import com.ziggfreed.rpgstations.asset.FactorRef;
 import com.ziggfreed.rpgstations.asset.StatRollEntry;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**
- * Pure fixture tests for {@link StampCapEngine} (design section 9.5, critique M2's binding fixes):
- * the cap-composition MIN rule (effective budget = MIN of every authored total-budget cap, never
- * max, never sum), PerStat clamping, and the roll model (Always/weighted/Unique). Zero server
- * dependency - {@link ItemStack} is not used here at all (a {@link StatRoll}/{@link StampInspection}
- * fixture is enough).
+ * Pure fixture tests for {@link StampCapEngine} (scope-2 design 3.8, critique M2's binding fix
+ * re-shaped onto {@code Caps.Budgets[]}): the cap-composition MIN rule (effective budget = MIN of
+ * every authored {@code Budget} entry, never max, never sum), a flat vs factor-scaled budget, and
+ * the roll model (Always/weighted/Unique/PerStat). Zero server dependency.
  */
 class StampCapEngineTest {
 
     private static final StampCapEngine.FactorLookup NO_FACTORS = (id, param) -> null;
+
+    private static StationStep.Stamp.Stats.Budget flat(double points) {
+        return StationStep.Stamp.Stats.Budget.flat(points);
+    }
+
+    private static StationStep.Stamp.Stats.Budget scaled(double pointsPer, String factor, String param) {
+        return StationStep.Stamp.Stats.Budget.scaled(pointsPer, new FactorRef[]{FactorRef.of(factor, param, null)});
+    }
+
+    private static StationStep.Stamp.Stats.Caps caps(StationStep.Stamp.Stats.Budget[] budgets,
+            Map<String, Double> perStat) {
+        return StationStep.Stamp.Stats.Caps.of(budgets, perStat, null);
+    }
 
     /** A deterministic sequence of {@code [0,1)} samples, cycling once exhausted. */
     private static StampCapEngine.RollSource sequence(double... values) {
@@ -40,55 +53,49 @@ class StampCapEngineTest {
         };
     }
 
-    // ==================== M2: effective-budget MIN composition ====================
+    // ==================== M2: effective-budget MIN composition over Budgets[] ====================
 
     @Test
-    void effectiveBudget_onlyPerItemBudget_returnsIt() {
-        StationStep.Stamp.Stats.Caps caps = StationStep.Stamp.Stats.Caps.of(30.0, null, null, null);
-        assertEquals(30.0, StampCapEngine.effectiveBudget(caps, NO_FACTORS));
+    void effectiveBudget_singleFlat_returnsIt() {
+        assertEquals(30.0, StampCapEngine.effectiveBudget(
+                caps(new StationStep.Stamp.Stats.Budget[]{flat(30.0)}, null), NO_FACTORS));
     }
 
     @Test
-    void effectiveBudget_onlySkillScaledBudget_computesFromFactor() {
-        StationStep.Stamp.Stats.SkillScaledBudget scaled =
-                StationStep.Stamp.Stats.SkillScaledBudget.of("mmoskilltree:skill_level", "SMITHING", 0.5);
-        StationStep.Stamp.Stats.Caps caps = StationStep.Stamp.Stats.Caps.of(null, null, scaled, null);
+    void effectiveBudget_singleFactorScaled_computesFromFactor() {
         StampCapEngine.FactorLookup lookup = (id, param) ->
-                "mmoskilltree:skill_level".equals(id) && "SMITHING".equals(param) ? 40.0 : null;
-        assertEquals(20.0, StampCapEngine.effectiveBudget(caps, lookup)); // 0.5 * 40
+                "stat".equals(id) && "MMO_Level_SMITHING".equals(param) ? 40.0 : null;
+        assertEquals(20.0, StampCapEngine.effectiveBudget(
+                caps(new StationStep.Stamp.Stats.Budget[]{scaled(0.5, "stat", "MMO_Level_SMITHING")}, null), lookup));
     }
 
     @Test
-    void effectiveBudget_bothAuthored_skillScaledSmaller_pickstheMin() {
-        StationStep.Stamp.Stats.SkillScaledBudget scaled =
-                StationStep.Stamp.Stats.SkillScaledBudget.of("mmoskilltree:skill_level", "SMITHING", 0.5);
-        StationStep.Stamp.Stats.Caps caps = StationStep.Stamp.Stats.Caps.of(30.0, null, scaled, null);
-        StampCapEngine.FactorLookup lookup = (id, param) -> 10.0; // 0.5 * 10 = 5, smaller than 30
-        assertEquals(5.0, StampCapEngine.effectiveBudget(caps, lookup));
+    void effectiveBudget_bothAuthored_picksTheMin_scaledSmaller() {
+        StampCapEngine.FactorLookup lookup = (id, param) -> 10.0; // 0.5 * 10 = 5 < 30
+        assertEquals(5.0, StampCapEngine.effectiveBudget(
+                caps(new StationStep.Stamp.Stats.Budget[]{flat(30.0), scaled(0.5, "stat", "MMO_Level_SMITHING")}, null),
+                lookup));
     }
 
     @Test
-    void effectiveBudget_bothAuthored_perItemSmaller_pickstheMin() {
-        StationStep.Stamp.Stats.SkillScaledBudget scaled =
-                StationStep.Stamp.Stats.SkillScaledBudget.of("mmoskilltree:skill_level", "SMITHING", 0.5);
-        StationStep.Stamp.Stats.Caps caps = StationStep.Stamp.Stats.Caps.of(30.0, null, scaled, null);
-        StampCapEngine.FactorLookup lookup = (id, param) -> 100.0; // 0.5 * 100 = 50, larger than 30
-        assertEquals(30.0, StampCapEngine.effectiveBudget(caps, lookup));
+    void effectiveBudget_bothAuthored_picksTheMin_flatSmaller() {
+        StampCapEngine.FactorLookup lookup = (id, param) -> 100.0; // 0.5 * 100 = 50 > 30
+        assertEquals(30.0, StampCapEngine.effectiveBudget(
+                caps(new StationStep.Stamp.Stats.Budget[]{flat(30.0), scaled(0.5, "stat", "MMO_Level_SMITHING")}, null),
+                lookup));
     }
 
     @Test
-    void effectiveBudget_neitherAuthored_isUnlimited() {
-        StationStep.Stamp.Stats.Caps caps = StationStep.Stamp.Stats.Caps.of(null, null, null, null);
-        assertNull(StampCapEngine.effectiveBudget(caps, NO_FACTORS));
+    void effectiveBudget_noBudgets_isUnlimited() {
+        assertNull(StampCapEngine.effectiveBudget(caps(null, null), NO_FACTORS));
+        assertNull(StampCapEngine.effectiveBudget(caps(new StationStep.Stamp.Stats.Budget[0], null), NO_FACTORS));
         assertNull(StampCapEngine.effectiveBudget(null, NO_FACTORS));
     }
 
     @Test
     void effectiveBudget_unresolvableFactor_failsClosedToZero() {
-        StationStep.Stamp.Stats.SkillScaledBudget scaled =
-                StationStep.Stamp.Stats.SkillScaledBudget.of("unknown:factor", null, 0.5);
-        StationStep.Stamp.Stats.Caps caps = StationStep.Stamp.Stats.Caps.of(null, null, scaled, null);
-        assertEquals(0.0, StampCapEngine.effectiveBudget(caps, NO_FACTORS));
+        assertEquals(0.0, StampCapEngine.effectiveBudget(
+                caps(new StationStep.Stamp.Stats.Budget[]{scaled(0.5, "unknown:factor", null)}, null), NO_FACTORS));
     }
 
     // ==================== resolve(): full roll + clamp ====================
@@ -100,11 +107,10 @@ class StampCapEngineTest {
 
     @Test
     void resolve_fullyCappedItem_deniesWithNoEntries() {
-        StatRollEntry entry = StatRollEntry.of("MMO_Crit_Chance", StatRollEntry.Points.of(5.0, 5.0), 1.0, true);
-        StationStep.Stamp.Stats.Caps caps = StationStep.Stamp.Stats.Caps.of(30.0, null, null, null);
+        StatRollEntry entry = StatRollEntry.of("MMO_CritChance", StatRollEntry.Points.of(5.0, 5.0), 1.0, true);
+        StationStep.Stamp.Stats.Caps caps = caps(new StationStep.Stamp.Stats.Budget[]{flat(30.0)}, null);
         StationStep.Stamp.Stats stats = statsOf(new StatRollEntry[]{entry}, null, false, caps);
-        // The item already has 30/30 budget spent.
-        StampInspection inspection = new StampInspection(30, Map.of("MMO_Crit_Chance", 30), 1);
+        StampInspection inspection = new StampInspection(30, Map.of("MMO_CritChance", 30), 1);
         StampCapEngine.Plan plan = StampCapEngine.resolve(stats, inspection, NO_FACTORS, sequence(0.0));
         assertTrue(plan.denied());
         assertTrue(plan.entries().isEmpty());
@@ -112,17 +118,27 @@ class StampCapEngineTest {
 
     @Test
     void resolve_perStatClamp_boundsASingleStatIndependentlyOfTotalBudget() {
-        StatRollEntry entry = StatRollEntry.of("MMO_Crit_Chance", StatRollEntry.Points.of(8.0, 8.0), 1.0, true);
+        StatRollEntry entry = StatRollEntry.of("MMO_CritChance", StatRollEntry.Points.of(8.0, 8.0), 1.0, true);
         Map<String, Double> perStat = new LinkedHashMap<>();
-        perStat.put("MMO_Crit_Chance", 10.0);
-        StationStep.Stamp.Stats.Caps caps = StationStep.Stamp.Stats.Caps.of(100.0, perStat, null, null);
+        perStat.put("MMO_CritChance", 10.0);
+        StationStep.Stamp.Stats.Caps caps = caps(new StationStep.Stamp.Stats.Budget[]{flat(100.0)}, perStat);
         StationStep.Stamp.Stats stats = statsOf(new StatRollEntry[]{entry}, null, false, caps);
-        // 7 points already stamped on this stat, cap is 10 - only 3 more should land, not 8.
-        StampInspection inspection = new StampInspection(7, Map.of("MMO_Crit_Chance", 7), 0);
+        StampInspection inspection = new StampInspection(7, Map.of("MMO_CritChance", 7), 0);
         StampCapEngine.Plan plan = StampCapEngine.resolve(stats, inspection, NO_FACTORS, sequence(0.0));
         assertFalse(plan.denied());
         assertEquals(1, plan.entries().size());
         assertEquals(3, plan.entries().get(0).points());
+    }
+
+    @Test
+    void resolve_pointsAddFactors_scalesTheRolledMagnitude() {
+        // Base fixed 2 points + a factor value 10 weighted 0.5 = +5 -> 7 points.
+        StatRollEntry entry = StatRollEntry.of("MMO_Luck",
+                StatRollEntry.Points.of(2.0, 2.0, new FactorRef[]{FactorRef.of("stat", "MMO_Luck", 0.5)}), 1.0, true);
+        StationStep.Stamp.Stats stats = statsOf(new StatRollEntry[]{entry}, null, false, null);
+        StampCapEngine.FactorLookup lookup = (id, param) -> 10.0;
+        StampCapEngine.Plan plan = StampCapEngine.resolve(stats, StampInspection.empty(), lookup, sequence(0.0));
+        assertEquals(7, plan.entries().get(0).points());
     }
 
     @Test
@@ -152,7 +168,7 @@ class StampCapEngineTest {
     void resolve_noCandidates_isNotDenied() {
         StationStep.Stamp.Stats stats = statsOf(new StatRollEntry[0], null, false, null);
         StampCapEngine.Plan plan = StampCapEngine.resolve(stats, StampInspection.empty(), NO_FACTORS, sequence(0.0));
-        assertFalse(plan.denied(), "no candidates at all is a no-op, not a denial (nothing was ever attempted)");
+        assertFalse(plan.denied());
         assertTrue(plan.entries().isEmpty());
     }
 }

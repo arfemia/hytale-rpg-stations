@@ -1,0 +1,94 @@
+package com.ziggfreed.rpgstations.asset;
+
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
+import com.hypixel.hytale.codec.Codec;
+import com.hypixel.hytale.codec.KeyedCodec;
+import com.hypixel.hytale.codec.builder.BuilderCodec;
+
+/**
+ * The ONE item-quantity leaf (scope-2 design section 1.3, DRY principle 1): a native-shaped
+ * recipe/material reference mirroring vanilla {@code MaterialQuantity}, reused at EVERY authoring
+ * site that names an item and an amount (a {@code StationAsset.Conversion}'s Input/Output, an
+ * {@code ExtensionAsset} appended conversion). Replaces the three near-identical item-quantity
+ * triples E1 found (the old nested {@code StationAsset.Ingredient}, the inline
+ * {@code StationStep.Consume} triple, {@code Stamp.Reagent}).
+ *
+ * <p><b>Exactly one of {@link #itemId} | {@link #resourceTypeId}.</b> {@link #itemId} is an exact
+ * item id; {@link #resourceTypeId} is a native {@code Item.ResourceTypes} family (the "any log"
+ * route), meaningful only on an INPUT. An OUTPUT authors {@link #itemId} only. Authoring both, or
+ * neither, is a content mistake the validator flags ({@code INGREDIENT_ROUTE_AMBIGUOUS}) - see
+ * {@link #hasExactlyOneRoute()}.
+ */
+public final class Ingredient {
+
+    @Nullable protected String itemId;
+    @Nullable protected String resourceTypeId;
+    @Nullable protected Integer quantity;
+
+    public static final BuilderCodec<Ingredient> CODEC = BuilderCodec.builder(Ingredient.class, Ingredient::new)
+            .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
+                    (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId)
+            .documentation("Exact item id (exactly one of ItemId | ResourceTypeId). An OUTPUT uses only ItemId.").add()
+            .appendInherited(new KeyedCodec<>("ResourceTypeId", Codec.STRING, false),
+                    (o, v) -> o.resourceTypeId = v, o -> o.resourceTypeId,
+                    (o, p) -> o.resourceTypeId = p.resourceTypeId)
+            .documentation("A native Item.ResourceTypes family id (the 'any log' route); INPUT only. Exactly one of ItemId | ResourceTypeId.").add()
+            .appendInherited(new KeyedCodec<>("Quantity", Codec.INTEGER, false),
+                    (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity)
+            .documentation("The item count; reader-defaults to 1 when omitted or non-positive.").add()
+            .build();
+
+    public Ingredient() {
+    }
+
+    @Nonnull
+    public static Ingredient of(@Nullable String itemId, @Nullable String resourceTypeId,
+            @Nullable Integer quantity) {
+        Ingredient i = new Ingredient();
+        i.itemId = itemId;
+        i.resourceTypeId = resourceTypeId;
+        i.quantity = quantity;
+        return i;
+    }
+
+    /** Convenience: an exact-item ingredient ({@code ItemId}). */
+    @Nonnull
+    public static Ingredient item(@Nullable String itemId, @Nullable Integer quantity) {
+        return of(itemId, null, quantity);
+    }
+
+    /** Convenience: a native resource-type family ingredient ({@code ResourceTypeId}); INPUT only. */
+    @Nonnull
+    public static Ingredient resource(@Nullable String resourceTypeId, @Nullable Integer quantity) {
+        return of(null, resourceTypeId, quantity);
+    }
+
+    @Nullable
+    public String getItemId() {
+        return itemId;
+    }
+
+    @Nullable
+    public String getResourceTypeId() {
+        return resourceTypeId;
+    }
+
+    @Nullable
+    public Integer getQuantity() {
+        return quantity;
+    }
+
+    /** {@link #quantity}, reader-defaulted to 1 when null/non-positive. */
+    public int effectiveQuantity() {
+        return quantity != null && quantity > 0 ? quantity : 1;
+    }
+
+    /** True when EXACTLY one of {@link #itemId}/{@link #resourceTypeId} is authored (the exactly-one-of contract). */
+    public boolean hasExactlyOneRoute() {
+        boolean item = itemId != null && !itemId.isBlank();
+        boolean res = resourceTypeId != null && !resourceTypeId.isBlank();
+        return item ^ res;
+    }
+}

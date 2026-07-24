@@ -13,14 +13,22 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
+import com.hypixel.hytale.assetstore.AssetExtraInfo;
+import com.hypixel.hytale.codec.util.RawJsonReader;
+import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.rpgstations.asset.ExtensionAsset;
+import com.ziggfreed.rpgstations.asset.FactorRef;
+import com.ziggfreed.rpgstations.asset.Ingredient;
+import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.Roll;
+import com.ziggfreed.rpgstations.asset.StatRollEntry;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.validation.Finding;
@@ -34,6 +42,26 @@ import com.ziggfreed.rpgstations.validation.Finding;
  * introduces. Leg 3 replaces the old Luck.Tiers section with the {@link Roll}-based Loot
  * section (the M3 critique fixes' validator coverage: floor-Grants-only, duplicate floors,
  * empty rolls, {@code BonusOutputCopies} under a non-Cycle trigger, unknown ladder factors).
+ *
+ * <p><b>Scope-2 rewrite (leg A4):</b> every fixture touching {@code StationStep} (no more
+ * {@code Type} union - orthogonal phases), {@code Loot} (now {@link LootRef}), a
+ * {@code Roll.Chance.AddFactors}/{@code Roll.Ladder.Values} ({@link FactorRef}s now), and
+ * {@code Conversion.Input/Output} (now top-level {@link Ingredient}) is rebuilt against the
+ * A-SCHEMA leg's rewritten codecs. New sections cover {@code ACTION_REF_UNKNOWN},
+ * {@code ANCHOR_STATION_UNKNOWN}, {@code WALK_TARGET_UNKNOWN_ANCHOR},
+ * {@code STEP_AT_UNKNOWN_ANCHOR}, {@code WALK_REQUIRES_PUPPET}, {@code WAVE3_PENDING},
+ * {@code LOOT_DOUBLE_LUCK}, the reshaped {@code Stamp.Caps.Budgets[]} checks, and the two new
+ * standalone-collection validators ({@link StationValidator#validateActionAssets} /
+ * {@link StationValidator#validateExtensions}) covering {@code EXTENSION_TARGET_UNKNOWN},
+ * {@code EXTENSION_PAYLOAD_MISMATCH}, {@code EXTENSION_KEY_COLLISION},
+ * {@code EXTENSION_ANCHOR_MISSING}, and {@code EXTENSION_STEP_MISSING_ID} (built via
+ * {@code ActionAsset.CODEC}/{@code ExtensionAsset.CODEC} fixture decode, mirroring
+ * {@code asset.ActionAssetCodecTest}/{@code asset.ExtensionAssetCodecTest}'s own pattern, since
+ * neither new asset type exposes a Java-side payload builder). Dropped tests: the retired
+ * {@code UNIMPLEMENTED_STEP_TYPE} (schema-reserved {@code Mount} type is GONE),
+ * {@code UNIMPLEMENTED_CONSUME_SOURCE} (no more {@code From} allow-list check), and
+ * {@code WAIT_MISSING_DURATION}/the {@code Wait} type entirely (retired for base-field
+ * {@code Duration}).
  */
 public class StationValidatorTest {
 
@@ -44,6 +72,12 @@ public class StationValidatorTest {
     private static final Predicate<String> NO_FACTOR = id -> false;
     private static final Predicate<String> ANY_MODEL = id -> true;
     private static final Predicate<String> NO_MODEL = id -> false;
+    private static final Predicate<String> ANY_LOOTABLE = id -> true;
+    private static final Predicate<String> ANY_ROLLPOOL = id -> true;
+    private static final Predicate<String> ANY_STATION = id -> true;
+    private static final Predicate<String> NO_STATION = id -> false;
+    private static final Predicate<String> ANY_ACTION_ASSET = id -> true;
+    private static final Predicate<String> NO_ACTION_ASSET = id -> false;
 
     private static Set<String> codes(List<Finding> findings) {
         return findings.stream().map(Finding::code).collect(Collectors.toSet());
@@ -53,10 +87,32 @@ public class StationValidatorTest {
         return StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, ANY_FACTOR);
     }
 
+    private static List<Finding> validateWithRefs(StationAsset a, Predicate<String> stationKnown,
+            Predicate<String> actionAssetKnown) {
+        return StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL,
+                ANY_MODEL, stationKnown, actionAssetKnown);
+    }
+
+    // ==================== Codec-decode fixture helpers (ActionAsset/ExtensionAsset have no
+    // Java-side payload builder - the same decode-from-JSON pattern asset.ActionAssetCodecTest/
+    // asset.ExtensionAssetCodecTest use) ====================
+
+    private static ActionAsset actionAsset(String id, String body) throws Exception {
+        AssetExtraInfo.Data data = new AssetExtraInfo.Data(ActionAsset.class, id, null);
+        return ActionAsset.CODEC.decodeAndInheritJsonAsset(
+                RawJsonReader.fromJsonString(body), null, new AssetExtraInfo<>(data));
+    }
+
+    private static ExtensionAsset extensionAsset(String id, String body) throws Exception {
+        AssetExtraInfo.Data data = new AssetExtraInfo.Data(ExtensionAsset.class, id, null);
+        return ExtensionAsset.CODEC.decodeAndInheritJsonAsset(
+                RawJsonReader.fromJsonString(body), null, new AssetExtraInfo<>(data));
+    }
+
     private static StationAsset.Conversion oakConversion() {
         return StationAsset.Conversion.of(
-                StationAsset.Ingredient.item("Wood_Oak_Trunk", 1),
-                StationAsset.Ingredient.item("Wood_Hardwood_Planks", 2));
+                Ingredient.item("Wood_Oak_Trunk", 1),
+                Ingredient.item("Wood_Hardwood_Planks", 2));
     }
 
     private static StationAsset.Recipe oakRecipe() {
@@ -77,6 +133,19 @@ public class StationValidatorTest {
                 null, null);
     }
 
+    /** An empty, fully-null {@link ActionDef} for tests that fill in only the leaves they need. */
+    private static ActionDef actionDef() {
+        return ActionDef.of(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    private static StationAsset stationWithActions(Map<String, ActionDef> actions) {
+        StationAsset a = StationAsset.of("multiaction",
+                StationAsset.Identity.of("rpgstations.station.multiaction.name", null, null),
+                null, oakRecipe(), null, null, null, null, null, null);
+        a.withActions(actions);
+        return a;
+    }
+
     @Test
     void validStation_producesNoFindings() {
         List<Finding> findings = validate(validStation());
@@ -90,8 +159,8 @@ public class StationValidatorTest {
                 null,
                 StationAsset.Recipe.of(new StationAsset.Conversion[]{
                         StationAsset.Conversion.of(
-                                StationAsset.Ingredient.resource("Wood_Hardwood_Trunk", 1),
-                                StationAsset.Ingredient.item("Wood_Hardwood_Planks", 2))}),
+                                Ingredient.resource("Wood_Hardwood_Trunk", 1),
+                                Ingredient.item("Wood_Hardwood_Planks", 2))}),
                 null, null, null, null, null, null);
         assertTrue(validate(a).isEmpty(), "a native resource-type input is clean, got: " + codes(validate(a)));
     }
@@ -103,8 +172,8 @@ public class StationValidatorTest {
                 null,
                 StationAsset.Recipe.of(new StationAsset.Conversion[]{
                         StationAsset.Conversion.of(
-                                StationAsset.Ingredient.of("Wood_Oak_Trunk", "Wood_Hardwood_Trunk", 1),
-                                StationAsset.Ingredient.item("Wood_Hardwood_Planks", 2))}),
+                                Ingredient.of("Wood_Oak_Trunk", "Wood_Hardwood_Trunk", 1),
+                                Ingredient.item("Wood_Hardwood_Planks", 2))}),
                 null, null, null, null, null, null);
         assertTrue(codes(validate(a)).contains("AMBIGUOUS_CONVERSION_INPUT"));
     }
@@ -116,8 +185,8 @@ public class StationValidatorTest {
                 null,
                 StationAsset.Recipe.of(new StationAsset.Conversion[]{
                         StationAsset.Conversion.of(
-                                StationAsset.Ingredient.item("Wood_Oak_Trunk", 1),
-                                StationAsset.Ingredient.of("Wood_Hardwood_Planks", "Wood_Hardwood_Trunk", 2))}),
+                                Ingredient.item("Wood_Oak_Trunk", 1),
+                                Ingredient.of("Wood_Hardwood_Planks", "Wood_Hardwood_Trunk", 2))}),
                 null, null, null, null, null, null);
         assertTrue(codes(validate(a)).contains("OUTPUT_RESOURCE_TYPE"));
     }
@@ -189,11 +258,11 @@ public class StationValidatorTest {
                 StationAsset.Identity.of("rpgstations.station.broken.name", null, null),
                 null,
                 StationAsset.Recipe.of(new StationAsset.Conversion[]{
-                        StationAsset.Conversion.of(null, StationAsset.Ingredient.item("Wood_Hardwood_Planks", 2)),
-                        StationAsset.Conversion.of(StationAsset.Ingredient.item("Wood_Oak_Trunk", 1), null),
+                        StationAsset.Conversion.of(null, Ingredient.item("Wood_Hardwood_Planks", 2)),
+                        StationAsset.Conversion.of(Ingredient.item("Wood_Oak_Trunk", 1), null),
                         StationAsset.Conversion.of(
-                                StationAsset.Ingredient.item("Wood_Oak_Trunk", 0),
-                                StationAsset.Ingredient.item("Wood_Hardwood_Planks", 2))}),
+                                Ingredient.item("Wood_Oak_Trunk", 0),
+                                Ingredient.item("Wood_Hardwood_Planks", 2))}),
                 null, null, null, null, null, null);
         Set<String> codes = codes(validate(a));
         assertTrue(codes.contains("MISSING_CONVERSION_INPUT"));
@@ -208,11 +277,11 @@ public class StationValidatorTest {
                 null,
                 StationAsset.Recipe.of(new StationAsset.Conversion[]{
                         StationAsset.Conversion.of(
-                                StationAsset.Ingredient.resource("Wood_Hardwood_Trunk", 1),
-                                StationAsset.Ingredient.item("Wood_Hardwood_Planks", 2)),
+                                Ingredient.resource("Wood_Hardwood_Trunk", 1),
+                                Ingredient.item("Wood_Hardwood_Planks", 2)),
                         StationAsset.Conversion.of(
-                                StationAsset.Ingredient.resource("Wood_Hardwood_Trunk", 1),
-                                StationAsset.Ingredient.item("Wood_Hardwood_Planks", 4))}),
+                                Ingredient.resource("Wood_Hardwood_Trunk", 1),
+                                Ingredient.item("Wood_Hardwood_Planks", 4))}),
                 null, null, null, null, null, null);
         assertTrue(codes(validate(a)).contains("DUPLICATE_CONVERSION_INPUT"));
     }
@@ -346,10 +415,10 @@ public class StationValidatorTest {
         assertFalse(codes.contains("DURABILITY_PERSWING_ADVISORY"));
     }
 
-    // ==================== Loot (leg 3, REPLACES the Luck.Tiers section) ====================
+    // ==================== Loot (scope-2: LootRef + weighted FactorRef vocabulary) ====================
 
-    private static StationAsset.Loot loot(Roll... rolls) {
-        return StationAsset.Loot.of(null, rolls);
+    private static LootRef loot(Roll... rolls) {
+        return LootRef.of(null, rolls);
     }
 
     private static Roll.Ladder.Floor floor(Double min, String dropList) {
@@ -358,7 +427,7 @@ public class StationValidatorTest {
 
     private static Roll ladderRoll(Roll.Ladder.Floor... floors) {
         return Roll.of(null, null, null,
-                Roll.Ladder.of(Condition.of("rpgstations:cycle_count", null, null, null), floors), null);
+                Roll.Ladder.of(new FactorRef[]{FactorRef.of("rpgstations:cycle_count", null)}, floors), null);
     }
 
     @Test
@@ -448,13 +517,23 @@ public class StationValidatorTest {
     }
 
     @Test
+    void ladderMissingValues_flagged() {
+        StationAsset a = StationAsset.of("noladdervalues",
+                StationAsset.Identity.of("rpgstations.station.noladdervalues.name", null, null),
+                null, oakRecipe(),
+                null, null, null, null, null, null,
+                loot(Roll.of(null, null, null, Roll.Ladder.of(null, new Roll.Ladder.Floor[]{floor(50.0, "T1")}), null)));
+        assertTrue(codes(validate(a)).contains("LOOT_LADDER_MISSING_VALUE"));
+    }
+
+    @Test
     void validLoot_producesNoLootFindings() {
         StationAsset a = StationAsset.of("goodloot",
                 StationAsset.Identity.of("rpgstations.station.goodloot.name", null, null),
                 null, oakRecipe(),
                 null, null, null, null, null, null,
                 loot(Roll.of("Cycle", null,
-                        Roll.Chance.of(2.0, new Condition[]{Condition.of("rpgstations:tool_power", null, null, null)}, 25.0),
+                        Roll.Chance.of(2.0, new FactorRef[]{FactorRef.of("rpgstations:tool_power", null)}, 25.0),
                         null, Roll.Grants.of(1, null, null))));
         assertTrue(validate(a).isEmpty(), "a fully valid Loot roll is clean, got: " + codes(validate(a)));
     }
@@ -465,11 +544,48 @@ public class StationValidatorTest {
                 StationAsset.Identity.of("rpgstations.station.unknowntable.name", null, null),
                 null, oakRecipe(),
                 null, null, null, null, null, null,
-                StationAsset.Loot.of(new String[]{"ghost_table"}, null));
+                LootRef.of(new String[]{"ghost_table"}, null));
         assertFalse(codes(StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, ANY_FACTOR, id -> true, id -> true))
                 .contains("LOOT_UNKNOWN_TABLE"), "a lootableKnown fixture that always answers true never flags");
         assertTrue(codes(StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, ANY_FACTOR, id -> false, id -> true))
                 .contains("LOOT_UNKNOWN_TABLE"));
+    }
+
+    // ==================== LOOT_DOUBLE_LUCK (scope-2 design 4.4, the either-or luck guard) ====================
+
+    @Test
+    void lootDoubleLuck_flagged() {
+        Roll roll = Roll.of("Cycle", null,
+                Roll.Chance.of(0.0, new FactorRef[]{
+                        FactorRef.of("mmoskilltree:station_luck", null),
+                        FactorRef.of("stat", "MMO_Luck")}, 90.0),
+                null, Roll.Grants.of(null, "T1", null));
+        StationAsset a = StationAsset.of("doubleluck",
+                StationAsset.Identity.of("rpgstations.station.doubleluck.name", null, null),
+                null, oakRecipe(), null, null, null, null, null, null, loot(roll));
+        assertTrue(codes(validate(a)).contains("LOOT_DOUBLE_LUCK"));
+    }
+
+    @Test
+    void lootSingleLuckSource_notFlaggedDoubleLuck() {
+        Roll roll = Roll.of("Cycle", null,
+                Roll.Chance.of(0.0, new FactorRef[]{FactorRef.of("stat", "MMO_Luck")}, 90.0),
+                null, Roll.Grants.of(null, "T1", null));
+        StationAsset a = StationAsset.of("singleluck",
+                StationAsset.Identity.of("rpgstations.station.singleluck.name", null, null),
+                null, oakRecipe(), null, null, null, null, null, null, loot(roll));
+        assertFalse(codes(validate(a)).contains("LOOT_DOUBLE_LUCK"));
+    }
+
+    @Test
+    void lootStationLuckAggregateAlone_notFlaggedDoubleLuck() {
+        Roll roll = Roll.of("Cycle", null,
+                Roll.Chance.of(0.0, new FactorRef[]{FactorRef.of("mmoskilltree:station_luck", null)}, 90.0),
+                null, Roll.Grants.of(null, "T1", null));
+        StationAsset a = StationAsset.of("aggregateluck",
+                StationAsset.Identity.of("rpgstations.station.aggregateluck.name", null, null),
+                null, oakRecipe(), null, null, null, null, null, null, loot(roll));
+        assertFalse(codes(validate(a)).contains("LOOT_DOUBLE_LUCK"));
     }
 
     // ==================== validateLootables (standalone LootableAsset content) ====================
@@ -486,12 +602,12 @@ public class StationValidatorTest {
     void validateLootables_validRolls_producesNoFindings() {
         com.ziggfreed.rpgstations.asset.LootableAsset table = com.ziggfreed.rpgstations.asset.LootableAsset.of(
                 "sawmillfinds", new Roll[]{Roll.of("Cycle", null,
-                        Roll.Chance.of(2.0, new Condition[]{Condition.of("rpgstations:tool_power", null, null, null)}, 25.0),
+                        Roll.Chance.of(2.0, new FactorRef[]{FactorRef.of("rpgstations:tool_power", null)}, 25.0),
                         null, Roll.Grants.of(1, null, null))});
         assertTrue(StationValidator.validateLootables(List.of(table), ANY_DROP, ANY_FACTOR).isEmpty());
     }
 
-    // ==================== Requires.Conditions (new this leg) ====================
+    // ==================== Requires.Conditions (unchanged shape) ====================
 
     @Test
     void unknownFactor_flagged() {
@@ -540,8 +656,8 @@ public class StationValidatorTest {
 
     @Test
     void swingWithShakeLeaf_isNotFlaggedAsUnplayed() {
-        // Shake is PLAYED at the station-scale choke point this leg (unlike the MMO's Feedback,
-        // which was never played there) - it must never trip the unplayed-leaves check.
+        // Shake is PLAYED at the station-scale choke point this leg - it must never trip the
+        // unplayed-leaves check.
         StationAsset a = StationAsset.of("swingshake",
                 StationAsset.Identity.of("rpgstations.station.swingshake.name", null, null),
                 null, oakRecipe(),
@@ -571,7 +687,7 @@ public class StationValidatorTest {
         assertFalse(codes.contains("SWING_UNPLAYED_LEAVES"));
     }
 
-    // ==================== Camera.FaceBlock / Camera.Recipe (design 9.7 rename) ====================
+    // ==================== Camera.FaceBlock / Camera.Recipe ====================
 
     @Test
     void faceBlockWithoutCamera_flagged() {
@@ -619,7 +735,7 @@ public class StationValidatorTest {
         assertTrue(codes(validate(a)).contains("MOUNT_FACE_BLOCK_CONFLICT"));
     }
 
-    // ==================== Hold.Mount (design 9.2, phase 2 leg D) ====================
+    // ==================== Hold.Mount ====================
 
     @Test
     void unknownMountSurface_flagged() {
@@ -677,7 +793,7 @@ public class StationValidatorTest {
         assertFalse(codes(validate(a)).contains("MOUNT_STEERABLE_UNTESTED"));
     }
 
-    // ==================== Puppet (round-4 puppet-presentation design) ====================
+    // ==================== Puppet (round-4 puppet-presentation design, unchanged by scope-2) ====================
 
     private static StationAsset puppetStation(String id, Puppet puppet, StationAsset.Hold hold) {
         return StationAsset.of(id,
@@ -828,7 +944,7 @@ public class StationValidatorTest {
                 "a disabled Puppet with no other leaves authored is clean, got: " + codes(validate(a)));
     }
 
-    // ==================== StationStep.Puppet (per-step override, round-4 design) ====================
+    // ==================== StationStep.Puppet (per-step override) ====================
 
     private static StationAsset stepPuppetStation(String id, ActionDef ritualAction) {
         Map<String, ActionDef> actions = new LinkedHashMap<>();
@@ -841,11 +957,10 @@ public class StationValidatorTest {
     }
 
     private static ActionDef ritualActionWithPuppetStep() {
-        StationStep step = StationStep.of("strike", StationStep.TYPE_WAIT)
-                .withWait(StationStep.Wait.ofDurationMs(400L))
+        StationStep step = StationStep.of("strike")
+                .withDuration(StationStep.Duration.of(400L))
                 .withPuppet(StationStep.PuppetOverride.of("Hammer_Strike", null));
-        return ActionDef.of(null, null, null, null, null, null, null, null, null, null, null, null,
-                new StationStep[]{step});
+        return actionDef().withSteps(new StationStep[]{step});
     }
 
     @Test
@@ -911,7 +1026,7 @@ public class StationValidatorTest {
         assertFalse(codes(validate(a)).contains("UNKNOWN_FLAIR_MOMENT_ID"));
     }
 
-    // ==================== FlairAssets (design 9.6, phase 2 leg F) ====================
+    // ==================== FlairAssets (standalone, unchanged) ====================
 
     @Test
     void flairAsset_emptyMoments_flagged() {
@@ -955,15 +1070,7 @@ public class StationValidatorTest {
         assertFalse(codes(findings).contains("FLAIR_ASSET_UNKNOWN_STATION"));
     }
 
-    // ==================== Actions (design 9.1/9.3, phase 2 leg B - "never block") ====================
-
-    private static StationAsset stationWithActions(Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions) {
-        StationAsset a = StationAsset.of("multiaction",
-                StationAsset.Identity.of("rpgstations.station.multiaction.name", null, null),
-                null, oakRecipe(), null, null, null, null, null, null);
-        a.withActions(actions);
-        return a;
-    }
+    // ==================== Actions (design 9.1/9.3, scope-2 Ref/Anchors additions - "never block") ====================
 
     @Test
     void noActionsMap_neverFlagsActionCodes() {
@@ -975,113 +1082,288 @@ public class StationValidatorTest {
 
     @Test
     void actionWithNoRecipeOrSteps_flaggedNoBody() {
-        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
-        actions.put("dead", com.ziggfreed.rpgstations.asset.ActionDef.of(
-                null, null, null, null, null, null, null, null, null, null, null, null, null));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("dead", actionDef());
         assertTrue(codes(validate(stationWithActions(actions))).contains("ACTION_NO_BODY"));
     }
 
     @Test
+    void actionWithRef_notFlaggedNoBody() {
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("prepfish", actionDef().withRef("prepfish"));
+        assertFalse(codes(validate(stationWithActions(actions))).contains("ACTION_NO_BODY"));
+    }
+
+    @Test
     void laterCatchAllAction_flaggedUnreachable() {
-        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
-        actions.put("first", com.ziggfreed.rpgstations.asset.ActionDef.of(
-                null, null, null, oakRecipe(), null, null, null, null, null, null, null, null, null));
-        actions.put("second", com.ziggfreed.rpgstations.asset.ActionDef.of(
-                null, null, null, oakRecipe(), null, null, null, null, null, null, null, null, null));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("first", actionDef().withRecipe(oakRecipe()));
+        actions.put("second", actionDef().withRecipe(oakRecipe()));
         assertTrue(codes(validate(stationWithActions(actions))).contains("UNREACHABLE_ACTION"));
     }
 
     @Test
     void duplicateExactItemIdAcrossActions_flaggedAmbiguous() {
-        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
-        com.ziggfreed.rpgstations.asset.ActionInput sameInput =
-                com.ziggfreed.rpgstations.asset.ActionInput.of("Metal_Ingot", null, null, null);
-        actions.put("convert1", com.ziggfreed.rpgstations.asset.ActionDef.of(
-                null, sameInput, null, oakRecipe(), null, null, null, null, null, null, null, null, null));
-        actions.put("convert2", com.ziggfreed.rpgstations.asset.ActionDef.of(
-                null, sameInput, null, oakRecipe(), null, null, null, null, null, null, null, null, null));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        ActionInput sameInput = ActionInput.of("Metal_Ingot", null, null, null);
+        actions.put("convert1", actionDef().withInput(sameInput).withRecipe(oakRecipe()));
+        actions.put("convert2", actionDef().withInput(sameInput).withRecipe(oakRecipe()));
         assertTrue(codes(validate(stationWithActions(actions))).contains("AMBIGUOUS_ACTION_INPUT"));
     }
 
     @Test
-    void reservedStepType_flaggedUnimplemented() {
-        // Stamp lands phase 2 leg E (design 9.5); Mount is the one type still schema-reserved.
-        StationStep mount = StationStep.of("pose", StationStep.TYPE_MOUNT);
-        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
-        actions.put("anvil", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
-                null, null, null, null, null, null, new StationStep[]{mount}));
-        assertTrue(codes(validate(stationWithActions(actions))).contains("UNIMPLEMENTED_STEP_TYPE"));
-    }
-
-    @Test
     void duplicateStepId_flagged() {
-        StationStep a1 = StationStep.of("dup", StationStep.TYPE_WAIT)
-                .withWait(StationStep.Wait.ofDurationMs(500L));
-        StationStep a2 = StationStep.of("dup", StationStep.TYPE_WAIT)
-                .withWait(StationStep.Wait.ofDurationMs(500L));
-        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
-        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
-                null, null, null, null, null, null, new StationStep[]{a1, a2}));
+        StationStep a1 = StationStep.of("dup").withDuration(StationStep.Duration.of(500L));
+        StationStep a2 = StationStep.of("dup").withDuration(StationStep.Duration.of(500L));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{a1, a2}));
         assertTrue(codes(validate(stationWithActions(actions))).contains("DUPLICATE_STEP_ID"));
     }
 
     @Test
-    void consumeStepUnimplementedSource_flagged() {
-        // "Custody" landed phase-2 leg C (design 9.4) and is no longer an unimplemented route -
-        // use a genuinely unrecognized value to keep exercising the "unknown From" finding.
-        StationStep consume = StationStep.of("c", StationStep.TYPE_CONSUME)
-                .withConsume(StationStep.Consume.of("X", null, 1, "Bench"));
-        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
-        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
-                null, null, null, null, null, null, new StationStep[]{consume}));
-        assertTrue(codes(validate(stationWithActions(actions))).contains("UNIMPLEMENTED_CONSUME_SOURCE"));
+    void consumeStepEmpty_flagged() {
+        StationStep consume = StationStep.of("c").withConsume(StationStep.Consume.of(null, null, 1, "Inventory"));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{consume}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("CONSUME_STEP_EMPTY"));
     }
 
     @Test
-    void consumeStepFromCustody_notFlagged() {
-        // Custody is now an implemented route (design 9.4, phase-2 leg C) - it must NOT trip
-        // UNIMPLEMENTED_CONSUME_SOURCE.
-        StationStep consume = StationStep.of("c", StationStep.TYPE_CONSUME)
-                .withConsume(StationStep.Consume.of("X", null, 1, "Custody"));
-        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
-        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
-                null, null, null, null, null, null, new StationStep[]{consume}));
-        assertFalse(codes(validate(stationWithActions(actions))).contains("UNIMPLEMENTED_CONSUME_SOURCE"));
+    void consumeStepFromCustody_withItemId_notFlaggedEmpty() {
+        // Custody (design 9.4, phase-2 leg C) is an implemented Consume.From route.
+        StationStep consume = StationStep.of("c").withConsume(StationStep.Consume.of("X", null, 1, "Custody"));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{consume}));
+        assertFalse(codes(validate(stationWithActions(actions))).contains("CONSUME_STEP_EMPTY"));
     }
 
     @Test
-    void waitStepMissingDuration_flagged() {
-        StationStep wait = StationStep.of("w", StationStep.TYPE_WAIT).withWait(StationStep.Wait.ofDurationMs(null));
-        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
-        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
-                null, null, null, null, null, null, new StationStep[]{wait}));
-        assertTrue(codes(validate(stationWithActions(actions))).contains("WAIT_MISSING_DURATION"));
+    void produceStepEmpty_flagged() {
+        StationStep produce = StationStep.of("p").withProduce(StationStep.Produce.of(null, 1, "Inventory"));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{produce}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("PRODUCE_STEP_EMPTY"));
     }
 
     @Test
     void unknownGotoTarget_flagged() {
-        StationStep step = StationStep.of("w", StationStep.TYPE_WAIT)
-                .withWait(StationStep.Wait.ofDurationMs(500L))
+        StationStep step = StationStep.of("w").withDuration(StationStep.Duration.of(500L))
                 .withOnConditionFail(StationStep.OnConditionFail.of(StationStep.OnConditionFail.RESULT_SKIP, "nope"));
-        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
-        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
-                null, null, null, null, null, null, new StationStep[]{step}));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step}));
         assertTrue(codes(validate(stationWithActions(actions))).contains("UNKNOWN_GOTO_TARGET"));
     }
 
     @Test
     void knownGotoTarget_notFlagged() {
-        StationStep target = StationStep.of("present", StationStep.TYPE_PRESENT);
-        StationStep step = StationStep.of("w", StationStep.TYPE_WAIT)
-                .withWait(StationStep.Wait.ofDurationMs(500L))
+        StationStep target = StationStep.of("present").withDuration(StationStep.Duration.of(100L));
+        StationStep step = StationStep.of("w").withDuration(StationStep.Duration.of(500L))
                 .withOnConditionFail(StationStep.OnConditionFail.of(StationStep.OnConditionFail.RESULT_SKIP, "present"));
-        Map<String, com.ziggfreed.rpgstations.asset.ActionDef> actions = new java.util.LinkedHashMap<>();
-        actions.put("ritual", com.ziggfreed.rpgstations.asset.ActionDef.of(null, null, null, null, null, null,
-                null, null, null, null, null, null, new StationStep[]{step, target}));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step, target}));
         assertFalse(codes(validate(stationWithActions(actions))).contains("UNKNOWN_GOTO_TARGET"));
     }
 
-    // ==================== Custody (design section 9.4, phase-2 leg C) ====================
+    // ==================== ACTION_REF_UNKNOWN (scope-2 design 1.5) ====================
+
+    @Test
+    void actionRefUnknown_flagged() {
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("prepfish", actionDef().withRef("prepfish"));
+        StationAsset station = stationWithActions(actions);
+        assertTrue(codes(validateWithRefs(station, ANY_STATION, NO_ACTION_ASSET)).contains("ACTION_REF_UNKNOWN"));
+    }
+
+    @Test
+    void actionRefKnown_notFlagged() {
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("prepfish", actionDef().withRef("prepfish"));
+        StationAsset station = stationWithActions(actions);
+        assertFalse(codes(validateWithRefs(station, ANY_STATION, ANY_ACTION_ASSET)).contains("ACTION_REF_UNKNOWN"));
+    }
+
+    // ==================== ANCHOR_STATION_UNKNOWN (scope-2 design 2.2) ====================
+
+    private static Map<String, ActionDef.Anchor> anchorsOf(String anchorId, String station) {
+        Map<String, ActionDef.Anchor> anchors = new LinkedHashMap<>();
+        anchors.put(anchorId, ActionDef.Anchor.of(station, 12.0));
+        return anchors;
+    }
+
+    @Test
+    void anchorUnknownStation_flagged() {
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withRecipe(oakRecipe()).withAnchors(anchorsOf("fire", "ghost_station")));
+        StationAsset station = stationWithActions(actions);
+        assertTrue(codes(validateWithRefs(station, NO_STATION, ANY_ACTION_ASSET)).contains("ANCHOR_STATION_UNKNOWN"));
+    }
+
+    @Test
+    void anchorKnownStation_notFlagged() {
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withRecipe(oakRecipe()).withAnchors(anchorsOf("fire", "cookingfire")));
+        StationAsset station = stationWithActions(actions);
+        assertFalse(codes(validateWithRefs(station, ANY_STATION, ANY_ACTION_ASSET)).contains("ANCHOR_STATION_UNKNOWN"));
+    }
+
+    // ==================== Walk/At + WALK_REQUIRES_PUPPET + WAVE3_PENDING (design 2.1-2.3, [wave 3]) ====================
+
+    @Test
+    void walkWithoutPuppet_flaggedRequiresPuppet() {
+        StationStep step = StationStep.of("go").withWalk(StationStep.Walk.of("fire", null));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step}).withAnchors(anchorsOf("fire", "cookingfire")));
+        Set<String> codes = codes(validate(stationWithActions(actions)));
+        assertTrue(codes.contains("WALK_REQUIRES_PUPPET"));
+        assertTrue(codes.contains("WAVE3_PENDING"), "Walk is always [wave 3]");
+    }
+
+    @Test
+    void walkWithActivePuppet_notFlaggedRequiresPuppet() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        StationStep step = StationStep.of("go").withWalk(StationStep.Walk.of("fire", null));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step})
+                .withAnchors(anchorsOf("fire", "cookingfire")).withPuppet(puppet));
+        assertFalse(codes(validate(stationWithActions(actions))).contains("WALK_REQUIRES_PUPPET"));
+    }
+
+    @Test
+    void walkTargetUnknownAnchor_flagged() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        StationStep step = StationStep.of("go").withWalk(StationStep.Walk.of("ghost", null));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step}).withPuppet(puppet));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("WALK_TARGET_UNKNOWN_ANCHOR"));
+    }
+
+    @Test
+    void walkTargetSelf_notFlaggedUnknownAnchor() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        StationStep step = StationStep.of("go").withWalk(StationStep.Walk.of("self", null));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step}).withPuppet(puppet));
+        assertFalse(codes(validate(stationWithActions(actions))).contains("WALK_TARGET_UNKNOWN_ANCHOR"));
+    }
+
+    @Test
+    void walkTargetDeclaredAnchor_notFlaggedUnknownAnchor() {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), null, null, null, null);
+        StationStep step = StationStep.of("go").withWalk(StationStep.Walk.of("fire", null));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step})
+                .withAnchors(anchorsOf("fire", "cookingfire")).withPuppet(puppet));
+        assertFalse(codes(validate(stationWithActions(actions))).contains("WALK_TARGET_UNKNOWN_ANCHOR"));
+    }
+
+    @Test
+    void stepAtUnknownAnchor_flagged() {
+        StationStep step = StationStep.of("cook").withAt("ghost").withDuration(StationStep.Duration.of(2000L));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("STEP_AT_UNKNOWN_ANCHOR"));
+    }
+
+    @Test
+    void stepAtDeclaredAnchor_notFlagged() {
+        StationStep step = StationStep.of("cook").withAt("fire").withDuration(StationStep.Duration.of(2000L));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step}).withAnchors(anchorsOf("fire", "cookingfire")));
+        assertFalse(codes(validate(stationWithActions(actions))).contains("STEP_AT_UNKNOWN_ANCHOR"));
+    }
+
+    @Test
+    void produceToCustody_flaggedWave3Pending() {
+        StationStep step = StationStep.of("deposit").withProduce(StationStep.Produce.of("Food_Fish_Grilled", 1, "Custody"));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("WAVE3_PENDING"));
+    }
+
+    @Test
+    void produceToInventory_notFlaggedWave3Pending() {
+        StationStep step = StationStep.of("deposit").withProduce(StationStep.Produce.of("Food_Fish_Grilled", 1, "Inventory"));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step}));
+        assertFalse(codes(validate(stationWithActions(actions))).contains("WAVE3_PENDING"));
+    }
+
+    @Test
+    void pureBeatStep_neverFlagsWave3Pending() {
+        StationStep step = StationStep.of("strike").withDuration(StationStep.Duration.of(650L));
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("ritual", actionDef().withSteps(new StationStep[]{step}));
+        assertFalse(codes(validate(stationWithActions(actions))).contains("WAVE3_PENDING"));
+    }
+
+    // ==================== Stamp (design 9.5, scope-2 Caps.Budgets[] reshape) ====================
+
+    private static StationStep stampStep(StationStep.Stamp.Stats.Budget... budgets) {
+        StationStep.Stamp.Stats.Caps caps = StationStep.Stamp.Stats.Caps.of(budgets, null, null);
+        StationStep.Stamp.Stats stats = StationStep.Stamp.Stats.of(null,
+                new StatRollEntry[]{StatRollEntry.of("MMO_CritChance", StatRollEntry.Points.of(1.0, 2.0), 1.0, null)},
+                null, null, caps);
+        StationStep.Stamp stamp = StationStep.Stamp.of(new Ingredient[]{Ingredient.item("Metal_Bars", 1)}, null, stats);
+        return StationStep.of("stamp").withStamp(stamp);
+    }
+
+    @Test
+    void stampBudgetBadRoute_flagged() {
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("enhance", actionDef().withSteps(new StationStep[]{
+                stampStep(StationStep.Stamp.Stats.Budget.flat(null))}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("STAMP_BUDGET_BAD_ROUTE"));
+    }
+
+    @Test
+    void stampBudgetNonPositive_flagged() {
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("enhance", actionDef().withSteps(new StationStep[]{
+                stampStep(StationStep.Stamp.Stats.Budget.flat(0.0))}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("STAMP_NONPOSITIVE_BUDGET"));
+    }
+
+    @Test
+    void stampBudgetFactorScaledUnknownFactor_flagged() {
+        StationStep.Stamp.Stats.Budget scaled = StationStep.Stamp.Stats.Budget.scaled(0.5,
+                new FactorRef[]{FactorRef.stat("MMO_Level_SMITHING")});
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("enhance", actionDef().withSteps(new StationStep[]{stampStep(scaled)}));
+        assertTrue(codes(StationValidator.validate(List.of(stationWithActions(actions)), ANY_LANG, ANY_DROP, NO_FACTOR))
+                .contains("UNKNOWN_FACTOR"));
+    }
+
+    @Test
+    void stampBudgetValid_producesNoBudgetFindings() {
+        StationStep.Stamp.Stats.Budget budget = StationStep.Stamp.Stats.Budget.flat(30.0);
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("enhance", actionDef().withSteps(new StationStep[]{stampStep(budget)}));
+        Set<String> codes = codes(validate(stationWithActions(actions)));
+        assertFalse(codes.contains("STAMP_BUDGET_BAD_ROUTE"));
+        assertFalse(codes.contains("STAMP_NONPOSITIVE_BUDGET"));
+        assertFalse(codes.contains("STAMP_NO_REAGENTS"));
+        assertFalse(codes.contains("STAMP_STATS_NO_ENTRIES"));
+    }
+
+    @Test
+    void stampNoReagents_flagged() {
+        StationStep.Stamp stamp = StationStep.Stamp.of(null, StationStep.Stamp.Durability.of(5.0), null);
+        StationStep step = StationStep.of("stamp").withStamp(stamp);
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("enhance", actionDef().withSteps(new StationStep[]{step}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("STAMP_NO_REAGENTS"));
+    }
+
+    @Test
+    void stampNoPayload_flagged() {
+        StationStep.Stamp stamp = StationStep.Stamp.of(new Ingredient[]{Ingredient.item("Metal_Bars", 1)}, null, null);
+        StationStep step = StationStep.of("stamp").withStamp(stamp);
+        Map<String, ActionDef> actions = new LinkedHashMap<>();
+        actions.put("enhance", actionDef().withSteps(new StationStep[]{step}));
+        assertTrue(codes(validate(stationWithActions(actions))).contains("STAMP_NO_PAYLOAD"));
+    }
+
+    // ==================== Custody (design section 9.4, unchanged shape) ====================
 
     @Test
     void custodyWithRecipeAndNoInput_notFlagged() {
@@ -1122,7 +1404,7 @@ public class StationValidatorTest {
         assertFalse(codes(validate(validStation())).contains("CUSTODY_NO_INPUT_MATCHER"));
     }
 
-    // ==================== Custody.Display (design section 9, phase-2 leg G) ====================
+    // ==================== Custody.Display ====================
 
     @Test
     void custodyDisplayNonPositiveScale_flagged() {
@@ -1141,5 +1423,172 @@ public class StationValidatorTest {
     @Test
     void noDisplay_neverFlagsDisplayFindings() {
         assertFalse(codes(validate(validStation())).contains("CUSTODY_DISPLAY_NON_POSITIVE_SCALE"));
+    }
+
+    // ==================== validateActionAssets (standalone ActionAsset, scope-2 design 1.5) ====================
+
+    @Test
+    void validateActionAssets_noBody_flaggedActionNoBody() throws Exception {
+        ActionAsset action = actionAsset("empty", "{}");
+        List<Finding> findings = StationValidator.validateActionAssets(List.of(action), ANY_DROP, ANY_FACTOR,
+                ANY_LOOTABLE, ANY_ROLLPOOL, ANY_MODEL, ANY_STATION);
+        assertTrue(codes(findings).contains("ACTION_NO_BODY"));
+    }
+
+    @Test
+    void validateActionAssets_withSteps_notFlaggedActionNoBody() throws Exception {
+        ActionAsset action = actionAsset("prepfish", "{ \"Steps\": [ { \"Id\": \"scale\" } ] }");
+        List<Finding> findings = StationValidator.validateActionAssets(List.of(action), ANY_DROP, ANY_FACTOR,
+                ANY_LOOTABLE, ANY_ROLLPOOL, ANY_MODEL, ANY_STATION);
+        assertFalse(codes(findings).contains("ACTION_NO_BODY"));
+    }
+
+    @Test
+    void validateActionAssets_unknownAnchorStation_flagged() throws Exception {
+        ActionAsset action = actionAsset("prepfish",
+                "{ \"Anchors\": { \"fire\": { \"Station\": \"ghost\" } }, \"Steps\": [ { \"Id\": \"s\" } ] }");
+        List<Finding> findings = StationValidator.validateActionAssets(List.of(action), ANY_DROP, ANY_FACTOR,
+                ANY_LOOTABLE, ANY_ROLLPOOL, ANY_MODEL, NO_STATION);
+        assertTrue(codes(findings).contains("ANCHOR_STATION_UNKNOWN"));
+    }
+
+    @Test
+    void validateActionAssets_knownAnchorStation_notFlagged() throws Exception {
+        ActionAsset action = actionAsset("prepfish",
+                "{ \"Anchors\": { \"fire\": { \"Station\": \"cookingfire\" } }, \"Steps\": [ { \"Id\": \"s\" } ] }");
+        List<Finding> findings = StationValidator.validateActionAssets(List.of(action), ANY_DROP, ANY_FACTOR,
+                ANY_LOOTABLE, ANY_ROLLPOOL, ANY_MODEL, ANY_STATION);
+        assertFalse(codes(findings).contains("ANCHOR_STATION_UNKNOWN"));
+    }
+
+    // ==================== validateExtensions (scope-2 design 1.8/1.9) ====================
+
+    @Test
+    void extensionTargetAmbiguous_flagged() throws Exception {
+        ExtensionAsset ext = extensionAsset("badtarget", "{ \"Target\": {} }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(), List.of(),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertTrue(codes(findings).contains("EXTENSION_TARGET_UNKNOWN"));
+    }
+
+    @Test
+    void extensionTargetUnknownStation_flagged() throws Exception {
+        ExtensionAsset ext = extensionAsset("ghosttarget", "{ \"Target\": { \"Station\": \"ghost_station\" } }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(), List.of(),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertTrue(codes(findings).contains("EXTENSION_TARGET_UNKNOWN"));
+    }
+
+    @Test
+    void extensionTargetKnownStation_notFlagged() throws Exception {
+        ExtensionAsset ext = extensionAsset("sawmillext", "{ \"Target\": { \"Station\": \"sawmill\" } }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(validStation()), List.of(),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertFalse(codes(findings).contains("EXTENSION_TARGET_UNKNOWN"));
+    }
+
+    @Test
+    void extensionPayloadMismatch_flagged() throws Exception {
+        // A Lootable target can only carry Rolls[] - Xp is not a legal payload for it.
+        ExtensionAsset ext = extensionAsset("badpayload", "{ \"Target\": { \"Lootable\": \"sawmillfinds\" },"
+                + " \"Xp\": [ { \"Skill\": \"WOODCUTTING\", \"PerCycle\": 5 } ] }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(), List.of(),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertTrue(codes(findings).contains("EXTENSION_PAYLOAD_MISMATCH"));
+    }
+
+    @Test
+    void extensionPayloadAllowed_notFlagged() throws Exception {
+        ExtensionAsset ext = extensionAsset("goodpayload", "{ \"Target\": { \"Lootable\": \"sawmillfinds\" },"
+                + " \"Rolls\": [ { \"Trigger\": \"Cycle\", \"Grants\": { \"DropList\": \"T1\" } } ] }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(), List.of(),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertFalse(codes(findings).contains("EXTENSION_PAYLOAD_MISMATCH"));
+    }
+
+    @Test
+    void extensionActionKeyCollidesWithBase_flagged() throws Exception {
+        Map<String, ActionDef> baseActions = new LinkedHashMap<>();
+        baseActions.put("convert", actionDef().withRecipe(oakRecipe()));
+        StationAsset station = stationWithActions(baseActions);
+        ExtensionAsset ext = extensionAsset("collideext", "{ \"Target\": { \"Station\": \"multiaction\" },"
+                + " \"Actions\": { \"convert\": { \"Work\": { \"CycleMs\": 1000 } } } }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(station), List.of(),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertTrue(codes(findings).contains("EXTENSION_KEY_COLLISION"));
+    }
+
+    @Test
+    void extensionActionNewKey_notFlaggedCollision() throws Exception {
+        Map<String, ActionDef> baseActions = new LinkedHashMap<>();
+        baseActions.put("convert", actionDef().withRecipe(oakRecipe()));
+        StationAsset station = stationWithActions(baseActions);
+        ExtensionAsset ext = extensionAsset("addsomething", "{ \"Target\": { \"Station\": \"multiaction\" },"
+                + " \"Actions\": { \"extra\": { \"Work\": { \"CycleMs\": 1000 } } } }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(station), List.of(),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertFalse(codes(findings).contains("EXTENSION_KEY_COLLISION"));
+    }
+
+    @Test
+    void extensionActionKeyCollidesWithAnotherExtension_loserFlagged() throws Exception {
+        Map<String, ActionDef> baseActions = new LinkedHashMap<>();
+        baseActions.put("convert", actionDef().withRecipe(oakRecipe()));
+        StationAsset station = stationWithActions(baseActions);
+        ExtensionAsset first = extensionAsset("first_ext", "{ \"Target\": { \"Station\": \"multiaction\" },"
+                + " \"Priority\": 0, \"Actions\": { \"extra\": { \"Work\": { \"CycleMs\": 1000 } } } }");
+        ExtensionAsset second = extensionAsset("second_ext", "{ \"Target\": { \"Station\": \"multiaction\" },"
+                + " \"Priority\": 5, \"Actions\": { \"extra\": { \"Work\": { \"CycleMs\": 2000 } } } }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(first, second), List.of(station), List.of(),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertTrue(codes(findings).contains("EXTENSION_KEY_COLLISION"));
+    }
+
+    @Test
+    void extensionStepInsertion_ambiguousAnchor_flagged() throws Exception {
+        ActionAsset action = actionAsset("prepfish", "{ \"Steps\": [ { \"Id\": \"scale\" } ] }");
+        ExtensionAsset ext = extensionAsset("noanchor", "{ \"Target\": { \"Action\": \"prepfish\" },"
+                + " \"Steps\": [ { \"Insert\": [ { \"Id\": \"extra\" } ] } ] }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(), List.of(action),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertTrue(codes(findings).contains("EXTENSION_ANCHOR_MISSING"));
+    }
+
+    @Test
+    void extensionStepInsertion_danglingAfterStepId_flagged() throws Exception {
+        ActionAsset action = actionAsset("prepfish", "{ \"Steps\": [ { \"Id\": \"scale\" } ] }");
+        ExtensionAsset ext = extensionAsset("dangling", "{ \"Target\": { \"Action\": \"prepfish\" },"
+                + " \"Steps\": [ { \"Anchor\": { \"After\": \"ghost_step\" }, \"Insert\": [ { \"Id\": \"extra\" } ] } ] }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(), List.of(action),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertTrue(codes(findings).contains("EXTENSION_ANCHOR_MISSING"));
+    }
+
+    @Test
+    void extensionStepInsertion_knownAfterStepId_notFlaggedAnchorMissing() throws Exception {
+        ActionAsset action = actionAsset("prepfish", "{ \"Steps\": [ { \"Id\": \"scale\" } ] }");
+        ExtensionAsset ext = extensionAsset("valid", "{ \"Target\": { \"Action\": \"prepfish\" },"
+                + " \"Steps\": [ { \"Anchor\": { \"After\": \"scale\" }, \"Insert\": [ { \"Id\": \"extra\" } ] } ] }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(), List.of(action),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertFalse(codes(findings).contains("EXTENSION_ANCHOR_MISSING"));
+    }
+
+    @Test
+    void extensionStepInsertion_missingId_flagged() throws Exception {
+        ExtensionAsset ext = extensionAsset("noid", "{ \"Target\": { \"Action\": \"prepfish\" },"
+                + " \"Steps\": [ { \"Anchor\": { \"AtEnd\": true }, \"Insert\": [ { \"Commands\": [\"say hi\"] } ] } ] }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(), List.of(),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertTrue(codes(findings).contains("EXTENSION_STEP_MISSING_ID"));
+    }
+
+    @Test
+    void extensionStepInsertion_withId_notFlaggedMissingId() throws Exception {
+        ExtensionAsset ext = extensionAsset("hasid", "{ \"Target\": { \"Action\": \"prepfish\" },"
+                + " \"Steps\": [ { \"Anchor\": { \"AtEnd\": true }, \"Insert\": [ { \"Id\": \"extra\" } ] } ] }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(), List.of(),
+                ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
+        assertFalse(codes(findings).contains("EXTENSION_STEP_MISSING_ID"));
     }
 }

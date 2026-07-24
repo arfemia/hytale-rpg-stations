@@ -16,10 +16,10 @@ import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.item.ItemModule;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Roll;
-import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -86,26 +86,27 @@ public final class LootEngine {
     }
 
     /**
-     * The station's effective Roll list: every referenced {@link LootableAsset}'s Rolls (via
-     * {@link LootableCatalog}, order-preserving over {@code Loot.Tables}), THEN the station's
-     * own inline {@code Loot.Rolls}. An unresolvable table id is skipped with a fine log (the
-     * validator's {@code LOOT_UNKNOWN_TABLE} catches the authoring mistake ahead of runtime).
+     * The effective Roll list for a {@link LootRef} (scope-2's unified loot vocabulary, replacing
+     * the old {@code StationAsset.Loot}): every referenced {@link LootableAsset}'s Rolls (via
+     * {@link LootableCatalog}, order-preserving over {@code LootRef.Lootables}), THEN the ref's own
+     * inline {@code Rolls}. An unresolvable lootable id is skipped with a fine log (the validator's
+     * {@code LOOT_UNKNOWN_TABLE} catches the authoring mistake ahead of runtime).
      */
     @Nonnull
-    public static List<Roll> resolveRolls(@Nullable StationAsset.Loot loot) {
+    public static List<Roll> resolveRolls(@Nullable LootRef loot) {
         List<Roll> out = new ArrayList<>();
         if (loot == null) {
             return out;
         }
-        String[] tables = loot.getTables();
-        if (tables != null) {
-            for (String tableId : tables) {
+        String[] lootables = loot.getLootables();
+        if (lootables != null) {
+            for (String tableId : lootables) {
                 if (tableId == null || tableId.isBlank()) {
                     continue;
                 }
                 LootableAsset table = LootableCatalog.getInstance().get(tableId);
                 if (table == null) {
-                    Log.fine("STATION Loot.Tables references unknown lootable '" + tableId + "'");
+                    Log.fine("STATION Loot.Lootables references unknown lootable '" + tableId + "'");
                     continue;
                 }
                 Roll[] rolls = table.getRolls();

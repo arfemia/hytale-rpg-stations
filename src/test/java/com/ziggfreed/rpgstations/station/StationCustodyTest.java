@@ -13,6 +13,7 @@ import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.rpgstations.asset.ActionInput;
+import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
@@ -207,8 +208,8 @@ class StationCustodyTest {
     void matchesAnyConversionInput_resourceTypeFamily_bareLogFallback() {
         StationAsset.Conversion[] conversions = {
                 StationAsset.Conversion.of(
-                        StationAsset.Ingredient.resource("Wood_Hardwood_Trunk", 1),
-                        StationAsset.Ingredient.item("Wood_Hardwood_Planks", 4))
+                        Ingredient.resource("Wood_Hardwood_Trunk", 1),
+                        Ingredient.item("Wood_Hardwood_Planks", 4))
         };
         assertTrue(StationCustody.matchesAnyConversionInput(conversions, "Wood_Oak_Log",
                 new String[] {"Wood_Hardwood_Trunk"}));
@@ -219,8 +220,8 @@ class StationCustodyTest {
     void matchesAnyConversionInput_exactItemId() {
         StationAsset.Conversion[] conversions = {
                 StationAsset.Conversion.of(
-                        StationAsset.Ingredient.item("MMO_Iron_Ingot", 2),
-                        StationAsset.Ingredient.item("MMO_Sharpened_Iron_Bar", 1))
+                        Ingredient.item("MMO_Iron_Ingot", 2),
+                        Ingredient.item("MMO_Sharpened_Iron_Bar", 1))
         };
         assertTrue(StationCustody.matchesAnyConversionInput(conversions, "MMO_Iron_Ingot", new String[0]));
         assertFalse(StationCustody.matchesAnyConversionInput(conversions, "MMO_Gold_Ingot", new String[0]));

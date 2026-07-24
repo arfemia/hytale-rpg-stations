@@ -42,7 +42,7 @@ public final class RollPool implements JsonAssetWithMap<String, DefaultAssetMap<
             .add()
             .appendInherited(new KeyedCodec<>("Entries", new ArrayCodec<>(StatRollEntry.CODEC, StatRollEntry[]::new), false),
                     (a, v) -> a.entries = v, a -> a.entries, (a, parent) -> a.entries = parent.entries)
-            .add()
+            .documentation("The candidate stat-roll entries this reusable pool contributes to a Stamp step.").add()
             .build();
 
     public RollPool() {

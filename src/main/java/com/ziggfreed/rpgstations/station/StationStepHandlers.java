@@ -22,9 +22,10 @@ import com.ziggfreed.rpgstations.api.EnhanceLine;
 import com.ziggfreed.rpgstations.api.EnhanceStamper;
 import com.ziggfreed.rpgstations.api.StampInspection;
 import com.ziggfreed.rpgstations.api.StampResult;
-import com.ziggfreed.rpgstations.api.StatRoll;
 import com.ziggfreed.rpgstations.api.impl.EnhanceStamperRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.rpgstations.asset.Ingredient;
+import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationStep;
@@ -36,15 +37,16 @@ import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * The seven executable {@code station.step} handlers (design sections 9.3/9.5, minus the one
- * schema-reserved-unimplemented {@code Mount} id - see {@link StationStep}'s javadoc). Each is
- * registered UNGUARDED here; {@link StationStepRegistry} wraps every one in the conditions-gate +
- * throw-guard layer (design 9.3/M4's binding fix) before handing it to the kernel, so a handler
- * body below may assume its step's {@code Conditions} already passed and never needs its own
- * top-level try/catch for an UNEXPECTED throw - only for the SPECIFIC failure modes it wants a
- * more precise {@link StationService.StopReason} for (Consume/Produce map an inventory-mutation
- * throw to {@code INVENTORY_FULL}, matching the pre-refactor engine's exact behavior, rather than
- * the guard's generic {@code STEP_FAILED}).
+ * The ONE composite {@code station.step} handler (scope-2 design 2.1, decision 34) plus the pure
+ * per-phase execution bodies it walks. The pre-scope-2 {@code Type} union and its seven per-type
+ * handlers are GONE; {@link CompositeStepHandler} walks the FIXED phase order per iteration and
+ * owns the per-step {@code Repeat} + {@code Duration} suspend/resume machinery.
+ *
+ * <p>{@link StationStepRegistry} wraps {@link CompositeStepHandler} in the conditions-gate +
+ * throw-guard layer, so the phase bodies below may assume a step's {@code Conditions} already
+ * passed and never need their own top-level try/catch for an UNEXPECTED throw - only for the
+ * SPECIFIC failure modes they want a more precise {@link StationService.StopReason} for
+ * (Consume/Produce map an inventory-mutation throw to {@code INVENTORY_FULL}).
  */
 final class StationStepHandlers {
 
@@ -52,234 +54,128 @@ final class StationStepHandlers {
     }
 
     /**
-     * Removes {@code Consume.Quantity} of the item/resource-type either from the player's
-     * inventory (storage-first) or from the station's placed-input custody claim (design section
-     * 9.4, phase-2 leg C - {@code From:"Custody"}, the sawmill migration's route).
+     * The composite handler: for each {@code Repeat} iteration, walk {@code Walk} (wave-3 deny)
+     * -&gt; {@code Consume} -&gt; {@code Stamp} -&gt; {@code Produce} -&gt; {@code Roll} -&gt;
+     * {@code Commands} -&gt; {@code Presentation}/{@code Puppet.Clip}/{@code Puppet.Prop} entry cues
+     * -&gt; {@code Duration} hold. A {@code Duration} suspends the walk (reusing the retired
+     * {@code Wait} type's suspend/resume math); {@link StationSession#stepIteration} +
+     * {@link StationSession#stepDeadlineMs} carry the resume state across ticks so a repeated,
+     * duration-holding step resumes at the correct iteration without re-running its earlier
+     * iterations' mutations.
      */
-    static final class ConsumeHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
+    static final class CompositeStepHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
         @Override
         public StationStepResult execute(StationStepContext ctx, StationStep step) {
-            StationStep.Consume consume = step.getConsume();
-            if (consume == null) {
-                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                        "Consume step '" + step.getId() + "' has no Consume group");
-            }
-            int quantity = consume.getQuantity() != null && consume.getQuantity() > 0 ? consume.getQuantity() : 1;
-            String resourceTypeId = consume.getResourceTypeId();
-            boolean isResource = resourceTypeId != null && !resourceTypeId.isBlank();
-            String itemId = consume.getItemId();
-            String inputRef = isResource ? resourceTypeId : itemId;
-            if (inputRef == null || inputRef.isBlank()) {
-                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                        "Consume step '" + step.getId() + "' has neither ItemId nor ResourceTypeId");
-            }
-            if (StationStep.Consume.FROM_CUSTODY.equalsIgnoreCase(consume.effectiveFrom())) {
-                return consumeFromCustody(ctx, step, isResource, resourceTypeId, itemId, quantity);
-            }
-            if (!StationStep.Consume.FROM_INVENTORY.equalsIgnoreCase(consume.effectiveFrom())) {
-                Log.warn("STATION Consume step '" + step.getId() + "' authors From '" + consume.effectiveFrom()
-                        + "' which has no handler yet (only 'Inventory'/'Custody' are implemented)");
-                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                        "Consume.From '" + consume.effectiveFrom() + "' is not yet implemented");
-            }
-            try {
-                if (isResource) {
-                    ResourceQuantity resource = new ResourceQuantity(inputRef, quantity);
-                    ResourceTransaction tx = InventoryAccess.storageOf(ctx.player).canRemoveResource(resource)
-                            ? InventoryAccess.storageOf(ctx.player).removeResource(resource)
-                            : InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeResource(resource);
-                    StationService.tallyResourceConsumption(ctx.session, tx, inputRef);
-                } else {
-                    ItemStack input = new ItemStack(inputRef, quantity);
-                    if (InventoryAccess.storageOf(ctx.player).canRemoveItemStack(input)) {
-                        InventoryAccess.storageOf(ctx.player).removeItemStack(input);
-                    } else {
-                        InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeItemStack(input);
-                    }
-                    ctx.session.consumedItems.merge(inputRef, quantity, Integer::sum);
-                }
-            } catch (Throwable t) {
-                Log.warn("STATION Consume step failed for '" + ctx.session.stationId + "': " + t.getMessage());
-                return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL, t.getMessage());
-            }
-            return StationStepResult.SUCCESS;
-        }
-
-        /**
-         * Drains {@code quantity} of {@code itemId}/{@code resourceTypeId} from the block's live
-         * claim ({@link StationService#custodyClaimFor}), tallying the REAL drained item ids into
-         * the session ledger ({@code StationCustody.drain}'s {@code drainedOut} parameter, mirroring
-         * {@code StationService#tallyResourceConsumption}). A short drain (the claim ran out
-         * mid-cycle - should not normally happen since {@code firstRunnableConversionFromCustody}
-         * pre-checks, but a mid-session drain-by-another-source is not otherwise excluded) fails
-         * {@code OUT_OF_INPUTS}, the same reason an empty custody station denies at engage.
-         */
-        private static StationStepResult consumeFromCustody(StationStepContext ctx, StationStep step,
-                boolean isResource, String resourceTypeId, String itemId, int quantity) {
-            StationCustodyClaim claim = StationService.getInstance().custodyClaimFor(ctx.session.blockKey);
-            Map<String, Integer> drainedOut = new LinkedHashMap<>();
-            int drained = StationCustody.drain(claim, isResource ? null : itemId, isResource ? resourceTypeId : null,
-                    quantity, StationService::liveResourceTypeIdsOf, drainedOut);
-            if (drained < quantity) {
-                return StationStepResult.fail(StationService.StopReason.OUT_OF_INPUTS,
-                        "Consume step '" + step.getId() + "' custody ran short ("
-                                + drained + "/" + quantity + " of '" + (isResource ? resourceTypeId : itemId) + "')");
-            }
-            for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
-                ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
-            }
-            return StationStepResult.SUCCESS;
-        }
-    }
-
-    /**
-     * Adds {@code Produce.Quantity} of {@code Produce.ItemId} to the player, hotbar-first then
-     * backpack storage then drop-at-block (round-5, via {@code util.ItemGrantUtil}), then fires a
-     * live item-gain notification ({@code StationService#notifyItemGain}).
-     */
-    static final class ProduceHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
-        @Override
-        public StationStepResult execute(StationStepContext ctx, StationStep step) {
-            StationStep.Produce produce = step.getProduce();
-            if (produce == null || produce.getItemId() == null || produce.getItemId().isBlank()) {
-                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                        "Produce step '" + step.getId() + "' has no Produce.ItemId");
-            }
-            if (!StationStep.Produce.TO_INVENTORY.equalsIgnoreCase(produce.effectiveTo())) {
-                Log.warn("STATION Produce step '" + step.getId() + "' authors To '" + produce.effectiveTo()
-                        + "' which has no handler yet (only 'Inventory' is implemented this leg)");
-                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                        "Produce.To '" + produce.effectiveTo() + "' is not yet implemented");
-            }
-            int quantity = produce.getQuantity() != null && produce.getQuantity() > 0 ? produce.getQuantity() : 1;
-            try {
-                // Round-5: ItemGrantUtil.grant never throws for "no room" anymore (it drops at
-                // the block instead) - this try/catch now only guards a genuinely unexpected
-                // failure (ItemStack construction, the ledger merge, the notify call), not the
-                // old "container full" case (that was already precluded by runCycle's NO_ROOM
-                // precheck before this handler ever runs for a real cycle).
-                ItemGrantUtil.grant(ctx.player, new ItemStack(produce.getItemId(), quantity), ctx.store,
-                        ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
-                ctx.session.producedItems.merge(produce.getItemId(), quantity, Integer::sum);
-                if (ctx.session.playerRef != null) {
-                    StationService.notifyItemGain(ctx.session.playerRef, produce.getItemId(), quantity, false);
-                }
-            } catch (Throwable t) {
-                Log.warn("STATION Produce step failed for '" + ctx.session.stationId + "': " + t.getMessage());
-                return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL, t.getMessage());
-            }
-            return StationStepResult.SUCCESS;
-        }
-    }
-
-    /**
-     * Suspends the walk until {@code Wait.DurationMs} elapses, deriving the deadline ONCE (session-
-     * held, never re-derived on re-entry - the kernel's binding resume contract). {@code Beats} is
-     * schema-reserved this leg (see {@link StationStep.Wait}'s javadoc) - fails cleanly rather
-     * than hanging forever.
-     */
-    static final class WaitHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
-        @Override
-        public StationStepResult execute(StationStepContext ctx, StationStep step) {
-            StationStep.Wait wait = step.getWait();
-            if (wait == null) {
-                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                        "Wait step '" + step.getId() + "' has no Wait group");
-            }
-            Long durationMs = wait.getDurationMs();
-            if (durationMs == null || durationMs <= 0) {
-                if (wait.getBeats() != null && wait.getBeats() > 0) {
-                    Log.warn("STATION Wait step '" + step.getId() + "' authors Beats with no handler yet"
-                            + " (Beats is schema-reserved this leg)");
-                }
-                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                        "Wait step '" + step.getId() + "' has no positive DurationMs");
-            }
+            StationSession s = ctx.session;
             long now = System.currentTimeMillis();
-            long deadline = StationStepDecisions.commitOrReadDeadline(now, durationMs, ctx.session.stepDeadlineMs);
-            ctx.session.stepDeadlineMs = deadline;
-            if (!StationStepDecisions.waitDue(now, deadline)) {
-                return StationStepResult.suspend(deadline);
+
+            // WAVE-3 pending guard (decision boundary): a step authoring Walk/At/Produce.To:Custody
+            // decodes + validates this wave but the engine cannot execute it - deny gracefully.
+            // Engage should already have denied any such program (StationService#hasWave3PendingStep);
+            // this is the defensive last line.
+            if (step.authorsWave3OnlyPhase()) {
+                Log.warn("STATION step '" + step.getId() + "' at '" + s.stationId
+                        + "' authors a wave-3 phase (Walk/At/Produce.To:Custody) that cannot execute this wave");
+                s.stepIteration = 0;
+                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                        "step '" + step.getId() + "' authors a wave-3-only phase");
             }
-            ctx.session.stepDeadlineMs = 0L;
+
+            // Resume of a Duration hold committed on a prior tick for THIS step's current iteration.
+            boolean resumed = false;
+            if (s.stepDeadlineMs != 0L) {
+                if (!StationStepDecisions.durationDue(now, s.stepDeadlineMs)) {
+                    return StationStepResult.suspend(s.stepDeadlineMs);
+                }
+                s.stepDeadlineMs = 0L;
+                s.stepIteration++; // the iteration that was holding is complete - advance past it.
+                resumed = true;
+            }
+
+            // Repeat resolves ONCE at step entry (design 2.1, m1): a fresh entry computes the count;
+            // a Duration-hold resume reuses the value cached at the hold, so a factor-scaled Repeat
+            // combined with a Duration hold never re-resolves its iteration count mid-loop.
+            int repeatCount;
+            if (resumed) {
+                repeatCount = s.stepRepeatCount;
+            } else {
+                double contribution = StationStepDecisions.repeatFactorContribution(step.getRepeat(), ctx.snapshot::resolve);
+                repeatCount = StationStepDecisions.resolveRepeatCount(step.getRepeat(), contribution);
+            }
+
+            for (int i = s.stepIteration; i < repeatCount; i++) {
+                s.stepIteration = i;
+
+                StationStepResult phase;
+                if ((phase = consumePhase(ctx, step)) != null) {
+                    s.stepIteration = 0;
+                    return phase;
+                }
+                if ((phase = StampHandler.executeStampPhase(ctx, step)) != null) {
+                    s.stepIteration = 0;
+                    return phase;
+                }
+                if ((phase = producePhase(ctx, step)) != null) {
+                    s.stepIteration = 0;
+                    return phase;
+                }
+                if ((phase = rollPhase(ctx, step)) != null) {
+                    s.stepIteration = 0;
+                    return phase;
+                }
+                if ((phase = commandsPhase(ctx, step)) != null) {
+                    s.stepIteration = 0;
+                    return phase;
+                }
+
+                emitEntryCues(ctx, step);
+
+                StationStep.Duration duration = step.getDuration();
+                if (duration != null && duration.effectiveMs() > 0) {
+                    long deadline = StationStepDecisions.commitOrReadDeadline(now, duration.effectiveMs(), 0L);
+                    s.stepDeadlineMs = deadline;
+                    s.stepIteration = i;
+                    s.stepRepeatCount = repeatCount; // cache the resolved count for the resume (m1)
+                    if (!StationStepDecisions.durationDue(now, deadline)) {
+                        return StationStepResult.suspend(deadline);
+                    }
+                    s.stepDeadlineMs = 0L;
+                }
+            }
+
+            s.stepIteration = 0;
             return StationStepResult.SUCCESS;
         }
     }
 
-    /** Evaluates + grants a loot pass through the SAME {@code loot.LootEngine} a station's {@code Loot} group uses. */
-    static final class RollHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
-        @Override
-        public StationStepResult execute(StationStepContext ctx, StationStep step) {
-            StationStep.RollGroup group = step.getRoll();
-            if (group == null) {
-                return StationStepResult.SUCCESS; // an empty Roll step is a legal no-op
-            }
-            List<Roll> rolls = new ArrayList<>();
-            String lootableId = group.getLootable();
-            if (lootableId != null && !lootableId.isBlank()) {
-                LootableAsset table = LootableCatalog.getInstance().get(lootableId);
-                if (table != null && table.getRolls() != null) {
-                    rolls.addAll(Arrays.asList(table.getRolls()));
-                } else {
-                    Log.fine("STATION Roll step '" + step.getId() + "' references unknown lootable '" + lootableId + "'");
-                }
-            }
-            if (group.getRolls() != null) {
-                rolls.addAll(Arrays.asList(group.getRolls()));
-            }
-            if (rolls.isEmpty()) {
-                return StationStepResult.SUCCESS;
-            }
-            LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, ctx.snapshot,
-                    ctx.player, ctx.cycleOutputForBonusCopies, ctx.session.playerRef, ctx.session.stationId,
-                    ctx.action.getActionId(), ctx.cycleIndex, ctx.store,
-                    ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
-            StationService.applyGrantResult(ctx.session, ctx.store, result);
-            return StationStepResult.SUCCESS;
-        }
-    }
-
-    /** Runs {@code Command.Commands} through the SAME zero-code integration surface a {@code Roll.Grants.Commands} uses. */
-    static final class CommandHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
-        @Override
-        public StationStepResult execute(StationStepContext ctx, StationStep step) {
-            StationStep.CommandGroup group = step.getCommand();
-            String[] commands = group != null ? group.getCommands() : null;
-            if (commands == null || commands.length == 0 || ctx.session.playerRef == null) {
-                return StationStepResult.SUCCESS;
-            }
-            CommandRewardExecutor.Placeholders placeholders = CommandRewardExecutor.Placeholders.of(
-                    ctx.session.playerRef, ctx.session.stationId, ctx.action.getActionId(), ctx.cycleIndex);
-            for (String raw : commands) {
-                if (raw != null && !raw.isBlank()) {
-                    CommandRewardExecutor.run(raw, placeholders);
-                }
-            }
-            return StationStepResult.SUCCESS;
-        }
-    }
+    // ==================== Per-iteration entry cues (presentation + puppet clip/prop) ====================
 
     /**
-     * Plays this step's OWN {@code Presentation} at the block through the per-step moment id
-     * (design section 9.6, leg F): {@code step:<actionId>:<stepId>} when this step authors an
-     * {@code Id}, else falls back to the well-known {@link StationFlairs#MOMENT_CYCLE} id (the
-     * pre-leg-F behavior every implicit-program Present step still exercises, since the implicit
-     * program's own steps author no {@code Id}).
+     * Fire the step's iteration-entry cues once per FRESH iteration (never a Duration-hold resume
+     * re-check - the composite handler only reaches this on a genuine fresh iteration, so the
+     * decision cores are passed a {@code null} resumingStep = "emit"): the step's own
+     * {@code Puppet.Clip} (the step-synced swing), a re-sync of the puppet's held {@code Puppet.Prop}
+     * (the step's override, else the session default), and the step's own {@code Presentation}
+     * moment (played AFTER the mutation phases, byte-equivalent to the old Present step running last
+     * in the four-step implicit program). No-op for a session with no puppet (the controller's own
+     * guards) or a step authoring none of these.
      */
-    static final class PresentHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
-        @Override
-        public StationStepResult execute(StationStepContext ctx, StationStep step) {
-            if (step.getPresentation() == null) {
-                return StationStepResult.SUCCESS;
-            }
+    private static void emitEntryCues(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        if (StationStepDecisions.shouldPlayClipOnEntry(step, null)) {
+            StationPuppetController.playStepClip(ctx.session, ctx.store, step.getPuppet().getClip());
+        }
+        if (StationStepDecisions.shouldSyncPropOnEntry(step, null)) {
+            StationPuppetController.syncStepProp(ctx.session, ctx.commandBuffer, ctx.player, step);
+        }
+        if (StationStepDecisions.shouldEmitPresentationOnEntry(step, null)) {
             Vector3d blockPos = new Vector3d(ctx.session.blockX + 0.5, ctx.session.blockY + 0.5,
                     ctx.session.blockZ + 0.5);
-            StationService.emitMoment(ctx.store, ctx.session, presentMomentId(ctx, step), step.getPresentation(), blockPos);
-            return StationStepResult.SUCCESS;
+            StationService.emitMoment(ctx.store, ctx.session, presentMomentId(ctx, step), step.getPresentation(),
+                    blockPos);
         }
     }
 
-    /** The pure per-step moment id decision {@link PresentHandler} resolves against. */
+    /** The per-step moment id: {@code step:<actionId>:<stepId>} when the step authors an Id, else {@link StationFlairs#MOMENT_CYCLE}. */
     @Nonnull
     static String presentMomentId(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
         String stepId = step.getId();
@@ -289,27 +185,208 @@ final class StationStepHandlers {
         return StationFlairs.MOMENT_CYCLE;
     }
 
+    // ==================== Consume phase ====================
+
     /**
-     * The anvil's enhance-commit step (design section 9.5, critique M5's binding fix): COMPUTE
-     * everything first with ZERO mutation (roll + cap-clamp the {@code Stats} leaf via
-     * {@link StampCapEngine}, validate reagent availability, validate the enhanced weapon can be
-     * returned to the player's inventory when the session later stops), THEN commit reagent
-     * consumption + the durability/stat mutation under one {@code try/catch} that restores the
-     * EXACT pre-step reagent quantities to the player's inventory on any failure and NEVER writes
-     * the mutated weapon back to custody unless the whole commit succeeds - custody's live
-     * {@link StationCustodyClaim#uniqueStack()} is the ONE write, as the very last line. Denies
-     * cleanly (no consume, no mutation) on: no weapon in custody, a fully-capped {@code Stats}
-     * roll ({@code ENHANCE_CAPPED}), insufficient reagents, or no room to return the weapon
-     * (both {@code OUT_OF_INPUTS}/{@code INVENTORY_FULL} - the SAME reasons the classic Convert
-     * cycle already uses for the equivalent denials).
+     * Removes {@code Consume.Quantity} of the item/resource-type from the player's inventory
+     * (storage-first) or from the station's placed-input custody claim ({@code From:"Custody"}).
+     * Returns {@code null} on success (or no {@code Consume} phase authored - a no-op), or a
+     * {@link StationStepResult.Fail} the composite handler propagates.
      */
-    static final class StampHandler implements StepHandler<StationStepContext, StationStep, StationStepResult> {
-        @Override
-        public StationStepResult execute(StationStepContext ctx, StationStep step) {
+    @Nullable
+    static StationStepResult consumePhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        StationStep.Consume consume = step.getConsume();
+        if (consume == null) {
+            return null;
+        }
+        int quantity = consume.effectiveQuantity();
+        String resourceTypeId = consume.getResourceTypeId();
+        boolean isResource = resourceTypeId != null && !resourceTypeId.isBlank();
+        String itemId = consume.getItemId();
+        String inputRef = isResource ? resourceTypeId : itemId;
+        if (inputRef == null || inputRef.isBlank()) {
+            return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                    "Consume step '" + step.getId() + "' has neither ItemId nor ResourceTypeId");
+        }
+        if (StationStep.Consume.FROM_CUSTODY.equalsIgnoreCase(consume.effectiveFrom())) {
+            return consumeFromCustody(ctx, step, isResource, resourceTypeId, itemId, quantity);
+        }
+        if (!StationStep.Consume.FROM_INVENTORY.equalsIgnoreCase(consume.effectiveFrom())) {
+            Log.warn("STATION Consume step '" + step.getId() + "' authors From '" + consume.effectiveFrom()
+                    + "' which has no handler (only 'Inventory'/'Custody' are implemented)");
+            return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                    "Consume.From '" + consume.effectiveFrom() + "' is not implemented");
+        }
+        try {
+            if (isResource) {
+                ResourceQuantity resource = new ResourceQuantity(inputRef, quantity);
+                ResourceTransaction tx = InventoryAccess.storageOf(ctx.player).canRemoveResource(resource)
+                        ? InventoryAccess.storageOf(ctx.player).removeResource(resource)
+                        : InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeResource(resource);
+                StationService.tallyResourceConsumption(ctx.session, tx, inputRef);
+            } else {
+                ItemStack input = new ItemStack(inputRef, quantity);
+                if (InventoryAccess.storageOf(ctx.player).canRemoveItemStack(input)) {
+                    InventoryAccess.storageOf(ctx.player).removeItemStack(input);
+                } else {
+                    InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeItemStack(input);
+                }
+                ctx.session.consumedItems.merge(inputRef, quantity, Integer::sum);
+            }
+        } catch (Throwable t) {
+            Log.warn("STATION Consume step failed for '" + ctx.session.stationId + "': " + t.getMessage());
+            return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL, t.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Drains {@code quantity} of {@code itemId}/{@code resourceTypeId} from the block's live claim,
+     * tallying the REAL drained item ids into the session ledger. A short drain fails
+     * {@code OUT_OF_INPUTS}, the same reason an empty custody station denies at engage.
+     */
+    @Nullable
+    private static StationStepResult consumeFromCustody(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
+            boolean isResource, @Nullable String resourceTypeId, @Nullable String itemId, int quantity) {
+        StationCustodyClaim claim = StationService.getInstance().custodyClaimFor(ctx.session.blockKey);
+        Map<String, Integer> drainedOut = new LinkedHashMap<>();
+        int drained = StationCustody.drain(claim, isResource ? null : itemId, isResource ? resourceTypeId : null,
+                quantity, StationService::liveResourceTypeIdsOf, drainedOut);
+        if (drained < quantity) {
+            return StationStepResult.fail(StationService.StopReason.OUT_OF_INPUTS,
+                    "Consume step '" + step.getId() + "' custody ran short ("
+                            + drained + "/" + quantity + " of '" + (isResource ? resourceTypeId : itemId) + "')");
+        }
+        for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
+            ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
+        }
+        return null;
+    }
+
+    // ==================== Produce phase ====================
+
+    /**
+     * Adds {@code Produce.Quantity} of {@code Produce.ItemId} to the player, hotbar-first then
+     * backpack storage then drop-at-block. {@code To:"Custody"} is a wave-3 phase (caught upstream
+     * by {@link StationStep#authorsWave3OnlyPhase()}); this body only ever sees {@code To:"Inventory"}
+     * and defends against anything else. Returns {@code null} on success/no-op.
+     */
+    @Nullable
+    static StationStepResult producePhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        StationStep.Produce produce = step.getProduce();
+        if (produce == null) {
+            return null;
+        }
+        if (produce.getItemId() == null || produce.getItemId().isBlank()) {
+            return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                    "Produce step '" + step.getId() + "' has no Produce.ItemId");
+        }
+        if (!StationStep.Produce.TO_INVENTORY.equalsIgnoreCase(produce.effectiveTo())) {
+            Log.warn("STATION Produce step '" + step.getId() + "' authors To '" + produce.effectiveTo()
+                    + "' which does not execute this wave (only 'Inventory' is implemented)");
+            return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                    "Produce.To '" + produce.effectiveTo() + "' is not implemented this wave");
+        }
+        int quantity = produce.effectiveQuantity();
+        try {
+            ItemGrantUtil.grant(ctx.player, new ItemStack(produce.getItemId(), quantity), ctx.store,
+                    ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
+            ctx.session.producedItems.merge(produce.getItemId(), quantity, Integer::sum);
+            if (ctx.session.playerRef != null) {
+                StationService.notifyItemGain(ctx.session.playerRef, produce.getItemId(), quantity, false);
+            }
+        } catch (Throwable t) {
+            Log.warn("STATION Produce step failed for '" + ctx.session.stationId + "': " + t.getMessage());
+            return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL, t.getMessage());
+        }
+        return null;
+    }
+
+    // ==================== Roll phase ====================
+
+    /**
+     * Evaluates + grants a loot pass through the SAME {@code loot.LootEngine} a station's {@code Loot}
+     * group uses, over the step's {@link LootRef} ({@code Lootables[]} + inline {@code Rolls[]}).
+     * Returns {@code null} always (a loot pass never fails a step; a full inventory drops at the
+     * block).
+     */
+    @Nullable
+    static StationStepResult rollPhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        LootRef ref = step.getRoll();
+        if (ref == null || ref.isEmpty()) {
+            return null;
+        }
+        List<Roll> rolls = new ArrayList<>();
+        String[] lootables = ref.getLootables();
+        if (lootables != null) {
+            for (String lootableId : lootables) {
+                if (lootableId == null || lootableId.isBlank()) {
+                    continue;
+                }
+                LootableAsset table = LootableCatalog.getInstance().get(lootableId);
+                if (table != null && table.getRolls() != null) {
+                    rolls.addAll(Arrays.asList(table.getRolls()));
+                } else {
+                    Log.fine("STATION Roll step '" + step.getId() + "' references unknown lootable '" + lootableId + "'");
+                }
+            }
+        }
+        if (ref.getRolls() != null) {
+            rolls.addAll(Arrays.asList(ref.getRolls()));
+        }
+        if (rolls.isEmpty()) {
+            return null;
+        }
+        LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, ctx.snapshot,
+                ctx.player, ctx.cycleOutputForBonusCopies, ctx.session.playerRef, ctx.session.stationId,
+                ctx.action.getActionId(), ctx.cycleIndex, ctx.store,
+                ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
+        StationService.applyGrantResult(ctx.session, ctx.store, result);
+        return null;
+    }
+
+    // ==================== Commands phase ====================
+
+    /** Runs {@code Commands} through the SAME zero-code integration surface a {@code Roll.Grants.Commands} uses. */
+    @Nullable
+    static StationStepResult commandsPhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        String[] commands = step.getCommands();
+        if (commands == null || commands.length == 0 || ctx.session.playerRef == null) {
+            return null;
+        }
+        CommandRewardExecutor.Placeholders placeholders = CommandRewardExecutor.Placeholders.of(
+                ctx.session.playerRef, ctx.session.stationId, ctx.action.getActionId(), ctx.cycleIndex);
+        for (String raw : commands) {
+            if (raw != null && !raw.isBlank()) {
+                CommandRewardExecutor.run(raw, placeholders);
+            }
+        }
+        return null;
+    }
+
+    // ==================== Stamp phase (kept in a StampHandler namespace for the pure-mutation test) ====================
+
+    /**
+     * The anvil's enhance-commit phase (design 9.5, critique M5's binding fix): COMPUTE everything
+     * first with ZERO mutation (roll + cap-clamp the {@code Stats} leaf via {@link StampCapEngine},
+     * validate reagent availability, validate the enhanced weapon can be returned), THEN commit
+     * reagent consumption + the durability/stat mutation under one restore-on-failure discipline -
+     * custody's live {@link StationCustodyClaim#uniqueStack()} is the ONE write, the very last line.
+     * Named {@code StampHandler} (though no longer a {@code StepHandler}) so the pure-mutation test's
+     * {@code StationStepHandlers.StampHandler.applyStampMutation}/{@code Mutation} references keep
+     * resolving.
+     */
+    static final class StampHandler {
+
+        private StampHandler() {
+        }
+
+        /** Returns {@code null} on success (or no {@code Stamp} phase authored), or a Fail the composite handler propagates. */
+        @Nullable
+        static StationStepResult executeStampPhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
             StationStep.Stamp stamp = step.getStamp();
             if (stamp == null) {
-                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                        "Stamp step '" + step.getId() + "' has no Stamp group");
+                return null;
             }
             Custody custody = ctx.action.getCustody();
             StationCustodyClaim claim = custody != null
@@ -342,12 +419,11 @@ final class StationStepHandlers {
                 }
             }
 
-            StationStep.Stamp.Reagent[] reagents = stamp.getReagents();
+            Ingredient[] reagents = stamp.getReagents();
             double repeatCostMultiplier = economicsMultiplier(statsGroup);
             int stampCount = stamper != null ? inspection.stampCount() : 0;
-            List<ItemStack> effectiveReagents = new ArrayList<>();
             if (reagents != null) {
-                for (StationStep.Stamp.Reagent r : reagents) {
+                for (Ingredient r : reagents) {
                     if (r == null) {
                         continue;
                     }
@@ -362,9 +438,6 @@ final class StationStepHandlers {
                                 "Stamp step '" + step.getId() + "' reagents unavailable ('" + reagentRef + "' x"
                                         + effectiveQty + ")");
                     }
-                    if (!isResource) {
-                        effectiveReagents.add(new ItemStack(reagentRef, effectiveQty));
-                    }
                 }
             }
 
@@ -374,16 +447,10 @@ final class StationStepHandlers {
             }
 
             // ===== COMMIT PHASE (mutation, restore-on-failure per M5) =====
-            // Reagent consumption and the weapon MUTATION are two separate try/catch blocks
-            // (not one), so a throw at EITHER point restores exactly what was consumed so far and
-            // - critically - claim.setUniqueStack (the ONE custody write) is reached ONLY on the
-            // final line, after applyStampMutation has ALREADY returned successfully: a throwing
-            // mutation (a bad third-party EnhanceStamper) can therefore NEVER leave a
-            // partially-applied stamp on the claim.
             List<ItemStack> consumedForRestore = new ArrayList<>();
             try {
                 if (reagents != null) {
-                    for (StationStep.Stamp.Reagent r : reagents) {
+                    for (Ingredient r : reagents) {
                         if (r == null) {
                             continue;
                         }
@@ -414,18 +481,8 @@ final class StationStepHandlers {
             }
             claim.setUniqueStack(mutation.stack());
 
-            // Record the ritual's committed reagents into the session's consumed ledger, the SAME
-            // s.consumedItems the implicit-program Consume step feeds, so the end-of-session summary
-            // renders one CONSUMED row per reagent stack (e.g. the 2 sharpened bars) through the
-            // existing ledgerRows pipeline. Tallied only AFTER claim.setUniqueStack (the point of no
-            // return - a restore-on-failure earlier would have refunded these, so they must not be
-            // counted as consumed until the commit is final). `consumedForRestore` already holds the
-            // REAL drained stacks a ResourceTypeId reagent family resolved to.
             StationService.tallyConsumedStacks(ctx.session, consumedForRestore);
 
-            // D-6: capture the committed outcome AFTER the ONE custody write, so a session summary
-            // + the api event report only a fully-committed enhancement (never a denied ritual).
-            // `weaponStack` is the immutable pre-mutation "before" copy; mutation.stack() is "after".
             String weaponId = weaponStack.getItemId() != null ? weaponStack.getItemId() : "";
             StationEnhanceOutcome outcome = new StationEnhanceOutcome(weaponId, weaponStack, mutation.stack(),
                     mutation.lines(), mutation.durabilityAdded());
@@ -434,17 +491,16 @@ final class StationStepHandlers {
                 StationEvents.fireEnhanceCompleted(ctx.store, ctx.session.playerRef, ctx.session.playerUuid,
                         ctx.session.sessionId, ctx.session.stationId, ctx.action.getActionId(), outcome);
             }
-            return StationStepResult.SUCCESS;
+            return null;
         }
 
         /**
-         * PURE: applies {@code Durability.AddMax} then the (already rolled + cap-clamped)
-         * {@code plan} entries via {@code stamper}, in that order, returning a {@link Mutation}
-         * (the new stack + the provider's {@link EnhanceLine} report + the max-durability delta) -
-         * both mutations are {@code ItemStack} with-copy operations, so no live server/Player is
-         * needed here (unit-tested directly, incl. a THROWING stamper - proves a mutation failure
-         * never reaches {@link StationCustodyClaim#setUniqueStack}, the caller's job, never this
-         * method's).
+         * PURE: applies {@code Durability.AddMax} then the (already rolled + cap-clamped) {@code plan}
+         * entries via {@code stamper}, in that order, returning a {@link Mutation} (the new stack +
+         * the provider's {@link EnhanceLine} report + the max-durability delta). Both mutations are
+         * {@code ItemStack} with-copy operations, so no live server/Player is needed here (unit-tested
+         * directly, incl. a THROWING stamper - proves a mutation failure never reaches
+         * {@link StationCustodyClaim#setUniqueStack}, the caller's job).
          */
         @Nonnull
         static Mutation applyStampMutation(@Nonnull ItemStack weaponStack,
@@ -467,16 +523,11 @@ final class StationStepHandlers {
             return new Mutation(mutated, lines, durabilityAdded);
         }
 
-        /**
-         * The pure result of {@link #applyStampMutation}: the mutated stack, the provider's
-         * verbatim {@link EnhanceLine} report (empty = durability-only / silent), and the
-         * max-durability delta the station's own {@code Durability.AddMax} added (for the engine-
-         * owned durability summary row + the api event).
-         */
+        /** The pure result of {@link #applyStampMutation}: the mutated stack, the provider's verbatim report, and the max-durability delta. */
         record Mutation(@Nonnull ItemStack stack, @Nonnull List<EnhanceLine> lines, double durabilityAdded) {
         }
 
-        /** Best-effort restore: each stack failing independently is logged, never re-thrown (a restore must not itself crash the drain). */
+        /** Best-effort restore: each stack failing independently is logged, never re-thrown. */
         private static void restoreReagents(@Nonnull Player player, @Nonnull List<ItemStack> toRestore) {
             for (ItemStack restore : toRestore) {
                 if (restore != null) {
@@ -500,12 +551,7 @@ final class StationStepHandlers {
             }
         }
 
-        /**
-         * The REAL drained stack(s) for {@code tx} (a {@code ResourceTypeId} route can drain
-         * several distinct concrete item ids - mirrors {@code StationService#tallyResourceConsumption}'s
-         * exact per-slot read), for a precise restore-on-failure (M5's binding fix: restore the
-         * EXACT pre-step contents, never a guessed substitute).
-         */
+        /** The REAL drained stack(s) for {@code tx} (a ResourceTypeId route can drain several concrete item ids), for a precise restore. */
         @Nonnull
         private static List<ItemStack> drainedStacksOf(@Nullable ResourceTransaction tx) {
             List<ItemStack> out = new ArrayList<>();
@@ -540,7 +586,7 @@ final class StationStepHandlers {
             return (int) Math.ceil(baseQuantity * (1.0 + repeatCostMultiplier * stampCount));
         }
 
-        /** Pure availability query (storage then combined) - never mutates, mirrors {@link ConsumeHandler}'s routing. */
+        /** Pure availability query (storage then combined) - never mutates. */
         private static boolean reagentAvailable(@Nonnull Player player, boolean isResource, @Nonnull String ref,
                 int quantity) {
             if (isResource) {
@@ -553,11 +599,7 @@ final class StationStepHandlers {
                     || InventoryAccess.combinedBackpackStorageHotbarOf(player).canRemoveItemStack(want);
         }
 
-        /**
-         * Mirrors {@link ConsumeHandler}'s storage-first-then-combined removal routing exactly;
-         * returns the REAL drained stack(s) (metadata-free reagents this leg, but generic) for the
-         * caller's restore-on-failure ledger.
-         */
+        /** Storage-first-then-combined removal; returns the REAL drained stack(s) for the caller's restore-on-failure ledger. */
         @Nonnull
         private static List<ItemStack> consumeReagent(@Nonnull Player player, boolean isResource,
                 @Nonnull String ref, int quantity) {

@@ -10,55 +10,44 @@ import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 
 /**
  * ONE conditional-lootable roll: gate ({@code Conditions}/{@code Chance}) + payoff
- * ({@code Ladder}/{@code Grants}), shared by {@link StationAsset.Loot#getRolls()} (inline) and
- * {@link LootableAsset#getRolls()} (a referenced table) - design section 4.5.1, TIGHTENED per
- * the adversarial critique's binding M3 fix (all five items below are load-bearing, not
- * cosmetic - a sonnet reader must not "fix" one back to the ambiguous draft shape).
+ * ({@code Ladder}/{@code Grants}), shared by {@link LootRef#getRolls()} (inline, wherever a
+ * {@link LootRef} is authored) and {@link LootableAsset#getRolls()} (a referenced table) - design
+ * section 4.5.1, TIGHTENED per the adversarial critique's binding M3 fix (all five items below are
+ * load-bearing).
+ *
+ * <p><b>Scope-2 changes (weighted-factor unification, design 4.2):</b>
+ * <ul>
+ *   <li>{@link Chance#getAddFactors()} entries are now {@link FactorRef}s ({@code {Factor, Param?,
+ *   Weight?}}), so a chance can weight several factor channels: {@code effective =
+ *   clamp(BasePercent + sum(resolve(f.Factor, f.Param) * f.Weight), 0, CapPercent)}.
+ *   <li>{@link Ladder#getValues()} (JSON key {@code Values}) REPLACES the old single
+ *   {@code Ladder.Value}: a {@link FactorRef}{@code []} summed BEFORE the floor lookup, so a ladder
+ *   composes {@code stat}-channel luck (e.g. {@code MMO_Luck} + {@code MMO_Luck_WOODCUTTING})
+ *   exactly the way the loot middle path requires. A single-factor ladder authors a one-element
+ *   array.
+ * </ul>
  *
  * <pre>{@code
  * {
  *   "Trigger": "Cycle",
  *   "Conditions": [ { "Factor": "rpgstations:cycle_count", "Min": 3 } ],
- *   "Chance":    { "BasePercent": 0, "AddFactors": [ { "Factor": "mmoskilltree:station_luck" } ],
+ *   "Chance":    { "BasePercent": 0, "AddFactors": [ { "Factor": "stat", "Param": "MMO_Luck" } ],
  *                  "CapPercent": 90 },
- *   "Ladder":    { "Value": { "Factor": "mmoskilltree:station_luck" },
- *                  "Floors": [
- *                    { "Min": 50,  "Grants": { "DropList": "MMO_Station_Sawmill_T1" } },
- *                    { "Min": 100, "Grants": { "DropList": "MMO_Station_Sawmill_T2" },
- *                      "Presentation": { "Sound": "SFX_Coins_Land" } } ] },
+ *   "Ladder":    { "Values": [ { "Factor": "stat", "Param": "MMO_Luck" },
+ *                              { "Factor": "stat", "Param": "MMO_Luck_WOODCUTTING" } ],
+ *                  "Floors": [ { "Min": 50,  "Grants": { "DropList": "SawmillFinds_T1" } },
+ *                              { "Min": 100, "Grants": { "DropList": "SawmillFinds_T2" },
+ *                                "Presentation": { "Sound": "SFX_Coins_Land" } } ] },
  *   "Grants":    { "BonusOutputCopies": 1, "DropList": "...", "Commands": [ "give {player} ..." ] }
  * }
  * }</pre>
  *
- * <p><b>M3 fix 1 - {@link Chance#getAddFactors()} is an ARRAY</b> (plural key {@code AddFactors}),
- * never a single object: {@code effective = clamp(BasePercent + sum(resolve(f) for f in
- * AddFactors), 0, CapPercent)}, rolled ONCE per trigger. Each entry reuses the shared
- * {@link Condition} leaf shape ({@code Factor}/{@code Param}) for its {@code Factor}/{@code Param}
- * ONLY - {@link Condition#getMin()}/{@link Condition#getMax()} are simply unused in this slot
- * (one condition-shaped leaf everywhere a factor is referenced, per the root DRY convention,
- * rather than a second near-identical "factor ref" type). {@link Ladder#getValue()} reuses the
- * same leaf the same way (a SINGLE factor reference, {@code Min}/{@code Max} unused).
- *
- * <p><b>M3 fix 2 - a {@link Ladder.Floor} has NO direct {@code DropList} leaf.</b> Every floor
- * reward routes through the floor's OWN {@link Ladder.Floor#getGrants()} (the same {@link Grants}
- * vocabulary the Roll's top level uses) - one reward vocabulary, never two overlapping droplist
- * paths on one floor.
- *
- * <p><b>M3 fix 3 - {@code Grants} stacking is EXPLICIT: top-level {@link #getGrants()} AND the
- * reached floor's {@link Ladder.Floor#getGrants()} BOTH apply</b> when a Roll carries both a
- * top-level {@code Grants} and a {@code Ladder} that reaches a floor. This is a deliberate design
- * choice (not an oversight) so a single Roll MAY combine "always grant X" with "additionally
- * grant Y at floor Z"; the shipped parity mapping (design 4.5.3) never exercises the combination
- * (it keeps the tier-0 proc and the tier ladder in SEPARATE Rolls), but the engine defines it.
- *
- * <p><b>M3 fix 4 - {@link Chance} gates the WHOLE Roll, including its {@link Ladder}.</b> A
- * {@code Chance} group present and FAILING its roll means NOTHING fires this trigger - no
- * top-level {@code Grants}, no {@code Ladder} floor lookup at all (the Ladder is never even
- * evaluated). An absent {@code Chance} is a deterministic pass (matches "Chance: probabilistic
- * gate... Absent = always").
- *
- * <p><b>M3 fix 5</b> - see {@link Grants#getBonusOutputCopies()}'s javadoc; the validator
- * ({@code StationValidator}) warns when it is authored under a non-{@code Cycle} {@link #getTrigger()}.
+ * <p><b>M3 fix 2</b> - a {@link Ladder.Floor} has NO direct {@code DropList} leaf; every floor
+ * reward routes through its OWN {@link Ladder.Floor#getGrants()}. <b>M3 fix 3</b> - top-level
+ * {@link #getGrants()} AND the reached floor's grants BOTH apply. <b>M3 fix 4</b> - a present,
+ * FAILING {@link Chance} means nothing fires (the {@link Ladder} is never evaluated). <b>M3 fix
+ * 5</b> - {@link Grants#getBonusOutputCopies()} is meaningless outside a {@code Cycle} trigger
+ * (validator warns).
  */
 public final class Roll {
 
@@ -74,21 +63,25 @@ public final class Roll {
 
     public static final BuilderCodec<Roll> CODEC = BuilderCodec.builder(Roll.class, Roll::new)
             .appendInherited(new KeyedCodec<>("Trigger", Codec.STRING, false),
-                    (o, v) -> o.trigger = v, o -> o.trigger, (o, p) -> o.trigger = p.trigger).add()
+                    (o, v) -> o.trigger = v, o -> o.trigger, (o, p) -> o.trigger = p.trigger)
+            .documentation("When this roll fires: 'Cycle' (per completed cycle, the default) or 'Completion' (at session stop).").add()
             .appendInherited(new KeyedCodec<>("Conditions", new ArrayCodec<>(Condition.CODEC, Condition[]::new), false),
-                    (o, v) -> o.conditions = v, o -> o.conditions, (o, p) -> o.conditions = p.conditions).add()
+                    (o, v) -> o.conditions = v, o -> o.conditions, (o, p) -> o.conditions = p.conditions)
+            .documentation("Gate: every Condition must pass (bounded factor checks) before the roll is considered.").add()
             .appendInherited(new KeyedCodec<>("Chance", Chance.CODEC, false),
-                    (o, v) -> o.chance = v, o -> o.chance, (o, p) -> o.chance = p.chance).add()
+                    (o, v) -> o.chance = v, o -> o.chance, (o, p) -> o.chance = p.chance)
+            .documentation("Probabilistic gate over the WHOLE roll (Ladder included); absent = a deterministic pass.").add()
             .appendInherited(new KeyedCodec<>("Ladder", Ladder.CODEC, false),
-                    (o, v) -> o.ladder = v, o -> o.ladder, (o, p) -> o.ladder = p.ladder).add()
+                    (o, v) -> o.ladder = v, o -> o.ladder, (o, p) -> o.ladder = p.ladder)
+            .documentation("A floor ladder over a summed factor value; the highest reached floor's Grants fire.").add()
             .appendInherited(new KeyedCodec<>("Grants", Grants.CODEC, false),
-                    (o, v) -> o.grants = v, o -> o.grants, (o, p) -> o.grants = p.grants).add()
+                    (o, v) -> o.grants = v, o -> o.grants, (o, p) -> o.grants = p.grants)
+            .documentation("Top-level rewards granted when the roll fires (in addition to any reached Ladder floor's Grants).").add()
             .build();
 
     public Roll() {
     }
 
-    /** Java-side factory; sets the same fields the codec fills. */
     @Nonnull
     public static Roll of(@Nullable String trigger, @Nullable Condition[] conditions, @Nullable Chance chance,
             @Nullable Ladder ladder, @Nullable Grants grants) {
@@ -101,7 +94,6 @@ public final class Roll {
         return r;
     }
 
-    /** The raw authored {@code Trigger}, or {@code null} when omitted (see {@link #effectiveTrigger()}). */
     @Nullable
     public String getTrigger() {
         return trigger;
@@ -144,27 +136,29 @@ public final class Roll {
     }
 
     /**
-     * The probabilistic gate (M3 fix 4: gates the WHOLE Roll, Ladder included). {@code
-     * effective = clamp(BasePercent + sum(AddFactors), 0, CapPercent)}, all in PERCENT units
-     * (0..100, matching the {@code MAX_DEFENSE_REDUCTION}-style repo convention for a percent
-     * scale) - rolled ONCE per trigger against a {@code [0,100)} uniform sample.
+     * The probabilistic gate (M3 fix 4: gates the WHOLE Roll, Ladder included). {@code effective =
+     * clamp(BasePercent + sum(resolve(f) * f.Weight for f in AddFactors), 0, CapPercent)}, all in
+     * PERCENT units (0..100), rolled ONCE per trigger against a {@code [0,100)} uniform sample.
      */
     public static final class Chance {
         @Nullable protected Double basePercent;
-        @Nullable protected Condition[] addFactors;
+        @Nullable protected FactorRef[] addFactors;
         @Nullable protected Double capPercent;
 
         public static final BuilderCodec<Chance> CODEC = BuilderCodec.builder(Chance.class, Chance::new)
                 .appendInherited(new KeyedCodec<>("BasePercent", Codec.DOUBLE, false),
-                        (o, v) -> o.basePercent = v, o -> o.basePercent, (o, p) -> o.basePercent = p.basePercent).add()
-                .appendInherited(new KeyedCodec<>("AddFactors", new ArrayCodec<>(Condition.CODEC, Condition[]::new), false),
-                        (o, v) -> o.addFactors = v, o -> o.addFactors, (o, p) -> o.addFactors = p.addFactors).add()
+                        (o, v) -> o.basePercent = v, o -> o.basePercent, (o, p) -> o.basePercent = p.basePercent)
+                .documentation("The flat base chance in percent (0..100) before any factor contributions.").add()
+                .appendInherited(new KeyedCodec<>("AddFactors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
+                        (o, v) -> o.addFactors = v, o -> o.addFactors, (o, p) -> o.addFactors = p.addFactors)
+                .documentation("Weighted factor references summed onto BasePercent: sum(resolve(Factor, Param) * Weight).").add()
                 .appendInherited(new KeyedCodec<>("CapPercent", Codec.DOUBLE, false),
-                        (o, v) -> o.capPercent = v, o -> o.capPercent, (o, p) -> o.capPercent = p.capPercent).add()
+                        (o, v) -> o.capPercent = v, o -> o.capPercent, (o, p) -> o.capPercent = p.capPercent)
+                .documentation("The maximum effective chance in percent; the summed chance clamps to [0, CapPercent].").add()
                 .build();
 
         @Nonnull
-        public static Chance of(@Nullable Double basePercent, @Nullable Condition[] addFactors,
+        public static Chance of(@Nullable Double basePercent, @Nullable FactorRef[] addFactors,
                 @Nullable Double capPercent) {
             Chance c = new Chance();
             c.basePercent = basePercent;
@@ -178,9 +172,9 @@ public final class Roll {
             return basePercent;
         }
 
-        /** Each entry's {@code Factor}/{@code Param} is resolved and SUMMED (M3 fix 1: an array). */
+        /** Weighted {@link FactorRef} entries, each resolved and summed (scope-2: an array of FactorRefs). */
         @Nullable
-        public Condition[] getAddFactors() {
+        public FactorRef[] getAddFactors() {
             return addFactors;
         }
 
@@ -191,33 +185,36 @@ public final class Roll {
     }
 
     /**
-     * A floor ladder over an UNCAPPED factor value (deliberately - a floor above the factor's
-     * "normal" range stays reachable, e.g. a multi-source luck stack); the HIGHEST reached floor
-     * wins.
+     * A floor ladder over an UNCAPPED, SUMMED factor value (deliberately uncapped - a floor above
+     * a factor's "normal" range stays reachable via a multi-source stack); the HIGHEST reached
+     * floor wins. {@link #values} (JSON key {@code Values}) is a {@link FactorRef}{@code []} summed
+     * before the floor lookup (scope-2 design, {@code Ladder.Value} -&gt; {@code Ladder.Values[]}).
      */
     public static final class Ladder {
-        @Nullable protected Condition value;
+        @Nullable protected FactorRef[] values;
         @Nullable protected Floor[] floors;
 
         public static final BuilderCodec<Ladder> CODEC = BuilderCodec.builder(Ladder.class, Ladder::new)
-                .appendInherited(new KeyedCodec<>("Value", Condition.CODEC, false),
-                        (o, v) -> o.value = v, o -> o.value, (o, p) -> o.value = p.value).add()
+                .appendInherited(new KeyedCodec<>("Values", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
+                        (o, v) -> o.values = v, o -> o.values, (o, p) -> o.values = p.values)
+                .documentation("Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array.").add()
                 .appendInherited(new KeyedCodec<>("Floors", new ArrayCodec<>(Floor.CODEC, Floor[]::new), false),
-                        (o, v) -> o.floors = v, o -> o.floors, (o, p) -> o.floors = p.floors).add()
+                        (o, v) -> o.floors = v, o -> o.floors, (o, p) -> o.floors = p.floors)
+                .documentation("The reward floors; the HIGHEST floor whose Min <= the summed value grants.").add()
                 .build();
 
         @Nonnull
-        public static Ladder of(@Nullable Condition value, @Nullable Floor[] floors) {
+        public static Ladder of(@Nullable FactorRef[] values, @Nullable Floor[] floors) {
             Ladder l = new Ladder();
-            l.value = value;
+            l.values = values;
             l.floors = floors;
             return l;
         }
 
-        /** The factor reference resolving the ladder's value ({@code Factor}/{@code Param} only, see M3 fix 1). */
+        /** The weighted factor references summed to the ladder value (scope-2 {@code Values[]}). */
         @Nullable
-        public Condition getValue() {
-            return value;
+        public FactorRef[] getValues() {
+            return values;
         }
 
         @Nullable
@@ -233,12 +230,15 @@ public final class Roll {
 
             public static final BuilderCodec<Floor> CODEC = BuilderCodec.builder(Floor.class, Floor::new)
                     .appendInherited(new KeyedCodec<>("Min", Codec.DOUBLE, false),
-                            (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min).add()
+                            (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
+                    .documentation("The summed-value threshold this floor requires (inclusive).").add()
                     .appendInherited(new KeyedCodec<>("Grants", Grants.CODEC, false),
-                            (o, v) -> o.grants = v, o -> o.grants, (o, p) -> o.grants = p.grants).add()
+                            (o, v) -> o.grants = v, o -> o.grants, (o, p) -> o.grants = p.grants)
+                    .documentation("This floor's ONLY reward path (no sibling DropList leaf, M3 fix 2).").add()
                     .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
                             (o, v) -> o.presentation = v, o -> o.presentation,
-                            (o, p) -> o.presentation = p.presentation).add()
+                            (o, p) -> o.presentation = p.presentation)
+                    .documentation("Played on the rare-find moment when this floor is reached and grants something.").add()
                     .build();
 
             @Nonnull
@@ -255,13 +255,11 @@ public final class Roll {
                 return min;
             }
 
-            /** This floor's ONLY reward path (M3 fix 2 - no sibling {@code DropList} leaf). */
             @Nullable
             public Grants getGrants() {
                 return grants;
             }
 
-            /** Played on the {@code station.StationFlairs#MOMENT_RARE_FIND} moment id when this floor is reached and grants something. */
             @Nullable
             public Presentation getPresentation() {
                 return presentation;
@@ -281,11 +279,14 @@ public final class Roll {
         public static final BuilderCodec<Grants> CODEC = BuilderCodec.builder(Grants.class, Grants::new)
                 .appendInherited(new KeyedCodec<>("BonusOutputCopies", Codec.INTEGER, false),
                         (o, v) -> o.bonusOutputCopies = v, o -> o.bonusOutputCopies,
-                        (o, p) -> o.bonusOutputCopies = p.bonusOutputCopies).add()
+                        (o, p) -> o.bonusOutputCopies = p.bonusOutputCopies)
+                .documentation("N extra copies of THIS cycle's Output (Cycle trigger only); silently skipped when inventory is full.").add()
                 .appendInherited(new KeyedCodec<>("DropList", Codec.STRING, false),
-                        (o, v) -> o.dropList = v, o -> o.dropList, (o, p) -> o.dropList = p.dropList).add()
+                        (o, v) -> o.dropList = v, o -> o.dropList, (o, p) -> o.dropList = p.dropList)
+                .documentation("A native ItemDropList asset id, rolled via ItemModule.getRandomItemDrops.").add()
                 .appendInherited(new KeyedCodec<>("Commands", new ArrayCodec<>(Codec.STRING, String[]::new), false),
-                        (o, v) -> o.commands = v, o -> o.commands, (o, p) -> o.commands = p.commands).add()
+                        (o, v) -> o.commands = v, o -> o.commands, (o, p) -> o.commands = p.commands)
+                .documentation("Commands run with {player}/{uuid}/{station}/{action}/{cycles} placeholders substituted.").add()
                 .build();
 
         @Nonnull
@@ -298,30 +299,17 @@ public final class Roll {
             return g;
         }
 
-        /**
-         * N extra copies of THIS CYCLE's Output, room-checked storage-first, silent skip when
-         * full. <b>M3 fix 5</b>: meaningless outside a {@code Cycle}-trigger Roll (a {@code
-         * Completion} trigger fires at session stop with no live cycle output) - {@code
-         * StationValidator} warns (does not error) when this is authored under a non-{@code
-         * Cycle} {@link Roll#getTrigger()}; at runtime the engine simply has no cycle output to
-         * copy there and skips this leaf silently.
-         */
+        /** N extra copies of THIS cycle's Output (M3 fix 5: meaningless outside a {@code Cycle} trigger; validator warns). */
         @Nullable
         public Integer getBonusOutputCopies() {
             return bonusOutputCopies;
         }
 
-        /** A native {@code ItemDropList} asset id, rolled via {@code ItemModule.getRandomItemDrops}. */
         @Nullable
         public String getDropList() {
             return dropList;
         }
 
-        /**
-         * Run through the common {@code util.CommandExecutor}, each with placeholders {@code
-         * {player}}/{@code {uuid}}/{@code {station}}/{@code {action}}/{@code {cycles}} substituted -
-         * the zero-code integration surface (design section 4.5.1).
-         */
         @Nullable
         public String[] getCommands() {
             return commands;

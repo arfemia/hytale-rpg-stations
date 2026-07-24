@@ -26,6 +26,8 @@ import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.impl.EnhanceStamperRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
+import com.ziggfreed.rpgstations.asset.ActionAsset;
+import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.RollPool;
@@ -36,7 +38,9 @@ import com.ziggfreed.rpgstations.interaction.StationRetrieveInteraction;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
+import com.ziggfreed.rpgstations.station.ActionCatalog;
 import com.ziggfreed.rpgstations.station.DefaultEnhanceStamper;
+import com.ziggfreed.rpgstations.station.ExtensionCatalog;
 import com.ziggfreed.rpgstations.station.FlairCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.station.StationCatalog;
@@ -103,6 +107,8 @@ public class RpgStationsPlugin extends JavaPlugin {
         FactorRegistryImpl.getInstance().registerBuiltins();
         EnhanceStamperRegistryImpl.getInstance().register(new DefaultEnhanceStamper());
         registerStationAssetStore();
+        registerActionAssetStore();
+        registerExtensionAssetStore();
         registerLootableAssetStore();
         registerRollPoolAssetStore();
         registerFlairAssetStore();
@@ -229,6 +235,65 @@ public class RpgStationsPlugin extends JavaPlugin {
         // Structural-only at fold time (D4 fix) - the FULL pass (incl. cross-layer reference
         // checks) runs once, post-load, from registerPostLoadAudit().
         StationValidator.runStructuralAndLog();
+    }
+
+    /**
+     * Registers the {@link ActionAsset} Pattern-A store at {@code Server/RpgStations/Actions}
+     * (scope-2 design 1.5) and folds every loaded entry into {@link ActionCatalog} - an inline
+     * {@code Actions} entry's {@code Ref} leaf resolves against it.
+     */
+    private void registerActionAssetStore() {
+        AssetStoreRegistrar.registerStore(
+                ActionAsset.class,
+                new DefaultAssetMap<String, ActionAsset>(),
+                "RpgStations/Actions",
+                ActionAsset::getId,
+                ActionAsset.CODEC,
+                null);
+        getEventRegistry().register(LoadedAssetsEvent.class, ActionAsset.class,
+                RpgStationsPlugin::onActionAssetsLoaded);
+    }
+
+    private static void onActionAssetsLoaded(
+            LoadedAssetsEvent<String, ActionAsset, DefaultAssetMap<String, ActionAsset>> event) {
+        DefaultAssetMap<String, ActionAsset> assetMap = event.getAssetMap();
+        Map<String, ActionAsset> layer = new LinkedHashMap<>();
+        for (Map.Entry<String, ActionAsset> entry : assetMap.getAssetMap().entrySet()) {
+            layer.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
+        }
+        ActionCatalog.getInstance().fold(layer, false);
+        Log.info("Action asset layer: folded " + layer.size() + " standalone action(s) into ActionCatalog: "
+                + layer.keySet());
+    }
+
+    /**
+     * Registers the {@link ExtensionAsset} Pattern-A store at {@code Server/RpgStations/Extensions}
+     * (scope-2 design 1.8, decision 27) and folds every loaded entry into {@link ExtensionCatalog}
+     * (the ONE additive fourth-party composition mechanism); {@code ExtensionCatalog.fold} logs the
+     * {@code EXTENSION_APPLIED} summary per target.
+     */
+    private void registerExtensionAssetStore() {
+        AssetStoreRegistrar.registerStore(
+                ExtensionAsset.class,
+                new DefaultAssetMap<String, ExtensionAsset>(),
+                "RpgStations/Extensions",
+                ExtensionAsset::getId,
+                ExtensionAsset.CODEC,
+                null);
+        getEventRegistry().register(LoadedAssetsEvent.class, ExtensionAsset.class,
+                RpgStationsPlugin::onExtensionAssetsLoaded);
+    }
+
+    private static void onExtensionAssetsLoaded(
+            LoadedAssetsEvent<String, ExtensionAsset, DefaultAssetMap<String, ExtensionAsset>> event) {
+        DefaultAssetMap<String, ExtensionAsset> assetMap = event.getAssetMap();
+        Map<String, ExtensionAsset> layer = new LinkedHashMap<>();
+        for (Map.Entry<String, ExtensionAsset> entry : assetMap.getAssetMap().entrySet()) {
+            layer.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
+        }
+        ExtensionCatalog.getInstance().fold(layer, false);
+        Log.info("Extension asset layer: folded " + layer.size() + " extension(s) into ExtensionCatalog: "
+                + layer.keySet());
     }
 
     /**

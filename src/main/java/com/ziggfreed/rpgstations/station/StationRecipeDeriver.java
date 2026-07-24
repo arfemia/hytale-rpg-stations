@@ -16,6 +16,7 @@ import com.hypixel.hytale.protocol.BenchRequirement;
 import com.hypixel.hytale.server.core.asset.type.item.config.CraftingRecipe;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.inventory.MaterialQuantity;
+import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -47,10 +48,10 @@ public final class StationRecipeDeriver {
     public static final class CraftingCandidate {
         @Nonnull final String itemId;
         @Nonnull final List<String> categories;
-        @Nonnull final List<StationAsset.Ingredient> inputs;
+        @Nonnull final List<Ingredient> inputs;
 
         public CraftingCandidate(@Nonnull String itemId, @Nonnull List<String> categories,
-                @Nonnull List<StationAsset.Ingredient> inputs) {
+                @Nonnull List<Ingredient> inputs) {
             this.itemId = itemId;
             this.categories = categories;
             this.inputs = inputs;
@@ -122,7 +123,7 @@ public final class StationRecipeDeriver {
                         + (cand.inputs == null ? 0 : cand.inputs.size()) + " inputs (need exactly 1)");
                 continue;
             }
-            StationAsset.Ingredient nativeInput = cand.inputs.get(0);
+            Ingredient nativeInput = cand.inputs.get(0);
             String ref = inputRef(nativeInput);
             if (nativeInput == null || ref == null) {
                 Log.fine("STATION FromCrafting skips '" + cand.itemId
@@ -133,10 +134,10 @@ public final class StationRecipeDeriver {
                     ? nativeInput.getQuantity() : 1;
             boolean isResource = nativeInput.getResourceTypeId() != null
                     && !nativeInput.getResourceTypeId().isBlank();
-            StationAsset.Ingredient input = isResource
-                    ? StationAsset.Ingredient.resource(nativeInput.getResourceTypeId(), inQty)
-                    : StationAsset.Ingredient.item(nativeInput.getItemId(), inQty);
-            StationAsset.Ingredient output = StationAsset.Ingredient.item(cand.itemId, outputPerInput);
+            Ingredient input = isResource
+                    ? Ingredient.resource(nativeInput.getResourceTypeId(), inQty)
+                    : Ingredient.item(nativeInput.getItemId(), inQty);
+            Ingredient output = Ingredient.item(cand.itemId, outputPerInput);
             derived.add(StationAsset.Conversion.of(input, output));
         }
         derived.sort(Comparator.comparing(c -> c.getOutput().getItemId(), String.CASE_INSENSITIVE_ORDER));
@@ -185,14 +186,14 @@ public final class StationRecipeDeriver {
                     if (categories.isEmpty()) {
                         continue;
                     }
-                    List<StationAsset.Ingredient> inputs = new ArrayList<>();
+                    List<Ingredient> inputs = new ArrayList<>();
                     MaterialQuantity[] mqs = recipe.getInput();
                     if (mqs != null) {
                         for (MaterialQuantity mq : mqs) {
                             if (mq == null) {
                                 continue;
                             }
-                            inputs.add(StationAsset.Ingredient.of(mq.getItemId(), mq.getResourceTypeId(),
+                            inputs.add(Ingredient.of(mq.getItemId(), mq.getResourceTypeId(),
                                     mq.getQuantity()));
                         }
                     }
@@ -209,7 +210,7 @@ public final class StationRecipeDeriver {
 
     /** The canonical (lowercased) input ref of an ingredient: ResourceTypeId, else ItemId, else null. */
     @Nullable
-    private static String inputRef(@Nullable StationAsset.Ingredient ingredient) {
+    private static String inputRef(@Nullable Ingredient ingredient) {
         if (ingredient == null) {
             return null;
         }

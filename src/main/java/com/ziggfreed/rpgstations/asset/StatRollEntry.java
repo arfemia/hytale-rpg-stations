@@ -6,6 +6,7 @@ import javax.annotation.Nullable;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 
 /**
  * ONE candidate entry of a Stamp step's stat roll (design section 9.5's composable roll model):
@@ -33,13 +34,17 @@ public final class StatRollEntry {
     public static final BuilderCodec<StatRollEntry> CODEC =
             BuilderCodec.builder(StatRollEntry.class, StatRollEntry::new)
                     .appendInherited(new KeyedCodec<>("Stat", Codec.STRING, false),
-                            (o, v) -> o.stat = v, o -> o.stat, (o, p) -> o.stat = p.stat).add()
+                            (o, v) -> o.stat = v, o -> o.stat, (o, p) -> o.stat = p.stat)
+                    .documentation("The stat id this entry rolls points into (opaque to this engine; the registered EnhanceStamper interprets it).").add()
                     .appendInherited(new KeyedCodec<>("Points", Points.CODEC, false),
-                            (o, v) -> o.points = v, o -> o.points, (o, p) -> o.points = p.points).add()
+                            (o, v) -> o.points = v, o -> o.points, (o, p) -> o.points = p.points)
+                    .documentation("The point value range (with optional weighted factor scaling) a hit on this entry rolls within.").add()
                     .appendInherited(new KeyedCodec<>("Weight", Codec.DOUBLE, false),
-                            (o, v) -> o.weight = v, o -> o.weight, (o, p) -> o.weight = p.weight).add()
+                            (o, v) -> o.weight = v, o -> o.weight, (o, p) -> o.weight = p.weight)
+                    .documentation("Relative pick weight in the weighted route (default 1.0, must be > 0 to ever be picked).").add()
                     .appendInherited(new KeyedCodec<>("Always", Codec.BOOLEAN, false),
-                            (o, v) -> o.always = v, o -> o.always, (o, p) -> o.always = p.always).add()
+                            (o, v) -> o.always = v, o -> o.always, (o, p) -> o.always = p.always)
+                    .documentation("When true, granted unconditionally on every stamp (independent of the weighted pool and Picks). Default false.").add()
                     .build();
 
     public StatRollEntry() {
@@ -76,23 +81,41 @@ public final class StatRollEntry {
         return always != null && always;
     }
 
-    /** The point value range a hit on this entry rolls within (inclusive; {@code Min==Max} = fixed). */
+    /**
+     * The point value range a hit on this entry rolls within (inclusive; {@code Min==Max} = fixed),
+     * plus optional weighted factor SCALING (scope-2 design 1.6/decision 20): rolled points =
+     * {@code uniform(Min, Max) + sum(resolve(f.Factor, f.Param) * f.Weight for f in AddFactors)},
+     * clamped by the Stamp caps as today. The same {@link FactorRef} vocabulary that drives loot
+     * chances now drives roll magnitudes.
+     */
     public static final class Points {
         @Nullable protected Double min;
         @Nullable protected Double max;
+        @Nullable protected FactorRef[] addFactors;
 
         public static final BuilderCodec<Points> CODEC = BuilderCodec.builder(Points.class, Points::new)
                 .appendInherited(new KeyedCodec<>("Min", Codec.DOUBLE, false),
-                        (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min).add()
+                        (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
+                .documentation("Inclusive lower bound of the rolled point value (reader-defaults to 1.0).").add()
                 .appendInherited(new KeyedCodec<>("Max", Codec.DOUBLE, false),
-                        (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max).add()
+                        (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max)
+                .documentation("Inclusive upper bound of the rolled point value (reader-defaults to Min - a fixed value).").add()
+                .appendInherited(new KeyedCodec<>("AddFactors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
+                        (o, v) -> o.addFactors = v, o -> o.addFactors, (o, p) -> o.addFactors = p.addFactors)
+                .documentation("Weighted factor references summed ONTO the rolled points: sum(resolve(Factor, Param) * Weight).").add()
                 .build();
 
         @Nonnull
         public static Points of(@Nullable Double min, @Nullable Double max) {
+            return of(min, max, null);
+        }
+
+        @Nonnull
+        public static Points of(@Nullable Double min, @Nullable Double max, @Nullable FactorRef[] addFactors) {
             Points p = new Points();
             p.min = min;
             p.max = max;
+            p.addFactors = addFactors;
             return p;
         }
 
@@ -104,6 +127,12 @@ public final class StatRollEntry {
         @Nullable
         public Double getMax() {
             return max;
+        }
+
+        /** Weighted factor references summed onto the rolled points (scope-2 magnitude scaling); null = none. */
+        @Nullable
+        public FactorRef[] getAddFactors() {
+            return addFactors;
         }
 
         /** {@link #min}, reader-defaulted to 1.0 when null. */

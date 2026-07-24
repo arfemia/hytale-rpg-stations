@@ -35,15 +35,19 @@ public final class ActionInput {
 
     public static final BuilderCodec<ActionInput> CODEC = BuilderCodec.builder(ActionInput.class, ActionInput::new)
             .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
-                    (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId).add()
+                    (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId)
+            .documentation("Match an exact held item id (one of several optional routes; match = ANY route satisfied).").add()
             .appendInherited(new KeyedCodec<>("ResourceTypeId", Codec.STRING, false),
                     (o, v) -> o.resourceTypeId = v, o -> o.resourceTypeId,
-                    (o, p) -> o.resourceTypeId = p.resourceTypeId).add()
+                    (o, p) -> o.resourceTypeId = p.resourceTypeId)
+            .documentation("Match a native resource-type family of the held item.").add()
             .appendInherited(new KeyedCodec<>("Tags",
                             new MapCodec<>(new ArrayCodec<>(Codec.STRING, String[]::new), LinkedHashMap::new), false),
-                    (o, v) -> o.tags = v, o -> o.tags, (o, p) -> o.tags = p.tags).add()
+                    (o, v) -> o.tags = v, o -> o.tags, (o, p) -> o.tags = p.tags)
+            .documentation("Match the held item's native tags (tag family -> accepted values).").add()
             .appendInherited(new KeyedCodec<>("Function", Codec.STRING, false),
-                    (o, v) -> o.function = v, o -> o.function, (o, p) -> o.function = p.function).add()
+                    (o, v) -> o.function = v, o -> o.function, (o, p) -> o.function = p.function)
+            .documentation("Match the held item's live function: 'Weapon' | 'Armor' | 'Tool'.").add()
             .build();
 
     public ActionInput() {

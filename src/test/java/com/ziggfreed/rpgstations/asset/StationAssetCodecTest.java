@@ -190,32 +190,39 @@ public class StationAssetCodecTest {
     // ==================== Loot (leg 3, REPLACES the MMO's Luck group) ====================
 
     @Test
-    void loot_decodesTablesAndInlineRolls() throws Exception {
-        StationAsset a = decodeAsset("{ \"Loot\": { \"Tables\": [\"sawmillfinds\"],"
+    void loot_decodesLootablesAndInlineRolls() throws Exception {
+        // Scope-2: Loot is now the unified LootRef (Lootables[] + inline Rolls); Chance.AddFactors are FactorRefs.
+        StationAsset a = decodeAsset("{ \"Loot\": { \"Lootables\": [\"sawmillfinds\"],"
                 + " \"Rolls\": [ { \"Trigger\": \"Cycle\","
-                + "   \"Chance\": { \"BasePercent\": 2, \"AddFactors\": [ { \"Factor\": \"rpgstations:tool_power\" } ],"
+                + "   \"Chance\": { \"BasePercent\": 2, \"AddFactors\": [ { \"Factor\": \"stat\", \"Param\": \"MMO_Luck\", \"Weight\": 2.0 } ],"
                 + "     \"CapPercent\": 25 }, \"Grants\": { \"BonusOutputCopies\": 1 } } ] } }");
         assertNotNull(a.getLoot());
-        assertEquals("sawmillfinds", a.getLoot().getTables()[0]);
+        assertEquals("sawmillfinds", a.getLoot().getLootables()[0]);
         assertEquals(1, a.getLoot().getRolls().length);
         Roll roll = a.getLoot().getRolls()[0];
         assertEquals("Cycle", roll.getTrigger());
         assertEquals(2.0, roll.getChance().getBasePercent());
-        assertEquals("rpgstations:tool_power", roll.getChance().getAddFactors()[0].getFactor());
+        assertEquals("stat", roll.getChance().getAddFactors()[0].getFactor());
+        assertEquals("MMO_Luck", roll.getChance().getAddFactors()[0].getParam());
+        assertEquals(2.0, roll.getChance().getAddFactors()[0].effectiveWeight());
         assertEquals(25.0, roll.getChance().getCapPercent());
         assertEquals(1, roll.getGrants().getBonusOutputCopies());
         assertNull(roll.getLadder());
     }
 
     @Test
-    void loot_ladderFloorRoutesThroughGrants_noDirectDropListLeaf() throws Exception {
-        // M3 fix 2: a Ladder floor's ONLY reward path is its own Grants (no sibling DropList leaf).
+    void loot_ladderValuesAreFactorRefArray_floorRoutesThroughGrants() throws Exception {
+        // Scope-2: Ladder.Value -> Ladder.Values[] (a summed FactorRef array). M3 fix 2: floor reward via Grants only.
         StationAsset a = decodeAsset("{ \"Loot\": { \"Rolls\": [ { \"Ladder\": {"
-                + " \"Value\": { \"Factor\": \"rpgstations:cycle_count\" },"
-                + " \"Floors\": [ { \"Min\": 10, \"Grants\": { \"DropList\": \"RPG_Station_Sawmill_T1\" } } ] } } ] } }");
-        Roll.Ladder.Floor floor = a.getLoot().getRolls()[0].getLadder().getFloors()[0];
+                + " \"Values\": [ { \"Factor\": \"stat\", \"Param\": \"MMO_Luck\" },"
+                + "               { \"Factor\": \"stat\", \"Param\": \"MMO_Luck_WOODCUTTING\" } ],"
+                + " \"Floors\": [ { \"Min\": 10, \"Grants\": { \"DropList\": \"SawmillFinds_T1\" } } ] } } ] } }");
+        Roll.Ladder ladder = a.getLoot().getRolls()[0].getLadder();
+        assertEquals(2, ladder.getValues().length);
+        assertEquals("MMO_Luck", ladder.getValues()[0].getParam());
+        Roll.Ladder.Floor floor = ladder.getFloors()[0];
         assertEquals(10.0, floor.getMin());
-        assertEquals("RPG_Station_Sawmill_T1", floor.getGrants().getDropList());
+        assertEquals("SawmillFinds_T1", floor.getGrants().getDropList());
     }
 
     @Test
@@ -335,33 +342,36 @@ public class StationAssetCodecTest {
     void actions_decodesPerActionWholeGroupOverrides() throws Exception {
         StationAsset a = decodeAsset("{ \"Work\": { \"CycleMs\": 5000 },"
                 + " \"Actions\": { \"convert\": {"
-                + "   \"Input\": { \"ResourceTypeId\": \"Metal_Ingot\" },"
+                + "   \"Input\": { \"ResourceTypeId\": \"Metal_Bars\" },"
                 + "   \"Work\": { \"CycleMs\": 3800,"
                 + "     \"Xp\": [ { \"Skill\": \"SMITHING\", \"PerCycle\": 6.0 } ] },"
-                + "   \"Loot\": { \"Tables\": [\"anvil_sparks\"] } },"
+                + "   \"Loot\": { \"Lootables\": [\"anvil_sparks\"] } },"
                 + " \"enhance\": {"
                 + "   \"Input\": { \"Function\": \"Weapon\" },"
                 + "   \"Work\": { \"Repeat\": false },"
-                + "   \"Steps\": [ { \"Id\": \"strike1\", \"Type\": \"Wait\", \"Wait\": { \"Beats\": 1 } } ] } } }");
+                + "   \"Steps\": [ { \"Id\": \"strike1\", \"Duration\": { \"Ms\": 650 },"
+                + "     \"Puppet\": { \"Clip\": \"MMO_Emote_Hammer\" } } ] } } }");
         assertNotNull(a.getActions());
         assertEquals(2, a.getActions().size());
         java.util.List<String> orderedIds = new java.util.ArrayList<>(a.getActions().keySet());
         assertEquals(java.util.List.of("convert", "enhance"), orderedIds, "LinkedHashMap preserves authoring order");
 
         ActionDef convert = a.getActions().get("convert");
-        assertEquals("Metal_Ingot", convert.getInput().getResourceTypeId());
+        assertEquals("Metal_Bars", convert.getInput().getResourceTypeId());
         assertEquals(3800L, convert.getWork().getCycleMs());
         assertEquals("SMITHING", convert.getWork().getXp()[0].getSkill());
-        assertEquals("anvil_sparks", convert.getLoot().getTables()[0]);
+        assertEquals("anvil_sparks", convert.getLoot().getLootables()[0]);
         assertNull(convert.getSteps(), "convert authors no Steps - the implicit program builds from Work/Recipe/Loot");
 
         ActionDef enhance = a.getActions().get("enhance");
         assertEquals("Weapon", enhance.getInput().getFunction());
         assertEquals(Boolean.FALSE, enhance.getWork().getRepeat());
         assertEquals(1, enhance.getSteps().length);
-        assertEquals("strike1", enhance.getSteps()[0].getId());
-        assertEquals(StationStep.TYPE_WAIT, enhance.getSteps()[0].getType());
-        assertEquals(1, enhance.getSteps()[0].getWait().getBeats());
+        StationStep strike = enhance.getSteps()[0];
+        assertEquals("strike1", strike.getId());
+        assertEquals(650L, strike.getDuration().getMs(), "a pure beat: Duration + Puppet clip, no phase group");
+        assertEquals("MMO_Emote_Hammer", strike.getPuppet().getClip());
+        assertTrue(strike.isPureBeat());
     }
 
     @Test
@@ -409,55 +419,49 @@ public class StationAssetCodecTest {
     // ==================== StationStep (design 9.3) ====================
 
     @Test
-    void stationStep_decodesConsumeProduceWaitRollCommandGroups() throws Exception {
+    void stationStep_decodesOrthogonalPhases() throws Exception {
+        // Scope-2 phase model: composable nullable phase groups, no Type discriminator, no Wait.
         StationAsset a = decodeAsset("{ \"Actions\": { \"ritual\": { \"Steps\": ["
-                + " { \"Id\": \"c\", \"Type\": \"Consume\","
-                + "   \"Consume\": { \"ItemId\": \"MMO_Sharpened_Bar\", \"Quantity\": 2, \"From\": \"Custody\" } },"
-                + " { \"Id\": \"p\", \"Type\": \"Produce\","
-                + "   \"Produce\": { \"ItemId\": \"MMO_Enhanced_Sword\", \"Quantity\": 1 } },"
-                + " { \"Id\": \"w\", \"Type\": \"Wait\", \"Wait\": { \"DurationMs\": 1200 },"
+                + " { \"Id\": \"c\", \"Consume\": { \"ItemId\": \"MMO_Sharpened_Bar\", \"Quantity\": 2, \"From\": \"Custody\" } },"
+                + " { \"Id\": \"p\", \"Produce\": { \"ItemId\": \"MMO_Enhanced_Sword\", \"Quantity\": 1 } },"
+                + " { \"Id\": \"beat\", \"Duration\": { \"Ms\": 1200 },"
                 + "   \"OnConditionFail\": { \"Result\": \"Skip\", \"Goto\": \"p\" },"
-                + "   \"Conditions\": [ { \"Factor\": \"mmoskilltree:skill_level\", \"Min\": 10 } ] },"
-                + " { \"Id\": \"r\", \"Type\": \"Roll\","
-                + "   \"Roll\": { \"Lootable\": \"anvil_sparks\", \"Rolls\": [ { \"Trigger\": \"Cycle\" } ] } },"
-                + " { \"Id\": \"cmd\", \"Type\": \"Command\","
-                + "   \"Command\": { \"Commands\": [\"give {player} test 1\"] } } ] } } }");
+                + "   \"Conditions\": [ { \"Factor\": \"stat\", \"Param\": \"MMO_Level_SMITHING\", \"Min\": 10 } ] },"
+                + " { \"Id\": \"r\", \"Roll\": { \"Lootables\": [\"anvil_sparks\"], \"Rolls\": [ { \"Trigger\": \"Cycle\" } ] } },"
+                + " { \"Id\": \"cmd\", \"Commands\": [\"give {player} test 1\"] } ] } } }");
         StationStep[] steps = a.getActions().get("ritual").getSteps();
         assertEquals(5, steps.length);
 
-        assertEquals(StationStep.TYPE_CONSUME, steps[0].getType());
         assertEquals("MMO_Sharpened_Bar", steps[0].getConsume().getItemId());
         assertEquals(2, steps[0].getConsume().getQuantity());
-        assertEquals("Custody", steps[0].getConsume().getFrom());
         assertEquals(StationStep.Consume.FROM_CUSTODY, steps[0].getConsume().effectiveFrom());
 
-        assertEquals(StationStep.TYPE_PRODUCE, steps[1].getType());
         assertEquals("MMO_Enhanced_Sword", steps[1].getProduce().getItemId());
         assertEquals(StationStep.Produce.TO_INVENTORY, steps[1].getProduce().effectiveTo(), "To defaults to Inventory");
 
-        assertEquals(StationStep.TYPE_WAIT, steps[2].getType());
-        assertEquals(1200L, steps[2].getWait().getDurationMs());
+        assertEquals(1200L, steps[2].getDuration().getMs());
+        assertTrue(steps[2].isPureBeat(), "Duration + Conditions only = a pure beat");
         assertEquals(StationStep.OnConditionFail.RESULT_SKIP, steps[2].getOnConditionFail().effectiveResult());
         assertEquals("p", steps[2].getOnConditionFail().getGoto());
         assertEquals(1, steps[2].getConditions().length);
 
-        assertEquals(StationStep.TYPE_ROLL, steps[3].getType());
-        assertEquals("anvil_sparks", steps[3].getRoll().getLootable());
+        assertEquals("anvil_sparks", steps[3].getRoll().getLootables()[0]);
         assertEquals(1, steps[3].getRoll().getRolls().length);
 
-        assertEquals(StationStep.TYPE_COMMAND, steps[4].getType());
-        assertEquals("give {player} test 1", steps[4].getCommand().getCommands()[0]);
+        assertEquals("give {player} test 1", steps[4].getCommands()[0]);
     }
 
     @Test
-    void stationStep_reservedTypes_decodeAndFlagUnimplemented() throws Exception {
-        // Stamp lands phase 2 leg E (design 9.5) - only Mount stays schema-reserved-unimplemented.
-        StationAsset a = decodeAsset("{ \"Actions\": { \"anvil\": { \"Steps\": ["
-                + " { \"Id\": \"stamp\", \"Type\": \"Stamp\" },"
-                + " { \"Id\": \"mount\", \"Type\": \"Mount\" } ] } } }");
-        StationStep[] steps = a.getActions().get("anvil").getSteps();
-        assertFalse(steps[0].isReservedUnimplemented());
-        assertTrue(steps[1].isReservedUnimplemented());
+    void stationStep_walkAndAt_areWave3Flagged() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": { \"fish\": { \"Steps\": ["
+                + " { \"Id\": \"walkout\", \"Walk\": { \"To\": \"fire\", \"SpeedMps\": 3.0 } },"
+                + " { \"Id\": \"cook\", \"At\": \"fire\", \"Duration\": { \"Ms\": 2500 } } ] } } }");
+        StationStep[] steps = a.getActions().get("fish").getSteps();
+        assertEquals("fire", steps[0].getWalk().getTo());
+        assertEquals(3.0, steps[0].getWalk().effectiveSpeedMps());
+        assertTrue(steps[0].authorsWave3OnlyPhase(), "a Walk phase is wave-3-only");
+        assertEquals("fire", steps[1].getAt());
+        assertTrue(steps[1].authorsWave3OnlyPhase(), "an At anchor is wave-3-only");
     }
 
     @Test
@@ -604,7 +608,7 @@ public class StationAssetCodecTest {
     @Test
     void stationStepPuppet_decodesClipAndProp() throws Exception {
         StationAsset a = decodeAsset("{ \"Actions\": { \"ritual\": { \"Steps\": ["
-                + " { \"Id\": \"strike\", \"Type\": \"Wait\", \"Wait\": { \"DurationMs\": 400 },"
+                + " { \"Id\": \"strike\", \"Duration\": { \"Ms\": 400 },"
                 + "   \"Puppet\": { \"Clip\": \"Hammer_Strike\","
                 + "     \"Prop\": { \"Source\": \"ItemId\", \"ItemId\": \"Tool_Hammer_Iron\" } } } ] } } }");
         StationStep step = a.getActions().get("ritual").getSteps()[0];
@@ -618,7 +622,7 @@ public class StationAssetCodecTest {
     @Test
     void stationStepPuppet_omitted_decodesNull() throws Exception {
         StationAsset a = decodeAsset("{ \"Actions\": { \"ritual\": { \"Steps\": ["
-                + " { \"Id\": \"strike\", \"Type\": \"Wait\", \"Wait\": { \"DurationMs\": 400 } } ] } } }");
+                + " { \"Id\": \"strike\", \"Duration\": { \"Ms\": 400 } } ] } } }");
         assertNull(a.getActions().get("ritual").getSteps()[0].getPuppet());
     }
 }

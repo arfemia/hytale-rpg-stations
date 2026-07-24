@@ -43,7 +43,11 @@ public final class StationAsset
     @Nullable private Recipe recipe;
     @Nullable private Hold hold;
     @Nullable private Tool tool;
-    @Nullable private Loot loot;
+    /**
+     * The conditional-lootable declaration - scope-2's unified {@link LootRef} ({@code Lootables}
+     * + inline {@code Rolls}), replacing the old bespoke {@code Loot {Tables, Rolls}} group.
+     */
+    @Nullable private LootRef loot;
     @Nullable private Camera camera;
     @Nullable private Animation animation;
     /** The CYCLE-complete presentation moment (sound/particles at the block per finished cycle). */
@@ -107,9 +111,9 @@ public final class StationAsset
             .appendInherited(new KeyedCodec<>("Tool", Tool.CODEC, false),
                     (a, v) -> a.tool = v, a -> a.tool, (a, parent) -> a.tool = parent.tool)
             .add()
-            .appendInherited(new KeyedCodec<>("Loot", Loot.CODEC, false),
+            .appendInherited(new KeyedCodec<>("Loot", LootRef.CODEC, false),
                     (a, v) -> a.loot = v, a -> a.loot, (a, parent) -> a.loot = parent.loot)
-            .add()
+            .documentation("Conditional loot for the implicit action: a LootRef (referenced Lootables + inline Rolls).").add()
             .appendInherited(new KeyedCodec<>("Camera", Camera.CODEC, false),
                     (a, v) -> a.camera = v, a -> a.camera, (a, parent) -> a.camera = parent.camera)
             .add()
@@ -157,7 +161,7 @@ public final class StationAsset
     public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
             @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
             @Nullable Animation animation, @Nullable Presentation presentation,
-            @Nullable Requires requires, @Nullable Loot loot) {
+            @Nullable Requires requires, @Nullable LootRef loot) {
         return of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires, loot, null);
     }
 
@@ -166,7 +170,7 @@ public final class StationAsset
     public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
             @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
             @Nullable Animation animation, @Nullable Presentation presentation,
-            @Nullable Requires requires, @Nullable Loot loot, @Nullable Map<String, Flair> flairs) {
+            @Nullable Requires requires, @Nullable LootRef loot, @Nullable Map<String, Flair> flairs) {
         StationAsset a = new StationAsset();
         a.id = id;
         a.identity = identity;
@@ -188,7 +192,7 @@ public final class StationAsset
     public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
             @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
             @Nullable Animation animation, @Nullable Presentation presentation,
-            @Nullable Requires requires, @Nullable Loot loot, @Nullable Map<String, Flair> flairs,
+            @Nullable Requires requires, @Nullable LootRef loot, @Nullable Map<String, Flair> flairs,
             @Nullable Presentation completion) {
         StationAsset a = of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires,
                 loot, flairs);
@@ -252,8 +256,9 @@ public final class StationAsset
         return tool;
     }
 
+    /** The conditional-lootable declaration (scope-2 {@link LootRef}); null = none authored. */
     @Nullable
-    public Loot getLoot() {
+    public LootRef getLoot() {
         return loot;
     }
 
@@ -668,64 +673,6 @@ public final class StationAsset
         @Nullable
         public Ingredient getOutput() {
             return output;
-        }
-    }
-
-    /**
-     * A native-shaped recipe ingredient mirroring vanilla {@code MaterialQuantity}. An INPUT
-     * sets exactly one of {@link #itemId} or {@link #resourceTypeId} (a native
-     * {@code Item.ResourceTypes} family - the "any log" route); an OUTPUT sets only {@code ItemId}.
-     */
-    public static final class Ingredient {
-        @Nullable protected String itemId;
-        @Nullable protected String resourceTypeId;
-        @Nullable protected Integer quantity;
-
-        public static final BuilderCodec<Ingredient> CODEC = BuilderCodec.builder(Ingredient.class, Ingredient::new)
-                .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
-                        (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId).add()
-                .appendInherited(new KeyedCodec<>("ResourceTypeId", Codec.STRING, false),
-                        (o, v) -> o.resourceTypeId = v, o -> o.resourceTypeId,
-                        (o, p) -> o.resourceTypeId = p.resourceTypeId).add()
-                .appendInherited(new KeyedCodec<>("Quantity", Codec.INTEGER, false),
-                        (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity).add()
-                .build();
-
-        @Nonnull
-        public static Ingredient of(@Nullable String itemId, @Nullable String resourceTypeId,
-                @Nullable Integer quantity) {
-            Ingredient i = new Ingredient();
-            i.itemId = itemId;
-            i.resourceTypeId = resourceTypeId;
-            i.quantity = quantity;
-            return i;
-        }
-
-        /** Convenience: an exact-item ingredient ({@code ItemId}). */
-        @Nonnull
-        public static Ingredient item(@Nullable String itemId, @Nullable Integer quantity) {
-            return of(itemId, null, quantity);
-        }
-
-        /** Convenience: a native resource-type family ingredient ({@code ResourceTypeId}); INPUT only. */
-        @Nonnull
-        public static Ingredient resource(@Nullable String resourceTypeId, @Nullable Integer quantity) {
-            return of(null, resourceTypeId, quantity);
-        }
-
-        @Nullable
-        public String getItemId() {
-            return itemId;
-        }
-
-        @Nullable
-        public String getResourceTypeId() {
-            return resourceTypeId;
-        }
-
-        @Nullable
-        public Integer getQuantity() {
-            return quantity;
         }
     }
 
@@ -1186,45 +1133,6 @@ public final class StationAsset
             public Integer getPerCycle() {
                 return perCycle;
             }
-        }
-    }
-
-    /**
-     * The conditional-lootable declaration (design section 4.4.3/4.5, REPLACES the MMO's
-     * {@code Luck} group this leg): references to shared {@link LootableAsset} tables and/or
-     * inline {@link Roll}s, both optional and independently composable (a station may combine
-     * any number of tables with its own inline rolls). See {@code loot.LootEngine} for
-     * resolution + evaluation.
-     */
-    public static final class Loot {
-        @Nullable protected String[] tables;
-        @Nullable protected Roll[] rolls;
-
-        public static final BuilderCodec<Loot> CODEC = BuilderCodec.builder(Loot.class, Loot::new)
-                .appendInherited(new KeyedCodec<>("Tables", new ArrayCodec<>(Codec.STRING, String[]::new), false),
-                        (o, v) -> o.tables = v, o -> o.tables, (o, p) -> o.tables = p.tables).add()
-                .appendInherited(new KeyedCodec<>("Rolls", new ArrayCodec<>(Roll.CODEC, Roll[]::new), false),
-                        (o, v) -> o.rolls = v, o -> o.rolls, (o, p) -> o.rolls = p.rolls).add()
-                .build();
-
-        @Nonnull
-        public static Loot of(@Nullable String[] tables, @Nullable Roll[] rolls) {
-            Loot l = new Loot();
-            l.tables = tables;
-            l.rolls = rolls;
-            return l;
-        }
-
-        /** Referenced {@link LootableAsset} ids (case-insensitive at resolve). */
-        @Nullable
-        public String[] getTables() {
-            return tables;
-        }
-
-        /** Inline rolls authored directly on this station (in addition to any {@link #tables}). */
-        @Nullable
-        public Roll[] getRolls() {
-            return rolls;
         }
     }
 

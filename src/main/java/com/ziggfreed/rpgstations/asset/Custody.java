@@ -1,22 +1,11 @@
 package com.ziggfreed.rpgstations.asset;
 
-import java.io.IOException;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import org.bson.BsonDocument;
-import org.bson.BsonValue;
-
 import com.hypixel.hytale.codec.Codec;
-import com.hypixel.hytale.codec.ExtraInfo;
-import com.hypixel.hytale.codec.InheritCodec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
-import com.hypixel.hytale.codec.schema.SchemaContext;
-import com.hypixel.hytale.codec.schema.config.Schema;
-import com.hypixel.hytale.codec.util.RawJsonReader;
-import com.ziggfreed.rpgstations.util.Log;
 
 /**
  * Session-scoped PLACED-INPUT custody (design section 9.4, phase-2 leg C): an authored group
@@ -253,36 +242,27 @@ public final class Custody {
          * own local pitch/roll and ride that yaw unchanged. At a default-orientation placement the
          * added yaw is 0, so an authored {@code Y} reads exactly as before.
          *
-         * <p><b>Migration tolerance (critique m6):</b> the {@code "Rotation"} leaf USED to be a
-         * bare {@code Codec.DOUBLE} (a single world-space yaw). This unreleased-cycle swap to the
-         * nested group is a hard break with no shipped JSON authoring the old form, but a stale
-         * dev-world override authoring {@code "Rotation": 90} would otherwise {@code asDocument()}-
-         * throw and abort the WHOLE asset load. {@link #CODEC} therefore tolerates a bare NUMBER,
-         * decoding it as the legacy Y-only world-space yaw ({@code of(null, yaw, null)}) with a
-         * WARN naming the {@code {X,Y,Z}} migration - a bare-number Rotation never aborts the load.
+         * <p><b>Scope-2:</b> the retired scalar-yaw {@code LegacyTolerantCodec} is DELETED (with the
+         * whole surface re-authored in-wave there is no legacy JSON to tolerate). {@link #CODEC} is
+         * now the plain nested {@code {X,Y,Z}} group codec.
          */
         public static final class Rotation {
             @Nullable protected Double x;
             @Nullable protected Double y;
             @Nullable protected Double z;
 
-            /** The structured {@code {X,Y,Z}} group codec (mirrors {@link Offset#CODEC} verbatim). */
-            static final BuilderCodec<Rotation> GROUP_CODEC = BuilderCodec.builder(Rotation.class, Rotation::new)
+            /** The structured {@code {X,Y,Z}} degrees group codec (mirrors {@link Offset#CODEC} verbatim). */
+            public static final BuilderCodec<Rotation> CODEC = BuilderCodec.builder(Rotation.class, Rotation::new)
                     .appendInherited(new KeyedCodec<>("X", Codec.DOUBLE, false),
-                            (o, v) -> o.x = v, o -> o.x, (o, p) -> o.x = p.x).add()
+                            (o, v) -> o.x = v, o -> o.x, (o, p) -> o.x = p.x)
+                    .documentation("Pitch in degrees (tips the prop forward/back - the 'lay it flat' axis). Default 0.").add()
                     .appendInherited(new KeyedCodec<>("Y", Codec.DOUBLE, false),
-                            (o, v) -> o.y = v, o -> o.y, (o, p) -> o.y = p.y).add()
+                            (o, v) -> o.y = v, o -> o.y, (o, p) -> o.y = p.y)
+                    .documentation("Yaw in degrees (turns about vertical; the placed block's facing is added at spawn). Default 0.").add()
                     .appendInherited(new KeyedCodec<>("Z", Codec.DOUBLE, false),
-                            (o, v) -> o.z = v, o -> o.z, (o, p) -> o.z = p.z).add()
+                            (o, v) -> o.z = v, o -> o.z, (o, p) -> o.z = p.z)
+                    .documentation("Roll in degrees (tips sideways about the prop's own long axis). Default 0.").add()
                     .build();
-
-            /**
-             * The migration-tolerant codec the {@code "Rotation"} leaf actually uses (critique m6):
-             * a bare NUMBER decodes as the legacy Y-only world-space yaw with a WARN; a document
-             * ({@code {X,Y,Z}}) and native {@code Parent} inheritance delegate straight to
-             * {@link #GROUP_CODEC}.
-             */
-            public static final Codec<Rotation> CODEC = new LegacyTolerantCodec();
 
             @Nonnull
             public static Rotation of(@Nullable Double x, @Nullable Double y, @Nullable Double z) {
@@ -306,88 +286,6 @@ public final class Custody {
             @Nullable
             public Double getZ() {
                 return z;
-            }
-
-            /**
-             * Wraps {@link Rotation#GROUP_CODEC} so a bare NUMBER (the legacy scalar-yaw form,
-             * critique m6) decodes as {@code of(null, yaw, null)} with a WARN instead of throwing;
-             * every document/inheritance path forwards verbatim to the group codec (so native
-             * {@code Parent} per-leaf reuse is unchanged). An {@link InheritCodec} so the enclosing
-             * {@code appendInherited} leaf keeps per-leaf inheritance of the sub-group.
-             */
-            private static final class LegacyTolerantCodec implements InheritCodec<Rotation> {
-
-                private static boolean isNumberStart(int c) {
-                    return c == '-' || c == '+' || c == '.' || (c >= '0' && c <= '9');
-                }
-
-                @Nonnull
-                private static Rotation legacyYaw(double yaw) {
-                    Log.warn("STATION Custody.Display.Rotation authored as a bare number (" + yaw
-                            + ") - the scalar world-space yaw form is retired; migrate to the nested {X,Y,Z}"
-                            + " degrees group. Decoding as Y-only (yaw) for this load.");
-                    return Rotation.of(null, yaw, null);
-                }
-
-                @Override
-                public Rotation decode(BsonValue bsonValue, ExtraInfo extraInfo) {
-                    if (bsonValue != null && bsonValue.isNumber()) {
-                        return legacyYaw(bsonValue.asNumber().doubleValue());
-                    }
-                    return GROUP_CODEC.decode(bsonValue, extraInfo);
-                }
-
-                @Override
-                public BsonValue encode(Rotation t, ExtraInfo extraInfo) {
-                    return GROUP_CODEC.encode(t, extraInfo);
-                }
-
-                @Override
-                public Rotation decodeJson(RawJsonReader reader, ExtraInfo extraInfo) throws IOException {
-                    reader.consumeWhiteSpace();
-                    if (isNumberStart(reader.peek())) {
-                        return legacyYaw(reader.readDoubleValue());
-                    }
-                    return GROUP_CODEC.decodeJson(reader, extraInfo);
-                }
-
-                @Nonnull
-                @Override
-                public Schema toSchema(@Nonnull SchemaContext context) {
-                    return GROUP_CODEC.toSchema(context);
-                }
-
-                @Override
-                public Rotation decodeAndInherit(BsonDocument document, Rotation parent, ExtraInfo extraInfo) {
-                    return GROUP_CODEC.decodeAndInherit(document, parent, extraInfo);
-                }
-
-                @Override
-                public void decodeAndInherit(BsonDocument document, Rotation t, Rotation parent, ExtraInfo extraInfo) {
-                    GROUP_CODEC.decodeAndInherit(document, t, parent, extraInfo);
-                }
-
-                @Override
-                public Rotation decodeAndInheritJson(RawJsonReader reader, Rotation parent, ExtraInfo extraInfo)
-                        throws IOException {
-                    reader.consumeWhiteSpace();
-                    if (isNumberStart(reader.peek())) {
-                        return legacyYaw(reader.readDoubleValue());
-                    }
-                    return GROUP_CODEC.decodeAndInheritJson(reader, parent, extraInfo);
-                }
-
-                @Override
-                public void decodeAndInheritJson(RawJsonReader reader, Rotation t, Rotation parent, ExtraInfo extraInfo)
-                        throws IOException {
-                    reader.consumeWhiteSpace();
-                    if (isNumberStart(reader.peek())) {
-                        t.y = reader.readDoubleValue();
-                        legacyYaw(t.y);
-                        return;
-                    }
-                    GROUP_CODEC.decodeAndInheritJson(reader, t, parent, extraInfo);
-                }
             }
         }
 

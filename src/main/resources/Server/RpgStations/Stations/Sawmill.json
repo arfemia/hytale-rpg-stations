@@ -1,5 +1,5 @@
 {
-  "$Comment": "Icon intentionally omitted (aligned with the skill-stations-pack tuning leg, 2026-07-22): StationService#blockItemIdAt already falls back to the anchor block's own BlockType id at engage time when Identity.Icon is absent/blank, and this jar's own default Sawmill block shares the SAME id (RPG_Station_Sawmill, filename = item id) - so the summary-HUD crest already shows the station's own block icon with zero duplicated id to drift, the same reasoning the pack's own Sawmill.json/Anvil.json now use.",
+  "$Comment": "Icon intentionally omitted (aligned with the skill-stations-pack tuning leg, 2026-07-22): StationService#blockItemIdAt already falls back to the anchor block's own BlockType id at engage time when Identity.Icon is absent/blank, and this jar's own default Sawmill block shares the SAME id (RPG_Station_Sawmill, filename = item id) - so the summary-HUD crest already shows the station's own block icon with zero duplicated id to drift, the same reasoning the pack's own Sawmill.json/Anvil.json now use. Scope-2 shape migration (2026-07-24, leg A5, jar content re-author to the A-schema): 'Loot.Tables' is renamed 'Loot.Lootables' (the unified LootRef group, asset.LootRef); no other group in this file changed shape (Recipe here authors only FromCrafting, never Conversions, so the Ingredient migration touches nothing here). Every value below is byte-identical to the pre-scope-2 file; only the one key name changed.",
   "Identity": {
     "NameKey": "rpgstations.station.sawmill.name",
     "DescKey": "rpgstations.station.sawmill.desc"
@@ -22,7 +22,7 @@
     "States": { "Empty": "Default", "Loaded": "Loaded" }
   },
   "Loot": {
-    "Tables": ["sawmillfinds"]
+    "Lootables": ["sawmillfinds"]
   },
   "Hold": {
     "MovementLock": true,

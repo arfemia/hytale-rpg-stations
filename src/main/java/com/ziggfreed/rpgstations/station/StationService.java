@@ -71,6 +71,8 @@ import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.SummaryEnricherRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.rpgstations.asset.Ingredient;
+import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.Roll;
@@ -791,7 +793,11 @@ public final class StationService {
                 check.inputCount, consumeFrom);
         StationStep.Produce produceStep = StationStep.Produce.of(check.outputItem, check.outputCount,
                 StationStep.Produce.TO_INVENTORY);
-        Roll[] resolvedRolls = LootEngine.resolveRolls(action.getLoot()).toArray(new Roll[0]);
+        // Scope-2 (design 1.8): fold Station/Action-targeted ExtensionAsset Loot into the cycle's
+        // effective loot refs (the SawmillProgression extension's luck-tier lootable lands here).
+        LootRef effectiveLoot = ExtensionCatalog.getInstance().applyToStationLoot(s.stationId, action.getLoot());
+        effectiveLoot = ExtensionCatalog.getInstance().applyToActionLoot(action.getActionId(), effectiveLoot);
+        Roll[] resolvedRolls = LootEngine.resolveRolls(effectiveLoot).toArray(new Roll[0]);
         List<StationStep> steps = ImplicitProgram.build(consumeStep, produceStep, resolvedRolls,
                 action.getPresentation());
         ItemStack cycleOutput = new ItemStack(check.outputItem, check.outputCount);
@@ -812,8 +818,28 @@ public final class StationService {
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player) {
         List<StationStep> steps = Arrays.asList(action.getSteps());
+        if (hasWave3PendingStep(steps)) {
+            // WAVE BOUNDARY (decision 34): a step authoring Walk/At/Produce.To:Custody decodes +
+            // validates this wave but cannot execute - deny the whole program gracefully at its
+            // first dispatch rather than running a partial cycle. No shipped wave-2 content reaches
+            // here (the validator warns any such step at load); this is the defensive engine guard.
+            Log.warn("STATION action '" + action.getActionId() + "' at '" + s.stationId
+                    + "' authors a wave-3 step phase (Walk/At/Produce.To:Custody) - denying gracefully");
+            stop(s, StopReason.STEP_FAILED, store, commandBuffer);
+            return false;
+        }
         int attemptCycleIndex = s.cyclesDone + 1;
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, null, attemptCycleIndex, 0, false);
+    }
+
+    /** Whether any authored step in {@code steps} authors a wave-3-only phase the engine cannot execute this wave. */
+    static boolean hasWave3PendingStep(@Nonnull List<StationStep> steps) {
+        for (StationStep step : steps) {
+            if (step != null && step.authorsWave3OnlyPhase()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -886,16 +912,16 @@ public final class StationService {
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
             @Nullable ItemStack cycleOutput, int attemptCycleIndex, int startIndex, boolean resuming) {
         if (!resuming) {
-            // A FRESH cycle attempt explicitly zeroes the suspend deadline before the walk starts,
-            // so a fresh program's very first Wait step can never inherit a stale nonzero value
-            // (an explicit guarantee on top of every Wait step's own success-path reset).
+            // A FRESH cycle attempt explicitly zeroes the suspend deadline AND the per-step
+            // iteration counter before the walk starts, so a fresh program's very first Duration
+            // hold / Repeat step can never inherit a stale nonzero value (an explicit guarantee on
+            // top of every step's own success-path reset).
             s.stepDeadlineMs = 0L;
+            s.stepIteration = 0;
         }
-        StationStep resumingStep = resuming && startIndex >= 0 && startIndex < steps.size()
-                ? steps.get(startIndex) : null;
         FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, action, attemptCycleIndex));
         StationStepContext ctx = new StationStepContext(s, store, commandBuffer, player, asset, action, snapshot,
-                steps, attemptCycleIndex, cycleOutput, resumingStep);
+                steps, attemptCycleIndex, cycleOutput);
 
         CastKernel.Walk<StationStepResult> walk = StationStepKernel.runResumable(ctx, startIndex);
         if (walk instanceof CastKernel.Walk.Suspended<StationStepResult> suspended) {
@@ -1068,7 +1094,14 @@ public final class StationService {
     private static void onCycleCompleted(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull ActionResolver.ResolvedAction action,
             double toolMultiplier, boolean idle, int cycleIndex) {
-        List<XpAsk> asks = xpAsks(action.getWork(), idle, s.idleXpFraction);
+        // Scope-2 (design 1.8): fold any Station/Action-targeted ExtensionAsset Xp into the
+        // forwarded asks so an extension authoring a genuinely-new Xp skill reaches the MMO bridge
+        // exactly as if authored inline on Work.Xp (decision 27). Append-only over the base Xp,
+        // never a re-add of a skill the base already grants (that would double it - A8 review M1).
+        StationAsset.WorkXp[] baseXp = action.getWork() != null ? action.getWork().getXp() : null;
+        StationAsset.WorkXp[] mergedXp = ExtensionCatalog.getInstance().applyToStationXp(s.stationId, baseXp);
+        mergedXp = ExtensionCatalog.getInstance().applyToActionXp(action.getActionId(), mergedXp);
+        List<XpAsk> asks = xpAsksFromXp(mergedXp, idle, s.idleXpFraction);
         StationEvents.fireCycleCompleted(store, commandBuffer, s.playerRef, s.playerUuid, s.sessionId,
                 s.stationId, action.getActionId(), cycleIndex, idle, asks, toolMultiplier);
     }
@@ -1086,7 +1119,12 @@ public final class StationService {
      */
     @Nonnull
     private static List<XpAsk> xpAsks(@Nullable StationAsset.Work work, boolean idle, double idleXpFraction) {
-        StationAsset.WorkXp[] xp = work != null ? work.getXp() : null;
+        return xpAsksFromXp(work != null ? work.getXp() : null, idle, idleXpFraction);
+    }
+
+    /** The {@link #xpAsks} core over an already-resolved (extension-merged) {@code WorkXp[]}. */
+    @Nonnull
+    private static List<XpAsk> xpAsksFromXp(@Nullable StationAsset.WorkXp[] xp, boolean idle, double idleXpFraction) {
         if (xp == null || xp.length == 0) {
             return List.of();
         }
@@ -1147,7 +1185,10 @@ public final class StationService {
         if (asset == null) {
             return;
         }
-        List<Roll> rolls = LootEngine.resolveRolls(asset.getLoot());
+        // Scope-2 (design 1.8): the Completion pass reads the STATION-level loot (not per-action),
+        // so only Station-targeted extension loot merges here.
+        LootRef effectiveLoot = ExtensionCatalog.getInstance().applyToStationLoot(s.stationId, asset.getLoot());
+        List<Roll> rolls = LootEngine.resolveRolls(effectiveLoot);
         if (rolls.isEmpty()) {
             return;
         }
@@ -1826,8 +1867,8 @@ public final class StationService {
                 if (c == null || c.getInput() == null || c.getOutput() == null) {
                     continue;
                 }
-                StationAsset.Ingredient in = c.getInput();
-                StationAsset.Ingredient out = c.getOutput();
+                Ingredient in = c.getInput();
+                Ingredient out = c.getOutput();
                 String outItem = out.getItemId();
                 if (outItem == null || outItem.isBlank()) {
                     continue;
@@ -1884,8 +1925,8 @@ public final class StationService {
                 if (c == null || c.getInput() == null || c.getOutput() == null) {
                     continue;
                 }
-                StationAsset.Ingredient in = c.getInput();
-                StationAsset.Ingredient out = c.getOutput();
+                Ingredient in = c.getInput();
+                Ingredient out = c.getOutput();
                 String outItem = out.getItemId();
                 if (outItem == null || outItem.isBlank()) {
                     continue;

@@ -32,9 +32,11 @@ public final class Requires {
 
     public static final BuilderCodec<Requires> CODEC = BuilderCodec.builder(Requires.class, Requires::new)
             .appendInherited(new KeyedCodec<>("Permission", Codec.STRING, false),
-                    (o, v) -> o.permission = v, o -> o.permission, (o, p) -> o.permission = p.permission).add()
+                    (o, v) -> o.permission = v, o -> o.permission, (o, p) -> o.permission = p.permission)
+            .documentation("A permission node the player must hold to start; null = no permission gate.").add()
             .appendInherited(new KeyedCodec<>("Conditions", new ArrayCodec<>(Condition.CODEC, Condition[]::new), false),
-                    (o, v) -> o.conditions = v, o -> o.conditions, (o, p) -> o.conditions = p.conditions).add()
+                    (o, v) -> o.conditions = v, o -> o.conditions, (o, p) -> o.conditions = p.conditions)
+            .documentation("Factor gate: every Condition must pass to start; an unregistered factor fails CLOSED.").add()
             .build();
 
     /** Java-side factory; sets the same fields the codec fills. */

@@ -72,8 +72,30 @@ clips keeps its one generic engage swing). The temporary `[D77DIAG]` enhance-tim
 was REMOVED in round-8 after proving the ritual timing correct (every tagged `Log` line + the
 resume-log throttle map gone; the functional instant-dispatch/resuming/Presentation changes stay).
 
+**Scope-2 (wave 2, 2026-07-24) landed on top: the authoring surface + step model were reshaped
+package-wide.** The old `StationStep.Type` union (Consume/Produce/Wait/Roll/Command/Stamp) is
+GONE, replaced by an orthogonal-phase step record (a step composes any combination of nullable
+`Walk`/`Consume`/`Stamp`/`Produce`/`Roll`/`Commands` phases in one fixed order; a phase-free step
+is a pure beat); `StationAsset.Loot`/`ActionDef.Loot`/`StationStep.Roll` all take the unified
+`LootRef` (`{Lootables[], Rolls[]}`, `Loot.Tables` renamed `Loot.Lootables`); a new standalone
+`asset.ActionAsset` type (`Server/RpgStations/Actions/*.json`) lets an `Actions` map entry `Ref`
+a reusable action instead of always inlining one; a new `asset.ExtensionAsset` type
+(`Server/RpgStations/Extensions/*.json`) is the ONE additive fourth-party extension mechanism
+(Station/Action/Lootable/RollPool targets, additive-only, base-wins key collisions) superseding
+ad hoc full-file pack overrides; the Stamp step's `Caps` re-shaped onto a weighted `FactorRef`
+budget vocabulary (`Budgets[]` replaces `PerItemBudget`/`SkillScaledBudget`) that also now drives
+loot chances, ladder values, and roll magnitudes (one factor vocabulary everywhere). **Wave-3
+pending (decodes/validates, does not execute yet)**: the multi-station seam - `StationStep.Walk`/
+`At`, `Produce.To:"Custody"`, and `ActionDef.Anchors` discovery/claiming. See `asset/CLAUDE.md`
+and `station/CLAUDE.md` for the full current schema/engine detail (both fully rewritten for this
+wave); this intro section above documents phase 1/2 history and stays accurate for everything it
+describes except the step-Type/Loot-shape/Caps-shape terminology scope-2 superseded.
+
 Design
-authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
+authority (scope-2): `../../.claude/research/raw/rpg-stations-scope2-unified-design-2026-07-23.md`
++ decisions 33-41 in `../../.claude/research/rpg-stations-extraction-design.md` (BINDING over
+everything below that conflicts). Phase 1/2 design authority:
+`../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
 (grounded by the decision log `../../.claude/research/rpg-stations-extraction-design.md` and the
 adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-2026-07-21.md`, ALL
 adopted fixes binding). Origin plan: `../../.claude/plans/interactive-stations.md` +
@@ -113,7 +135,8 @@ api/                                                   the FROZEN-ONCE-1.0.0-rel
   src/main/java/com/ziggfreed/rpgstations/api/         see api/CLAUDE.md
 src/main/resources/
   manifest.json                                        Group Ziggfreed, IncludesAssetPack:true, ServerVersion Update 5
-  Server/RpgStations/{Stations,Lootables,Settings}/     the three Pattern A asset stores this mod registers
+  Server/RpgStations/{Stations,Actions,Lootables,RollPools,Flairs,Extensions,Settings}/
+                                                        the seven Pattern A asset stores this mod registers
   Server/Item/{Items,RootInteractions}/                 the jar's OWN default Sawmill block + its RootInteraction
   Server/Drops/, Server/Emote/                           the standalone Sawmill's native-namespace drop tables + work emote
   Server/Entity/Effects/RPG/                             RPG_Station_Hold.json (the effect-mode movement-lock effect)
@@ -287,7 +310,11 @@ fix layers on cleanly.
   Mount bullet for the full file-by-file detail.
 - **Leg E (LANDED, this mod + the MMO bridge + the pack)**: the anvil arc (design 9.5) - the
   `Stamp` step un-reserved (`asset.StationStep.Stamp{Reagents,Durability,Stats}`, nested
-  `Stats{Pool,Entries,Picks,Unique,Caps{PerItemBudget,PerStat,SkillScaledBudget,Economics}}`), a
+  `Stats{Pool,Entries,Picks,Unique,Caps{PerItemBudget,PerStat,SkillScaledBudget,Economics}}`
+  as originally shipped this leg; **scope-2 (wave 2) re-shaped `Caps` onto a weighted
+  `Budgets[]`/`FactorRef` vocabulary, `PerItemBudget`/`SkillScaledBudget` are GONE - see
+  `station/CLAUDE.md`'s anvil-arc bullet and `asset/CLAUDE.md`'s `StationStep` bullet for the
+  current shape**), a
   NEW `asset.RollPool` Pattern-A store (`Server/RpgStations/RollPools/*.json`, `loot.RollPoolCatalog`)
   + the shared `asset.StatRollEntry` codec both `RollPool.Entries` and inline `Stats.Entries` use,
   the PURE `station.StampCapEngine` (roll + weighted-pick/`Picks`/`Unique` + the M2-bound
@@ -318,8 +345,11 @@ fix layers on cleanly.
   `Metal_Ingot`); the anvil's Tool gate uses `Ids: ["Tool_Hammer_Crude","Tool_Hammer_Iron"]` (no
   `Tags.Family:["Hammer"]` exists on the real vanilla hammer items); the shipped `PerStat` cap key
   is `MMO_CritChance` (the MMO's real `reward.MmoStats` constant, not the doc's `MMO_Crit_Chance`);
-  the ritual's Wait steps use `DurationMs` (`Beats` stays schema-reserved/unimplemented - the doc's
-  own example would have hard-failed the ritual at its first step); the placeholder empty `Roll`
+  the ritual's Wait steps used `DurationMs` as originally shipped (`Beats` stayed schema-reserved/
+  unimplemented - the doc's own example would have hard-failed the ritual at its first step);
+  **scope-2 (wave 2) retired the `Wait` type entirely - the anvil's strikes/settle now author
+  plain `Duration{Ms}` beats on the orthogonal-phase `StationStep`, see `station/CLAUDE.md`'s
+  step-engine section**; the placeholder empty `Roll`
   step in the doc's example was dropped (the Stamp step's OWN roll engine already covers stat
   rolling, a second roll layer added nothing); `EnhanceStamper` is a lean 2-method
   `inspect`/`apply` contract, not the doc's literal `StampContext`/`StampResult` shape (the api is

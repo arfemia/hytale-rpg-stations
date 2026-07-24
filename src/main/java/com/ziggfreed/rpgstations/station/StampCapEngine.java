@@ -16,6 +16,7 @@ import com.ziggfreed.rpgstations.api.StatRoll;
 import com.ziggfreed.rpgstations.asset.RollPool;
 import com.ziggfreed.rpgstations.asset.StatRollEntry;
 import com.ziggfreed.rpgstations.asset.StationStep;
+import com.ziggfreed.rpgstations.loot.FactorMath;
 import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -29,9 +30,10 @@ import com.ziggfreed.rpgstations.util.Log;
  * false.
  *
  * <p><b>M2 cap-composition rule (binding, the ONE place this is implemented):</b> the effective
- * total-point budget is the MIN of every authored total-budget cap ({@code PerItemBudget} and/or
- * {@code SkillScaledBudget}'s computed value) - never their max, never their sum. {@code PerStat}
- * is a separate, additional per-stat-id ceiling layered on top. A roll that clamps to nothing
+ * total-point budget is the MIN of every authored {@code Caps.Budgets[]} entry (each a flat
+ * {@code Points} or a factor-scaled {@code PointsPer * sum(Factors)}) - never their max, never
+ * their sum. {@code PerStat} is a separate, additional per-stat-id ceiling layered on top. A roll
+ * that clamps to nothing
  * (every candidate entry clamped to zero points, or nothing was ever rolled) is a FULLY-CAPPED
  * deny ({@link Plan#denied()} true) - the caller consumes zero reagents and mutates nothing.
  */
@@ -107,6 +109,10 @@ final class StampCapEngine {
             double min = pts != null ? pts.effectiveMin() : 1.0;
             double max = pts != null ? pts.effectiveMax() : min;
             double value = max > min ? min + rng.next() * (max - min) : min;
+            // Scope-2 (decision 20): weighted FactorRef magnitude scaling summed onto the roll.
+            if (pts != null) {
+                value += FactorMath.sum(pts.getAddFactors(), factorLookup::resolve);
+            }
             int points = (int) Math.round(value);
             if (points > 0) {
                 rolled.add(new StatRoll(e.getStat(), points));
@@ -149,21 +155,41 @@ final class StampCapEngine {
     }
 
     /**
-     * M2's binding rule: MIN of every authored total-budget cap. {@code null} = no total-budget
-     * cap authored at all (unlimited, PerStat may still bind).
+     * M2's binding rule, re-shaped onto the scope-2 {@code Budgets[]} vocabulary (design 3.8): the
+     * effective total-point budget is the MIN of every authored {@link StationStep.Stamp.Stats.Caps
+     * .Budget} entry (never their max, never their sum), each entry being EITHER a flat
+     * {@code {Points}} or a factor-scaled {@code {PointsPer, Factors[]}}
+     * ({@code PointsPer * sum(resolve(f) * f.Weight)}). {@code null} = no total-budget cap authored
+     * at all (unlimited; {@code PerStat} may still bind). A malformed budget entry (neither or both
+     * routes authored) is skipped - the validator flags it separately.
      */
     @Nullable
     static Double effectiveBudget(@Nullable StationStep.Stamp.Stats.Caps caps, @Nonnull FactorLookup factorLookup) {
         if (caps == null) {
             return null;
         }
-        Double min = caps.getPerItemBudget();
-        StationStep.Stamp.Stats.SkillScaledBudget scaled = caps.getSkillScaledBudget();
-        if (scaled != null && scaled.getPointsPerLevel() != null
-                && scaled.getFactor() != null && !scaled.getFactor().isBlank()) {
-            Double factorValue = factorLookup.resolve(scaled.getFactor(), scaled.getParam());
-            double scaledBudget = scaled.getPointsPerLevel() * (factorValue != null ? factorValue : 0.0);
-            min = min == null ? scaledBudget : Math.min(min, scaledBudget);
+        StationStep.Stamp.Stats.Budget[] budgets = caps.getBudgets();
+        if (budgets == null || budgets.length == 0) {
+            return null;
+        }
+        Double min = null;
+        for (StationStep.Stamp.Stats.Budget b : budgets) {
+            if (b == null) {
+                continue;
+            }
+            Double val;
+            if (b.isFlat()) {
+                val = b.getPoints();
+            } else if (b.isFactorScaled()) {
+                double contribution = FactorMath.sum(b.getFactors(), factorLookup::resolve);
+                val = b.getPointsPer() * contribution;
+            } else {
+                continue; // malformed (neither/both routes) - validator flags; skip
+            }
+            if (val == null) {
+                continue;
+            }
+            min = min == null ? val : Math.min(min, val);
         }
         return min;
     }

@@ -9,209 +9,158 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.FactorRef;
+import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**
- * The pure decision cores behind the {@code station.step} conditions gate, the Goto branch
- * mechanism, and a {@code Wait} step's suspend/resume math (design section 9.3) - the "sessions
- * suspend/resume across ticks" claim, verified WITHOUT a live server via a two-tick simulation.
+ * The pure decision cores behind the {@code station.step} conditions gate, the Goto branch, the
+ * per-step {@code Repeat} count, and a {@code Duration} hold's suspend/resume math (scope-2 design
+ * 2.1) - verified WITHOUT a live server, incl. a two-tick suspend/resume simulation.
  */
 public class StationStepDecisionsTest {
 
-    // ==================== Wait suspend/resume (the kernel's binding resume contract) ====================
+    private static final java.util.function.BiFunction<String, String, Double> ALWAYS_TEN_BI = (f, p) -> 10.0;
+
+    // ==================== Duration suspend/resume (reuses the retired Wait math verbatim) ====================
 
     @Test
-    void wait_firstEntry_commitsAFreshDeadlineAndIsNotYetDue() {
-        long now = 1_000L;
-        long durationMs = 500L;
-        long deadline = StationStepDecisions.commitOrReadDeadline(now, durationMs, 0L);
+    void duration_firstEntry_commitsAFreshDeadlineAndIsNotYetDue() {
+        long deadline = StationStepDecisions.commitOrReadDeadline(1_000L, 500L, 0L);
         assertEquals(1_500L, deadline);
-        assertFalse(StationStepDecisions.waitDue(now, deadline), "not due at the moment it commits");
+        assertFalse(StationStepDecisions.durationDue(1_000L, deadline), "not due at the moment it commits");
     }
 
     @Test
-    void wait_reEntry_readsTheCommittedDeadlineVerbatim_neverReDerives() {
-        long committedDeadline = 1_500L;
-        // A re-entry passes a DIFFERENT durationMs (simulating a naive re-derive bug) - the
-        // stored deadline must win regardless, per the kernel's binding resume contract.
-        long deadline = StationStepDecisions.commitOrReadDeadline(2_000L, 999_999L, committedDeadline);
-        assertEquals(committedDeadline, deadline, "a re-entry NEVER re-derives a fresh window");
+    void duration_reEntry_readsTheCommittedDeadlineVerbatim_neverReDerives() {
+        long deadline = StationStepDecisions.commitOrReadDeadline(2_000L, 999_999L, 1_500L);
+        assertEquals(1_500L, deadline, "a re-entry NEVER re-derives a fresh window");
     }
 
     @Test
-    void wait_twoTickSimulation_suspendsThenResumesThenCompletes() {
+    void duration_twoTickSimulation_suspendsThenResumesThenCompletes() {
         long durationMs = 500L;
-        long storedDeadline = 0L; // "not yet committed" sentinel, matching StationSession.stepDeadlineMs
+        long stored = 0L; // "not yet committed" sentinel, matching StationSession.stepDeadlineMs
 
-        // Tick 1 (t=1000): first entry - commits the deadline, not yet due.
-        long tick1Now = 1_000L;
-        storedDeadline = StationStepDecisions.commitOrReadDeadline(tick1Now, durationMs, storedDeadline);
-        assertFalse(StationStepDecisions.waitDue(tick1Now, storedDeadline));
+        long t1 = 1_000L;
+        stored = StationStepDecisions.commitOrReadDeadline(t1, durationMs, stored);
+        assertFalse(StationStepDecisions.durationDue(t1, stored));
 
-        // Tick 2 (t=1200): re-entry BEFORE the deadline - still suspended, deadline unchanged.
-        long tick2Now = 1_200L;
-        long deadlineAtTick2 = StationStepDecisions.commitOrReadDeadline(tick2Now, durationMs, storedDeadline);
-        assertEquals(storedDeadline, deadlineAtTick2, "the deadline never moves across re-entries");
-        assertFalse(StationStepDecisions.waitDue(tick2Now, deadlineAtTick2));
+        long t2 = 1_200L;
+        long atT2 = StationStepDecisions.commitOrReadDeadline(t2, durationMs, stored);
+        assertEquals(stored, atT2, "the deadline never moves across re-entries");
+        assertFalse(StationStepDecisions.durationDue(t2, atT2));
 
-        // Tick 3 (t=1600): re-entry AFTER the deadline - due, the step completes.
-        long tick3Now = 1_600L;
-        assertTrue(StationStepDecisions.waitDue(tick3Now, storedDeadline));
+        long t3 = 1_600L;
+        assertTrue(StationStepDecisions.durationDue(t3, stored));
     }
 
-    // ==================== Generic per-step Presentation entry (maintainer-approved extension) ====================
+    // ==================== Repeat resolution ====================
 
     @Test
-    void presentationEntry_freshDispatch_playsForAnyNonPresentStep() {
-        StationStep wait = StationStep.of("strike1", StationStep.TYPE_WAIT);
-        assertTrue(StationStepDecisions.shouldEmitPresentationOnEntry(wait, null),
-                "a fresh (non-resuming) dispatch has no resumingStep - every step plays its own Presentation");
+    void repeat_null_isOneIteration() {
+        assertEquals(1, StationStepDecisions.resolveRepeatCount(null, 0.0));
+        assertEquals(0.0, StationStepDecisions.repeatFactorContribution(null, ALWAYS_TEN_BI));
     }
 
     @Test
-    void presentationEntry_presentTypedStep_neverPlaysGenerically_evenFresh() {
-        StationStep present = StationStep.of("finale", StationStep.TYPE_PRESENT);
-        assertFalse(StationStepDecisions.shouldEmitPresentationOnEntry(present, null),
-                "a Present-typed step's OWN handler already emits - the generic hook must not double-play it");
+    void repeat_fixedTimes_wins_andContributesNoFactor() {
+        StationStep.Repeat r = StationStep.Repeat.times(3);
+        assertEquals(3, StationStepDecisions.resolveRepeatCount(r, 99.0), "a fixed Times ignores any factor contribution");
+        assertEquals(0.0, StationStepDecisions.repeatFactorContribution(r, ALWAYS_TEN_BI),
+                "a fixed Times never sums its (absent) AddFactors");
+    }
+
+    @Test
+    void repeat_rangedWithFactors_clampsRoundMinPlusContribution() {
+        // Min 1, Max 4, one factor weight 0.2 over a value of 10 -> contribution 2.0 -> round(1+2)=3.
+        StationStep.Repeat r = StationStep.Repeat.of(null, 1, 4,
+                new FactorRef[]{FactorRef.of("stat", "MMO_X", 0.2)});
+        double contribution = StationStepDecisions.repeatFactorContribution(r, ALWAYS_TEN_BI);
+        assertEquals(2.0, contribution, 1e-9);
+        assertEquals(3, StationStepDecisions.resolveRepeatCount(r, contribution));
+    }
+
+    @Test
+    void repeat_rangedClampsToMax() {
+        StationStep.Repeat r = StationStep.Repeat.of(null, 1, 2,
+                new FactorRef[]{FactorRef.of("stat", "MMO_X", 1.0)});
+        double contribution = StationStepDecisions.repeatFactorContribution(r, ALWAYS_TEN_BI); // 10.0
+        assertEquals(2, StationStepDecisions.resolveRepeatCount(r, contribution), "clamped to Max");
+    }
+
+    // ==================== Per-iteration-entry presentation ====================
+
+    @Test
+    void presentationEntry_freshEntry_playsWhenStepAuthorsAPresentation() {
+        StationStep step = StationStep.of("beat").withPresentation(Presentation.ofSound("SFX"));
+        assertTrue(StationStepDecisions.shouldEmitPresentationOnEntry(step, null));
+    }
+
+    @Test
+    void presentationEntry_noPresentation_neverPlays() {
+        assertFalse(StationStepDecisions.shouldEmitPresentationOnEntry(StationStep.of("beat"), null));
     }
 
     @Test
     void presentationEntry_resumeReCheckOfTheSuspendedStep_doesNotReplay() {
-        StationStep wait = StationStep.of("strike1", StationStep.TYPE_WAIT);
-        // The exact SAME object identity as the step a resume re-enters (StationSession
-        // .activeProgramSteps is the same List reference across a suspend/resume pair).
-        assertFalse(StationStepDecisions.shouldEmitPresentationOnEntry(wait, wait),
-                "the resume re-check of an already-started Wait must not replay its Presentation");
+        StationStep step = StationStep.of("beat").withPresentation(Presentation.ofSound("SFX"));
+        assertFalse(StationStepDecisions.shouldEmitPresentationOnEntry(step, step),
+                "the resume re-check of an already-started step must not replay its Presentation");
+    }
+
+    // ==================== Step-synced puppet clip ====================
+
+    private static StationStep withClip(String id, String clip) {
+        return StationStep.of(id).withPuppet(StationStep.PuppetOverride.of(clip, null));
     }
 
     @Test
-    void presentationEntry_resumeDispatch_stillPlaysForALaterFreshStep() {
-        StationStep resumedWait = StationStep.of("strike1", StationStep.TYPE_WAIT);
-        StationStep laterWait = StationStep.of("strike2", StationStep.TYPE_WAIT);
-        // Within the SAME resumed walk, once the resumed step succeeds and the walk advances to a
-        // DIFFERENT step object, that later step is a genuine fresh entry and must still play.
-        assertTrue(StationStepDecisions.shouldEmitPresentationOnEntry(laterWait, resumedWait),
-                "a later step reached within a resumed walk is still its OWN fresh entry");
-    }
-
-    // ==================== Step-synced puppet swings (maintainer-approved, round-8) ====================
-
-    private static StationStep waitWithClip(String id, String clip) {
-        return StationStep.of(id, StationStep.TYPE_WAIT)
-                .withPuppet(StationStep.PuppetOverride.of(clip, null));
+    void clipEntry_freshEntry_stepAuthorsClip_plays() {
+        assertTrue(StationStepDecisions.shouldPlayClipOnEntry(withClip("strike1", "MMO_Emote_Hammer"), null));
     }
 
     @Test
-    void clipEntry_freshDispatch_stepAuthorsClip_plays() {
-        StationStep strike = waitWithClip("strike1", "MMO_Emote_Hammer");
-        assertTrue(StationStepDecisions.shouldPlayClipOnEntry(strike, null),
-                "a fresh (non-resuming) dispatch plays a step's own authored Puppet.Clip at its iteration entry");
-    }
-
-    @Test
-    void clipEntry_stepAuthorsNoPuppet_neverPlays() {
-        StationStep settle = StationStep.of("settle", StationStep.TYPE_WAIT);
-        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(settle, null),
-                "a step with no Puppet override authors no clip - nothing to play (it idles)");
-    }
-
-    @Test
-    void clipEntry_stepAuthorsBlankClip_neverPlays() {
-        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(waitWithClip("s", "   "), null),
-                "a blank Clip is 'inherit the default', owned by the generic swing - not a per-step-entry play");
-        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(waitWithClip("s", null), null),
-                "an absent Clip (Prop-only override) never plays a clip at entry");
+    void clipEntry_noClip_neverPlays() {
+        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(StationStep.of("settle"), null));
+        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(withClip("s", "   "), null));
+        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(withClip("s", null), null));
     }
 
     @Test
     void clipEntry_resumeReCheckOfTheSuspendedStep_doesNotReplay() {
-        StationStep strike = waitWithClip("strike1", "MMO_Emote_Hammer");
-        // The exact SAME object identity as the step a resume re-enters must not replay its clip
-        // on every heartbeat re-check while suspended - only ONCE when it BEGINS.
-        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(strike, strike),
-                "the resume re-check of an already-started Wait must not replay its Puppet.Clip");
+        StationStep strike = withClip("strike1", "MMO_Emote_Hammer");
+        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(strike, strike));
     }
 
     @Test
-    void clipEntry_resumeDispatch_stillPlaysForALaterFreshStep() {
-        StationStep resumedStrike = waitWithClip("strike1", "MMO_Emote_Hammer");
-        StationStep laterStrike = waitWithClip("strike2", "MMO_Emote_Hammer");
-        assertTrue(StationStepDecisions.shouldPlayClipOnEntry(laterStrike, resumedStrike),
-                "a later clip-authoring step reached within a resumed walk is still its OWN fresh iteration entry");
-    }
-
-    @Test
-    void programAuthorsAnyStepClip_nullOrEmpty_false() {
+    void programAuthorsAnyStepClip_variants() {
         assertFalse(StationStepDecisions.programAuthorsAnyStepClip(null));
         assertFalse(StationStepDecisions.programAuthorsAnyStepClip(List.of()));
+        assertFalse(StationStepDecisions.programAuthorsAnyStepClip(List.of(StationStep.of("settle"))));
+        assertTrue(StationStepDecisions.programAuthorsAnyStepClip(
+                List.of(withClip("strike1", "MMO_Emote_Hammer"), StationStep.of("settle"))));
+    }
+
+    // ==================== Step-synced puppet PROP swap ====================
+
+    @Test
+    void propSync_everyFreshEntrySyncs_evenWithoutAnOverride() {
+        StationStep stamp = StationStep.of("stamp")
+                .withPuppet(StationStep.PuppetOverride.of(null, Puppet.Prop.of(Puppet.PROP_SOURCE_NONE, null, null)));
+        assertTrue(StationStepDecisions.shouldSyncPropOnEntry(stamp, null));
+        assertTrue(StationStepDecisions.shouldSyncPropOnEntry(StationStep.of("settle"), null),
+                "even a step with no prop override syncs on fresh entry (reverts to the session default)");
     }
 
     @Test
-    void programAuthorsAnyStepClip_noStepAuthorsAClip_false() {
-        List<StationStep> steps = List.of(
-                StationStep.of("settle", StationStep.TYPE_WAIT),
-                StationStep.of("stamp", StationStep.TYPE_STAMP)
-                        .withPuppet(StationStep.PuppetOverride.of(null, null)));
-        assertFalse(StationStepDecisions.programAuthorsAnyStepClip(steps),
-                "a program whose every step inherits the default clip keeps its one generic engage swing");
+    void propSync_resumeReCheckDoesNotReSync() {
+        StationStep stamp = StationStep.of("stamp");
+        assertFalse(StationStepDecisions.shouldSyncPropOnEntry(stamp, stamp));
     }
 
-    @Test
-    void programAuthorsAnyStepClip_anyStepAuthorsAClip_true() {
-        List<StationStep> steps = List.of(
-                waitWithClip("strike1", "MMO_Emote_Hammer"),
-                StationStep.of("settle", StationStep.TYPE_WAIT));
-        assertTrue(StationStepDecisions.programAuthorsAnyStepClip(steps),
-                "one clip-authoring step is enough to suppress the generic swing for the whole program");
-    }
-
-    // ==================== Step-synced puppet PROP swap (round-8 continuation) ====================
-
-    private static StationStep waitWithProp(String id, String propSource) {
-        return StationStep.of(id, StationStep.TYPE_WAIT)
-                .withPuppet(StationStep.PuppetOverride.of(null, Puppet.Prop.of(propSource, null, null)));
-    }
-
-    @Test
-    void propSync_freshDispatch_propOverridingStep_syncs() {
-        StationStep stamp = waitWithProp("stamp", Puppet.PROP_SOURCE_NONE);
-        assertTrue(StationStepDecisions.shouldSyncPropOnEntry(stamp, null),
-                "a fresh (non-resuming) dispatch syncs a step's own Puppet.Prop override at its iteration entry");
-    }
-
-    @Test
-    void propSync_freshDispatch_stepAuthorsNoPropOverride_stillSyncsToRevertToDefault() {
-        // The load-bearing difference from the clip gate: even a step authoring NO prop override
-        // syncs on fresh entry - that is how the prop reverts to the session default when the program
-        // moves PAST a prop-overriding step (the exit edge), made consistent with the swing-beat sync.
-        StationStep plain = StationStep.of("settle", StationStep.TYPE_WAIT);
-        assertTrue(StationStepDecisions.shouldSyncPropOnEntry(plain, null),
-                "a step authoring no Puppet.Prop still syncs on fresh entry (reverts the prop to the session default)");
-        StationStep clipOnly = waitWithClip("strike1", "MMO_Emote_Hammer");
-        assertTrue(StationStepDecisions.shouldSyncPropOnEntry(clipOnly, null),
-                "a clip-only step (Prop absent) still syncs on fresh entry - the exit edge is not gated on authoring a prop");
-    }
-
-    @Test
-    void propSync_resumeReCheckOfTheSuspendedStep_doesNotReSync() {
-        StationStep stamp = waitWithProp("stamp", Puppet.PROP_SOURCE_NONE);
-        // The exact SAME object identity as the step a resume re-enters must not re-sync its prop on
-        // every heartbeat re-check while suspended - the swing-beat suspension-gated sync already
-        // HOLDS the suspended step's prop, so re-syncing here would be redundant.
-        assertFalse(StationStepDecisions.shouldSyncPropOnEntry(stamp, stamp),
-                "the resume re-check of an already-started step must not re-sync its Puppet.Prop");
-    }
-
-    @Test
-    void propSync_resumeDispatch_stillSyncsForALaterFreshStep() {
-        StationStep resumedStrike = waitWithClip("strike1", "MMO_Emote_Hammer");
-        StationStep laterStamp = waitWithProp("stamp", Puppet.PROP_SOURCE_NONE);
-        assertTrue(StationStepDecisions.shouldSyncPropOnEntry(laterStamp, resumedStrike),
-                "a later step reached within a resumed walk is its OWN fresh entry - it syncs its prop (the empty-hands swap)");
-    }
-
-    // ==================== Conditions gate (design 9.3's "Branch is NOT a step type") ====================
+    // ==================== Conditions gate ====================
 
     private static final StationService.FactorLookup ALWAYS_TEN = (factorId, param) -> 10.0;
     private static final StationService.FactorLookup UNKNOWN = (factorId, param) -> null;
@@ -257,22 +206,14 @@ public class StationStepDecisionsTest {
 
     @Test
     void gotoTarget_findsMatchingStepIdCaseInsensitively() {
-        List<StationStep> steps = List.of(
-                StationStep.of("a", StationStep.TYPE_WAIT),
-                StationStep.of("b", StationStep.TYPE_ROLL),
-                StationStep.of("c", StationStep.TYPE_PRESENT));
+        List<StationStep> steps = List.of(StationStep.of("a"), StationStep.of("b"), StationStep.of("c"));
         assertEquals(2, StationStepDecisions.resolveGotoTarget(steps, "C"));
     }
 
     @Test
-    void gotoTarget_unknownId_returnsNegativeOne() {
-        List<StationStep> steps = List.of(StationStep.of("a", StationStep.TYPE_WAIT));
+    void gotoTarget_unknownOrBlankId_returnsNegativeOne() {
+        List<StationStep> steps = List.of(StationStep.of("a"));
         assertEquals(-1, StationStepDecisions.resolveGotoTarget(steps, "nope"));
-    }
-
-    @Test
-    void gotoTarget_blankOrNullId_returnsNegativeOne() {
-        List<StationStep> steps = List.of(StationStep.of("a", StationStep.TYPE_WAIT));
         assertEquals(-1, StationStepDecisions.resolveGotoTarget(steps, null));
         assertEquals(-1, StationStepDecisions.resolveGotoTarget(steps, "  "));
     }

@@ -16,9 +16,9 @@ import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 /**
  * A named, reusable conditional-lootable table: {@code Server/RpgStations/Lootables/<Name>.json}
  * (Pattern A, id = lowercased filename), body {@code { "Rolls": [ <Roll>, ... ] } } - design
- * section 4.5.1. Referenced by a {@link StationAsset.Loot#getTables()} entry (a station may
- * combine any number of shared tables with its own inline {@code Loot.Rolls}); a table with no
- * consumer is simply dormant content.
+ * section 4.5.1. Referenced by a {@link LootRef#getLootables()} entry (a station, action, or
+ * extension may combine any number of shared tables with its own inline {@code Rolls}); a table
+ * with no consumer is simply dormant content.
  */
 public final class LootableAsset
         implements JsonAssetWithMap<String, DefaultAssetMap<String, LootableAsset>> {
@@ -45,7 +45,7 @@ public final class LootableAsset
             .add()
             .appendInherited(new KeyedCodec<>("Rolls", new ArrayCodec<>(Roll.CODEC, Roll[]::new), false),
                     (a, v) -> a.rolls = v, a -> a.rolls, (a, parent) -> a.rolls = parent.rolls)
-            .add()
+            .documentation("The conditional-lootable rolls this reusable table contributes.").add()
             .build();
 
     public LootableAsset() {

@@ -3,37 +3,60 @@ package com.ziggfreed.rpgstations.station;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**
- * PURE, unit-testable resolution of a station's effective per-action groups (design section 9.1):
- * the WHOLE-GROUP override rule ("an action authoring a group replaces the station-level group
- * wholesale; omitting inherits it") - the ONE choke point every group read goes through, so no
- * call site re-derives the fallback-to-station-default logic by hand. Zero engine/store touch;
- * takes only {@link StationAsset}/{@link ActionDef} value objects.
+ * The resolution of a station's effective per-action groups (design 9.1 + scope-2 1.5): the
+ * WHOLE-GROUP override rule ("an action authoring a group replaces the station-level group
+ * wholesale; omitting inherits it"), NOW composed with the scope-2 {@code Ref} attachment route.
+ * The ONE choke point every group read goes through, so no call site re-derives the fallback logic.
  *
- * <p>The phase-1 single-action default (no {@code Actions} map authored) is modeled as ONE
- * implicit action id, {@link #ACTION_WORK}, whose {@link ResolvedAction} is simply the station's
- * own top-level groups verbatim - {@link #resolve} never special-cases it beyond that (a station
- * with no {@code Actions} map behaves exactly as if it authored one entry, {@code "work"}, with
- * every group omitted - the design's own byte-stable-regression framing).
+ * <p><b>{@code Ref} resolution (scope-2 1.5):</b> when an inline {@code Actions} entry authors a
+ * {@code Ref}, the named standalone {@link ActionAsset}'s body is the BASE, and any OTHER group
+ * authored on the inline entry overlays it group-wise (the SAME whole-group-replace semantics
+ * applied twice: {@code Ref}-base -&gt; inline overlay -&gt; station default). A dangling {@code Ref}
+ * resolves as if no ref existed (every group falls back to the inline entry, then the station
+ * default); the validator reports {@code ACTION_REF_UNKNOWN} and {@code toggle()} denies gracefully.
+ *
+ * <p>The pure core {@link #resolve(StationAsset, String, Function)} takes an injected
+ * {@code refLookup} (an {@code ActionAsset} id -&gt; its {@link ActionDef} body, or {@code null}),
+ * so Ref+overlay resolution is unit-testable without a live {@link ActionCatalog}. The 2-arg
+ * {@link #resolve(StationAsset, String)} convenience wires the live catalog; likewise the diegetic
+ * selection helpers consult the catalog only to resolve a {@code Ref}'d action's effective
+ * {@link ActionInput} (an empty catalog degrades a Ref'd action to a catch-all, never a throw).
  */
 public final class ActionResolver {
 
-    /** The one action id phase 1 ever forwarded; still the implicit default id in phase 2. */
+    /** The one action id phase 1 ever forwarded; still the implicit default id in phase 2/scope-2. */
     public static final String ACTION_WORK = "work";
 
+    /** The live Ref lookup: an {@link ActionAsset} id -> its {@link ActionDef} body, or null when unknown. */
+    private static final Function<String, ActionDef> CATALOG_REF_LOOKUP = ActionResolver::catalogBody;
+
     private ActionResolver() {
+    }
+
+    @Nullable
+    private static ActionDef catalogBody(@Nullable String refId) {
+        if (refId == null || refId.isBlank()) {
+            return null;
+        }
+        ActionAsset a = ActionCatalog.getInstance().get(refId);
+        return a != null ? a.getBody() : null;
     }
 
     /**
@@ -49,40 +72,84 @@ public final class ActionResolver {
         return new ArrayList<>(actions.keySet());
     }
 
-    /**
-     * The whole-group-override-resolved view of {@code actionId} on {@code asset}. An unknown
-     * {@code actionId} against an asset that DOES author an {@code Actions} map resolves as if no
-     * override existed for it (every group falls back to the station-level default) - callers
-     * that need "does this action exist" should check {@link #actionIds} first.
-     */
+    /** The whole-group-override-resolved view of {@code actionId} on {@code asset}, using the live {@link ActionCatalog} for {@code Ref}. */
     @Nonnull
     public static ResolvedAction resolve(@Nonnull StationAsset asset, @Nonnull String actionId) {
-        Map<String, ActionDef> actions = asset.getActions();
-        ActionDef def = actions != null ? actions.get(actionId) : null;
-        return new ResolvedAction(
-                actionId,
-                def != null && def.getInput() != null ? def.getInput() : null,
-                def != null && def.getCustody() != null ? def.getCustody() : asset.getCustody(),
-                def != null && def.getPuppet() != null ? def.getPuppet() : asset.getPuppet(),
-                def != null && def.getWork() != null ? def.getWork() : asset.getWork(),
-                def != null && def.getRecipe() != null ? def.getRecipe() : asset.getRecipe(),
-                def != null && def.getTool() != null ? def.getTool() : asset.getTool(),
-                def != null && def.getHold() != null ? def.getHold() : asset.getHold(),
-                def != null && def.getCamera() != null ? def.getCamera() : asset.getCamera(),
-                def != null && def.getAnimation() != null ? def.getAnimation() : asset.getAnimation(),
-                def != null && def.getPresentation() != null ? def.getPresentation() : asset.getPresentation(),
-                def != null && def.getCompletion() != null ? def.getCompletion() : asset.getCompletion(),
-                def != null && def.getLoot() != null ? def.getLoot() : asset.getLoot(),
-                def != null && def.getRequires() != null ? def.getRequires() : asset.getRequires(),
-                def != null ? def.getSteps() : null);
+        return resolve(asset, actionId, CATALOG_REF_LOOKUP);
     }
 
     /**
-     * Diegetic action selection (design 9.1): the FIRST action (authored order) whose
-     * {@link ActionInput} matches {@code heldItemId}/{@code heldResourceTypeId}/{@code heldTags}/
-     * {@code heldFunction}, or a catch-all ({@link ActionInput#isCatchAll()}) entry. Returns
-     * {@code null} when nothing matches (including no catch-all). A station with no {@code
-     * Actions} map always resolves to {@link #ACTION_WORK} (no matcher to fail).
+     * The PURE resolution core (design 9.1 + scope-2 1.5): {@code refLookup} maps a {@code Ref}
+     * {@link ActionAsset} id to its {@link ActionDef} body (or {@code null}). Precedence per group:
+     * inline entry override -&gt; {@code Ref} base override -&gt; station-level default (input/steps/
+     * anchors have no station default). An unknown {@code actionId} against an asset that DOES
+     * author an {@code Actions} map resolves as if no override existed for it.
+     */
+    @Nonnull
+    public static ResolvedAction resolve(@Nonnull StationAsset asset, @Nonnull String actionId,
+            @Nonnull Function<String, ActionDef> refLookup) {
+        Map<String, ActionDef> actions = asset.getActions();
+        ActionDef def = actions != null ? actions.get(actionId) : null;
+        ActionDef base = def != null && def.hasRef() ? refLookup.apply(def.getRef()) : null;
+        return new ResolvedAction(
+                actionId,
+                pick(def, base, ActionDef::getInput, null),
+                pick(def, base, ActionDef::getCustody, asset.getCustody()),
+                pick(def, base, ActionDef::getPuppet, asset.getPuppet()),
+                pick(def, base, ActionDef::getWork, asset.getWork()),
+                pick(def, base, ActionDef::getRecipe, asset.getRecipe()),
+                pick(def, base, ActionDef::getTool, asset.getTool()),
+                pick(def, base, ActionDef::getHold, asset.getHold()),
+                pick(def, base, ActionDef::getCamera, asset.getCamera()),
+                pick(def, base, ActionDef::getAnimation, asset.getAnimation()),
+                pick(def, base, ActionDef::getPresentation, asset.getPresentation()),
+                pick(def, base, ActionDef::getCompletion, asset.getCompletion()),
+                pick(def, base, ActionDef::getLoot, asset.getLoot()),
+                pick(def, base, ActionDef::getRequires, asset.getRequires()),
+                pick(def, base, ActionDef::getSteps, null));
+    }
+
+    /**
+     * Group pick: the inline entry's own override first, then the {@code Ref} base's override, then
+     * the station default. A blank {@link ActionDef} (the {@code Ref}-only case) contributes no
+     * override, so the base wins - exactly the "author only the delta" intent.
+     */
+    @Nullable
+    private static <T> T pick(@Nullable ActionDef def, @Nullable ActionDef base,
+            @Nonnull Function<ActionDef, T> getter, @Nullable T stationDefault) {
+        if (def != null) {
+            T v = getter.apply(def);
+            if (v != null) {
+                return v;
+            }
+        }
+        if (base != null) {
+            T v = getter.apply(base);
+            if (v != null) {
+                return v;
+            }
+        }
+        return stationDefault;
+    }
+
+    /** The effective {@link ActionInput} for a {@code def} (its own, else its {@code Ref} base's), consulting the live catalog. */
+    @Nullable
+    private static ActionInput effectiveInputOf(@Nonnull ActionDef def) {
+        if (def.getInput() != null) {
+            return def.getInput();
+        }
+        if (def.hasRef()) {
+            ActionDef base = catalogBody(def.getRef());
+            return base != null ? base.getInput() : null;
+        }
+        return null;
+    }
+
+    /**
+     * Diegetic action selection (design 9.1): the FIRST action (authored order) whose effective
+     * {@link ActionInput} (its own, or its {@code Ref} base's - see {@link #effectiveInputOf})
+     * matches, or a catch-all. Returns {@code null} when nothing matches. A station with no {@code
+     * Actions} map always resolves to {@link #ACTION_WORK}.
      */
     @Nullable
     public static String selectAction(@Nonnull StationAsset asset, @Nullable String heldItemId,
@@ -94,8 +161,9 @@ public final class ActionResolver {
         }
         for (Map.Entry<String, ActionDef> e : actions.entrySet()) {
             ActionDef def = e.getValue();
-            ActionInput input = def != null ? def.getInput() : null;
-            if (input == null || input.isCatchAll() || matches(input, heldItemId, heldResourceTypeId, heldTags, heldFunction)) {
+            ActionInput input = def != null ? effectiveInputOf(def) : null;
+            if (input == null || input.isCatchAll()
+                    || matches(input, heldItemId, heldResourceTypeId, heldTags, heldFunction)) {
                 return e.getKey();
             }
         }
@@ -103,13 +171,9 @@ public final class ActionResolver {
     }
 
     /**
-     * The live-item-aware sibling of {@link #selectAction} (phase 2 leg E, a DIFFERENT name -
-     * never an overload - since a {@code null} 3rd argument would otherwise be ambiguous between
-     * the {@code String}/{@code String[]} forms): matches against the held item's FULL
-     * {@code ResourceTypeId} FAMILY set (an item can belong to more than one family) instead of a
-     * single id - the anvil's "convert" action matches ANY vanilla {@code Ingredient_Bar_<Metal>}
-     * by its {@code Metal_Bars} family membership, the exact same family-array matching
-     * {@code station.StationCustody} already uses for placed-input custody.
+     * The live-item-aware sibling of {@link #selectAction} (phase 2 leg E): matches against the held
+     * item's FULL {@code ResourceTypeId} FAMILY set instead of a single id. Uses the effective
+     * {@link ActionInput} (its own, or its {@code Ref} base's).
      */
     @Nullable
     public static String selectActionByFamily(@Nonnull StationAsset asset, @Nullable String heldItemId,
@@ -121,7 +185,7 @@ public final class ActionResolver {
         }
         for (Map.Entry<String, ActionDef> e : actions.entrySet()) {
             ActionDef def = e.getValue();
-            ActionInput input = def != null ? def.getInput() : null;
+            ActionInput input = def != null ? effectiveInputOf(def) : null;
             if (input == null || input.isCatchAll()
                     || matchesAnyResourceType(input, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
                 return e.getKey();
@@ -131,15 +195,10 @@ public final class ActionResolver {
     }
 
     /**
-     * Restart-orphan recovery (R5 fix, design 9.4's self-heal extended): the FIRST action whose
-     * {@link Custody#getStates()}' {@code Loaded} name case-insensitively matches {@code
-     * currentStateName} - the block's own CURRENTLY PERSISTED interaction-state name, read
-     * separately from any live claim (which is memory-only and lost across a restart). Consulted
-     * ONLY as a third fallback ({@code StationService#toggle}, after both the live-claim selector
-     * and {@link #selectActionByFamily} return null) so it never disturbs the already-correct
-     * in-session fast path. Returns {@code null} when {@code currentStateName} is null/blank, or
-     * when no action authors a matching {@code Custody.States.Loaded} (including no {@code
-     * Custody} at all) - a genuinely idle/never-loaded block correctly finds nothing here.
+     * Restart-orphan recovery (R5 fix): the FIRST action whose resolved {@link Custody#getStates()}'
+     * {@code Loaded} name case-insensitively matches {@code currentStateName}. Resolves through
+     * {@link #resolve} so a {@code Ref}'d action's custody (on the base {@link ActionAsset}) is
+     * honored. Returns {@code null} when nothing matches.
      */
     @Nullable
     public static String selectActionForBlockState(@Nonnull StationAsset asset, @Nullable String currentStateName) {
@@ -208,8 +267,9 @@ public final class ActionResolver {
 
     /**
      * The resolved, whole-group-overridden view of one action. Every accessor is the group a
-     * {@code station.step} handler / the phase-1 direct-Java engine path should read - never the
-     * raw {@link StationAsset} or {@link ActionDef} group directly once an action id is chosen.
+     * {@code station.step} handler / the direct-Java engine path should read - never the raw
+     * {@link StationAsset}/{@link ActionDef}/{@link ActionAsset} group directly once an action id is
+     * chosen.
      */
     public static final class ResolvedAction {
         private final String actionId;
@@ -224,17 +284,17 @@ public final class ActionResolver {
         @Nullable private final StationAsset.Animation animation;
         @Nullable private final Presentation presentation;
         @Nullable private final Presentation completion;
-        @Nullable private final StationAsset.Loot loot;
+        @Nullable private final LootRef loot;
         @Nullable private final Requires requires;
-        @Nullable private final com.ziggfreed.rpgstations.asset.StationStep[] steps;
+        @Nullable private final StationStep[] steps;
 
         ResolvedAction(@Nonnull String actionId, @Nullable ActionInput input, @Nullable Custody custody,
                 @Nullable Puppet puppet, @Nullable StationAsset.Work work,
                 @Nullable StationAsset.Recipe recipe, @Nullable StationAsset.Tool tool,
                 @Nullable StationAsset.Hold hold, @Nullable StationAsset.Camera camera,
                 @Nullable StationAsset.Animation animation, @Nullable Presentation presentation,
-                @Nullable Presentation completion, @Nullable StationAsset.Loot loot, @Nullable Requires requires,
-                @Nullable com.ziggfreed.rpgstations.asset.StationStep[] steps) {
+                @Nullable Presentation completion, @Nullable LootRef loot, @Nullable Requires requires,
+                @Nullable StationStep[] steps) {
             this.actionId = actionId;
             this.input = input;
             this.custody = custody;
@@ -314,8 +374,9 @@ public final class ActionResolver {
             return completion;
         }
 
+        /** The per-action conditional-loot override (a {@link LootRef}, scope-2); null = the station default. */
         @Nullable
-        public StationAsset.Loot getLoot() {
+        public LootRef getLoot() {
             return loot;
         }
 
@@ -326,7 +387,7 @@ public final class ActionResolver {
 
         /** The authored step program, or {@code null} when this action wants the implicit program. */
         @Nullable
-        public com.ziggfreed.rpgstations.asset.StationStep[] getSteps() {
+        public StationStep[] getSteps() {
             return steps;
         }
     }

@@ -13,82 +13,100 @@ import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
 
 /**
- * ONE step of a multi-action station's step PROGRAM (design section 9.3), a Pattern A union
- * mirroring the MMO's {@code AbilityAsset.EffectStep}: a {@link #type} discriminator plus, per
- * type, ONE nested group carrying that step's own fields (orthogonal groups, never a flat
- * prefixed-key soup). Every base field ({@link #id}/{@link #type}/{@link #conditions}/
- * {@link #onConditionFail}/{@link #presentation}/{@link #puppet}) applies to EVERY step type;
- * {@link #id} is unique WITHIN one action's {@code Steps} array (the {@code station.step}
- * engine's resume/jump bookkeeping keys off it - {@code StationValidator} flags a duplicate).
- * {@link #puppet} (round-4 puppet-presentation design, {@link PuppetOverride}) is the ONE base
- * field NOT tied to {@link #type} the same way {@link #consume}/{@link #produce}/etc. are - it is
- * itself already a small, type-independent override group.
+ * ONE step of a multi-action station's step PROGRAM, reshaped for scope-2 (design section 2.1,
+ * gate Q1/Q2 ADOPTED) from the old {@code Type}-discriminated union into an ORTHOGONAL PHASE
+ * record. A step composes any combination of nullable PHASE groups executed in ONE fixed,
+ * documented order; a step with no phase group is a pure BEAT (presentation + clip + duration).
+ * This kills the old {@code Wait} type, the reserved {@code Mount} type, and {@code Wait.Beats}
+ * outright (no decoy fields the engine does not execute).
  *
- * <p><b>Branch is NOT a step type</b> (design 9.3): a step authors {@link OnConditionFail#getGoto()}
- * to jump, via the reshaped {@code cast.step} kernel's {@code StepSemantics#nextIndex} hook - no
- * dedicated branch node exists in this vocabulary.
+ * <p><b>Base fields</b> (apply to every step): {@link #id} (unique within one action's {@code
+ * Steps} array; required whenever another step or an {@code ExtensionAsset} insertion anchors on
+ * it), {@link #conditions} + {@link #onConditionFail} (the gate + its branch/skip result),
+ * {@link #at} (an anchor id from the action's {@code Anchors} map; absent = the primary station
+ * {@code "self"}), {@link #repeat} (per-step iteration count), {@link #duration} (post-phase hold),
+ * {@link #puppet} (per-step clip/prop), {@link #presentation} (a per-iteration-entry cue), and
+ * {@link #commands} (a phase - see below).
  *
- * <p><b>{@code "Stamp"} lands this leg</b> (design 9.5, phase-2 leg E): the anvil's enhance-commit
- * step - see {@link Stamp}'s own javadoc for the compute-then-commit contract (M5's binding fix).
- * <b>{@code "Mount"} stays reserved, unimplemented</b> (a mid-sequence pose swap): the {@link #type}
- * string decodes fine (no dedicated nested group exists for it), but
- * {@code station.step.StationStepRegistry} registers no handler for it, so a program authoring one
- * FAILS at dispatch with a clear log - {@code StationValidator}'s {@code UNIMPLEMENTED_STEP_TYPE}
- * finding catches the authoring mistake ahead of runtime, per the design's binding note.
+ * <p><b>Phase groups</b> (all nullable): {@link #walk}, {@link #consume}, {@link #stamp},
+ * {@link #produce}, {@link #roll} (a {@link LootRef}), {@link #commands} ({@code String[]}).
+ *
+ * <p><b>Execution order within ONE step iteration (fixed, honored by the engine - leg A3):</b>
+ * Conditions gate -&gt; {@link #walk} -&gt; {@link #consume} -&gt; {@link #stamp} -&gt;
+ * {@link #produce} -&gt; {@link #roll} -&gt; {@link #commands} -&gt; {@link #presentation}/
+ * {@link #puppet} clip (fire at iteration entry, listed here for the mental model) -&gt;
+ * {@link #duration} hold (suspend) -&gt; next iteration or next step.
+ *
+ * <p><b>WAVE BOUNDARY (this codec vs the wave-2 engine):</b> this codec carries the FULL field
+ * set - a step authoring {@link #walk}/{@link #at} or {@code Produce.To: "Custody"} DECODES fine.
+ * The wave-2 engine executes {@link #consume}/{@link #produce} (To Inventory)/{@link #roll}/
+ * {@link #commands}/{@link #stamp}/{@link #duration}/{@link #repeat} only; a step authoring
+ * {@link #walk}, {@link #at}, or {@code Produce.To: "Custody"} draws a {@code WAVE3_PENDING}-style
+ * validator WARN and engage denies gracefully (wave 3 makes them real). No shipped wave-2 content
+ * authors them.
  */
 public final class StationStep {
 
-    /** The seven step types this leg's engine actually EXECUTES (see the class javadoc for the one reserved id). */
-    public static final String TYPE_CONSUME = "Consume";
-    public static final String TYPE_PRODUCE = "Produce";
-    public static final String TYPE_WAIT = "Wait";
-    public static final String TYPE_ROLL = "Roll";
-    public static final String TYPE_COMMAND = "Command";
-    public static final String TYPE_PRESENT = "Present";
-    public static final String TYPE_STAMP = "Stamp";
-    /** Schema-reserved, unimplemented this leg (see the class javadoc). */
-    public static final String TYPE_MOUNT = "Mount";
-
     @Nullable protected String id;
-    @Nullable protected String type;
     @Nullable protected Condition[] conditions;
     @Nullable protected OnConditionFail onConditionFail;
+    @Nullable protected String at;
+    @Nullable protected Repeat repeat;
+    @Nullable protected Duration duration;
     @Nullable protected Presentation presentation;
+    @Nullable protected PuppetOverride puppet;
 
+    @Nullable protected Walk walk;
     @Nullable protected Consume consume;
     @Nullable protected Produce produce;
-    @Nullable protected Wait wait;
-    @Nullable protected RollGroup roll;
-    @Nullable protected CommandGroup command;
+    @Nullable protected LootRef roll;
+    @Nullable protected String[] commands;
     @Nullable protected Stamp stamp;
-    @Nullable protected PuppetOverride puppet;
 
     public static final BuilderCodec<StationStep> CODEC = BuilderCodec.builder(StationStep.class, StationStep::new)
             .appendInherited(new KeyedCodec<>("Id", Codec.STRING, false),
-                    (o, v) -> o.id = v, o -> o.id, (o, p) -> o.id = p.id).add()
-            .appendInherited(new KeyedCodec<>("Type", Codec.STRING, false),
-                    (o, v) -> o.type = v, o -> o.type, (o, p) -> o.type = p.type).add()
+                    (o, v) -> o.id = v, o -> o.id, (o, p) -> o.id = p.id)
+            .documentation("Unique step id within one action's Steps array; required when another step or extension insertion anchors on it.").add()
             .appendInherited(new KeyedCodec<>("Conditions", new ArrayCodec<>(Condition.CODEC, Condition[]::new), false),
-                    (o, v) -> o.conditions = v, o -> o.conditions, (o, p) -> o.conditions = p.conditions).add()
+                    (o, v) -> o.conditions = v, o -> o.conditions, (o, p) -> o.conditions = p.conditions)
+            .documentation("Gate re-checked at each iteration entry; a failing check runs OnConditionFail.").add()
             .appendInherited(new KeyedCodec<>("OnConditionFail", OnConditionFail.CODEC, false),
                     (o, v) -> o.onConditionFail = v, o -> o.onConditionFail,
-                    (o, p) -> o.onConditionFail = p.onConditionFail).add()
+                    (o, p) -> o.onConditionFail = p.onConditionFail)
+            .documentation("What a failing Conditions check does: Skip (no-op continue) or Fail (default); Goto jumps to a step Id.").add()
+            .appendInherited(new KeyedCodec<>("At", Codec.STRING, false),
+                    (o, v) -> o.at = v, o -> o.at, (o, p) -> o.at = p.at)
+            .documentation("The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'self'. [wave 3]").add()
+            .appendInherited(new KeyedCodec<>("Repeat", Repeat.CODEC, false),
+                    (o, v) -> o.repeat = v, o -> o.repeat, (o, p) -> o.repeat = p.repeat)
+            .documentation("Per-step iteration count: a fixed Times, or Min/Max/AddFactors resolved once at step entry.").add()
+            .appendInherited(new KeyedCodec<>("Duration", Duration.CODEC, false),
+                    (o, v) -> o.duration = v, o -> o.duration, (o, p) -> o.duration = p.duration)
+            .documentation("A post-phase hold in ms per iteration; prop/presentation persist across the hold.").add()
             .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
-                    (o, v) -> o.presentation = v, o -> o.presentation, (o, p) -> o.presentation = p.presentation).add()
-            .appendInherited(new KeyedCodec<>("Consume", Consume.CODEC, false),
-                    (o, v) -> o.consume = v, o -> o.consume, (o, p) -> o.consume = p.consume).add()
-            .appendInherited(new KeyedCodec<>("Produce", Produce.CODEC, false),
-                    (o, v) -> o.produce = v, o -> o.produce, (o, p) -> o.produce = p.produce).add()
-            .appendInherited(new KeyedCodec<>("Wait", Wait.CODEC, false),
-                    (o, v) -> o.wait = v, o -> o.wait, (o, p) -> o.wait = p.wait).add()
-            .appendInherited(new KeyedCodec<>("Roll", RollGroup.CODEC, false),
-                    (o, v) -> o.roll = v, o -> o.roll, (o, p) -> o.roll = p.roll).add()
-            .appendInherited(new KeyedCodec<>("Command", CommandGroup.CODEC, false),
-                    (o, v) -> o.command = v, o -> o.command, (o, p) -> o.command = p.command).add()
-            .appendInherited(new KeyedCodec<>("Stamp", Stamp.CODEC, false),
-                    (o, v) -> o.stamp = v, o -> o.stamp, (o, p) -> o.stamp = p.stamp).add()
+                    (o, v) -> o.presentation = v, o -> o.presentation, (o, p) -> o.presentation = p.presentation)
+            .documentation("A sound/particles/etc. cue played once at step ITERATION entry.").add()
             .appendInherited(new KeyedCodec<>("Puppet", PuppetOverride.CODEC, false),
-                    (o, v) -> o.puppet = v, o -> o.puppet, (o, p) -> o.puppet = p.puppet).add()
+                    (o, v) -> o.puppet = v, o -> o.puppet, (o, p) -> o.puppet = p.puppet)
+            .documentation("Per-step puppet override: a Clip played at iteration entry and/or a Prop swap for this beat.").add()
+            .appendInherited(new KeyedCodec<>("Walk", Walk.CODEC, false),
+                    (o, v) -> o.walk = v, o -> o.walk, (o, p) -> o.walk = p.walk)
+            .documentation("Move the puppet to an anchor (To) at SpeedMps. Requires Puppet enabled. [wave 3]").add()
+            .appendInherited(new KeyedCodec<>("Consume", Consume.CODEC, false),
+                    (o, v) -> o.consume = v, o -> o.consume, (o, p) -> o.consume = p.consume)
+            .documentation("Consume Quantity of ItemId|ResourceTypeId From Inventory (default) or Custody.").add()
+            .appendInherited(new KeyedCodec<>("Produce", Produce.CODEC, false),
+                    (o, v) -> o.produce = v, o -> o.produce, (o, p) -> o.produce = p.produce)
+            .documentation("Produce Quantity of ItemId To Inventory (default). To Custody is [wave 3].").add()
+            .appendInherited(new KeyedCodec<>("Roll", LootRef.CODEC, false),
+                    (o, v) -> o.roll = v, o -> o.roll, (o, p) -> o.roll = p.roll)
+            .documentation("Evaluate a loot pass through the shared LootRef (Lootables + inline Rolls) vocabulary.").add()
+            .appendInherited(new KeyedCodec<>("Commands", new ArrayCodec<>(Codec.STRING, String[]::new), false),
+                    (o, v) -> o.commands = v, o -> o.commands, (o, p) -> o.commands = p.commands)
+            .documentation("Run commands through the shared CommandRewardExecutor with the usual placeholder substitutions.").add()
+            .appendInherited(new KeyedCodec<>("Stamp", Stamp.CODEC, false),
+                    (o, v) -> o.stamp = v, o -> o.stamp, (o, p) -> o.stamp = p.stamp)
+            .documentation("The enhance-commit phase (reagents + durability + stat rolls) - see Stamp.").add()
             .build();
 
     public StationStep() {
@@ -96,21 +114,15 @@ public final class StationStep {
 
     /** Java-side construction path (a program built procedurally, e.g. {@code ImplicitProgram}). */
     @Nonnull
-    public static StationStep of(@Nullable String id, @Nonnull String type) {
+    public static StationStep of(@Nullable String id) {
         StationStep s = new StationStep();
         s.id = id;
-        s.type = type;
         return s;
     }
 
     @Nullable
     public String getId() {
         return id;
-    }
-
-    @Nullable
-    public String getType() {
-        return type;
     }
 
     @Nullable
@@ -129,9 +141,63 @@ public final class StationStep {
         return this;
     }
 
+    /** The anchor id this step runs at (from the action's {@code Anchors} map); null = the primary station {@code "self"}. [wave 3] */
+    @Nullable
+    public String getAt() {
+        return at;
+    }
+
+    @Nonnull
+    public StationStep withAt(@Nullable String v) {
+        this.at = v;
+        return this;
+    }
+
+    /** Per-step iteration count; null = a single iteration. */
+    @Nullable
+    public Repeat getRepeat() {
+        return repeat;
+    }
+
+    @Nonnull
+    public StationStep withRepeat(@Nullable Repeat v) {
+        this.repeat = v;
+        return this;
+    }
+
+    /** Post-phase hold; null = no hold. */
+    @Nullable
+    public Duration getDuration() {
+        return duration;
+    }
+
+    @Nonnull
+    public StationStep withDuration(@Nullable Duration v) {
+        this.duration = v;
+        return this;
+    }
+
     @Nullable
     public Presentation getPresentation() {
         return presentation;
+    }
+
+    @Nonnull
+    public StationStep withPresentation(@Nullable Presentation v) {
+        this.presentation = v;
+        return this;
+    }
+
+    /** Move the puppet to an anchor; null = no walk. [wave 3] */
+    @Nullable
+    public Walk getWalk() {
+        return walk;
+    }
+
+    @Nonnull
+    public StationStep withWalk(@Nullable Walk v) {
+        this.walk = v;
+        return this;
     }
 
     @Nullable
@@ -140,7 +206,7 @@ public final class StationStep {
     }
 
     @Nonnull
-    public StationStep withConsume(@Nonnull Consume v) {
+    public StationStep withConsume(@Nullable Consume v) {
         this.consume = v;
         return this;
     }
@@ -151,41 +217,32 @@ public final class StationStep {
     }
 
     @Nonnull
-    public StationStep withProduce(@Nonnull Produce v) {
+    public StationStep withProduce(@Nullable Produce v) {
         this.produce = v;
         return this;
     }
 
+    /** The loot phase (a {@link LootRef}); null = no roll. */
     @Nullable
-    public Wait getWait() {
-        return wait;
-    }
-
-    @Nonnull
-    public StationStep withWait(@Nonnull Wait v) {
-        this.wait = v;
-        return this;
-    }
-
-    @Nullable
-    public RollGroup getRoll() {
+    public LootRef getRoll() {
         return roll;
     }
 
     @Nonnull
-    public StationStep withRoll(@Nonnull RollGroup v) {
+    public StationStep withRoll(@Nullable LootRef v) {
         this.roll = v;
         return this;
     }
 
+    /** The command phase; null = no commands. */
     @Nullable
-    public CommandGroup getCommand() {
-        return command;
+    public String[] getCommands() {
+        return commands;
     }
 
     @Nonnull
-    public StationStep withCommand(@Nonnull CommandGroup v) {
-        this.command = v;
+    public StationStep withCommands(@Nullable String[] v) {
+        this.commands = v;
         return this;
     }
 
@@ -195,50 +252,42 @@ public final class StationStep {
     }
 
     @Nonnull
-    public StationStep withStamp(@Nonnull Stamp v) {
+    public StationStep withStamp(@Nullable Stamp v) {
         this.stamp = v;
         return this;
     }
 
-    /**
-     * The per-step puppet override (round-4 design, section 3.1 - "the new per step / station
-     * knob"): a SMALL group, {@code {Clip?, Prop?}}, NOT tied to {@link #type} - it applies to
-     * ANY step (a ritual's distinct beats each want their own puppet pose/prop), unlike every
-     * other nested group here which is exclusive to its own {@link #type}. Null = the step
-     * inherits the resolved action's default clip ({@link StationAsset.Animation}) and prop
-     * ({@link Puppet#getProp()}). Meaningless (never played) when the resolved action's own
-     * {@link Puppet} is not active - {@code station.StationValidator}'s
-     * {@code PUPPET_STEP_OVERRIDE_WITHOUT_PUPPET} flags that authoring mistake.
-     */
+    /** The per-step puppet override ({@code {Clip?, Prop?}}); null = inherit the action's default clip/prop. */
     @Nullable
     public PuppetOverride getPuppet() {
         return puppet;
     }
 
     @Nonnull
-    public StationStep withPuppet(@Nonnull PuppetOverride v) {
+    public StationStep withPuppet(@Nullable PuppetOverride v) {
         this.puppet = v;
         return this;
     }
 
-    @Nonnull
-    public StationStep withPresentation(@Nullable Presentation v) {
-        this.presentation = v;
-        return this;
+    /** True when NO phase group is authored - a pure beat (presentation + clip + duration only). */
+    public boolean isPureBeat() {
+        return walk == null && consume == null && produce == null && roll == null
+                && (commands == null || commands.length == 0) && stamp == null;
     }
 
-    /** True when {@link #type} is the one design-reserved, not-yet-executable id. */
-    public boolean isReservedUnimplemented() {
-        return TYPE_MOUNT.equalsIgnoreCase(type);
+    /** True when this step authors any [wave 3] field (Walk, At) the wave-2 engine cannot execute (validator warns; engage denies gracefully). */
+    public boolean authorsWave3OnlyPhase() {
+        boolean walkAuthored = walk != null;
+        boolean atAuthored = at != null && !at.isBlank();
+        boolean produceToCustody = produce != null && Produce.TO_CUSTODY.equalsIgnoreCase(produce.effectiveTo());
+        return walkAuthored || atAuthored || produceToCustody;
     }
 
     /**
-     * The branch/skip leaf (design 9.3: "Branch is NOT a step type"): {@link #result} decides
-     * what a FAILING {@link #conditions} check does ({@code "Skip"} - treat as a no-op success and
-     * continue; {@code "Fail"}, the default when omitted - fail the walk at this step), and
-     * {@link #goto_} (JSON key {@code "Goto"}) is an authored step {@code Id} the kernel's
-     * {@code nextIndex} hook jumps to on a SUCCESS-continuing result (a station-authored branch),
-     * or {@code null} for the classic linear advance.
+     * The branch/skip leaf (design 2.1): {@link #result} decides what a FAILING {@link #conditions}
+     * check does ({@code "Skip"} - no-op success and continue; {@code "Fail"}, the default - fail
+     * the walk at this step), and {@link #goto_} (JSON key {@code "Goto"}) is an authored step
+     * {@code Id} the kernel's {@code nextIndex} hook jumps to on a success-continuing result.
      */
     public static final class OnConditionFail {
         public static final String RESULT_SKIP = "Skip";
@@ -250,9 +299,11 @@ public final class StationStep {
         public static final BuilderCodec<OnConditionFail> CODEC =
                 BuilderCodec.builder(OnConditionFail.class, OnConditionFail::new)
                         .appendInherited(new KeyedCodec<>("Result", Codec.STRING, false),
-                                (o, v) -> o.result = v, o -> o.result, (o, p) -> o.result = p.result).add()
+                                (o, v) -> o.result = v, o -> o.result, (o, p) -> o.result = p.result)
+                        .documentation("On a failing Conditions check: 'Skip' (treat as a no-op success and continue) or 'Fail' (default).").add()
                         .appendInherited(new KeyedCodec<>("Goto", Codec.STRING, false),
-                                (o, v) -> o.goto_ = v, o -> o.goto_, (o, p) -> o.goto_ = p.goto_).add()
+                                (o, v) -> o.goto_ = v, o -> o.goto_, (o, p) -> o.goto_ = p.goto_)
+                        .documentation("An authored step Id to jump to on a success-continuing result; null = classic linear advance.").add()
                         .build();
 
         @Nonnull
@@ -281,12 +332,176 @@ public final class StationStep {
     }
 
     /**
-     * Consume {@link #quantity} of {@link #itemId} or {@link #resourceTypeId} (exactly one route,
-     * matching {@code StationAsset.Ingredient}'s convention) {@link #from}. {@code From:
-     * "Inventory"} (the default when omitted) and {@code From: "Custody"} (phase-2 leg C,
-     * design 9.4 - drains the block's placed-input claim, the sawmill migration's route) are BOTH
-     * executable; any other value fails cleanly at dispatch - {@code StationValidator}'s
-     * {@code UNIMPLEMENTED_CONSUME_SOURCE} flags an authoring mistake ahead of runtime.
+     * Per-step iteration count (design 2.1, decision 29c). EITHER a fixed {@link #times}, OR a
+     * factor-resolved range {@code clamp(round(Min + sum(resolve(f) * f.Weight)), Min, Max)} via
+     * {@link #addFactors} - the same weighted vocabulary as loot chances and caps. Resolved ONCE at
+     * step entry; per iteration the Conditions re-check, the phases re-execute, and any
+     * clip/presentation re-fire.
+     */
+    public static final class Repeat {
+        @Nullable protected Integer times;
+        @Nullable protected Integer min;
+        @Nullable protected Integer max;
+        @Nullable protected FactorRef[] addFactors;
+
+        public static final BuilderCodec<Repeat> CODEC = BuilderCodec.builder(Repeat.class, Repeat::new)
+                .appendInherited(new KeyedCodec<>("Times", Codec.INTEGER, false),
+                        (o, v) -> o.times = v, o -> o.times, (o, p) -> o.times = p.times)
+                .documentation("A fixed iteration count. Authored INSTEAD of Min/Max/AddFactors (the fixed route).").add()
+                .appendInherited(new KeyedCodec<>("Min", Codec.INTEGER, false),
+                        (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
+                .documentation("Lower bound of the factor-resolved iteration count (the ranged route).").add()
+                .appendInherited(new KeyedCodec<>("Max", Codec.INTEGER, false),
+                        (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max)
+                .documentation("Upper bound of the factor-resolved iteration count (the ranged route).").add()
+                .appendInherited(new KeyedCodec<>("AddFactors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
+                        (o, v) -> o.addFactors = v, o -> o.addFactors, (o, p) -> o.addFactors = p.addFactors)
+                .documentation("Weighted factor references summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max).").add()
+                .build();
+
+        @Nonnull
+        public static Repeat times(@Nullable Integer times) {
+            Repeat r = new Repeat();
+            r.times = times;
+            return r;
+        }
+
+        @Nonnull
+        public static Repeat of(@Nullable Integer times, @Nullable Integer min, @Nullable Integer max,
+                @Nullable FactorRef[] addFactors) {
+            Repeat r = new Repeat();
+            r.times = times;
+            r.min = min;
+            r.max = max;
+            r.addFactors = addFactors;
+            return r;
+        }
+
+        @Nullable
+        public Integer getTimes() {
+            return times;
+        }
+
+        @Nullable
+        public Integer getMin() {
+            return min;
+        }
+
+        @Nullable
+        public Integer getMax() {
+            return max;
+        }
+
+        /** Weighted factor references summed into the ranged count; null = a fixed {@link #times} (or a Min-only floor). */
+        @Nullable
+        public FactorRef[] getAddFactors() {
+            return addFactors;
+        }
+
+        /** True when the fixed {@link #times} route is authored (takes precedence over the ranged route). */
+        public boolean isFixed() {
+            return times != null;
+        }
+
+        /**
+         * PURE iteration-count resolution (unit-tested; no live server): if {@link #times} is
+         * authored it wins ({@code max(1, times)}); otherwise {@code clamp(round(min +
+         * factorContribution), min, max)} where {@code factorContribution} is the caller-resolved
+         * {@code sum(resolve(f) * f.Weight)}. Reader defaults: {@code min} 1, {@code max} =
+         * {@code max(min, 1)} when omitted/less-than-min. Never returns below 1.
+         */
+        public int resolveCount(double factorContribution) {
+            if (times != null) {
+                return Math.max(1, times);
+            }
+            int lo = min != null && min > 0 ? min : 1;
+            int hi = max != null && max >= lo ? max : lo;
+            long rounded = Math.round(lo + factorContribution);
+            long clamped = Math.max(lo, Math.min(hi, rounded));
+            return (int) Math.max(1, clamped);
+        }
+    }
+
+    /** A post-phase hold: suspend this iteration for {@link #ms} real milliseconds (prop/presentation persist). */
+    public static final class Duration {
+        @Nullable protected Long ms;
+
+        public static final BuilderCodec<Duration> CODEC = BuilderCodec.builder(Duration.class, Duration::new)
+                .appendInherited(new KeyedCodec<>("Ms", Codec.LONG, false),
+                        (o, v) -> o.ms = v, o -> o.ms, (o, p) -> o.ms = p.ms)
+                .documentation("The hold length in milliseconds for this iteration.").add()
+                .build();
+
+        @Nonnull
+        public static Duration of(@Nullable Long ms) {
+            Duration d = new Duration();
+            d.ms = ms;
+            return d;
+        }
+
+        @Nullable
+        public Long getMs() {
+            return ms;
+        }
+
+        /** {@link #ms}, reader-defaulted to 0 when null/negative (no hold). */
+        public long effectiveMs() {
+            return ms != null && ms > 0 ? ms : 0L;
+        }
+    }
+
+    /**
+     * The Walk phase (design 2.3, [wave 3] execution): move the PUPPET to the anchor {@link #to}
+     * (an id from the action's {@code Anchors} map, or the reserved {@code "self"}) at
+     * {@link #speedMps}. Requires the action's {@code Puppet} enabled (validator {@code
+     * WALK_REQUIRES_PUPPET}). Decodes and validates in wave 2; the wave-2 engine denies engage
+     * gracefully for any program authoring it (wave 3 makes it real).
+     */
+    public static final class Walk {
+        /** The design default straight-line speed (m/s). */
+        public static final double DEFAULT_SPEED_MPS = 2.5;
+
+        @Nullable protected String to;
+        @Nullable protected Double speedMps;
+
+        public static final BuilderCodec<Walk> CODEC = BuilderCodec.builder(Walk.class, Walk::new)
+                .appendInherited(new KeyedCodec<>("To", Codec.STRING, false),
+                        (o, v) -> o.to = v, o -> o.to, (o, p) -> o.to = p.to)
+                .documentation("The anchor id to walk the puppet to (or the reserved 'self' = the primary station).").add()
+                .appendInherited(new KeyedCodec<>("SpeedMps", Codec.DOUBLE, false),
+                        (o, v) -> o.speedMps = v, o -> o.speedMps, (o, p) -> o.speedMps = p.speedMps)
+                .documentation("Straight-line walk speed in meters per second (reader-defaults to 2.5).").add()
+                .build();
+
+        @Nonnull
+        public static Walk of(@Nullable String to, @Nullable Double speedMps) {
+            Walk w = new Walk();
+            w.to = to;
+            w.speedMps = speedMps;
+            return w;
+        }
+
+        @Nullable
+        public String getTo() {
+            return to;
+        }
+
+        @Nullable
+        public Double getSpeedMps() {
+            return speedMps;
+        }
+
+        /** {@link #speedMps}, reader-defaulted to {@link #DEFAULT_SPEED_MPS} when null/non-positive. */
+        public double effectiveSpeedMps() {
+            return speedMps != null && speedMps > 0 ? speedMps : DEFAULT_SPEED_MPS;
+        }
+    }
+
+    /**
+     * Consume {@link #quantity} of {@link #itemId} or {@link #resourceTypeId} (the {@link Ingredient}
+     * exactly-one-of convention, flattened with a {@code From} discriminator per the design 2.1
+     * exemplar) {@link #from}. {@code From: "Inventory"} (default) and {@code From: "Custody"} (drains
+     * the block's placed-input claim) are BOTH executable this wave.
      */
     public static final class Consume {
         public static final String FROM_INVENTORY = "Inventory";
@@ -299,14 +514,18 @@ public final class StationStep {
 
         public static final BuilderCodec<Consume> CODEC = BuilderCodec.builder(Consume.class, Consume::new)
                 .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
-                        (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId).add()
+                        (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId)
+                .documentation("Exact item id to consume (exactly one of ItemId | ResourceTypeId).").add()
                 .appendInherited(new KeyedCodec<>("ResourceTypeId", Codec.STRING, false),
                         (o, v) -> o.resourceTypeId = v, o -> o.resourceTypeId,
-                        (o, p) -> o.resourceTypeId = p.resourceTypeId).add()
+                        (o, p) -> o.resourceTypeId = p.resourceTypeId)
+                .documentation("A native resource-type family to consume (exactly one of ItemId | ResourceTypeId).").add()
                 .appendInherited(new KeyedCodec<>("Quantity", Codec.INTEGER, false),
-                        (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity).add()
+                        (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity)
+                .documentation("The count to consume (reader-defaults to 1).").add()
                 .appendInherited(new KeyedCodec<>("From", Codec.STRING, false),
-                        (o, v) -> o.from = v, o -> o.from, (o, p) -> o.from = p.from).add()
+                        (o, v) -> o.from = v, o -> o.from, (o, p) -> o.from = p.from)
+                .documentation("The source: 'Inventory' (default) or 'Custody' (the block's placed-input claim).").add()
                 .build();
 
         @Nonnull
@@ -340,6 +559,11 @@ public final class StationStep {
             return from;
         }
 
+        /** {@link #quantity}, reader-defaulted to 1 when null/non-positive. */
+        public int effectiveQuantity() {
+            return quantity != null && quantity > 0 ? quantity : 1;
+        }
+
         /** {@link #from}, reader-defaulted to {@link #FROM_INVENTORY} when null/blank. */
         @Nonnull
         public String effectiveFrom() {
@@ -348,10 +572,9 @@ public final class StationStep {
     }
 
     /**
-     * Produce {@link #quantity} of {@link #itemId} {@link #to}. {@code To: "Inventory"} (default
-     * when omitted) is the ONLY route this leg's engine EXECUTES; {@code "Custody"} decodes
-     * (schema-reserved for a future leg's output-stays-in-custody shape, e.g. the anvil holding
-     * the weapon being enhanced) but has no handler yet - {@code UNIMPLEMENTED_PRODUCE_DEST} flags it.
+     * Produce {@link #quantity} of {@link #itemId} {@link #to}. {@code To: "Inventory"} (default) is
+     * executed this wave; {@code "Custody"} decodes (the fish exemplar's cross-station output) and
+     * is [wave 3] - {@link StationStep#authorsWave3OnlyPhase()} flags it, engage denies gracefully.
      */
     public static final class Produce {
         public static final String TO_INVENTORY = "Inventory";
@@ -363,11 +586,14 @@ public final class StationStep {
 
         public static final BuilderCodec<Produce> CODEC = BuilderCodec.builder(Produce.class, Produce::new)
                 .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
-                        (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId).add()
+                        (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId)
+                .documentation("The exact item id to produce.").add()
                 .appendInherited(new KeyedCodec<>("Quantity", Codec.INTEGER, false),
-                        (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity).add()
+                        (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity)
+                .documentation("The count to produce (reader-defaults to 1).").add()
                 .appendInherited(new KeyedCodec<>("To", Codec.STRING, false),
-                        (o, v) -> o.to = v, o -> o.to, (o, p) -> o.to = p.to).add()
+                        (o, v) -> o.to = v, o -> o.to, (o, p) -> o.to = p.to)
+                .documentation("The destination: 'Inventory' (default). 'Custody' is [wave 3].").add()
                 .build();
 
         @Nonnull
@@ -394,6 +620,11 @@ public final class StationStep {
             return to;
         }
 
+        /** {@link #quantity}, reader-defaulted to 1 when null/non-positive. */
+        public int effectiveQuantity() {
+            return quantity != null && quantity > 0 ? quantity : 1;
+        }
+
         /** {@link #to}, reader-defaulted to {@link #TO_INVENTORY} when null/blank. */
         @Nonnull
         public String effectiveTo() {
@@ -402,137 +633,31 @@ public final class StationStep {
     }
 
     /**
-     * Suspend the walk until {@link #durationMs} elapses (real time) OR {@link #beats} swing
-     * ticks have fired. Exactly one route is meaningful; both authored is a content mistake
-     * ({@code StationValidator}'s {@code WAIT_BOTH_ROUTES} warns, {@code DurationMs} wins).
-     * {@link #beats} decodes (forward-compat with the anvil's strike beats, phase-2 leg E) but has
-     * no handler yet - {@code UNIMPLEMENTED_WAIT_BEATS} flags a {@code Beats}-only Wait.
-     */
-    public static final class Wait {
-        @Nullable protected Long durationMs;
-        @Nullable protected Integer beats;
-
-        public static final BuilderCodec<Wait> CODEC = BuilderCodec.builder(Wait.class, Wait::new)
-                .appendInherited(new KeyedCodec<>("DurationMs", Codec.LONG, false),
-                        (o, v) -> o.durationMs = v, o -> o.durationMs, (o, p) -> o.durationMs = p.durationMs).add()
-                .appendInherited(new KeyedCodec<>("Beats", Codec.INTEGER, false),
-                        (o, v) -> o.beats = v, o -> o.beats, (o, p) -> o.beats = p.beats).add()
-                .build();
-
-        @Nonnull
-        public static Wait ofDurationMs(@Nullable Long durationMs) {
-            Wait w = new Wait();
-            w.durationMs = durationMs;
-            return w;
-        }
-
-        @Nonnull
-        public static Wait ofBeats(@Nullable Integer beats) {
-            Wait w = new Wait();
-            w.beats = beats;
-            return w;
-        }
-
-        @Nullable
-        public Long getDurationMs() {
-            return durationMs;
-        }
-
-        @Nullable
-        public Integer getBeats() {
-            return beats;
-        }
-    }
-
-    /**
-     * Evaluate a loot pass through the SAME {@code loot.LootEngine}/{@link Roll} vocabulary a
-     * station's own {@code Loot} group uses (DRY - one roll engine, never a second). Either
-     * {@link #lootable} (a referenced {@link LootableAsset} id) or {@link #rolls} (inline), or
-     * both (both resolve, same as {@code StationAsset.Loot}).
-     */
-    public static final class RollGroup {
-        @Nullable protected String lootable;
-        @Nullable protected Roll[] rolls;
-
-        public static final BuilderCodec<RollGroup> CODEC = BuilderCodec.builder(RollGroup.class, RollGroup::new)
-                .appendInherited(new KeyedCodec<>("Lootable", Codec.STRING, false),
-                        (o, v) -> o.lootable = v, o -> o.lootable, (o, p) -> o.lootable = p.lootable).add()
-                .appendInherited(new KeyedCodec<>("Rolls", new ArrayCodec<>(Roll.CODEC, Roll[]::new), false),
-                        (o, v) -> o.rolls = v, o -> o.rolls, (o, p) -> o.rolls = p.rolls).add()
-                .build();
-
-        @Nonnull
-        public static RollGroup of(@Nullable String lootable, @Nullable Roll[] rolls) {
-            RollGroup g = new RollGroup();
-            g.lootable = lootable;
-            g.rolls = rolls;
-            return g;
-        }
-
-        @Nullable
-        public String getLootable() {
-            return lootable;
-        }
-
-        @Nullable
-        public Roll[] getRolls() {
-            return rolls;
-        }
-    }
-
-    /** Run {@link #commands} through the SAME {@code loot.CommandRewardExecutor} a {@code Roll.Grants.Commands} uses. */
-    public static final class CommandGroup {
-        @Nullable protected String[] commands;
-
-        public static final BuilderCodec<CommandGroup> CODEC = BuilderCodec.builder(CommandGroup.class, CommandGroup::new)
-                .appendInherited(new KeyedCodec<>("Commands", new ArrayCodec<>(Codec.STRING, String[]::new), false),
-                        (o, v) -> o.commands = v, o -> o.commands, (o, p) -> o.commands = p.commands).add()
-                .build();
-
-        @Nonnull
-        public static CommandGroup of(@Nullable String[] commands) {
-            CommandGroup g = new CommandGroup();
-            g.commands = commands;
-            return g;
-        }
-
-        @Nullable
-        public String[] getCommands() {
-            return commands;
-        }
-    }
-
-    /**
-     * The anvil's enhance-commit step (design section 9.5): the ONE transaction commit, compute-
-     * then-commit by construction (critique M5's binding fix, enforced by
-     * {@code station.StationStepHandlers.StampHandler}, NOT by this codec - a codec cannot enforce
-     * an execution order, only carry the data). Two ORTHOGONAL payload leaves, any combination:
-     * {@link #durability} (RpgStations-native, real without any progression mod) and
-     * {@link #stats} (delegated to the api {@code EnhanceStamperRegistry}; a Stats leaf with no
-     * registered stamper no-ops with a runtime-audit warning while Durability still lands).
-     * {@link #reagents} are consumed FROM THE PLAYER'S INVENTORY (never a second custody claim -
-     * the design's "reagents stay in custody until this step" describes them staying UNTOUCHED in
-     * the player's own inventory until this step's commit phase, in contrast to draining them
-     * earlier via a separate {@code Consume} step; the actual placed-input custody this leg's
-     * anvil uses is reserved for the single item BEING enhanced, capped at
-     * {@code Custody.MaxQuantity: 1}).
+     * The enhance-commit phase (design 9.5 / scope-2 3.8, the anvil's stamp step): the ONE
+     * transaction commit, compute-then-commit by construction (enforced by the handler, not this
+     * codec). Orthogonal payload leaves, any combination: {@link #durability} (RpgStations-native)
+     * and {@link #stats} (delegated to the api {@code EnhanceStamperRegistry}). {@link #reagents}
+     * are {@link Ingredient}s consumed FROM THE PLAYER'S INVENTORY at this step's commit.
      */
     public static final class Stamp {
-        @Nullable protected Reagent[] reagents;
+        @Nullable protected Ingredient[] reagents;
         @Nullable protected Durability durability;
         @Nullable protected Stats stats;
 
         public static final BuilderCodec<Stamp> CODEC = BuilderCodec.builder(Stamp.class, Stamp::new)
-                .appendInherited(new KeyedCodec<>("Reagents", new ArrayCodec<>(Reagent.CODEC, Reagent[]::new), false),
-                        (o, v) -> o.reagents = v, o -> o.reagents, (o, p) -> o.reagents = p.reagents).add()
+                .appendInherited(new KeyedCodec<>("Reagents", new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
+                        (o, v) -> o.reagents = v, o -> o.reagents, (o, p) -> o.reagents = p.reagents)
+                .documentation("Ingredient reagents consumed from the player's inventory at this step's commit.").add()
                 .appendInherited(new KeyedCodec<>("Durability", Durability.CODEC, false),
-                        (o, v) -> o.durability = v, o -> o.durability, (o, p) -> o.durability = p.durability).add()
+                        (o, v) -> o.durability = v, o -> o.durability, (o, p) -> o.durability = p.durability)
+                .documentation("RpgStations-native durability upgrade (AddMax). Real without any progression mod.").add()
                 .appendInherited(new KeyedCodec<>("Stats", Stats.CODEC, false),
-                        (o, v) -> o.stats = v, o -> o.stats, (o, p) -> o.stats = p.stats).add()
+                        (o, v) -> o.stats = v, o -> o.stats, (o, p) -> o.stats = p.stats)
+                .documentation("The composable stat-roll + cap model, delegated to the registered EnhanceStamper.").add()
                 .build();
 
         @Nonnull
-        public static Stamp of(@Nullable Reagent[] reagents, @Nullable Durability durability, @Nullable Stats stats) {
+        public static Stamp of(@Nullable Ingredient[] reagents, @Nullable Durability durability, @Nullable Stats stats) {
             Stamp s = new Stamp();
             s.reagents = reagents;
             s.durability = durability;
@@ -540,8 +665,9 @@ public final class StationStep {
             return s;
         }
 
+        /** {@link Ingredient} reagents consumed from the player's inventory at commit; null = free. */
         @Nullable
-        public Reagent[] getReagents() {
+        public Ingredient[] getReagents() {
             return reagents;
         }
 
@@ -556,64 +682,8 @@ public final class StationStep {
         }
 
         /**
-         * ONE Stamp reagent cost line: {@code Quantity} of {@code ItemId} or {@code ResourceTypeId}
-         * (exactly one route, matching {@link Consume}'s convention), consumed from the player's
-         * inventory (storage-first, then the combined view). {@link Stats.Caps.Economics} scales
-         * the EFFECTIVE quantity per prior stamp count when authored; this leaf's {@link #quantity}
-         * is always the BASE (unscaled) amount.
-         */
-        public static final class Reagent {
-            @Nullable protected String itemId;
-            @Nullable protected String resourceTypeId;
-            @Nullable protected Integer quantity;
-
-            public static final BuilderCodec<Reagent> CODEC = BuilderCodec.builder(Reagent.class, Reagent::new)
-                    .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
-                            (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId).add()
-                    .appendInherited(new KeyedCodec<>("ResourceTypeId", Codec.STRING, false),
-                            (o, v) -> o.resourceTypeId = v, o -> o.resourceTypeId,
-                            (o, p) -> o.resourceTypeId = p.resourceTypeId).add()
-                    .appendInherited(new KeyedCodec<>("Quantity", Codec.INTEGER, false),
-                            (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity).add()
-                    .build();
-
-            @Nonnull
-            public static Reagent of(@Nullable String itemId, @Nullable String resourceTypeId,
-                    @Nullable Integer quantity) {
-                Reagent r = new Reagent();
-                r.itemId = itemId;
-                r.resourceTypeId = resourceTypeId;
-                r.quantity = quantity;
-                return r;
-            }
-
-            @Nullable
-            public String getItemId() {
-                return itemId;
-            }
-
-            @Nullable
-            public String getResourceTypeId() {
-                return resourceTypeId;
-            }
-
-            @Nullable
-            public Integer getQuantity() {
-                return quantity;
-            }
-
-            /** {@link #quantity}, reader-defaulted to 1 when null/non-positive. */
-            public int effectiveQuantity() {
-                return quantity != null && quantity > 0 ? quantity : 1;
-            }
-        }
-
-        /**
-         * RpgStations-NATIVE durability stamp (design 9.5): {@link #addMax} raises the stack's own
-         * {@code MaxDurability} (real, per-stack, independent of any progression mod - the
-         * standalone anvil's own value-add without the MMO). The engine also adds the SAME delta
-         * to the stack's current durability (a genuine upgrade, not a relative nerf against the
-         * new higher max).
+         * RpgStations-NATIVE durability stamp: {@link #addMax} raises the stack's own
+         * {@code MaxDurability} (and adds the same delta to current durability - a genuine upgrade).
          */
         public static final class Durability {
             @Nullable protected Double addMax;
@@ -621,7 +691,8 @@ public final class StationStep {
             public static final BuilderCodec<Durability> CODEC =
                     BuilderCodec.builder(Durability.class, Durability::new)
                             .appendInherited(new KeyedCodec<>("AddMax", Codec.DOUBLE, false),
-                                    (o, v) -> o.addMax = v, o -> o.addMax, (o, p) -> o.addMax = p.addMax).add()
+                                    (o, v) -> o.addMax = v, o -> o.addMax, (o, p) -> o.addMax = p.addMax)
+                            .documentation("The amount added to the stack's MaxDurability (and its current durability).").add()
                             .build();
 
             @Nonnull
@@ -638,12 +709,10 @@ public final class StationStep {
         }
 
         /**
-         * The composable stat-roll + cap model (design 9.5, critique M2's binding fixes): roll
-         * selection is EITHER {@link #pool} (a reusable {@code RollPool} asset id) or inline
-         * {@link #entries} (or both - both resolve, same convention as {@code RollGroup}), picked
-         * through {@link #picks} + {@link #unique}, then clamped by {@link #caps} - resolved end to
-         * end by the PURE, unit-tested {@code station.StampCapEngine} before the Stamp step ever
-         * touches the api {@code EnhanceStamper}.
+         * The composable stat-roll + cap model (design 9.5, M2's binding fixes): roll selection is
+         * EITHER {@link #pool} (a reusable {@code RollPool} id) or inline {@link #entries} (or
+         * both), picked through {@link #picks} + {@link #unique}, then clamped by {@link #caps} -
+         * resolved end to end by the PURE {@code station.StampCapEngine}.
          */
         public static final class Stats {
             @Nullable protected String pool;
@@ -654,15 +723,20 @@ public final class StationStep {
 
             public static final BuilderCodec<Stats> CODEC = BuilderCodec.builder(Stats.class, Stats::new)
                     .appendInherited(new KeyedCodec<>("Pool", Codec.STRING, false),
-                            (o, v) -> o.pool = v, o -> o.pool, (o, p) -> o.pool = p.pool).add()
+                            (o, v) -> o.pool = v, o -> o.pool, (o, p) -> o.pool = p.pool)
+                    .documentation("A reusable RollPool asset id to pick stat entries from (alternative/addition to inline Entries).").add()
                     .appendInherited(new KeyedCodec<>("Entries", new ArrayCodec<>(StatRollEntry.CODEC, StatRollEntry[]::new), false),
-                            (o, v) -> o.entries = v, o -> o.entries, (o, p) -> o.entries = p.entries).add()
+                            (o, v) -> o.entries = v, o -> o.entries, (o, p) -> o.entries = p.entries)
+                    .documentation("Inline candidate stat-roll entries (shares the StatRollEntry shape with RollPool).").add()
                     .appendInherited(new KeyedCodec<>("Picks", Picks.CODEC, false),
-                            (o, v) -> o.picks = v, o -> o.picks, (o, p) -> o.picks = p.picks).add()
+                            (o, v) -> o.picks = v, o -> o.picks, (o, p) -> o.picks = p.picks)
+                    .documentation("How many pool entries the weighted route picks (Always entries are extra).").add()
                     .appendInherited(new KeyedCodec<>("Unique", Codec.BOOLEAN, false),
-                            (o, v) -> o.unique = v, o -> o.unique, (o, p) -> o.unique = p.unique).add()
+                            (o, v) -> o.unique = v, o -> o.unique, (o, p) -> o.unique = p.unique)
+                    .documentation("When true, a stat id is never picked twice in one stamp (default false).").add()
                     .appendInherited(new KeyedCodec<>("Caps", Caps.CODEC, false),
-                            (o, v) -> o.caps = v, o -> o.caps, (o, p) -> o.caps = p.caps).add()
+                            (o, v) -> o.caps = v, o -> o.caps, (o, p) -> o.caps = p.caps)
+                    .documentation("Budget/per-stat/economics clamps applied after the roll.").add()
                     .build();
 
             @Nonnull
@@ -709,9 +783,11 @@ public final class StationStep {
 
                 public static final BuilderCodec<Picks> CODEC = BuilderCodec.builder(Picks.class, Picks::new)
                         .appendInherited(new KeyedCodec<>("Min", Codec.INTEGER, false),
-                                (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min).add()
+                                (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
+                        .documentation("The minimum number of weighted picks (reader-defaults to 1).").add()
                         .appendInherited(new KeyedCodec<>("Max", Codec.INTEGER, false),
-                                (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max).add()
+                                (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max)
+                        .documentation("The maximum number of weighted picks (reader-defaults to Min).").add()
                         .build();
 
                 @Nonnull
@@ -745,58 +821,54 @@ public final class StationStep {
             }
 
             /**
-             * Every cap leaf is nullable and independently composable - "alone or in ANY
-             * combination" (maintainer directive 3). <b>M2's binding composition rule (documented
-             * here, the ONE place a sonnet implementer needs to read it):</b> when more than one
-             * TOTAL-BUDGET cap is authored ({@link #perItemBudget} and/or {@link #skillScaledBudget}),
-             * the EFFECTIVE budget is the MIN of every authored one - never the max, never a sum.
-             * {@link #perStat} is a SEPARATE, additional per-stat-id ceiling layered on top of
-             * (not instead of) the total budget. {@link #economics} does not affect the point
-             * budget at all - it scales REAGENT cost per prior stamp count.
+             * The cap model, re-shaped for scope-2 (design 3.8, decision 20). Every leaf is nullable
+             * and independently composable.
+             *
+             * <p><b>{@link #budgets}</b> replaces the old {@code PerItemBudget} + {@code
+             * SkillScaledBudget} pair: a list of total-budget entries, each EITHER a flat
+             * {@code {Points}} or a factor-scaled {@code {PointsPer, Factors[]}}
+             * ({@code PointsPer * sum(resolve(f) * f.Weight)}). <b>M2's binding rule (unchanged):</b>
+             * the EFFECTIVE total budget is the MIN over every authored {@link Budget} entry.
+             * <b>{@link #perStat}</b> is a SEPARATE per-stat-id ceiling layered on top.
+             * <b>{@link #economics}</b> scales REAGENT cost per prior stamp count; it never affects
+             * the point budget.
              */
             public static final class Caps {
-                @Nullable protected Double perItemBudget;
+                @Nullable protected Budget[] budgets;
                 @Nullable protected Map<String, Double> perStat;
-                @Nullable protected SkillScaledBudget skillScaledBudget;
                 @Nullable protected Economics economics;
 
                 public static final BuilderCodec<Caps> CODEC = BuilderCodec.builder(Caps.class, Caps::new)
-                        .appendInherited(new KeyedCodec<>("PerItemBudget", Codec.DOUBLE, false),
-                                (o, v) -> o.perItemBudget = v, o -> o.perItemBudget,
-                                (o, p) -> o.perItemBudget = p.perItemBudget).add()
+                        .appendInherited(new KeyedCodec<>("Budgets", new ArrayCodec<>(Budget.CODEC, Budget[]::new), false),
+                                (o, v) -> o.budgets = v, o -> o.budgets, (o, p) -> o.budgets = p.budgets)
+                        .documentation("Total-point budget entries; the EFFECTIVE budget is the MIN over every entry (M2 rule).").add()
                         .appendInherited(new KeyedCodec<>("PerStat", new MapCodec<>(Codec.DOUBLE, LinkedHashMap::new), false),
-                                (o, v) -> o.perStat = v, o -> o.perStat, (o, p) -> o.perStat = p.perStat).add()
-                        .appendInherited(new KeyedCodec<>("SkillScaledBudget", SkillScaledBudget.CODEC, false),
-                                (o, v) -> o.skillScaledBudget = v, o -> o.skillScaledBudget,
-                                (o, p) -> o.skillScaledBudget = p.skillScaledBudget).add()
+                                (o, v) -> o.perStat = v, o -> o.perStat, (o, p) -> o.perStat = p.perStat)
+                        .documentation("A per-stat-id ceiling layered ON TOP of the total budget (stat id -> max points).").add()
                         .appendInherited(new KeyedCodec<>("Economics", Economics.CODEC, false),
-                                (o, v) -> o.economics = v, o -> o.economics, (o, p) -> o.economics = p.economics).add()
+                                (o, v) -> o.economics = v, o -> o.economics, (o, p) -> o.economics = p.economics)
+                        .documentation("Reagent-cost scaling per prior stamp count; never affects the point budget.").add()
                         .build();
 
                 @Nonnull
-                public static Caps of(@Nullable Double perItemBudget, @Nullable Map<String, Double> perStat,
-                        @Nullable SkillScaledBudget skillScaledBudget, @Nullable Economics economics) {
+                public static Caps of(@Nullable Budget[] budgets, @Nullable Map<String, Double> perStat,
+                        @Nullable Economics economics) {
                     Caps c = new Caps();
-                    c.perItemBudget = perItemBudget;
+                    c.budgets = budgets;
                     c.perStat = perStat;
-                    c.skillScaledBudget = skillScaledBudget;
                     c.economics = economics;
                     return c;
                 }
 
+                /** Total-budget entries; the effective budget is the MIN over them. Null = no total budget. */
                 @Nullable
-                public Double getPerItemBudget() {
-                    return perItemBudget;
+                public Budget[] getBudgets() {
+                    return budgets;
                 }
 
                 @Nullable
                 public Map<String, Double> getPerStat() {
                     return perStat;
-                }
-
-                @Nullable
-                public SkillScaledBudget getSkillScaledBudget() {
-                    return skillScaledBudget;
                 }
 
                 @Nullable
@@ -806,64 +878,78 @@ public final class StationStep {
             }
 
             /**
-             * A total-point budget that GROWS with a factor (design 9.5's "budget grows with a
-             * factor, the skill-scaled model" - factor-based so ANY registered {@code FactorProvider}
-             * can back it, not just a skill level): {@code effective = PointsPerLevel * resolve(Factor, Param)}.
-             * The anvil's shipped example reads {@code mmoskilltree:skill_level} with
-             * {@code Param: "SMITHING"} - an EXISTING registered factor (leg 5's
-             * {@code StationFactorProviders}), zero new factor plumbing needed. An unresolvable
-             * factor contributes 0 (fails closed, matching every other factor consumer in this mod).
+             * ONE total-budget entry (scope-2 design 3.8): EXACTLY one of a flat {@link #points} OR a
+             * factor-scaled {@code {PointsPer, Factors}} (effective = {@code PointsPer * sum(resolve(f)
+             * * f.Weight)}). Authoring both, or neither, is a content mistake (validator flags it);
+             * see {@link #isFlat()}/{@link #isFactorScaled()}. An unresolvable factor contributes 0.
              */
-            public static final class SkillScaledBudget {
-                @Nullable protected String factor;
-                @Nullable protected String param;
-                @Nullable protected Double pointsPerLevel;
+            public static final class Budget {
+                @Nullable protected Double points;
+                @Nullable protected Double pointsPer;
+                @Nullable protected FactorRef[] factors;
 
-                public static final BuilderCodec<SkillScaledBudget> CODEC =
-                        BuilderCodec.builder(SkillScaledBudget.class, SkillScaledBudget::new)
-                                .appendInherited(new KeyedCodec<>("Factor", Codec.STRING, false),
-                                        (o, v) -> o.factor = v, o -> o.factor, (o, p) -> o.factor = p.factor).add()
-                                .appendInherited(new KeyedCodec<>("Param", Codec.STRING, false),
-                                        (o, v) -> o.param = v, o -> o.param, (o, p) -> o.param = p.param).add()
-                                .appendInherited(new KeyedCodec<>("PointsPerLevel", Codec.DOUBLE, false),
-                                        (o, v) -> o.pointsPerLevel = v, o -> o.pointsPerLevel,
-                                        (o, p) -> o.pointsPerLevel = p.pointsPerLevel).add()
-                                .build();
+                public static final BuilderCodec<Budget> CODEC = BuilderCodec.builder(Budget.class, Budget::new)
+                        .appendInherited(new KeyedCodec<>("Points", Codec.DOUBLE, false),
+                                (o, v) -> o.points = v, o -> o.points, (o, p) -> o.points = p.points)
+                        .documentation("A flat total budget (the flat route). Author INSTEAD of PointsPer+Factors.").add()
+                        .appendInherited(new KeyedCodec<>("PointsPer", Codec.DOUBLE, false),
+                                (o, v) -> o.pointsPer = v, o -> o.pointsPer, (o, p) -> o.pointsPer = p.pointsPer)
+                        .documentation("Per-unit budget multiplied by the summed Factors (the factor-scaled route).").add()
+                        .appendInherited(new KeyedCodec<>("Factors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
+                                (o, v) -> o.factors = v, o -> o.factors, (o, p) -> o.factors = p.factors)
+                        .documentation("Weighted factor references summed and multiplied by PointsPer: PointsPer * sum(resolve*Weight).").add()
+                        .build();
 
                 @Nonnull
-                public static SkillScaledBudget of(@Nullable String factor, @Nullable String param,
-                        @Nullable Double pointsPerLevel) {
-                    SkillScaledBudget b = new SkillScaledBudget();
-                    b.factor = factor;
-                    b.param = param;
-                    b.pointsPerLevel = pointsPerLevel;
+                public static Budget flat(@Nullable Double points) {
+                    Budget b = new Budget();
+                    b.points = points;
+                    return b;
+                }
+
+                @Nonnull
+                public static Budget scaled(@Nullable Double pointsPer, @Nullable FactorRef[] factors) {
+                    Budget b = new Budget();
+                    b.pointsPer = pointsPer;
+                    b.factors = factors;
                     return b;
                 }
 
                 @Nullable
-                public String getFactor() {
-                    return factor;
+                public Double getPoints() {
+                    return points;
                 }
 
                 @Nullable
-                public String getParam() {
-                    return param;
+                public Double getPointsPer() {
+                    return pointsPer;
                 }
 
                 @Nullable
-                public Double getPointsPerLevel() {
-                    return pointsPerLevel;
+                public FactorRef[] getFactors() {
+                    return factors;
+                }
+
+                /** True when the flat {@link #points} route is authored (and not the scaled route). */
+                public boolean isFlat() {
+                    return points != null && pointsPer == null;
+                }
+
+                /** True when the factor-scaled {@code {PointsPer, Factors}} route is authored (and not the flat route). */
+                public boolean isFactorScaled() {
+                    return pointsPer != null && points == null;
+                }
+
+                /** True when EXACTLY one route is authored (the exactly-one-of contract). */
+                public boolean hasExactlyOneRoute() {
+                    return isFlat() ^ isFactorScaled();
                 }
             }
 
             /**
-             * The reagent-cost-scaling model (design 9.5, critique M2 fix (b)): EFFECTIVE reagent
-             * quantity for a Stamp attempt = {@code ceil(baseQuantity * (1 + RepeatCostMultiplier *
-             * stampCount))}, {@code stampCount} read off the registered stamper's own
-             * {@link com.ziggfreed.rpgstations.api.StampInspection#stampCount()} (the M2 (b) leaf -
-             * a per-stack stamp count now exists on the MMO's item metadata seam specifically so
-             * this is computable). Absent {@code Economics} = flat cost every attempt (the
-             * multiplier contributes nothing).
+             * The reagent-cost-scaling model (design 9.5, M2 fix (b)): EFFECTIVE reagent quantity =
+             * {@code ceil(baseQuantity * (1 + RepeatCostMultiplier * stampCount))}, {@code stampCount}
+             * read off the registered stamper. Absent = flat cost every attempt.
              */
             public static final class Economics {
                 @Nullable protected Double repeatCostMultiplier;
@@ -872,7 +958,8 @@ public final class StationStep {
                         BuilderCodec.builder(Economics.class, Economics::new)
                                 .appendInherited(new KeyedCodec<>("RepeatCostMultiplier", Codec.DOUBLE, false),
                                         (o, v) -> o.repeatCostMultiplier = v, o -> o.repeatCostMultiplier,
-                                        (o, p) -> o.repeatCostMultiplier = p.repeatCostMultiplier).add()
+                                        (o, p) -> o.repeatCostMultiplier = p.repeatCostMultiplier)
+                                .documentation("Scales reagent cost per prior stamp count: ceil(base * (1 + mult * stampCount)).").add()
                                 .build();
 
                 @Nonnull
@@ -891,11 +978,9 @@ public final class StationStep {
     }
 
     /**
-     * The per-step puppet override (round-4 puppet-presentation design, section 3.1/3.6): a
-     * SMALL group tweaking only the moment-to-moment {@link #clip} + {@link #prop} for THIS step -
-     * never the session-scoped hide/look/spawn knobs, which live on the station/action-level
-     * {@link Puppet} group and are set once at engage. {@link #prop} reuses {@link Puppet.Prop}'s
-     * EXACT codec (DRY - one prop shape, whether authored at the action level or per step).
+     * The per-step puppet override (design 2.1): a SMALL group tweaking only the moment-to-moment
+     * {@link #clip} + {@link #prop} for THIS step. {@link #prop} reuses {@link Puppet.Prop}'s EXACT
+     * codec (DRY - one prop shape, whether at the action level or per step).
      */
     public static final class PuppetOverride {
         @Nullable protected String clip;
@@ -904,9 +989,11 @@ public final class StationStep {
         public static final BuilderCodec<PuppetOverride> CODEC =
                 BuilderCodec.builder(PuppetOverride.class, PuppetOverride::new)
                         .appendInherited(new KeyedCodec<>("Clip", Codec.STRING, false),
-                                (o, v) -> o.clip = v, o -> o.clip, (o, p) -> o.clip = p.clip).add()
+                                (o, v) -> o.clip = v, o -> o.clip, (o, p) -> o.clip = p.clip)
+                        .documentation("The puppet clip id played once at this step's iteration entry; null = inherit the action's default clip.").add()
                         .appendInherited(new KeyedCodec<>("Prop", Puppet.Prop.CODEC, false),
-                                (o, v) -> o.prop = v, o -> o.prop, (o, p) -> o.prop = p.prop).add()
+                                (o, v) -> o.prop = v, o -> o.prop, (o, p) -> o.prop = p.prop)
+                        .documentation("The puppet's held prop for this beat; null = inherit the action's default Prop.").add()
                         .build();
 
         @Nonnull
@@ -917,13 +1004,11 @@ public final class StationStep {
             return o;
         }
 
-        /** The puppet clip id for this beat (e.g. a ritual's strike/quench/stamp poses); null = inherit the action's default clip. */
         @Nullable
         public String getClip() {
             return clip;
         }
 
-        /** The puppet's held prop for this beat; null = inherit the action's default {@link Puppet#getProp()}. */
         @Nullable
         public Puppet.Prop getProp() {
             return prop;
