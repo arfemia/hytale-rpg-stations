@@ -49,6 +49,10 @@ public final class RpgStationsCommand extends CommandBase {
 
     private final RequiredArg<String> subArg;
     private final OptionalArg<String> actionArg;
+    private final OptionalArg<String> optArg;
+
+    /** The throwaway scope-3 NPC-performer spike harness (dev-only, admin-gated with the command). */
+    private final NpcPerformerSpike npcSpike = new NpcPerformerSpike();
 
     public RpgStationsCommand() {
         // The engine resolves the command + arg descriptions as localization keys.
@@ -56,6 +60,7 @@ public final class RpgStationsCommand extends CommandBase {
         this.setPermissionGroups(HytalePermissionsProvider.GROUP_ADMIN);
         this.subArg = withRequiredArg("sub", "rpgstations.command.arg.sub", ArgTypes.STRING);
         this.actionArg = withOptionalArg("action", "rpgstations.command.arg.action", ArgTypes.STRING);
+        this.optArg = withOptionalArg("opt", "rpgstations.command.arg.opt", ArgTypes.STRING);
     }
 
     @Override
@@ -65,6 +70,7 @@ public final class RpgStationsCommand extends CommandBase {
         switch (sub) {
             case "camera" -> camera(ctx);
             case "validate" -> validate(ctx);
+            case "npcspike" -> npcspike(ctx);
             default -> ctx.sendMessage(RpgMsg.tr("command.usage").color(Color.YELLOW));
         }
     }
@@ -109,6 +115,29 @@ public final class RpgStationsCommand extends CommandBase {
             sb.append(preset.id());
         }
         return sb.toString();
+    }
+
+    /**
+     * {@code npcspike start [noserialize] | walk | stop} - the throwaway scope-3 NPC-performer
+     * spike (dev-only). Applies to the CALLING player only (it clones the caller's own skin onto
+     * the spawned Role NPC and drives it from the caller's position/facing). Delegates the
+     * world-thread work to {@link NpcPerformerSpike}.
+     */
+    private void npcspike(@Nonnull CommandContext ctx) {
+        if (!(ctx.sender() instanceof PlayerRef player)) {
+            ctx.sendMessage(RpgMsg.tr("command.camera.players_only").color(Color.RED));
+            return;
+        }
+        String action = ctx.provided(actionArg) ? actionArg.get(ctx) : null;
+        action = action == null ? "" : action.trim().toLowerCase(Locale.ROOT);
+        String opt = ctx.provided(optArg) ? optArg.get(ctx) : null;
+        boolean noSerialize = opt != null && "noserialize".equalsIgnoreCase(opt.trim());
+        switch (action) {
+            case "start" -> npcSpike.start(player, noSerialize);
+            case "walk" -> npcSpike.walk(player);
+            case "stop" -> npcSpike.stop(player);
+            default -> ctx.sendMessage(RpgMsg.tr("command.npcspike.usage").color(Color.YELLOW));
+        }
     }
 
     /**
