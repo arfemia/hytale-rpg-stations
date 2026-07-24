@@ -81,6 +81,7 @@ final class StationStepRegistry extends StepRegistry<String, StationStepContext,
                 return conditionOutcome;
             }
             emitGenericStepPresentation(ctx, step);
+            emitStepPuppetClip(ctx, step);
             try {
                 return inner.execute(ctx, step);
             } catch (Throwable t) {
@@ -111,6 +112,27 @@ final class StationStepRegistry extends StepRegistry<String, StationStepContext,
         Vector3d blockPos = new Vector3d(ctx.session.blockX + 0.5, ctx.session.blockY + 0.5, ctx.session.blockZ + 0.5);
         StationService.emitMoment(ctx.store, ctx.session, StationStepHandlers.presentMomentId(ctx, step),
                 step.getPresentation(), blockPos);
+    }
+
+    /**
+     * The step-synced puppet swing (maintainer-approved, round-8): plays {@code step}'s OWN
+     * authored {@code Puppet.Clip} once on the session's puppet the moment the step begins
+     * EXECUTING - the per-ITERATION-entry trigger (future-proof for step repetition by
+     * construction). Uses the SAME once-per-entry / never-on-resume-recheck gate the generic
+     * per-step Presentation hook uses ({@link StationStepDecisions#shouldPlayClipOnEntry},
+     * {@link StationStepContext#resumingStep} identity-compared). No-op for a step with no authored
+     * {@code Puppet.Clip} (it inherits the action's default - owned by the generic engage/swing beat
+     * for a NON-clip program - or simply idles), for the suspend-resume RE-CHECK of an
+     * already-started step, or when the session runs no puppet ({@link StationPuppetController
+     * #playStepClip}'s own guard). The generic per-cycle puppet swing is suppressed for a stepped
+     * program whose steps author any clip ({@link StationSession#stepProgramAuthorsClip}), so these
+     * per-step-entry clips never double-fire with it.
+     */
+    private static void emitStepPuppetClip(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        if (!StationStepDecisions.shouldPlayClipOnEntry(step, ctx.resumingStep)) {
+            return;
+        }
+        StationPuppetController.playStepClip(ctx.session, ctx.store, step.getPuppet().getClip());
     }
 
     /** {@code null} = every condition passed (or none authored) - proceed to the inner handler. */

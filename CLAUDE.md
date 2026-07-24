@@ -52,6 +52,26 @@ show|off>`, see `command/CLAUDE.md`) and the five `[SMOKEDIAG]` log lines in
 `StationService`/`StationHoldController` were DELETED in the round-6 cleanup pass. The PRODUCTION
 puppet route (`station.StationPuppetController`, legs P3-P5) is unaffected and stays live.
 
+**Round-7/round-8 (2026-07-23) landed on top:** round-7 fixes (the `Custody.Display.Rotation`
+`{X,Y,Z}` degrees group, the MMO-agnostic enhance session-summary + `StationEnhanceCompletedEvent`,
+the native-pickup-shaped item-gain toast) plus a maintainer-approved timing pass: **instant dispatch
+for a non-repeating authored Steps program** (`Work.Repeat: false`, e.g. the anvil's Enhance, fires
+its first and only cycle immediately at engage rather than waiting a full `Work.CycleMs`), the
+explicit `dispatchProgram` `resuming` flag + fresh-dispatch `stepDeadlineMs` zeroing, and the generic
+per-step `Presentation` emission (any step's own `Presentation` plays once at step entry, not just
+the `Present` step's). **Round-8**: (a) `Custody.Display` `Offset`/`Rotation` are now FACING-RELATIVE
+to the placed block's yaw (authored `+Z` = block front, `+X` = block right, block yaw folded into
+`Rotation.Y`, `Offset.Y` stays vertical; identity at yaw 0 so pre-round-8 values are byte-identical;
+commit `cc52fb4`, read `StationCustodyDisplay`/`asset.Custody`), and (b) **step-synced puppet swings**
+- a `StationStep` authoring its own `Puppet.Clip` plays that clip once at STEP ITERATION ENTRY
+(`StationStepRegistry`'s guard, `StationStepDecisions.shouldPlayClipOnEntry` mirroring the generic
+Presentation hook's once-per-entry / never-on-resume-recheck gate), and the generic engage/swing
+puppet clip is SUPPRESSED for a stepped program whose steps author any clip
+(`StationSession.stepProgramAuthorsClip`) so they never double-fire (a stepped program with no step
+clips keeps its one generic engage swing). The temporary `[D77DIAG]` enhance-timing instrumentation
+was REMOVED in round-8 after proving the ritual timing correct (every tagged `Log` line + the
+resume-log throttle map gone; the functional instant-dispatch/resuming/Presentation changes stay).
+
 Design
 authority: `../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
 (grounded by the decision log `../../.claude/research/rpg-stations-extraction-design.md` and the

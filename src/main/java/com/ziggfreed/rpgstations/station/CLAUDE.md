@@ -413,16 +413,27 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   zero items mid-session - the only site left to reach it in that case). The ref lives ON the
   claim (`StationCustodyClaim#displayRef`/`#setDisplayRef`, mirroring the `uniqueStack` field's own
   pattern) - no second tracking map. Offset/Scale/Rotation math
-  (`StationCustodyDisplay#resolvePosition`/`#resolveRotationRadians`/`#resolveScale`) is kept
-  PRIMITIVE-typed (doubles/floats only, no `Vector3d`/`Rotation3f` touch) so it stays unit-tested
-  without a running Hytale server, the same discipline
-  `StationEntityMountController#resolveAttachmentOffset` established. **Documented simplification**:
-  `Offset`/`Rotation` apply in WORLD SPACE, not compensated for a station block's own placement
-  rotation (`BlockType.VariantRotation` - both shipped blocks author `"NESW"`) - this codebase has
-  no existing "read a placed block's live facing yaw" helper to compose against, so a large
-  horizontal `Offset.X`/`.Z` will not track a rotated placement; both shipped exemplars keep theirs
-  small/zero for exactly this reason (see the pack's own `CLAUDE.md` for the shipped values, which
-  are provisional/in-game-unverified pending the phase-2 smoke round).
+  (`StationCustodyDisplay#resolveWorldOffset`/`#resolvePosition`/`#resolveRotationRadians`/
+  `#resolveScale`) is kept PRIMITIVE-typed (doubles/floats only, no `Vector3d`/`Rotation3f` touch)
+  so it stays unit-tested without a running Hytale server, the same discipline
+  `StationEntityMountController#resolveAttachmentOffset` established. **Round-8: `Offset`/`Rotation`
+  are FACING-RELATIVE** (commit `cc52fb4`, superseding the pre-round-8 world-space simplification
+  this bullet used to document): the ONE impure read (`#blockYawRadians`, isolated so the
+  composition cores stay pure) resolves the placed block's own facing yaw at spawn via the
+  non-deprecated `World#getBlockRotationIndex` -> `RotationTuple` (World resolved off the command
+  buffer's store through `ziggfreed-common`'s `WorldEvictors#worldOf`); `#resolveWorldOffset` then
+  rotates the authored HORIZONTAL `Offset` (X/Z) into world space by that yaw
+  (`x' = x*cos + z*sin`, `z' = -x*sin + z*cos` - the engine's own block-vector yaw convention) while
+  `Offset.Y` stays vertical, and `#resolveRotationRadians` ADDS the block yaw into the authored
+  `Rotation.Y` (`X` pitch / `Z` roll unchanged). Authoring convention: `+Z` = toward the block's
+  FRONT, `+X` = its right. A DEFAULT-orientation placement (yaw 0) is the identity (`cos 0 = 1`,
+  `sin 0 = 0`), so every pre-round-8 authored value renders BYTE-IDENTICALLY - a horizontal offset
+  now TRACKS a rotated placement instead of pointing at a fixed world axis. The read is try-guarded
+  to yaw 0 (unloaded chunk / null-facing / any throw), degrading gracefully to the prior world-space
+  behavior, never aborting the spawn. Shipped values (the anvil's `enhance.Custody.Display` gained a
+  facing-relative `Offset.X` + a `Rotation.Z` roll for the placed weapon; `convert` + the sawmill log
+  stay vertical-offset-only, so unchanged at any orientation) are in the pack's own `CLAUDE.md`,
+  still provisional pending the smoke round.
 - **The anvil arc (design section 9.5, phase 2 leg E, LANDED)**: see the mod-root `CLAUDE.md`'s
   Phase 2 section for the full narrative (the `Stamp` step, the `StampCapEngine` roll/cap engine,
   AND the live multi-action wiring leg E ALSO had to land - leg B shipped the schema/step-engine
@@ -442,6 +453,22 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   `Recipe` override needs its OWN derived-conversion cache entry). `StationService.dispatchProgram`
   reads the resolved action's `Work.effectiveRepeat()` and calls `stop(..., StopReason.RITUAL_COMPLETE, ...)`
   on a completed non-repeating program.
+- **Round-7/round-8 stepped-program timing (maintainer-approved, `[D77DIAG]`-proven then swept)**:
+  a NON-repeating authored Steps program (`Work.effectiveRepeat()` false, e.g. the anvil's Enhance)
+  gets INSTANT first dispatch - `toggle` sets `s.nextCycleAtMs = now` (not `now + CycleMs`) when
+  `stepsProgram && !work.effectiveRepeat()`, so a one-shot ritual fires its only cycle immediately
+  at engage instead of eating a full `Work.CycleMs` of pure latency (a REPEATING program - the
+  sawmill loop or any `Repeat: true` steps program - keeps the pre-delay; idle mode never applies to
+  a Steps program). `dispatchProgram` takes an explicit `resuming` flag (a resume's `startIndex` can
+  legally be 0, so `startIndex == 0` alone cannot distinguish fresh-vs-resume) and a FRESH dispatch
+  explicitly zeroes `s.stepDeadlineMs` before the walk (an explicit guarantee on top of every `Wait`
+  step's own success-path reset), plus feeds `StationStepContext#resumingStep` (the round-8 per-step
+  puppet clip + the generic per-step `Presentation` hook both read it to skip an already-played
+  step's replay on resume). **The `[D77DIAG]` enhance-timing instrumentation was REMOVED 2026-07-23
+  (round-8)** after it proved the ritual timing correct - every tagged `Log.info`/`Log.warn` across
+  `StationService`/`StationStepHandlers` plus the per-player resume-log throttle map is gone (same
+  one-sweep-removable pattern as the retired `[SMOKEDIAG]` lines); only the functional
+  instant-dispatch / `resuming` / `Presentation` changes above survive.
 - **Enhancement outcome reporting (round-7 D-6, MMO-agnostic)**: after the Stamp step's ONE custody
   write (`claim.setUniqueStack`), `StampHandler#execute` captures a
   [`StationEnhanceOutcome`](StationEnhanceOutcome.java) (`itemId` + immutable before/after
@@ -649,12 +676,24 @@ gating, or the moment-playback choke point. They are load-bearing, not decorativ
   from `StationService#runSwing`'s new `s.puppetActive` branch) BOTH fire on the puppet's `Emote`
   slot, SUPERSEDING `useActionSlotForSwing`/`playActionSwing` entirely for that session - a puppet
   has no sit pose to fight, so it needs none of the seat-mode Action-slot held-item workaround
-  (sidesteps the whole S5/R2 seated-swing-render defect class by construction). The per-step
-  `StationStep.Puppet` override (`Clip`/`Prop`) is read off the SESSION's already-tracked
-  step-resume state (`programSuspended`/`activeProgramSteps`/`programIndex`) on the SAME swing-beat
-  cadence, so a ritual's distinct beats get their own puppet clip/prop for as long as that step
-  stays suspended - no new step-dispatch hookup needed (`resolveEffectiveClip`/
-  `resolveEffectivePropItemId` are the pure decision cores, unit-tested). **Safety net** (design
+  (sidesteps the whole S5/R2 seated-swing-render defect class by construction). **The per-step
+  `StationStep.Puppet` override, round-8 step-synced swings:** the per-step **`Clip`** now plays
+  once at STEP ITERATION ENTRY (`StationStepRegistry`'s guard calls `#playStepClip` when
+  `StationStepDecisions.shouldPlayClipOnEntry(step, resumingStep)` passes - the SAME once-per-entry /
+  never-on-resume-recheck gate the generic per-step `Presentation` hook uses, `resumingStep`
+  identity-compared, so a `Wait` step's suspend/resume never replays its clip; per-iteration-entry by
+  construction, so future step repetition fires one clip per iteration for free). To stop a
+  double-fire, `StationService#runSwing`/`start` SUPPRESS the generic engage/swing puppet CLIP for a
+  stepped program whose steps author any `Clip` (`StationSession.stepProgramAuthorsClip`, resolved
+  once at engage via `StationStepDecisions.programAuthorsAnyStepClip`; a stepped program with NO step
+  clips keeps its one generic engage swing). The per-step **`Prop`** override is UNCHANGED - still
+  read off the session's step-resume state (`programSuspended`/`activeProgramSteps`/`programIndex`)
+  via `#playSwing`'s prop sync (which always runs, even when the clip is suppressed - `playSwing`'s
+  `playClip` param gates only the clip). `resolveEffectiveClip`/`resolveEffectivePropItemId`/
+  `shouldPlayClipOnEntry`/`programAuthorsAnyStepClip` are the pure decision cores, unit-tested
+  (`StationPuppetControllerTest`/`StationStepDecisionsTest`). The shipped anvil authors
+  `MMO_Emote_Hammer` on its `strike1`/`strike2` steps (the same clip the generic swing route resolves
+  for the held hammer) so the puppet visibly hammers on both strike beats. **Safety net** (design
   4.4/leg P5): `reassertOnReady` unconditionally clears any lingering `EntityScaleComponent` and
   restores the correct cosmetic model on a FRESH `PlayerReadyEvent` ref/store - NOT gated on any
   remembered session (a restart wipes every in-memory `StationSession` by construction), wired via

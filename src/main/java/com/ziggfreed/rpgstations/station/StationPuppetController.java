@@ -260,18 +260,46 @@ final class StationPuppetController {
      * store} ({@link PlayerPuppetService#playAnimation} sends a network packet, not a component
      * mutation - not part of the accessor-bug fix); the prop sync (a real {@code Hotbar} component
      * mutation) routes through {@code commandBuffer} - see {@link #syncProp}.
+     *
+     * <p><b>{@code playClip} suppression (round-8 step-synced swings):</b> {@code false} when the
+     * session runs a stepped program whose steps author their OWN per-step clips
+     * ({@link StationSession#stepProgramAuthorsClip}) - those clips fire at each step's ITERATION
+     * ENTRY ({@link StationStepRegistry}) and are the sole puppet animation driver, so the generic
+     * swing must NOT re-fire a clip on top of them. The prop sync ALWAYS runs regardless (the
+     * mirror-held refresh is orthogonal to the clip and never double-fires an animation).
      */
     static void playSwing(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
-            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nullable Player player) {
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nullable Player player, boolean playClip) {
         if (!s.puppetActive) {
             return;
         }
         StationStep.PuppetOverride override = activeStepPuppetOverride(s);
-        String clip = resolveEffectiveClip(override != null ? override.getClip() : null, s.emoteId);
-        if (clip != null && !clip.isBlank()) {
-            PlayerPuppetService.playAnimation(store, s.puppetRef, AnimationSlot.Emote, null, clip, true);
+        if (playClip) {
+            String clip = resolveEffectiveClip(override != null ? override.getClip() : null, s.emoteId);
+            if (clip != null && !clip.isBlank()) {
+                PlayerPuppetService.playAnimation(store, s.puppetRef, AnimationSlot.Emote, null, clip, true);
+            }
         }
         syncProp(s, commandBuffer, player, override);
+    }
+
+    /**
+     * The step-synced swing beat (round-8, maintainer-approved): plays {@code clip} ONCE on the
+     * puppet's {@code Emote} slot the moment a step that authors its own {@code Puppet.Clip} begins
+     * executing ({@link StationStepRegistry}'s per-step clip entry hook, gated by
+     * {@link StationStepDecisions#shouldPlayClipOnEntry}). No-op when the puppet is not active or
+     * {@code clip} is blank. Unlike {@link #playSwing} this fires the CLIP ONLY - the held prop is
+     * driven on its own path (the session default at spawn, plus the currently-suspended step's
+     * {@code Puppet.Prop} override via {@link #syncProp}), so a step authoring only a {@code Clip}
+     * (the anvil's strike beats) never disturbs it. Routes through {@code store} for the same
+     * reason {@link #playSwing}'s clip does: {@link PlayerPuppetService#playAnimation} sends a
+     * network packet, not a component mutation.
+     */
+    static void playStepClip(@Nonnull StationSession s, @Nonnull Store<EntityStore> store, @Nullable String clip) {
+        if (!s.puppetActive || clip == null || clip.isBlank()) {
+            return;
+        }
+        PlayerPuppetService.playAnimation(store, s.puppetRef, AnimationSlot.Emote, null, clip, true);
     }
 
     /**

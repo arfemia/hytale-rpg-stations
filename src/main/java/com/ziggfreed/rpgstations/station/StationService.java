@@ -191,14 +191,6 @@ public final class StationService {
     private final ConcurrentHashMap<String, StationCustodyClaim> custodyByBlock = new ConcurrentHashMap<>();
 
     /**
-     * [D77DIAG] temporary, one-sweep-removable (same pattern as the retired [SMOKEDIAG] lines) -
-     * last-logged timestamp per player for the resume-check throttle in {@link #tickFrameOnce},
-     * so the per-heartbeat-frame suspended-branch diag caps at ~250ms per session instead of
-     * spamming every frame.
-     */
-    private static final ConcurrentHashMap<UUID, Long> d77diagLastResumeLogMs = new ConcurrentHashMap<>();
-
-    /**
      * A single-shot {@code (factorId, param) -> value} lookup, pure/testable independent of the
      * live api registry (used by {@link #conditionPasses}). {@link #checkRequires} builds one
      * inline against {@link FactorRegistryImpl} + a fresh {@link FactorContext} (leg 4 - replaces
@@ -496,6 +488,12 @@ public final class StationService {
         StationAsset.Animation animation = action.getAnimation();
         s.emoteId = animation != null ? animation.getEmoteId() : null;
         s.actionClip = animation != null ? animation.getActionClip() : null;
+        // Round-8 step-synced swings: an authored Steps program whose steps author their own
+        // Puppet.Clip drives the puppet ENTIRELY from those per-step-entry clips, so the generic
+        // engage/swing puppet clip is suppressed for it (never double-fired on top). A non-stepped
+        // session, or a stepped program with no step clips, keeps its one generic engage swing.
+        s.stepProgramAuthorsClip = stepsProgram
+                && StationStepDecisions.programAuthorsAnyStepClip(Arrays.asList(action.getSteps()));
 
         // Puppet presentation (round-4 design, doc section 4.2): spawn + hide AFTER the mount
         // attach above - the puppet layers on WHATEVER hold/mount the real player already has
@@ -561,9 +559,14 @@ public final class StationService {
         StationHoldController.applyCamera(s);
         // Puppet presentation (design 4.3): supersedes the seatMode-gated real-player emote
         // entirely - the puppet has no sit pose to fight, so it always plays its own loop clip
-        // regardless of which mount/hold the (now possibly hidden) real player has.
+        // regardless of which mount/hold the (now possibly hidden) real player has. Round-8: the
+        // generic engage loop is SUPPRESSED for a stepped program whose steps author their own
+        // Puppet.Clip (s.stepProgramAuthorsClip) - the per-step-entry clips are the sole animation
+        // driver there, so an engage loop would double-fire on top of the first step's entry clip.
         if (s.puppetActive) {
-            StationPuppetController.playLoop(s, store);
+            if (!s.stepProgramAuthorsClip) {
+                StationPuppetController.playLoop(s, store);
+            }
         } else if (!s.seatMode) {
             StationHoldController.playEmote(s, store);
         }
@@ -612,22 +615,7 @@ public final class StationService {
                     // passes (never re-derived here, matching the kernel's resume contract). The
                     // phase-1 implicit program has no Wait step, so this branch is unreached by
                     // the shipped sawmill; it exists for a future authored Wait-bearing program.
-                    // [D77DIAG] temporary, one-sweep-removable - logs the ACTUAL deadline value
-                    // the gate below compares against, throttled to ~250ms per session so the
-                    // per-heartbeat-frame cadence doesn't spam the log.
-                    long d77DiagDeadline = s.stepDeadlineMs;
-                    long d77DiagLastLoggedAt = d77diagLastResumeLogMs.getOrDefault(s.playerUuid, 0L);
-                    if (now - d77DiagLastLoggedAt >= 250L) {
-                        d77diagLastResumeLogMs.put(s.playerUuid, now);
-                        Log.info("[D77DIAG] resume-check station=" + s.stationId + " action=" + s.actionId
-                                + " now=" + now + " deadline=" + d77DiagDeadline);
-                    }
-                    boolean d77DiagDue = now >= d77DiagDeadline;
-                    if (d77DiagDue) {
-                        Log.info("[D77DIAG] resume-fire station=" + s.stationId + " action=" + s.actionId
-                                + " now=" + now);
-                    }
-                    if (d77DiagDue && !resumeCycleProgram(s, store, commandBuffer)) {
+                    if (now >= s.stepDeadlineMs && !resumeCycleProgram(s, store, commandBuffer)) {
                         it.remove();
                         continue;
                     }
@@ -823,13 +811,6 @@ public final class StationService {
     private boolean runAuthoredProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player) {
-        // [D77DIAG] temporary, one-sweep-removable (see StationStepHandlers/stop() siblings) -
-        // proves the moment a stepped program is actually dispatched for a cycle, PLUS the
-        // stepDeadlineMs value at that instant (maintainer's leading-suspect check: a fresh
-        // dispatch must never inherit a stale nonzero deadline from a prior run - dispatchProgram
-        // itself now asserts this explicitly, see its own [D77DIAG] STALE warn).
-        Log.info("[D77DIAG] program-dispatch station=" + asset.getId() + " action=" + action.getActionId()
-                + " stepDeadlineMsAtEntry=" + s.stepDeadlineMs + " now=" + System.currentTimeMillis());
         List<StationStep> steps = Arrays.asList(action.getSteps());
         int attemptCycleIndex = s.cyclesDone + 1;
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, null, attemptCycleIndex, 0, false);
@@ -885,37 +866,29 @@ public final class StationService {
      * stops the session right here, non-silent, immediately after the cycle-completed event fires
      * (so XP/luck listeners still see it) - never schedules another cycle attempt.
      *
-     * <p><b>[D77DIAG] {@code resuming} + the stepDeadlineMs hardening (maintainer-flagged leading
-     * suspect, round-7 D77):</b> {@code false} from {@link #runRealCycle}/{@link #runAuthoredProgram}
-     * (a FRESH cycle attempt, {@code startIndex} always 0), {@code true} from
-     * {@link #resumeCycleProgram} (re-entering a previously suspended program at
-     * {@code s.programIndex}, which can itself legally be 0 - so {@code startIndex == 0} alone
-     * can NEVER distinguish a fresh dispatch from a resume, this explicit flag is the only
-     * reliable signal). A FRESH dispatch now EXPLICITLY resets {@code s.stepDeadlineMs} to 0
-     * before the walk starts - this used to be an IMPLICIT invariant only (every {@code Wait}
-     * step resets its own committed deadline to 0 the instant it succeeds, so a fresh dispatch
-     * "should" already read 0 by construction), made explicit + logged here so a fresh program's
-     * very first {@code Wait} step can never inherit a stale nonzero value from anywhere. Also
-     * feeds {@link StationStepContext#resumingStep} (the step object at {@code startIndex} when
-     * {@code resuming} is true, else {@code null}) - {@code StationStepRegistry}'s generic
-     * per-step Presentation entry reads it to skip the suspend-resume RE-CHECK of an
-     * already-played step.
+     * <p><b>The {@code resuming} flag + the stepDeadlineMs hardening (round-7):</b> {@code false}
+     * from {@link #runRealCycle}/{@link #runAuthoredProgram} (a FRESH cycle attempt,
+     * {@code startIndex} always 0), {@code true} from {@link #resumeCycleProgram} (re-entering a
+     * previously suspended program at {@code s.programIndex}, which can itself legally be 0 - so
+     * {@code startIndex == 0} alone can NEVER distinguish a fresh dispatch from a resume, this
+     * explicit flag is the only reliable signal). A FRESH dispatch EXPLICITLY resets
+     * {@code s.stepDeadlineMs} to 0 before the walk starts - this used to be an IMPLICIT invariant
+     * only (every {@code Wait} step resets its own committed deadline to 0 the instant it succeeds,
+     * so a fresh dispatch "should" already read 0 by construction), made explicit so a fresh
+     * program's very first {@code Wait} step can never inherit a stale nonzero value from anywhere.
+     * Also feeds {@link StationStepContext#resumingStep} (the step object at {@code startIndex}
+     * when {@code resuming} is true, else {@code null}) - {@code StationStepRegistry}'s generic
+     * per-step Presentation entry AND the round-8 per-step puppet clip read it to skip the
+     * suspend-resume RE-CHECK of an already-played step.
      */
     private boolean dispatchProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
             @Nullable ItemStack cycleOutput, int attemptCycleIndex, int startIndex, boolean resuming) {
         if (!resuming) {
-            if (s.stepDeadlineMs != 0L) {
-                // [D77DIAG] this is the exact staleness the maintainer flagged as the leading
-                // suspect for the ~600ms ritual-completion report - a fresh cycle attempt reading
-                // a nonzero stepDeadlineMs left over from somewhere else. Should never fire given
-                // every Wait step's own success-path reset; a WARN here on a live run is the
-                // smoking gun if it ever does.
-                Log.warn("[D77DIAG] program-dispatch station=" + asset.getId() + " action=" + action.getActionId()
-                        + " STALE stepDeadlineMs=" + s.stepDeadlineMs + " reset to 0 at fresh dispatch, now="
-                        + System.currentTimeMillis());
-            }
+            // A FRESH cycle attempt explicitly zeroes the suspend deadline before the walk starts,
+            // so a fresh program's very first Wait step can never inherit a stale nonzero value
+            // (an explicit guarantee on top of every Wait step's own success-path reset).
             s.stepDeadlineMs = 0L;
         }
         StationStep resumingStep = resuming && startIndex >= 0 && startIndex < steps.size()
@@ -1476,8 +1449,10 @@ public final class StationService {
             // puppet has no sit pose to fight, so it always plays its natural Emote-slot clip
             // (its own default, or the currently-suspended step's Puppet.Clip override) and syncs
             // its held prop, instead of routing anything onto the (now possibly hidden) real
-            // player.
-            StationPuppetController.playSwing(s, store, commandBuffer, swingPlayer);
+            // player. Round-8: the CLIP re-fire is suppressed for a stepped program whose steps
+            // author their own Puppet.Clip (s.stepProgramAuthorsClip - those clips fire at each
+            // step's iteration entry); the prop sync still runs regardless.
+            StationPuppetController.playSwing(s, store, commandBuffer, swingPlayer, !s.stepProgramAuthorsClip);
         } else if (useActionSlotForSwing(s.seatMode)) {
             StationHoldController.playActionSwing(s, swingPlayer, store);
         } else {
@@ -1621,9 +1596,6 @@ public final class StationService {
         if (!s.stopped.compareAndSet(false, true)) {
             return;
         }
-        // [D77DIAG] temporary, one-sweep-removable - one line in the existing stop funnel.
-        Log.info("[D77DIAG] stop station=" + s.stationId + " action=" + s.actionId + " reason=" + reason
-                + " now=" + System.currentTimeMillis());
         byPlayer.remove(s.playerUuid, s);
         if (s.blockKey != null) {
             byBlock.remove(s.blockKey, s.playerUuid);

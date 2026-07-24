@@ -96,6 +96,59 @@ final class StationStepDecisions {
         return !StationStep.TYPE_PRESENT.equalsIgnoreCase(step.getType());
     }
 
+    // ==================== Step-synced puppet swings (maintainer-approved, round-8) ====================
+
+    /**
+     * Whether a step's own authored {@code Puppet.Clip} should play ONCE on the session's puppet as
+     * this handler call begins EXECUTING - the step-synced swing, mirroring
+     * {@link #shouldEmitPresentationOnEntry}'s once-per-ITERATION-entry, never-on-resume-recheck
+     * semantics (the trigger is per-iteration-entry BY CONSTRUCTION, so future step repetition -
+     * N or stat-driven N-M iterations - fires one clip per iteration for free). {@code false} when
+     * {@code step} IS {@code resumingStep} (the suspend-resume RE-CHECK of a step that already
+     * played its clip on its first entry - a {@code Wait} step must never replay it on every
+     * heartbeat re-check while suspended, only once when it BEGINS). {@code false} when the step
+     * authors no non-blank {@code Puppet.Clip} (nothing to play - the step either inherits the
+     * action's default clip, which the GENERIC engage/swing beat owns for a non-clip program, or
+     * simply idles, e.g. the anvil's {@code settle} step). Identity comparison (never
+     * {@code equals}), for the SAME reason {@link #shouldEmitPresentationOnEntry} uses it -
+     * {@code resumingStep} and a later step in the same authored steps list are the exact same
+     * object reference across a suspend/resume pair.
+     */
+    static boolean shouldPlayClipOnEntry(@Nonnull StationStep step, @Nullable StationStep resumingStep) {
+        if (step == resumingStep) {
+            return false;
+        }
+        return stepAuthorsClip(step);
+    }
+
+    /**
+     * Whether ANY step in an authored program authors a non-blank per-step {@code Puppet.Clip} -
+     * the gate {@code StationService} resolves ONCE at engage to decide whether to SUPPRESS the
+     * generic engage/swing puppet clip (round-8): a stepped program whose steps author clips drives
+     * the puppet ENTIRELY from those per-step-entry clips, so the generic per-cycle swing must not
+     * double-fire on top of them. {@code false} for a null/empty list or a program whose every step
+     * inherits the action's default clip - that program KEEPS its one generic engage swing (no step
+     * clip ever fires at entry, so nothing would drive the puppet otherwise).
+     */
+    static boolean programAuthorsAnyStepClip(@Nullable List<StationStep> steps) {
+        if (steps == null) {
+            return false;
+        }
+        for (StationStep step : steps) {
+            if (step != null && stepAuthorsClip(step)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether {@code step} authors a non-blank {@code Puppet.Clip} override (the raw predicate both hooks share). */
+    private static boolean stepAuthorsClip(@Nonnull StationStep step) {
+        StationStep.PuppetOverride puppet = step.getPuppet();
+        String clip = puppet != null ? puppet.getClip() : null;
+        return clip != null && !clip.isBlank();
+    }
+
     /** The index of the step whose {@code Id} equals {@code gotoId} (case-insensitive), or -1 when absent/not found. */
     static int resolveGotoTarget(@Nonnull List<StationStep> steps, @Nullable String gotoId) {
         if (gotoId == null || gotoId.isBlank()) {

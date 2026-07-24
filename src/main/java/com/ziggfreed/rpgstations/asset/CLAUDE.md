@@ -48,12 +48,21 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   `"HiddenManager"` routes were retired before this schema shipped. `Look.Source` defaults
   `"PlayerClone"` (clones the live player skin) with `"Model"` (a fixed authored look) as an open
   performer seam for a future minion/provider route. `Offset`/`Yaw` place the puppet relative to
-  the station's block-top anchor (world-space, same simplification as `Custody.Display`).
+  the station's block-top anchor in WORLD SPACE (NOT compensated for the block's placement facing -
+  unlike `Custody.Display`, which became facing-relative in round-8; the puppet path
+  `StationPuppetController#spawnAndHide` -> `PlayerPuppetService#offsetPosition` still adds a plain
+  world-space offset, so keep any horizontal `Offset` small on a rotatable block).
   `Prop.Source` defaults `"MirrorHeld"` (copies the player's live hotbar item onto the puppet);
   `"ItemId"` forces a specific prop, `"None"` empties the puppet's hands (the anvil's `enhance`
   stamp step uses this per-step). A `StationStep` carries its own small `{Clip, Prop}` override
   reusing this exact `Prop` codec (see `StationStep.PuppetOverride`) for moment-to-moment swaps
-  without touching the session-scoped hide/look/spawn knobs. Engine-side: see
+  without touching the session-scoped hide/look/spawn knobs. **Round-8 step-synced swings:** an
+  authored per-step `Puppet.Clip` now plays once on the puppet at that step's ITERATION ENTRY
+  (`station.StationStepRegistry`, gated by `StationStepDecisions.shouldPlayClipOnEntry`), and the
+  generic engage/swing puppet clip is suppressed for a stepped program authoring any step clip so
+  they never double-fire - the anvil's `strike1`/`strike2` steps author `MMO_Emote_Hammer` so the
+  puppet visibly hammers on each strike beat; the per-step `Prop` swap is unchanged (still the
+  swing-beat sync). Engine-side: see
   `../station/CLAUDE.md`'s puppet-engine bullet (`StationPuppetController`); both shipped stations
   (Sawmill, Anvil) author `Puppet` in `content-packs/skill-stations-pack` - see that pack's own
   `CLAUDE.md`.
@@ -84,7 +93,13 @@ entries into the matching `station`/`loot` package catalog on `LoadedAssetsEvent
   route ONLY (a block-shaped custody item skips the `HeadRotation` mirror - see the codec's own m5
   caveat javadoc). The retired scalar form is migration-tolerated: a stale bare-number `Rotation`
   decodes as legacy Y-only yaw with a WARN, never aborting the asset load (m6, via a small
-  `InheritCodec` wrapper over the `{X,Y,Z}` group codec). See `../station/CLAUDE.md` for the full engine-side behavior
+  `InheritCodec` wrapper over the `{X,Y,Z}` group codec). **Round-8 (commit `cc52fb4`): `Offset`/
+  `Rotation` are now FACING-RELATIVE to the placed block's own yaw** (superseding leg G's world-space
+  application): the horizontal `Offset` (X/Z) is rotated by the block's facing (authored `+Z` = block
+  FRONT, `+X` = block right; `Offset.Y` stays vertical) and the block yaw is added into `Rotation.Y`
+  (`X` pitch / `Z` roll unchanged), so a rotated station carries its prop's position AND facing with
+  it. A default-orientation placement (yaw 0) is the identity, so pre-round-8 values render
+  byte-identically. See `../station/CLAUDE.md` for the full engine-side behavior
   (`StationCustody`/`StationCustodyClaim`/`StationCustodyBreakSystem`/`StationCustodyDisplay`).
 - **[`ActionInput`](ActionInput.java)** (design 9.1) - the diegetic action-selection matcher:
   `{ItemId?, ResourceTypeId?, Tags?, Function?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, resolved

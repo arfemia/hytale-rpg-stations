@@ -114,6 +114,16 @@ final class StationSession {
     String emoteId;
     /** The seated-worker swing fix's optional {@code Animation.ActionClip} override. */
     String actionClip;
+    /**
+     * True when this session runs an authored Steps program whose steps author any per-step
+     * {@code Puppet.Clip} (round-8 step-synced swings) - SUPPRESSES the generic engage/swing puppet
+     * clip so the per-step-entry clips ({@code StationStepRegistry}) are the sole puppet animation
+     * driver and never double-fire on top of a generic swing. False for a non-stepped session, or a
+     * stepped program with no step clips (that keeps its one generic engage swing). Resolved once at
+     * engage ({@code StationStepDecisions#programAuthorsAnyStepClip}); the prop-sync path is
+     * unaffected (see {@code StationPuppetController#playSwing}).
+     */
+    boolean stepProgramAuthorsClip;
     /** The station's held-tool gate, re-checked each heartbeat (null = no requirement). */
     StationAsset.Tool toolReq;
 

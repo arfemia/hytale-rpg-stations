@@ -188,3 +188,39 @@ outcome; the sibling CustomSkill migration and XP-toast-stacking defects land MM
   same packet field a native pickup uses, routed through `ziggfreed-common`'s shared
   `feedback.Notify#itemKeyed`), instead of a leading `+N` in the text that froze stale when the
   client coalesced consecutive grants.
+
+### Round-8: facing-relative custody display + step-synced puppet swings (2026-07-23)
+
+- Adds facing-relative `Custody.Display` placement: a placed prop's authored `Offset`/`Rotation`
+  are now relative to the placed station block's own facing yaw instead of absolute world axes.
+  `StationCustodyDisplay` reads the block's non-deprecated `getBlockRotationIndex` yaw at spawn,
+  rotates the horizontal `Offset` (X/Z) by it (authored `+Z` = toward the block's FRONT, `+X` = its
+  right; `Y` stays vertical), and adds the block yaw into `Rotation.Y`, so a rotated station carries
+  its display prop's position AND facing around with it. A default-orientation placement (yaw 0) is
+  the identity, so every pre-round-8 authored value renders byte-identically (no pack re-tune
+  needed); a failed block-facing read degrades gracefully to the prior world-space behavior and
+  never aborts the spawn. New pure `resolveWorldOffset` plus extended `resolvePosition`/
+  `resolveRotationRadians` take the block yaw as a plain scalar (unit-tested, all offset/rotation
+  math still primitive-typed so it needs no live server).
+- Adds step-synced puppet swings: a `StationStep` that authors its own `Puppet.Clip` now plays that
+  clip once on the session's puppet the moment the step begins EXECUTING, at each step's ITERATION
+  entry (`StationStepRegistry`'s guard, gated by the new pure `StationStepDecisions
+  .shouldPlayClipOnEntry`, mirroring the generic per-step Presentation hook's once-per-entry,
+  never-on-resume-recheck semantics - per-iteration-entry by construction, forward-compatible with
+  the future step-repetition work). The generic engage/swing puppet clip is SUPPRESSED for a stepped
+  program whose steps author any clip (`StationSession.stepProgramAuthorsClip`, resolved once at
+  engage via `StationStepDecisions.programAuthorsAnyStepClip`) so the step-entry clips are the sole
+  animation driver and never double-fire on top of a generic swing; a stepped program with NO step
+  clips keeps its one generic engage swing, and the puppet prop-sync path is unaffected. The shipped
+  anvil's Enhance ritual authors `MMO_Emote_Hammer` on its `strike1`/`strike2` steps so the puppet
+  visibly hammers on both strike beats (content ships in `content-packs/skill-stations-pack`).
+- Removes the temporary `[D77DIAG]` enhance-timing instrumentation after it proved the stepped-
+  ritual timing correct: every `[D77DIAG]` `Log.info`/`Log.warn` line across `StationService`/
+  `StationStepHandlers` plus the per-player resume-log throttle map is gone (same one-sweep-removable
+  pattern as the retired `[SMOKEDIAG]` lines). The functional changes that landed alongside it stay:
+  instant dispatch for a non-repeating authored Steps program (`Work.Repeat: false`, e.g. the anvil's
+  Enhance, fires its first and only cycle immediately at engage instead of waiting a full
+  `Work.CycleMs` - a ritual runs once, so the pre-delay was pure latency; a repeating program is
+  unaffected), the explicit `dispatchProgram` `resuming` flag with fresh-dispatch `stepDeadlineMs`
+  zeroing, and the generic per-step Presentation emission (any step's own authored `Presentation`
+  plays once when it begins executing, not just the dedicated `Present` step's).

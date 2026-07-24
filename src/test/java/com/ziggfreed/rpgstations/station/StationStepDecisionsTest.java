@@ -94,6 +94,77 @@ public class StationStepDecisionsTest {
                 "a later step reached within a resumed walk is still its OWN fresh entry");
     }
 
+    // ==================== Step-synced puppet swings (maintainer-approved, round-8) ====================
+
+    private static StationStep waitWithClip(String id, String clip) {
+        return StationStep.of(id, StationStep.TYPE_WAIT)
+                .withPuppet(StationStep.PuppetOverride.of(clip, null));
+    }
+
+    @Test
+    void clipEntry_freshDispatch_stepAuthorsClip_plays() {
+        StationStep strike = waitWithClip("strike1", "MMO_Emote_Hammer");
+        assertTrue(StationStepDecisions.shouldPlayClipOnEntry(strike, null),
+                "a fresh (non-resuming) dispatch plays a step's own authored Puppet.Clip at its iteration entry");
+    }
+
+    @Test
+    void clipEntry_stepAuthorsNoPuppet_neverPlays() {
+        StationStep settle = StationStep.of("settle", StationStep.TYPE_WAIT);
+        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(settle, null),
+                "a step with no Puppet override authors no clip - nothing to play (it idles)");
+    }
+
+    @Test
+    void clipEntry_stepAuthorsBlankClip_neverPlays() {
+        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(waitWithClip("s", "   "), null),
+                "a blank Clip is 'inherit the default', owned by the generic swing - not a per-step-entry play");
+        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(waitWithClip("s", null), null),
+                "an absent Clip (Prop-only override) never plays a clip at entry");
+    }
+
+    @Test
+    void clipEntry_resumeReCheckOfTheSuspendedStep_doesNotReplay() {
+        StationStep strike = waitWithClip("strike1", "MMO_Emote_Hammer");
+        // The exact SAME object identity as the step a resume re-enters must not replay its clip
+        // on every heartbeat re-check while suspended - only ONCE when it BEGINS.
+        assertFalse(StationStepDecisions.shouldPlayClipOnEntry(strike, strike),
+                "the resume re-check of an already-started Wait must not replay its Puppet.Clip");
+    }
+
+    @Test
+    void clipEntry_resumeDispatch_stillPlaysForALaterFreshStep() {
+        StationStep resumedStrike = waitWithClip("strike1", "MMO_Emote_Hammer");
+        StationStep laterStrike = waitWithClip("strike2", "MMO_Emote_Hammer");
+        assertTrue(StationStepDecisions.shouldPlayClipOnEntry(laterStrike, resumedStrike),
+                "a later clip-authoring step reached within a resumed walk is still its OWN fresh iteration entry");
+    }
+
+    @Test
+    void programAuthorsAnyStepClip_nullOrEmpty_false() {
+        assertFalse(StationStepDecisions.programAuthorsAnyStepClip(null));
+        assertFalse(StationStepDecisions.programAuthorsAnyStepClip(List.of()));
+    }
+
+    @Test
+    void programAuthorsAnyStepClip_noStepAuthorsAClip_false() {
+        List<StationStep> steps = List.of(
+                StationStep.of("settle", StationStep.TYPE_WAIT),
+                StationStep.of("stamp", StationStep.TYPE_STAMP)
+                        .withPuppet(StationStep.PuppetOverride.of(null, null)));
+        assertFalse(StationStepDecisions.programAuthorsAnyStepClip(steps),
+                "a program whose every step inherits the default clip keeps its one generic engage swing");
+    }
+
+    @Test
+    void programAuthorsAnyStepClip_anyStepAuthorsAClip_true() {
+        List<StationStep> steps = List.of(
+                waitWithClip("strike1", "MMO_Emote_Hammer"),
+                StationStep.of("settle", StationStep.TYPE_WAIT));
+        assertTrue(StationStepDecisions.programAuthorsAnyStepClip(steps),
+                "one clip-authoring step is enough to suppress the generic swing for the whole program");
+    }
+
     // ==================== Conditions gate (design 9.3's "Branch is NOT a step type") ====================
 
     private static final StationService.FactorLookup ALWAYS_TEN = (factorId, param) -> 10.0;
