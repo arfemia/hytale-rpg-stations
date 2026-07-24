@@ -12,10 +12,13 @@ import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.math.vector.Rotation3f;
 import com.hypixel.hytale.protocol.InteractionType;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.RotationTuple;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.entity.component.Interactable;
 import com.hypixel.hytale.server.core.modules.interaction.Interactions;
+import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.entity.ItemPropEntityService;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.util.Log;
@@ -46,10 +49,13 @@ import com.ziggfreed.rpgstations.util.Log;
  * already resets a stale Loaded block state on the next interaction
  * ({@code StationService#toggle}) covers the whole picture.
  *
- * <p><b>Offset/Scale/Rotation math is kept PRIMITIVE-typed</b> ({@link #resolvePosition}/
- * {@link #resolveRotationRadians}/{@link #resolveScale} take/return only doubles/floats, never touch
- * {@link Vector3d}/{@link Rotation3f}) so it stays unit-testable without a running Hytale server -
- * the same discipline {@code StationEntityMountController#resolveAttachmentOffset} established.
+ * <p><b>Offset/Scale/Rotation math is kept PRIMITIVE-typed</b> ({@link #resolveWorldOffset}/
+ * {@link #resolvePosition}/{@link #resolveRotationRadians}/{@link #resolveScale} take/return only
+ * doubles/floats - the placed block's facing enters as a plain {@code blockYawRadians} scalar, never
+ * a live block/world type - so it stays unit-testable without a running Hytale server, the same
+ * discipline {@code StationEntityMountController#resolveAttachmentOffset} established. The ONE impure
+ * read (the placed block's facing yaw from the world) is {@link #blockYawRadians}, isolated so the
+ * composition cores stay pure.
  *
  * <p><b>Press-F RETRIEVAL (new feature, the R6 fix round)</b>: the spawned display entity is
  * marked press-F interactable ({@link Interactable} + a {@link Interactions} entry on
@@ -123,9 +129,14 @@ final class StationCustodyDisplay {
             return null;
         }
         try {
-            double[] pos = resolvePosition(display, blockX, blockY, blockZ);
+            // FACING-RELATIVE composition (round-8): read the placed block's own facing yaw so the
+            // authored Offset/Rotation are relative to the block's front, not absolute world axes -
+            // a rotated station carries its display prop's position AND facing around with it. The
+            // read is the ONE impure step; the composition itself stays in the pure cores below.
+            double blockYawRadians = blockYawRadians(commandBuffer, blockX, blockY, blockZ);
+            double[] pos = resolvePosition(display, blockX, blockY, blockZ, blockYawRadians);
             Vector3d position = new Vector3d(pos[0], pos[1], pos[2]);
-            float[] rot = resolveRotationRadians(display);
+            float[] rot = resolveRotationRadians(display, blockYawRadians);
             // Rotation3f's 3-arg ctor order is (pitch, yaw, roll) = (X, Y, Z) radians. Applied to
             // TransformComponent on both prop routes; MIRRORED onto HeadRotation for the item route
             // ONLY (block-shaped items skip it) - see Custody.Display's own m5 caveat javadoc.
@@ -162,31 +173,90 @@ final class StationCustodyDisplay {
     }
 
     /**
-     * Pure: the block-top anchor ({@code blockX+0.5, blockY+0.5, blockZ+0.5}) shifted by
-     * {@code display}'s authored {@code Offset} (each leaf independently nullable, default 0).
-     * Returns {@code [x, y, z]} - kept primitive so it needs no live Hytale type.
+     * Impure: the placed station block's own facing yaw at {@code (blockX, blockY, blockZ)}, in
+     * radians, for the facing-relative composition (round-8). Resolves the {@link World} off the
+     * {@code commandBuffer}'s store (the engine-stable {@code store -> externalData -> world} chain,
+     * via {@link WorldEvictors#worldOf(com.hypixel.hytale.component.Store)}), reads the block's
+     * non-deprecated {@code getBlockRotationIndex} (a placed block's rotation is a discrete
+     * {@link RotationTuple} of 0/90/180/270 yaw/pitch/roll enums), and returns just the yaw's radians.
+     *
+     * <p>Try-guarded to {@code 0.0} (an unloaded chunk, a null-facing read, any throw) - a failed read
+     * degrades gracefully to the pre-round-8 WORLD-SPACE behavior (yaw 0 = no rotation of the authored
+     * offset, no yaw added to the authored rotation), never aborts the spawn. World-thread by
+     * construction (the sole caller, {@link #spawn}, runs inside {@code toggle()}'s interaction-handler
+     * processing on the world thread), matching the {@code getBlockRotationIndex} chunk-read contract.
+     */
+    private static double blockYawRadians(@Nonnull CommandBuffer<EntityStore> commandBuffer,
+            int blockX, int blockY, int blockZ) {
+        try {
+            World world = WorldEvictors.worldOf(commandBuffer.getStore());
+            int index = world.getBlockRotationIndex(blockX, blockY, blockZ);
+            return RotationTuple.get(index).yaw().getRadians();
+        } catch (Throwable t) {
+            Log.fine("STATION custody display could not read block facing at " + blockX + "," + blockY
+                    + "," + blockZ + " - falling back to world-space offset: " + t.getMessage());
+            return 0.0;
+        }
+    }
+
+    /**
+     * Pure: {@code display}'s authored horizontal {@code Offset} (X/Z) ROTATED into world space by
+     * {@code blockYawRadians} (the placed block's own facing), with {@code Offset.Y} left VERTICAL
+     * (never rotated). Returns {@code [worldOffsetX, offsetY, worldOffsetZ]} - kept primitive so it
+     * needs no live Hytale type.
+     *
+     * <p><b>Facing-relative convention (round-8):</b> the authored {@code Offset.X}/{@code .Z} are in
+     * the block's OWN horizontal frame, rotated by the block's yaw using the engine's own block-vector
+     * yaw convention ({@code Rotation.rotateY}: {@code x' = x*cos(yaw) + z*sin(yaw)},
+     * {@code z' = -x*sin(yaw) + z*cos(yaw)}), so the display prop's shift tracks the block's front for
+     * any placement orientation. At a DEFAULT-orientation placement ({@code blockYawRadians == 0}) this
+     * is the identity ({@code cos 0 = 1}, {@code sin 0 = 0}), so every pre-round-8 authored value
+     * renders BYTE-IDENTICALLY - existing packs need no re-tune.
      */
     @Nonnull
-    static double[] resolvePosition(@Nullable Custody.Display display, int blockX, int blockY, int blockZ) {
+    static double[] resolveWorldOffset(@Nullable Custody.Display display, double blockYawRadians) {
         Custody.Display.Offset offset = display != null ? display.getOffset() : null;
         double ox = offset != null && offset.getX() != null ? offset.getX() : 0.0;
         double oy = offset != null && offset.getY() != null ? offset.getY() : 0.0;
         double oz = offset != null && offset.getZ() != null ? offset.getZ() : 0.0;
-        return new double[] {blockX + 0.5 + ox, blockY + 0.5 + oy, blockZ + 0.5 + oz};
+        double cos = Math.cos(blockYawRadians);
+        double sin = Math.sin(blockYawRadians);
+        double worldX = ox * cos + oz * sin;
+        double worldZ = -ox * sin + oz * cos;
+        return new double[] {worldX, oy, worldZ};
     }
 
     /**
-     * Pure: {@code display}'s authored {@code Rotation} group ({@code {X,Y,Z}} degrees, world-space)
-     * as {@code [pitchRad, yawRad, rollRad]}; each axis zero when absent. Kept primitive so it needs
-     * no live Hytale type - the 3-axis successor to the pre-round-7 single-yaw {@code resolveYawRadians}.
+     * Pure: the block-top anchor ({@code blockX+0.5, blockY+0.5, blockZ+0.5}) shifted by
+     * {@code display}'s authored {@code Offset}, the horizontal (X/Z) part rotated into world space by
+     * the placed block's own {@code blockYawRadians} facing (see {@link #resolveWorldOffset}; Y stays
+     * vertical). Returns {@code [x, y, z]} - kept primitive so it needs no live Hytale type.
      */
     @Nonnull
-    static float[] resolveRotationRadians(@Nullable Custody.Display display) {
+    static double[] resolvePosition(@Nullable Custody.Display display, int blockX, int blockY, int blockZ,
+            double blockYawRadians) {
+        double[] off = resolveWorldOffset(display, blockYawRadians);
+        return new double[] {blockX + 0.5 + off[0], blockY + 0.5 + off[1], blockZ + 0.5 + off[2]};
+    }
+
+    /**
+     * Pure: {@code display}'s authored {@code Rotation} group ({@code {X,Y,Z}} degrees) as
+     * {@code [pitchRad, yawRad, rollRad]}, with the placed block's own {@code blockYawRadians} facing
+     * ADDED into the yaw (Y) axis so the prop turns WITH the block (round-8 facing-relative). X (pitch)
+     * and Z (roll) are the prop's own local tilt, unchanged by the block facing (they ride the yaw
+     * through the engine's Y-X-Z composition). Each authored axis is zero when absent; at a
+     * default-orientation placement ({@code blockYawRadians == 0}) the yaw is the authored Y verbatim,
+     * so pre-round-8 values render identically. Kept primitive so it needs no live Hytale type - the
+     * 3-axis successor to the pre-round-7 single-yaw {@code resolveYawRadians}.
+     */
+    @Nonnull
+    static float[] resolveRotationRadians(@Nullable Custody.Display display, double blockYawRadians) {
         Custody.Display.Rotation r = display != null ? display.getRotation() : null;
         double x = r != null && r.getX() != null ? r.getX() : 0.0;
         double y = r != null && r.getY() != null ? r.getY() : 0.0;
         double z = r != null && r.getZ() != null ? r.getZ() : 0.0;
-        return new float[] {(float) Math.toRadians(x), (float) Math.toRadians(y), (float) Math.toRadians(z)};
+        return new float[] {(float) Math.toRadians(x), (float) (Math.toRadians(y) + blockYawRadians),
+                (float) Math.toRadians(z)};
     }
 
     /** Pure: {@code display}'s authored {@code Scale}, defaulted to {@code 1.0} when absent/non-positive. */

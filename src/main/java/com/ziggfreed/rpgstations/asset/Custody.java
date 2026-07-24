@@ -160,17 +160,27 @@ public final class Custody {
      * {@link #scale} resizes the prop, {@link #rotation} (a nested {@code {X,Y,Z}} degrees group)
      * turns it about all three axes.
      *
-     * <p><b>World-space, not block-facing-relative (a documented simplification):</b> a station
-     * block placed with a non-default {@code VariantRotation} orientation is NOT compensated for
-     * here - {@link #offset} and {@link #rotation} apply in absolute world space. This codebase
-     * has no existing "read a placed block's live facing yaw" helper to compose against (the
-     * seat-mount route sidesteps the question entirely via the native {@code BlockMountAPI}), so
-     * a non-zero horizontal offset on a station whose block CAN be placed rotated will land
-     * consistently but not "toward the front" for every placement. Both shipped exemplars (the
-     * sawmill's placed logs, the anvil's placed weapon) use a small/zero horizontal offset for
-     * exactly this reason. A future leg can compose the offset against the block's own rotation
-     * (see {@code BlockRotationUtil}/{@code RotationTuple} in the shared source) if a station
-     * needs a large facing-relative offset.
+     * <p><b>FACING-RELATIVE (round-8), not absolute world-space:</b> {@link #offset} and
+     * {@link #rotation} are authored RELATIVE TO THE PLACED STATION BLOCK'S OWN FACING, not in
+     * absolute world axes (the pre-round-8 simplification). {@code station.StationCustodyDisplay}
+     * reads the placed block's own facing yaw at spawn time (the non-deprecated
+     * {@code World#getBlockRotationIndex} -> {@code RotationTuple#yaw()}, resolved off the spawn
+     * command buffer's store) and composes it two ways: the horizontal {@link Offset} (X/Z) is
+     * ROTATED by that yaw (Y stays vertical), and the block's yaw is ADDED into the {@link Rotation}
+     * group's Y (yaw) axis - so a station block placed rotated carries its display prop's POSITION and
+     * FACING around with it, and a {@code +Z} authored offset lands toward the SAME face of the block
+     * for every placement orientation. <b>Convention:</b> authored {@code Offset.X}/{@code .Z} are in
+     * the block's own horizontal frame under the engine's block-vector yaw convention
+     * ({@code Rotation.rotateY}); at a DEFAULT-orientation placement (block yaw {@code None}/0deg) the
+     * local frame equals the world frame and the yaw addition is 0, so <b>every pre-round-8 authored
+     * value renders byte-identically</b> - existing packs need no blind re-tune (both shipped exemplars
+     * authored only a vertical {@code Offset.Y}, untouched by the change; only the anvil's enhance
+     * weapon adds a horizontal leaf this round). The composition math is the pure, unit-tested
+     * {@code StationCustodyDisplay#resolveWorldOffset}/{@code #resolveRotationRadians} (each taking the
+     * block yaw as a plain scalar); the ONE impure block-facing read try-guards to yaw 0 (an unloaded
+     * chunk / bad read degrades to the old world-space behavior, never aborts the spawn). Grounded in
+     * the shared source's {@code BlockRotationUtil}/{@code RotationTuple}/{@code Rotation} discrete
+     * 0/90/180/270 block-rotation model.
      *
      * <p><b>Rotation applies through {@code TransformComponent} on BOTH spawn routes, but is only
      * MIRRORED onto {@code HeadRotation} for the ITEM-entity route (critique m5):</b> the anvil's
@@ -227,7 +237,7 @@ public final class Custody {
         }
 
         /**
-         * World-space rotation of the display prop, in DEGREES per axis (engine default 0 per
+         * FACING-RELATIVE rotation of the display prop, in DEGREES per axis (engine default 0 per
          * leaf). {@code X} = pitch (tips the prop forward/back about the horizontal axis - the
          * "lay it flat" axis), {@code Y} = yaw (turns it about the vertical axis), {@code Z} =
          * roll (tips it sideways about its own long axis). Applied engine-side as radians in the
@@ -236,6 +246,12 @@ public final class Custody {
          * {@code BlockMountPoint}/{@code EntitySpawnPage} human-authoring precedent), never raw
          * {@code Rotation3f.CODEC} radians. Every leaf is independently nullable (partial owner
          * overlays and native {@code Parent} reuse), mirroring {@link Offset}.
+         *
+         * <p><b>Round-8 facing-relative:</b> the placed block's own facing yaw is ADDED into the
+         * {@code Y} (yaw) axis at spawn so the prop turns WITH the block (see the enclosing
+         * {@link Display} class javadoc for the full convention); {@code X}/{@code Z} are the prop's
+         * own local pitch/roll and ride that yaw unchanged. At a default-orientation placement the
+         * added yaw is 0, so an authored {@code Y} reads exactly as before.
          *
          * <p><b>Migration tolerance (critique m6):</b> the {@code "Rotation"} leaf USED to be a
          * bare {@code Codec.DOUBLE} (a single world-space yaw). This unreleased-cycle swap to the
@@ -375,7 +391,14 @@ public final class Custody {
             }
         }
 
-        /** A relative {@code X}/{@code Y}/{@code Z} shift off the block-top anchor, each leaf independently nullable (default 0). */
+        /**
+         * A relative {@code X}/{@code Y}/{@code Z} shift off the block-top anchor, each leaf
+         * independently nullable (default 0). <b>Round-8 facing-relative:</b> the horizontal
+         * {@code X}/{@code Z} are in the block's OWN facing frame (rotated by the placed block's yaw
+         * at spawn; {@code +Z} = toward the block's front), {@code Y} stays vertical - see the
+         * enclosing {@link Display} class javadoc for the convention. A default-orientation placement
+         * makes the block frame equal the world frame, so pre-round-8 values are unchanged.
+         */
         public static final class Offset {
             @Nullable protected Double x;
             @Nullable protected Double y;
