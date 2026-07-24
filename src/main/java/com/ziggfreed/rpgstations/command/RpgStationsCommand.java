@@ -118,10 +118,13 @@ public final class RpgStationsCommand extends CommandBase {
     }
 
     /**
-     * {@code npcspike start [noserialize] | walk | stop} - the throwaway scope-3 NPC-performer
-     * spike (dev-only). Applies to the CALLING player only (it clones the caller's own skin onto
-     * the spawned Role NPC and drives it from the caller's position/facing). Delegates the
-     * world-thread work to {@link NpcPerformerSpike}.
+     * {@code npcspike start [noserialize] | walk | stop | prop <itemId|off> | clip <emoteId>} -
+     * the throwaway scope-3 NPC-performer spike (dev-only). Applies to the CALLING player only
+     * (it clones the caller's own skin onto the spawned Role NPC and drives it from the caller's
+     * position/facing). {@code prop}/{@code clip} are the decision-48 batch-2 spike extension
+     * (prop mirroring + clip playing, the two performer-contract items the merged spike left
+     * UNPROVEN - see {@link NpcPerformerSpike}'s class javadoc). Delegates the world-thread work
+     * to {@link NpcPerformerSpike}.
      */
     private void npcspike(@Nonnull CommandContext ctx) {
         if (!(ctx.sender() instanceof PlayerRef player)) {
@@ -130,12 +133,15 @@ public final class RpgStationsCommand extends CommandBase {
         }
         String action = ctx.provided(actionArg) ? actionArg.get(ctx) : null;
         action = action == null ? "" : action.trim().toLowerCase(Locale.ROOT);
+        // Preserve case: item ids and emote ids (e.g. "RPG_Emote_Hammer") are case-sensitive.
         String opt = ctx.provided(optArg) ? optArg.get(ctx) : null;
         boolean noSerialize = opt != null && "noserialize".equalsIgnoreCase(opt.trim());
         switch (action) {
             case "start" -> npcSpike.start(player, noSerialize);
             case "walk" -> npcSpike.walk(player);
             case "stop" -> npcSpike.stop(player);
+            case "prop" -> npcSpike.prop(player, opt);
+            case "clip" -> npcSpike.clip(player, opt);
             default -> ctx.sendMessage(RpgMsg.tr("command.npcspike.usage").color(Color.YELLOW));
         }
     }

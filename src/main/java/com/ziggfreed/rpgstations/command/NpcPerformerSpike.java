@@ -17,11 +17,14 @@ import com.hypixel.hytale.component.RemoveReason;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.function.consumer.TriConsumer;
 import com.hypixel.hytale.math.vector.Rotation3f;
+import com.hypixel.hytale.protocol.AnimationSlot;
 import com.hypixel.hytale.protocol.PlayerSkin;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.asset.type.model.config.Model;
 import com.hypixel.hytale.server.core.cosmetics.CosmeticsModule;
+import com.hypixel.hytale.server.core.entity.AnimationUtils;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
+import com.hypixel.hytale.server.core.modules.entity.component.ActiveAnimationComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerSkinComponent;
@@ -34,21 +37,27 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.npc.NPCPlugin;
 import com.hypixel.hytale.server.npc.entities.NPCEntity;
 import com.hypixel.hytale.server.npc.role.Role;
+import com.hypixel.hytale.server.npc.util.InventoryHelper;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
  * SCOPE-3 NPC-performer spike (throwaway dev harness): drives the {@code RPG_Performer_Spike}
- * Role NPC through {@code /rpgstations npcspike start [noserialize] | walk | stop}, so the
- * maintainer can smoke the open scope-3 questions a Role performer (as opposed to the shipped
- * bare-{@code Holder} puppet) raises: does a cloned PLAYER skin render on a walking
- * {@link NPCEntity}? does its native {@code MotionControllerWalk} gait / step-up beat the
- * hand-rolled A* walker? is there really no nameplate / health bar / F-prompt / crosshair target?
- * how does the {@code NonSerialized}-on-NPC variant behave across a relog?
+ * Role NPC through {@code /rpgstations npcspike start [noserialize] | walk | stop | prop
+ * <itemId|off> | clip <emoteId>}, so the maintainer can smoke the open scope-3 questions a Role
+ * performer (as opposed to the shipped bare-{@code Holder} puppet) raises: does a cloned PLAYER
+ * skin render on a walking {@link NPCEntity}? does its native {@code MotionControllerWalk} gait /
+ * step-up beat the hand-rolled A* walker? is there really no nameplate / health bar / F-prompt /
+ * crosshair target? how does the {@code NonSerialized}-on-NPC variant behave across a relog? does
+ * the puppet's PROP technique (a {@code Hotbar} write) render a held item on the NPC? does the
+ * puppet's CLIP technique ({@code ActiveAnimationComponent} + {@code AnimationUtils.playAnimation})
+ * fire a one-shot animation on the NPC without fighting the Role brain's own walk gait?
  *
  * <p>The design authority is
  * {@code .claude/research/raw/rpg-stations-npc-performer-feasibility-2026-07-24.md} (the MINIMAL
- * SPIKE, section 5) + the recon digest
+ * SPIKE, section 5) + {@code .claude/research/raw/rpg-stations-look-source-performer-seam-2026-07-24.md}
+ * (section 2's performer contract - {@code setProp}/{@code playClip} listed UNPROVEN, Q5's spike
+ * extension) + the recon digest
  * {@code .claude/research/raw/npc-behavior-mods-recon-2026-07-24.md}. The mechanism, source-verified
  * against the official shared source:
  * <ul>
@@ -68,6 +77,33 @@ import com.ziggfreed.rpgstations.util.Log;
  *       asset path toward whatever is marked), and RE-ANCHOR the leash to the destination (or
  *       background leash logic fights the Seek - the recon's leash gotcha).</li>
  *   <li><b>stop</b> - despawn the NPC + the marker ({@code store.removeEntity}, REMOVE reason).</li>
+ *   <li><b>prop</b> - attempts the bare-Holder puppet's OWN prop technique ({@code
+ *       InventoryComponent.Hotbar}) retargeted at the NPC ref, but via the NPC-NATIVE write
+ *       ({@link InventoryHelper#useItem}) rather than the puppet's from-scratch component
+ *       replace: {@code NPCPlugin.spawnEntity}'s own {@code NPCSystems.OnNPCAdded} hook already
+ *       provisions a {@code Hotbar} (3 slots) on every NPC at add-time (source-verified,
+ *       {@code NPCSystems.java:673-674}), so the NPC's inventory surface genuinely DIFFERS from
+ *       the puppet's ad hoc single-slot Hotbar - {@code InventoryHelper.useItem} sets the item
+ *       into that EXISTING hotbar and marks it the active slot (the same call the NPC package's
+ *       own {@code ActionInventory}/{@code ActionPickUpItem} use), which is the NPC-native route
+ *       the class javadoc above asks for. Role's own {@code HotbarItems} field
+ *       ({@code BuilderRole.java:252}) is asset-static (authored once, baked at Role-build time,
+ *       no runtime setter) so it is NOT an option here - runtime always means a component write,
+ *       confirmed by reading the builder.</li>
+ *   <li><b>clip</b> - attempts the bare-Holder puppet's OWN clip technique
+ *       ({@code ActiveAnimationComponent} write + {@code AnimationUtils.playAnimation} packet,
+ *       {@code PlayerPuppetService.playAnimation}'s exact mechanism) retargeted at the NPC ref.
+ *       {@code spawnEntity} never pre-seeds {@code ActiveAnimationComponent} (unlike the puppet's
+ *       optional {@code initialAnimation} holder pre-seed), so this ensures one exists first (the
+ *       "write" itself) via a plain {@code putComponent}, then fires
+ *       {@link AnimationUtils#playAnimation} directly on {@code AnimationSlot.Emote} - NOT
+ *       {@link NPCEntity#playAnimation}, the NPC's own convenience wrapper: its model-registered
+ *       gate does NOT exempt {@code AnimationSlot.Emote} the way {@code AnimationUtils
+ *       .playAnimation}'s own gate explicitly does (source-verified, {@code NPCEntity.java:327}
+ *       vs {@code AnimationUtils.java:68}), so a player-clone model (whose animation set will not
+ *       list a custom id like {@code RPG_Emote_Hammer}) would have the NPC's own wrapper silently
+ *       swallow the clip. Calling {@code AnimationUtils.playAnimation} directly is the exact
+ *       mechanism the shipped puppet already proves works for emote clips.</li>
  * </ul>
  *
  * <p><b>World-thread discipline.</b> Every {@code Store}/{@code Ref}/{@code spawnEntity}/
@@ -125,6 +161,23 @@ public final class NpcPerformerSpike {
     /** {@code /rpgstations npcspike stop} - despawn the active performer NPC + its marker. */
     public void stop(@Nonnull PlayerRef player) {
         onWorld(player, (world, playerRef, store) -> doStop(player, store));
+    }
+
+    /**
+     * {@code /rpgstations npcspike prop <itemId|off>} - attempts the puppet's prop technique
+     * (a held-item write) on the active performer NPC. {@code off}/blank clears the held item.
+     */
+    public void prop(@Nonnull PlayerRef player, @Nullable String itemIdOrOff) {
+        onWorld(player, (world, playerRef, store) -> doProp(player, store, itemIdOrOff));
+    }
+
+    /**
+     * {@code /rpgstations npcspike clip <emoteId>} - attempts the puppet's clip technique (a
+     * one-shot {@code AnimationSlot.Emote} animation) on the active performer NPC. Suggested
+     * test ids: {@code RPG_Emote_Hammer}, {@code RPG_Emote_Knife}.
+     */
+    public void clip(@Nonnull PlayerRef player, @Nullable String emoteId) {
+        onWorld(player, (world, playerRef, store) -> doClip(player, store, emoteId));
     }
 
     // ==================== operations (world thread) ====================
@@ -281,6 +334,79 @@ public final class NpcPerformerSpike {
         } else {
             player.sendMessage(RpgMsg.tr("command.npcspike.stop_none").color(Color.YELLOW));
         }
+    }
+
+    /**
+     * Attempts the prop-mirroring technique on the active performer's Hotbar (decision 48,
+     * batch-2 spike extension). Graceful no-NPC handling; never throws into the command.
+     */
+    private void doProp(@Nonnull PlayerRef player, @Nonnull Store<EntityStore> store, @Nullable String itemIdOrOff) {
+        Spawned spawned = byPlayer.get(player.getUuid());
+        if (spawned == null || spawned.npcRef == null || !spawned.npcRef.isValid()) {
+            player.sendMessage(RpgMsg.tr("command.npcspike.walk_no_npc").color(Color.YELLOW));
+            return;
+        }
+        String trimmed = itemIdOrOff == null ? "" : itemIdOrOff.trim();
+        boolean off = trimmed.isEmpty() || "off".equalsIgnoreCase(trimmed);
+
+        boolean applied;
+        try {
+            // NPC-native write (class javadoc's <li>prop</li>): the NPC already carries its own
+            // Hotbar (NPCSystems.OnNPCAdded provisions one on every NPC at add-time), so this sets
+            // into it and marks the slot active rather than replacing the whole component the way
+            // the bare-Holder puppet does.
+            applied = InventoryHelper.useItem(spawned.npcRef, off ? null : trimmed, store);
+        } catch (Throwable t) {
+            Log.warn("[npcspike] prop attempt failed: " + t.getMessage());
+            player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+            return;
+        }
+        if (!off && !applied) {
+            player.sendMessage(RpgMsg.tr("command.npcspike.prop_unknown_item", trimmed).color(Color.YELLOW));
+            return;
+        }
+        Message ok = off
+                ? RpgMsg.tr("command.npcspike.prop_cleared")
+                : RpgMsg.tr("command.npcspike.prop_set", trimmed);
+        player.sendMessage(ok.color(Color.GREEN));
+        Log.info("[npcspike] prop attempted for " + player.getUuid() + ": " + (off ? "off" : trimmed));
+    }
+
+    /**
+     * Attempts the clip-playing technique on the active performer (decision 48, batch-2 spike
+     * extension). Graceful no-NPC handling; never throws into the command.
+     */
+    private void doClip(@Nonnull PlayerRef player, @Nonnull Store<EntityStore> store, @Nullable String emoteId) {
+        Spawned spawned = byPlayer.get(player.getUuid());
+        if (spawned == null || spawned.npcRef == null || !spawned.npcRef.isValid()) {
+            player.sendMessage(RpgMsg.tr("command.npcspike.walk_no_npc").color(Color.YELLOW));
+            return;
+        }
+        String trimmed = emoteId == null ? "" : emoteId.trim();
+        if (trimmed.isEmpty()) {
+            player.sendMessage(RpgMsg.tr("command.npcspike.clip_usage").color(Color.YELLOW));
+            return;
+        }
+
+        try {
+            // The "write" (class javadoc's <li>clip</li>): spawnEntity never pre-seeds
+            // ActiveAnimationComponent, so ensure one exists before firing the packet.
+            ActiveAnimationComponent anim = store.getComponent(spawned.npcRef, ActiveAnimationComponent.getComponentType());
+            if (anim == null) {
+                anim = new ActiveAnimationComponent();
+                store.putComponent(spawned.npcRef, ActiveAnimationComponent.getComponentType(), anim);
+            }
+            anim.setPlayingAnimation(AnimationSlot.Emote, trimmed);
+            // The packet: AnimationUtils directly, NOT NPCEntity#playAnimation - see the class
+            // javadoc's <li>clip</li> for why the NPC's own wrapper is the wrong choice here.
+            AnimationUtils.playAnimation(spawned.npcRef, AnimationSlot.Emote, null, trimmed, true, store);
+        } catch (Throwable t) {
+            Log.warn("[npcspike] clip attempt failed: " + t.getMessage());
+            player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+            return;
+        }
+        player.sendMessage(RpgMsg.tr("command.npcspike.clip_attempted", trimmed).color(Color.GREEN));
+        Log.info("[npcspike] clip attempted for " + player.getUuid() + ": " + trimmed);
     }
 
     /**

@@ -30,6 +30,8 @@ import javax.annotation.Nonnull;
  * row of the enhancement session summary, {@code StationService#enhanceLedgerRows}); round-7 (D-4)
  * also drops the quantity from {@code ui.station.gain.produced}'s value (now bare {@code {0}}) so
  * the toast matches a native pickup exactly - the quantity rides the item-slot count badge.
+ * Decision 48 (batch-2 spike extension, 2026-07-24) adds the {@code command.npcspike.prop_*}/
+ * {@code clip_*} keys backing {@code NpcPerformerSpike}'s {@code prop}/{@code clip} subcommands.
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -93,7 +95,13 @@ public final class RpgStationsLangKeys {
             "rpgstations.command.npcspike.walk_no_npc",
             "rpgstations.command.npcspike.role_not_ready",
             "rpgstations.command.npcspike.stopped",
-            "rpgstations.command.npcspike.stop_none");
+            "rpgstations.command.npcspike.stop_none",
+            // Decision 48 (batch-2 spike extension): prop + clip checks.
+            "rpgstations.command.npcspike.prop_set",
+            "rpgstations.command.npcspike.prop_cleared",
+            "rpgstations.command.npcspike.prop_unknown_item",
+            "rpgstations.command.npcspike.clip_usage",
+            "rpgstations.command.npcspike.clip_attempted");
 
     private RpgStationsLangKeys() {
     }
