@@ -44,15 +44,20 @@ public final class FactorRegistryImpl implements FactorRegistry {
     }
 
     /**
-     * Register RpgStations' own built-in {@code rpgstations:} factors ({@code
-     * session_seconds}/{@code cycle_count}/{@code tool_power}/{@code tool_durability_percent}) -
-     * called once from {@code RpgStationsPlugin#setup()}. Idempotent (re-registering is harmless).
+     * Register RpgStations' own built-in factors ({@code rpgstations:session_seconds}/{@code
+     * rpgstations:cycle_count}/{@code rpgstations:tool_power}/{@code
+     * rpgstations:tool_durability_percent}, plus the mod-agnostic bare-id {@code "stat"} factor
+     * - design section 4.1, gate decision 37: {@code {"Factor":"stat","Param":"<StatId>"}} reads
+     * ANY registered native stat channel's effective value, so a mod that writes native stats
+     * participates in loot/gate/cap formulas with zero extra bridge code) - called once from
+     * {@code RpgStationsPlugin#setup()}. Idempotent (re-registering is harmless).
      */
     public void registerBuiltins() {
         register("rpgstations:session_seconds", (ctx, param) -> (double) ctx.sessionSeconds());
         register("rpgstations:cycle_count", (ctx, param) -> (double) ctx.cycleIndex());
         register("rpgstations:tool_power", (ctx, param) -> ctx.toolPower());
         register("rpgstations:tool_durability_percent", (ctx, param) -> ctx.toolDurabilityPercent());
+        register("stat", new StatChannelFactorProvider());
     }
 
     /**

@@ -23,6 +23,7 @@ import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.asset.AssetStoreRegistrar;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
+import com.ziggfreed.rpgstations.api.impl.EnhanceStamperRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
@@ -35,6 +36,7 @@ import com.ziggfreed.rpgstations.interaction.StationRetrieveInteraction;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
+import com.ziggfreed.rpgstations.station.DefaultEnhanceStamper;
 import com.ziggfreed.rpgstations.station.FlairCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.station.StationCatalog;
@@ -99,6 +101,7 @@ public class RpgStationsPlugin extends JavaPlugin {
     protected void setup() {
         RpgStationsApi.set(RpgStationsApiImpl.getInstance());
         FactorRegistryImpl.getInstance().registerBuiltins();
+        EnhanceStamperRegistryImpl.getInstance().register(new DefaultEnhanceStamper());
         registerStationAssetStore();
         registerLootableAssetStore();
         registerRollPoolAssetStore();
