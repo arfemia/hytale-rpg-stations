@@ -1,0 +1,12 @@
+RPG_Station_Sawmill.name = Scierie
+RPG_Station_Sawmill.description = Une station de travail qui scie les rondins en planches. Appuyez sur utiliser pour commencer à travailler.
+RPG_Station_Sawmill.hint.empty = Appuyez sur [{key}] pour charger les rondins
+RPG_Station_Sawmill.hint.loaded = Appuyez sur [{key}] pour travailler
+RPG_Station_CuttingBoard.name = Planche à Découper
+RPG_Station_CuttingBoard.description = Une station de travail qui écaille les poissons et les prépare pour la cuisson. Appuyez sur utiliser pour commencer à travailler.
+RPG_Station_CuttingBoard.hint.empty = Appuyez sur [{key}] pour charger les poissons
+RPG_Station_CuttingBoard.hint.loaded = Appuyez sur [{key}] pour travailler
+RPG_Station_CookingFire.name = Feu de Cuisson
+RPG_Station_CookingFire.description = Un feu de camp qui grille les poissons crus. Appuyez sur utiliser pour commencer à travailler.
+RPG_Station_CookingFire.hint.empty = Appuyez sur [{key}] pour charger les poissons crus
+RPG_Station_CookingFire.hint.loaded = Appuyez sur [{key}] pour travailler

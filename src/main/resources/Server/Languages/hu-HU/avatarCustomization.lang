@@ -1,9 +1,9 @@
-# RPG Stations - avatarCustomization-namespace additions, en-US (authoritative).
+# RPG Stations - avatarCustomization-namespace additions, hu-HU.
 # This file's basename targets Hytale's own "avatarCustomization" language namespace (the
 # namespace the client's emote UI reads emote names from - vanilla emotes use
 # avatarCustomization.emotes.<Id>.name). Server-shipped .lang files merge per-key-additively
 # into a namespace, so this file adds ONLY brand-new keys for this mod's own EmoteAssets
 # (Server/Emote/*.json) and never overrides a client-owned one.
 
-emotes.RPG_Emote_Saw.name = Sawing
-emotes.RPG_Emote_Knife.name = Scaling Fish
+emotes.RPG_Emote_Saw.name = Fűrészolás
+emotes.RPG_Emote_Knife.name = Hal tisztítása

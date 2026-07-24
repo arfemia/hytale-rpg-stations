@@ -1,0 +1,7 @@
+{
+  "Name": "avatarCustomization.emotes.RPG_Emote_Knife.name",
+  "Animation": "Characters/Animations/Items/Dual_Handed/Daggers/Attacks/Swing_Right/Swing_Right.blockyanim",
+  "Icon": "Icons/Emotes/Wave@2x.png",
+  "IsLooping": false,
+  "HideItemInHand": false
+}

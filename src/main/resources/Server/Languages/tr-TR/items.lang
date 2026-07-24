@@ -1,0 +1,8 @@
+RPG_Station_CuttingBoard.name = Kesme Tahtası
+RPG_Station_CuttingBoard.description = Balıkları ölçekleyen ve pişmeye hazırlayan bir çalışma istasyonu. Çalışmaya başlamak için kullan tuşuna bas.
+RPG_Station_CuttingBoard.hint.empty = Balık yüklemek için [{key}] tuşuna bas
+RPG_Station_CuttingBoard.hint.loaded = Çalışmak için [{key}] tuşuna bas
+RPG_Station_CookingFire.name = Pişirme Ateşi
+RPG_Station_CookingFire.description = Çiğ balığı ateşin üzerinde ızgaralayan bir kamp ateşi. Çalışmaya başlamak için kullan tuşuna bas.
+RPG_Station_CookingFire.hint.empty = Çiğ balık yüklemek için [{key}] tuşuna bas
+RPG_Station_CookingFire.hint.loaded = Çalışmak için [{key}] tuşuna bas

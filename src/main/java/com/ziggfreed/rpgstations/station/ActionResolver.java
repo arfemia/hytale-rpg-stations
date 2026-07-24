@@ -106,7 +106,8 @@ public final class ActionResolver {
                 pick(def, base, ActionDef::getCompletion, asset.getCompletion()),
                 pick(def, base, ActionDef::getLoot, asset.getLoot()),
                 pick(def, base, ActionDef::getRequires, asset.getRequires()),
-                pick(def, base, ActionDef::getSteps, null));
+                pick(def, base, ActionDef::getSteps, null),
+                pick(def, base, ActionDef::getAnchors, null));
     }
 
     /**
@@ -287,6 +288,7 @@ public final class ActionResolver {
         @Nullable private final LootRef loot;
         @Nullable private final Requires requires;
         @Nullable private final StationStep[] steps;
+        @Nullable private final Map<String, ActionDef.Anchor> anchors;
 
         ResolvedAction(@Nonnull String actionId, @Nullable ActionInput input, @Nullable Custody custody,
                 @Nullable Puppet puppet, @Nullable StationAsset.Work work,
@@ -294,7 +296,7 @@ public final class ActionResolver {
                 @Nullable StationAsset.Hold hold, @Nullable StationAsset.Camera camera,
                 @Nullable StationAsset.Animation animation, @Nullable Presentation presentation,
                 @Nullable Presentation completion, @Nullable LootRef loot, @Nullable Requires requires,
-                @Nullable StationStep[] steps) {
+                @Nullable StationStep[] steps, @Nullable Map<String, ActionDef.Anchor> anchors) {
             this.actionId = actionId;
             this.input = input;
             this.custody = custody;
@@ -310,6 +312,7 @@ public final class ActionResolver {
             this.loot = loot;
             this.requires = requires;
             this.steps = steps;
+            this.anchors = anchors;
         }
 
         @Nonnull
@@ -389,6 +392,16 @@ public final class ActionResolver {
         @Nullable
         public StationStep[] getSteps() {
             return steps;
+        }
+
+        /**
+         * The declared multi-station anchor map ({@code anchorId -> {Station, MaxRadius}}, scope-2
+         * 2.2); null = a single-station action. No station-level default (anchors are action-level
+         * only, like {@code Input}/{@code Steps}).
+         */
+        @Nullable
+        public Map<String, ActionDef.Anchor> getAnchors() {
+            return anchors;
         }
     }
 }

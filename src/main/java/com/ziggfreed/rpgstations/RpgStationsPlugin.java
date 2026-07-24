@@ -43,6 +43,7 @@ import com.ziggfreed.rpgstations.station.DefaultEnhanceStamper;
 import com.ziggfreed.rpgstations.station.ExtensionCatalog;
 import com.ziggfreed.rpgstations.station.FlairCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
+import com.ziggfreed.rpgstations.station.StationBlockPlaceSystem;
 import com.ziggfreed.rpgstations.station.StationCatalog;
 import com.ziggfreed.rpgstations.station.StationCustodyBreakSystem;
 import com.ziggfreed.rpgstations.station.StationDeathSystem;
@@ -528,6 +529,10 @@ public class RpgStationsPlugin extends JavaPlugin {
         getEntityStoreRegistry().registerSystem(new StationFrameSystem());
         getEntityStoreRegistry().registerSystem(new StationInterruptDamageSystem());
         getEntityStoreRegistry().registerSystem(new StationCustodyBreakSystem());
+        // Scope-2 wave 3 (gate m4): the place-event feed for the lazy station-block index the
+        // multi-station anchor discovery reads (StationBlockPlaceSystem); the break side (index
+        // removal + ANCHOR_LOST) is handled by StationCustodyBreakSystem -> onCustodyBlockBroken.
+        getEntityStoreRegistry().registerSystem(new StationBlockPlaceSystem());
     }
 
     @Override

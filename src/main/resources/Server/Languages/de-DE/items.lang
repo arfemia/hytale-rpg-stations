@@ -1,0 +1,12 @@
+RPG_Station_Sawmill.name = Sägewerk
+RPG_Station_Sawmill.description = Eine Arbeitsstation, die Baumstämme zu Brettern sägt. Drücke die Benutzen-Taste, um zu arbeiten.
+RPG_Station_Sawmill.hint.empty = Drücke [{key}] zum Laden von Baumstämmen
+RPG_Station_Sawmill.hint.loaded = Drücke [{key}] zum Arbeiten
+RPG_Station_CuttingBoard.name = Zubereitungsbrett
+RPG_Station_CuttingBoard.description = Eine Arbeitsstation, die Fische filetiert und sie zum Kochen vorbereitet. Drücke die Benutzen-Taste, um zu arbeiten.
+RPG_Station_CuttingBoard.hint.empty = Drücke [{key}] zum Laden von Fischen
+RPG_Station_CuttingBoard.hint.loaded = Drücke [{key}] zum Arbeiten
+RPG_Station_CookingFire.name = Lagerfeuer
+RPG_Station_CookingFire.description = Ein Lagerfeuer, das rohe Fische grillt. Drücke die Benutzen-Taste, um zu arbeiten.
+RPG_Station_CookingFire.hint.empty = Drücke [{key}] zum Laden von rohen Fischen
+RPG_Station_CookingFire.hint.loaded = Drücke [{key}] zum Arbeiten

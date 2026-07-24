@@ -1,0 +1,83 @@
+{
+  "$Comment": "The standalone RpgStations Cooking Fire work station block (scope-2 wave-3 leg W3-F, design section 2.7 fish exemplar, the remote-anchor half of the cutting-board/cooking-fire pair - it is BOTH a standalone direct cook loop AND the multi-station anchor CuttingBoard/PrepFish claims by proximity+type). Model/texture/hitbox lifted from the vanilla Deco_Campfire_Off (ledger [6cdea5ead]) - zero native Bench/Use fields; the vanilla Bench_Campfire is deliberately AVOIDED, it carries a native Bench:{Type:Processing} + Interactions.Use:'Open_Processing_Bench' that would fight this mod's own rpg_station_use interaction (the same RPG_Station_Sawmill-vs-Bench_Lumbermill discipline). State.Definitions.Lit swaps to the lit Blocks/Benches/Campfire.blockymodel plus embers Light + smoke Particles while a fish is cooking (Server/RpgStations/Stations/CookingFire.json's Custody.States.Loaded = 'Lit'); Default stays the unlit Campfire_Off model/texture. VariantRotation is authored NESW (a station-block placement convention, deliberately over the vanilla decorative RandomRotation) so the block's own facing composes correctly with Custody.Display's facing-relative Offset. When claimed as a remote anchor by another station's program, this block's OWN action is never invoked (design 2.2) - only its Custody claim and block state matter there.",
+  "TranslationProperties": {
+    "Name": "items.RPG_Station_CookingFire.name",
+    "Description": "items.RPG_Station_CookingFire.description"
+  },
+  "PlayerAnimationsId": "Block",
+  "Categories": ["Blocks.Deco"],
+  "Icon": "Icons/ItemsGenerated/Deco_Campfire_Off.png",
+  "MaxStack": 1,
+  "Interactions": {
+    "Primary": "Block_Primary",
+    "Secondary": "Block_Secondary"
+  },
+
+  "BlockType": {
+    "BlockParticleSetId": "Wood",
+    "BlockSoundSetId": "Wood",
+    "PhysicalMaterialId": "Wood",
+    "CustomModel": "Blocks/Benches/Campfire_Off.blockymodel",
+    "CustomModelTexture": [
+      {
+        "Texture": "Blocks/Benches/Campfire_Off_Texture.png",
+        "Weight": 1
+      }
+    ],
+    "DrawType": "Model",
+    "Flags": {
+      "IsUsable": true
+    },
+    "Gathering": {
+      "Soft": {
+        "IsWeaponBreakable": false
+      }
+    },
+    "HitboxType": "Brazier_Small",
+    "Material": "Solid",
+    "Opacity": "Transparent",
+    "Support": {
+      "Down": [
+        {
+          "FaceType": "Full"
+        }
+      ]
+    },
+    "VariantRotation": "NESW",
+    "InteractionHint": "items.RPG_Station_CookingFire.hint.empty",
+    "Interactions": {
+      "Use": "RPG_Station_CookingFire_Use"
+    },
+    "State": {
+      "Definitions": {
+        "Default": {
+          "InteractionHint": "items.RPG_Station_CookingFire.hint.empty"
+        },
+        "Lit": {
+          "InteractionHint": "items.RPG_Station_CookingFire.hint.loaded",
+          "CustomModel": "Blocks/Benches/Campfire.blockymodel",
+          "CustomModelTexture": [
+            {
+              "Texture": "Blocks/Benches/Campfire_Texture.png",
+              "Weight": 1
+            }
+          ],
+          "Light": {
+            "Color": "#ecb"
+          },
+          "Particles": [
+            {
+              "SystemId": "Smoke_Black",
+              "Scale": 1
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Tags": {
+    "Type": ["Deco"],
+    "Family": ["RpgStations"]
+  },
+  "ItemSoundSetId": "ISS_Blocks_Wood"
+}

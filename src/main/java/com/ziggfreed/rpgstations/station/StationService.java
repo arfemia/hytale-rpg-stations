@@ -53,6 +53,7 @@ import com.ziggfreed.common.cast.ModelParticleService;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.cast.WorldKeyedQueues;
 import com.ziggfreed.common.cast.step.CastKernel;
+import com.ziggfreed.common.entity.PuppetNav;
 import com.ziggfreed.common.feedback.Notify;
 import com.ziggfreed.common.feedback.PickupMimic;
 import com.ziggfreed.common.i18n.Msg;
@@ -69,6 +70,7 @@ import com.ziggfreed.rpgstations.api.SummaryEnricher;
 import com.ziggfreed.rpgstations.api.XpAsk;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.SummaryEnricherRegistryImpl;
+import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Ingredient;
@@ -175,7 +177,28 @@ public final class StationService {
          * every authored cap ({@code PerItemBudget}/{@code PerStat}/{@code SkillScaledBudget}) is
          * already saturated for this item. No reagents were consumed.
          */
-        ENHANCE_CAPPED
+        ENHANCE_CAPPED,
+        /**
+         * Repeat-while-inputs completed naturally (scope-2 wave 3, design 2.4): a REPEATING program
+         * ({@code Work.Repeat: true}) whose {@code Consume} phase found insufficient inputs at its
+         * claimed source ends GRACEFULLY here (the fish exemplar's "repeats while fish remain"). A
+         * real completion, non-silent, summary shows totals - distinct from {@link #OUT_OF_INPUTS}
+         * (a NON-repeating program's material shortage) only in its toast wording.
+         */
+        INPUTS_EXHAUSTED,
+        /**
+         * A remote anchor block this session claimed was broken mid-program (scope-2 wave 3, design
+         * 2.6): {@link StationCustodyBreakSystem} resolves the owning session via the generalized
+         * anchor map and stops it here; every OTHER claimed anchor's custody auto-returns, the
+         * broken block's custody drops at that block, the in-flight iteration refunds. Non-silent.
+         */
+        ANCHOR_LOST,
+        /**
+         * A {@code Walk} phase could not solve a path to its anchor when the walk step began
+         * (scope-2 wave 3, design 2.3/2.6): mid-program the terrain/obstacles changed so the puppet
+         * can no longer reach the anchor. A graceful localized stop, never a wedged program.
+         */
+        PATH_BLOCKED
     }
 
     private static final StationService INSTANCE = new StationService();
@@ -191,6 +214,26 @@ public final class StationService {
      * block-state layer on the next interaction - see {@link #toggle}).
      */
     private final ConcurrentHashMap<String, StationCustodyClaim> custodyByBlock = new ConcurrentHashMap<>();
+
+    /**
+     * The lazy per-block station index (scope-2 wave 3, gate m4, design 2.2): {@code blockKey ->
+     * stationId} for every station block the engine has SEEN (an interaction warmed it, or a place
+     * event registered it via the learned {@link #stationBlockItemToId} map). Anchor discovery
+     * consults this FIRST (a cheap map scan), falling back to ONE bounded ring scan only when it
+     * yields nothing. Populated opportunistically, removed on a block break; never persisted (a
+     * freshly world-edited block is "seen" after any interaction, the honest documented contract).
+     */
+    private final ConcurrentHashMap<String, String> knownStationBlocks = new ConcurrentHashMap<>();
+
+    /**
+     * The learned {@code blockItemId(lowercased) -> stationId} map (scope-2 wave 3): filled the
+     * first time ANY block of a given station-block item id is interacted with (we know both the
+     * block's item id AND its station id at that moment). Lets a {@link PlaceBlockEvent} index a
+     * placed station block by item id, and the bounded ring scan resolve an unseen block's item id
+     * back to a station id. Fail-open: an unlearned item id simply is not discoverable until its
+     * first interaction (the documented contract).
+     */
+    private final ConcurrentHashMap<String, String> stationBlockItemToId = new ConcurrentHashMap<>();
 
     /**
      * A single-shot {@code (factorId, param) -> value} lookup, pure/testable independent of the
@@ -263,6 +306,11 @@ public final class StationService {
             Log.warn("STATION could not resolve world for session start: " + t.getMessage());
             return;
         }
+
+        // Warm the lazy station index (scope-2 wave 3, gate m4): this interaction "sees" the primary
+        // block, so a later anchor discovery elsewhere finds it (and learns its block item id -> id
+        // mapping for place-event indexing + the bounded ring scan).
+        registerKnownStationBlock(blockKey, asset.getId(), blockItemIdAt(world, blockX, blockY, blockZ));
 
         // 2) Diegetic action selection (design section 9.1, phase 2 leg E) - BEFORE Requires, so a
         // per-action Requires override (design 9.1) gates the RIGHT action. A loaded claim already
@@ -407,6 +455,18 @@ public final class StationService {
         }
         Vector3d pos = transform.getPosition();
 
+        // 6.1) Multi-station anchors (scope-2 wave 3, design 2.2): resolve + CLAIM every declared
+        // anchor atomically (first-wins), self included. A deny leaves ZERO claims
+        // (resolveAndClaimAnchors rolls back its own partial claims on every deny path); the only
+        // engage return AFTER this point (seat-mount failure) releases them explicitly.
+        AnchorResolution anchorRes = resolveAndClaimAnchors(world, worldUuid, playerUuid, action, transform,
+                store, blockX, blockY, blockZ, blockKey);
+        if (anchorRes.denied()) {
+            toast(playerRef, anchorRes.denyToast);
+            return;
+        }
+        Map<String, String> claimedAnchorBlocks = anchorRes.anchorBlocks;
+
         StationSession s = new StationSession();
         s.playerUuid = playerUuid;
         s.ref = ref;
@@ -417,6 +477,9 @@ public final class StationService {
         s.blockX = blockX;
         s.blockY = blockY;
         s.blockZ = blockZ;
+        if (claimedAnchorBlocks != null) {
+            s.anchorBlocks.putAll(claimedAnchorBlocks);
+        }
         s.startBlockId = blockIdAt(world, blockX, blockY, blockZ);
         StationAsset.Identity identity = asset.getIdentity();
         String authoredIcon = identity != null ? identity.getIcon() : null;
@@ -445,6 +508,15 @@ public final class StationService {
         s.interruptOnDamage = hold == null || hold.getInterruptOnDamage() == null || hold.getInterruptOnDamage();
 
         if (s.seatMode && !StationMountController.mount(ref, commandBuffer, blockX, blockY, blockZ, pos)) {
+            // Release the anchor claims taken in 6.1 - this is the ONLY engage return after them.
+            if (claimedAnchorBlocks != null) {
+                for (Map.Entry<String, String> e : claimedAnchorBlocks.entrySet()) {
+                    if (!ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(e.getKey())
+                            && !e.getValue().equals(blockKey)) {
+                        byBlock.remove(e.getValue(), playerUuid);
+                    }
+                }
+            }
             toast(playerRef, RpgMsg.tr("ui.station.seat_unavailable"));
             return;
         }
@@ -818,28 +890,8 @@ public final class StationService {
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player) {
         List<StationStep> steps = Arrays.asList(action.getSteps());
-        if (hasWave3PendingStep(steps)) {
-            // WAVE BOUNDARY (decision 34): a step authoring Walk/At/Produce.To:Custody decodes +
-            // validates this wave but cannot execute - deny the whole program gracefully at its
-            // first dispatch rather than running a partial cycle. No shipped wave-2 content reaches
-            // here (the validator warns any such step at load); this is the defensive engine guard.
-            Log.warn("STATION action '" + action.getActionId() + "' at '" + s.stationId
-                    + "' authors a wave-3 step phase (Walk/At/Produce.To:Custody) - denying gracefully");
-            stop(s, StopReason.STEP_FAILED, store, commandBuffer);
-            return false;
-        }
         int attemptCycleIndex = s.cyclesDone + 1;
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, null, attemptCycleIndex, 0, false);
-    }
-
-    /** Whether any authored step in {@code steps} authors a wave-3-only phase the engine cannot execute this wave. */
-    static boolean hasWave3PendingStep(@Nonnull List<StationStep> steps) {
-        for (StationStep step : steps) {
-            if (step != null && step.authorsWave3OnlyPhase()) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -945,6 +997,10 @@ public final class StationService {
         }
 
         s.cyclesDone++;
+        // Iteration refund ledger (design 2.5/M1): a COMPLETED program cycle committed every output
+        // (to inventory or custody), so nothing is owed - clear the ledger so a stop between cycles
+        // refunds nothing. A mid-cycle stop still refunds whatever was recorded before the commit.
+        s.iterationConsumed.clear();
         if (s.durabilityPerCycle > 0) {
             drainHeldToolDurability(store, s.ref, player, s.durabilityPerCycle);
         }
@@ -1680,6 +1736,13 @@ public final class StationService {
         // out-of-inputs, inventory-full, session-cap, feature-disabled, step-failed, server-stop)
         // funnels through this ONE call, unconditionally, before any of the notification logic
         // below runs.
+        // Multi-station teardown (scope-2 wave 3, design 2.6), BEFORE the primary custody return:
+        // refund the in-flight iteration's consumed inputs (mutually exclusive with a custody return
+        // per M1 - a Produce.To:Custody already cleared the ledger), then release + return every
+        // remote anchor's claim/custody. The primary block's own custody returns just below.
+        refundIterationLedger(s);
+        releaseAnchorClaims(s, commandBuffer);
+
         StationAsset stopAsset = StationCatalog.getInstance().getStation(s.stationId);
         String stopActionId = s.actionId != null ? s.actionId : ACTION_WORK;
         Custody stopCustody = stopAsset != null ? ActionResolver.resolve(stopAsset, stopActionId).getCustody() : null;
@@ -1965,6 +2028,492 @@ public final class StationService {
     @Nullable
     StationCustodyClaim custodyClaimFor(@Nullable String blockKey) {
         return blockKey != null ? custodyByBlock.get(blockKey) : null;
+    }
+
+    // ==================== Multi-station anchors (scope-2 wave 3, design 2.2/2.4/2.6) ====================
+
+    /**
+     * The refined stop reason for a {@code Consume} phase that found insufficient inputs (design
+     * 2.4): a REPEATING program's shortage is the graceful natural end
+     * ({@link StopReason#INPUTS_EXHAUSTED}); a non-repeating one keeps today's
+     * {@link StopReason#OUT_OF_INPUTS}. Pure, unit-tested.
+     */
+    @Nonnull
+    static StopReason shortInputStopReason(boolean repeating) {
+        return repeating ? StopReason.INPUTS_EXHAUSTED : StopReason.OUT_OF_INPUTS;
+    }
+
+    /**
+     * Warms the lazy station index (design 2.2/m4): records {@code blockKey -> stationId} and, when
+     * {@code blockItemId} resolves, the {@code blockItemId -> stationId} learned map a place event /
+     * ring scan reads back. Called from every station interaction ({@link #toggle} + the custody /
+     * retrieve paths) - a station block is normally interacted with at least once, so it is "seen".
+     */
+    void registerKnownStationBlock(@Nonnull String blockKey, @Nonnull String stationId,
+            @Nullable String blockItemId) {
+        knownStationBlocks.put(blockKey, stationId);
+        if (blockItemId != null && !blockItemId.isBlank()) {
+            stationBlockItemToId.put(blockItemId.toLowerCase(java.util.Locale.ROOT), stationId);
+        }
+    }
+
+    /**
+     * A {@link PlaceBlockEvent} feed (design 2.2/m4, {@link StationBlockPlaceSystem}): when a placed
+     * block's item id has been LEARNED as a station block (any prior interaction with that station
+     * type), index the new block so a later anchor discovery finds it without a ring scan. A never-
+     * before-interacted station type stays undiscovered-by-place until its first interaction (the
+     * honest contract). No-op for a non-station item id.
+     */
+    void onStationBlockPlaced(@Nonnull UUID worldUuid, int x, int y, int z, @Nullable String blockItemId) {
+        if (blockItemId == null || blockItemId.isBlank()) {
+            return;
+        }
+        String stationId = stationBlockItemToId.get(blockItemId.toLowerCase(java.util.Locale.ROOT));
+        if (stationId != null) {
+            knownStationBlocks.put(StationAnchors.blockKey(worldUuid.toString(), x, y, z), stationId);
+        }
+    }
+
+    /** Package-private for {@link StationBlockPlaceSystem} test wiring; the live count of indexed station blocks. */
+    int knownStationBlockCount() {
+        return knownStationBlocks.size();
+    }
+
+    /**
+     * Discovers the NEAREST placed block resolving to station {@code wantStationId} within
+     * {@code radius} horizontal blocks of the primary block, SAME world (design 2.2): the lazy
+     * index first (a cheap {@link #knownStationBlocks} scan), then ONE bounded ring scan
+     * ({@link StationAnchors#ringOffsets}) over {@code world.getBlock} as a last resort. Returns the
+     * discovered blockKey (also re-indexing a ring-scan hit for next time), or {@code null} when no
+     * matching block is reachable within the bound.
+     */
+    @Nullable
+    private String discoverAnchorBlock(@Nonnull World world, @Nonnull UUID worldUuid, int px, int py, int pz,
+            @Nonnull String wantStationId, int radius) {
+        String want = wantStationId.toLowerCase(java.util.Locale.ROOT);
+        long radiusSq = (long) radius * radius;
+        String worldPrefix = worldUuid.toString() + ":";
+        // 1) the lazy index (cheap): nearest matching seen block in this world within the radius.
+        String bestKey = null;
+        long bestDistSq = Long.MAX_VALUE;
+        for (Map.Entry<String, String> e : knownStationBlocks.entrySet()) {
+            if (!e.getKey().startsWith(worldPrefix) || !want.equals(e.getValue().toLowerCase(java.util.Locale.ROOT))) {
+                continue;
+            }
+            int[] coords = StationAnchors.parseCoords(e.getKey());
+            if (coords == null || (coords[0] == px && coords[1] == py && coords[2] == pz)) {
+                continue; // skip the primary block itself
+            }
+            long distSq = StationAnchors.horizontalDistSq(px, pz, coords[0], coords[2]);
+            if (distSq <= radiusSq && distSq < bestDistSq) {
+                bestDistSq = distSq;
+                bestKey = e.getKey();
+            }
+        }
+        if (bestKey != null) {
+            return bestKey;
+        }
+        // 2) bounded ring scan (last resort, engage is cold): the FIRST offset (nearest-ordered)
+        // whose block's item id learns back to the wanted station id wins.
+        for (int[] off : StationAnchors.ringOffsets(radius, StationAnchors.SCAN_Y_SPREAD)) {
+            int bx = px + off[0];
+            int by = py + off[1];
+            int bz = pz + off[2];
+            String blockItemId = blockItemIdAt(world, bx, by, bz);
+            if (blockItemId == null) {
+                continue;
+            }
+            String stationId = stationBlockItemToId.get(blockItemId.toLowerCase(java.util.Locale.ROOT));
+            if (stationId != null && want.equals(stationId.toLowerCase(java.util.Locale.ROOT))) {
+                String key = StationAnchors.blockKey(worldUuid.toString(), bx, by, bz);
+                knownStationBlocks.put(key, stationId); // re-index for next time
+                return key;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The result of the engage-time anchor resolution+claim (design 2.2's atomic first-wins claim):
+     * either {@link #ok(Map)} carrying the resolved {@code anchorId -> blockKey} map (self included),
+     * or a graceful deny with a localized toast key + the station-name arg it interpolates.
+     */
+    private static final class AnchorResolution {
+        @Nullable final Map<String, String> anchorBlocks;
+        @Nullable final Message denyToast;
+
+        private AnchorResolution(@Nullable Map<String, String> anchorBlocks, @Nullable Message denyToast) {
+            this.anchorBlocks = anchorBlocks;
+            this.denyToast = denyToast;
+        }
+
+        static AnchorResolution ok(@Nonnull Map<String, String> anchorBlocks) {
+            return new AnchorResolution(anchorBlocks, null);
+        }
+
+        static AnchorResolution deny(@Nonnull Message denyToast) {
+            return new AnchorResolution(null, denyToast);
+        }
+
+        boolean denied() {
+            return denyToast != null;
+        }
+    }
+
+    /**
+     * Resolves + CLAIMS every declared anchor for {@code action} atomically on the world thread
+     * (design 2.2/2.6, gate m5): each anchor discovers its nearest matching placed block, which must
+     * be reachable by a {@link PuppetNav} solve for any anchor a {@code Walk} step targets (else
+     * {@code ui.station.anchor_missing}), and must not be busy with its OWN session or hold a
+     * non-empty custody claim (else {@code ui.station.anchor_busy}, gate m5). On success every
+     * resolved anchor's blockKey is claimed into {@link #byBlock} (first-wins) and returned; the
+     * reserved {@code "self"} anchor maps to the primary block. A single-station action (no
+     * {@code Anchors}) returns just {@code self}.
+     *
+     * <p>Runs BEFORE the session object is built, so a mid-resolution deny leaves ZERO partial
+     * claims (nothing was written until every anchor validated). On success the caller writes the
+     * returned map onto the session and the claims are already live in {@link #byBlock}.
+     */
+    @Nonnull
+    private AnchorResolution resolveAndClaimAnchors(@Nonnull World world, @Nonnull UUID worldUuid,
+            @Nonnull UUID playerUuid, @Nonnull ActionResolver.ResolvedAction action, @Nonnull TransformComponent transform,
+            @Nonnull Store<EntityStore> store, int px, int py, int pz, @Nonnull String primaryBlockKey) {
+        Map<String, ActionDef.Anchor> declared = action.getAnchors();
+        Map<String, String> resolved = new java.util.LinkedHashMap<>();
+        resolved.put(ActionDef.Anchor.RESERVED_SELF, primaryBlockKey);
+        if (declared == null || declared.isEmpty()) {
+            return AnchorResolution.ok(resolved);
+        }
+        java.util.Set<String> walkTargets = walkTargetAnchorIds(action.getSteps());
+        Vector3d from = new Vector3d(transform.getPosition());
+        List<String> claimed = new ArrayList<>();
+        for (Map.Entry<String, ActionDef.Anchor> e : declared.entrySet()) {
+            String anchorId = e.getKey();
+            ActionDef.Anchor anchor = e.getValue();
+            if (anchorId == null || anchorId.isBlank() || anchor == null || anchor.getStation() == null
+                    || anchor.getStation().isBlank()) {
+                releaseClaimed(claimed, playerUuid);
+                return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_missing",
+                        Msg.raw(anchorId != null ? anchorId : ""), 0));
+            }
+            int radius = StationAnchors.cappedRadius(anchor.effectiveMaxRadius());
+            String blockKey = discoverAnchorBlock(world, worldUuid, px, py, pz, anchor.getStation(), radius);
+            if (blockKey == null) {
+                releaseClaimed(claimed, playerUuid);
+                return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_missing",
+                        anchorStationNameMsg(anchor.getStation()), radius));
+            }
+            // m5 precedence: refuse a block busy with its own session OR a non-empty custody claim.
+            boolean busy = byBlock.containsKey(blockKey) && !playerUuid.equals(byBlock.get(blockKey));
+            StationCustodyClaim custodyClaim = custodyByBlock.get(blockKey);
+            boolean custodyBusy = custodyClaim != null && !custodyClaim.isEmpty()
+                    && !playerUuid.equals(custodyClaim.ownerId);
+            if (!StationAnchors.claimAllowed(busy, custodyBusy)) {
+                releaseClaimed(claimed, playerUuid);
+                return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_busy",
+                        anchorStationNameMsg(anchor.getStation())));
+            }
+            // A walk-targeted anchor must be reachable at engage (design 2.3's per-anchor solve);
+            // an unreachable walk anchor denies the whole engage gracefully (no partial claims).
+            if (walkTargets.contains(anchorId.toLowerCase(java.util.Locale.ROOT))) {
+                int[] coords = StationAnchors.parseCoords(blockKey);
+                Vector3d to = coords != null
+                        ? new Vector3d(coords[0] + 0.5, coords[1] + 1.0, coords[2] + 0.5)
+                        : new Vector3d(px + 0.5, py + 1.0, pz + 0.5);
+                if (PuppetNav.solve(world, store, from, to, radius) == null) {
+                    releaseClaimed(claimed, playerUuid);
+                    return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_missing",
+                            anchorStationNameMsg(anchor.getStation()), radius));
+                }
+            }
+            // Atomic first-wins claim into byBlock (the generalized occupancy map).
+            UUID prior = byBlock.putIfAbsent(blockKey, playerUuid);
+            if (prior != null && !prior.equals(playerUuid)) {
+                releaseClaimed(claimed, playerUuid);
+                return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_busy",
+                        anchorStationNameMsg(anchor.getStation())));
+            }
+            claimed.add(blockKey);
+            resolved.put(anchorId, blockKey);
+        }
+        return AnchorResolution.ok(resolved);
+    }
+
+    /** Releases anchor blockKeys claimed so far into {@link #byBlock} for THIS player (a mid-resolution deny rollback). */
+    private void releaseClaimed(@Nonnull List<String> claimed, @Nonnull UUID playerUuid) {
+        for (String key : claimed) {
+            byBlock.remove(key, playerUuid);
+        }
+    }
+
+    /** The lowercased anchor ids any {@code Walk} step in {@code steps} targets ({@code "self"} excluded - always reachable). */
+    @Nonnull
+    private static java.util.Set<String> walkTargetAnchorIds(@Nullable StationStep[] steps) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        if (steps == null) {
+            return out;
+        }
+        for (StationStep step : steps) {
+            StationStep.Walk walk = step != null ? step.getWalk() : null;
+            String to = walk != null ? walk.getTo() : null;
+            if (to != null && !to.isBlank() && !ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(to)) {
+                out.add(to.toLowerCase(java.util.Locale.ROOT));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The blockKey a step's {@code At}/{@code Walk.To} anchor id resolves to for THIS session
+     * (design 2.2's custody-at-anchor + walk-target lookup): the reserved {@code "self"} (or a
+     * null/blank id) is the primary block; any other id reads {@link StationSession#anchorBlocks}.
+     * Returns {@code null} for an unresolved anchor id (an engine guard - the validator already
+     * warned; the handler denies gracefully).
+     */
+    @Nullable
+    static String anchorBlockKeyFor(@Nonnull StationSession s, @Nullable String anchorId) {
+        if (anchorId == null || anchorId.isBlank() || ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(anchorId)) {
+            return s.blockKey;
+        }
+        return s.anchorBlocks.get(anchorId);
+    }
+
+    /** The live custody claim at a step's {@code At} anchor (or the primary block for {@code "self"}/absent). */
+    @Nullable
+    StationCustodyClaim custodyClaimForAnchor(@Nonnull StationSession s, @Nullable String anchorId) {
+        return custodyClaimFor(anchorBlockKeyFor(s, anchorId));
+    }
+
+    /**
+     * {@code Produce.To:"Custody"} execution (scope-2 wave 3, design 2.2): stores {@code quantity}
+     * of {@code itemId} into the custody claim at the step's {@code At} anchor block (the primary
+     * block for {@code "self"}), creating the claim owned by this session's player when absent, and
+     * spawning the placed-as-entity display via the ANCHOR station's own {@code Custody.Display}
+     * when it authors one, else the running action's. Returns {@code true} when the produce landed.
+     */
+    boolean produceIntoCustody(@Nonnull StationSession s, @Nonnull CommandBuffer<EntityStore> commandBuffer,
+            @Nullable String anchorId, @Nonnull String itemId, int quantity) {
+        String blockKey = anchorBlockKeyFor(s, anchorId);
+        if (blockKey == null || itemId.isBlank() || quantity <= 0) {
+            return false;
+        }
+        int[] coords = anchorId == null || ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(anchorId)
+                ? new int[] {s.blockX, s.blockY, s.blockZ}
+                : StationAnchors.parseCoords(blockKey);
+        if (coords == null) {
+            return false;
+        }
+        StationCustodyClaim claim = custodyByBlock.get(blockKey);
+        if (claim == null) {
+            claim = new StationCustodyClaim(s.playerUuid, s.stationId, s.actionId != null ? s.actionId : ACTION_WORK,
+                    coords[0], coords[1], coords[2]);
+            custodyByBlock.put(blockKey, claim);
+        }
+        claim.add(itemId, quantity);
+        // Display spawn: the anchor station's own Custody.Display when it authors one, else the
+        // running action's (design 2.2). Only when the claim has no live display yet.
+        if (claim.displayRef() == null) {
+            Custody displayCustody = anchorDisplayCustody(s, anchorId);
+            Custody.Display displayGroup = displayCustody != null ? displayCustody.getDisplay() : null;
+            if (displayGroup != null) {
+                ItemStack visualStack = claim.uniqueStack() != null ? claim.uniqueStack() : new ItemStack(itemId, 1);
+                Ref<EntityStore> displayRef = StationCustodyDisplay.spawn(commandBuffer, visualStack, displayGroup,
+                        coords[0], coords[1], coords[2]);
+                claim.setDisplayRef(displayRef);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * The {@code Custody} group governing an anchor's display: for a named anchor, the ANCHOR
+     * station's own resolved {@code "work"}-action Custody (its own {@code Display} knobs), else the
+     * running action's Custody (for {@code "self"}). A best-effort lookup - a missing anchor station
+     * falls back to the running action's Custody.
+     */
+    @Nullable
+    private Custody anchorDisplayCustody(@Nonnull StationSession s, @Nullable String anchorId) {
+        if (anchorId == null || ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(anchorId)) {
+            StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
+            return asset != null && s.actionId != null
+                    ? ActionResolver.resolve(asset, s.actionId).getCustody() : null;
+        }
+        String blockKey = s.anchorBlocks.get(anchorId);
+        String anchorStationId = blockKey != null ? knownStationBlocks.get(blockKey) : null;
+        if (anchorStationId != null) {
+            StationAsset anchorAsset = StationCatalog.getInstance().getStation(anchorStationId);
+            if (anchorAsset != null) {
+                Custody anchorCustody = ActionResolver.resolve(anchorAsset, ACTION_WORK).getCustody();
+                if (anchorCustody != null && anchorCustody.getDisplay() != null) {
+                    return anchorCustody;
+                }
+            }
+        }
+        StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
+        return asset != null && s.actionId != null ? ActionResolver.resolve(asset, s.actionId).getCustody() : null;
+    }
+
+    /**
+     * Releases every ANCHOR block this session claimed (design 2.6, {@code stop()}'s teardown):
+     * clears the {@link #byBlock} occupancy for each non-{@code self} anchor and returns any custody
+     * standing at that anchor to the owner (else drops it at the block). Skips {@code self} (the
+     * primary block's own claim + custody are handled by the existing {@code stop()} paths).
+     */
+    private void releaseAnchorClaims(@Nonnull StationSession s, @Nullable CommandBuffer<EntityStore> commandBuffer) {
+        if (s.anchorBlocks.isEmpty()) {
+            return;
+        }
+        Store<EntityStore> ownerStore = null;
+        if (s.ref != null && s.ref.isValid()) {
+            try {
+                ownerStore = s.ref.getStore();
+            } catch (Throwable ignored) {
+                ownerStore = null;
+            }
+        }
+        for (Map.Entry<String, String> e : s.anchorBlocks.entrySet()) {
+            String anchorId = e.getKey();
+            String blockKey = e.getValue();
+            if (ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(anchorId) || blockKey.equals(s.blockKey)) {
+                continue;
+            }
+            byBlock.remove(blockKey, s.playerUuid);
+            StationCustodyClaim claim = custodyByBlock.get(blockKey);
+            if (claim == null || !claim.ownerId.equals(s.playerUuid)) {
+                continue;
+            }
+            custodyByBlock.remove(blockKey, claim);
+            StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
+            giveClaimToOwner(ownerStore, s.ref, claim, claim.blockX, claim.blockY, claim.blockZ);
+        }
+    }
+
+    /**
+     * Refunds the in-flight iteration's consumed inputs (design 2.5/M1, {@code stop()}'s teardown):
+     * grants whatever remains in {@link StationSession#iterationConsumed} back to the owner
+     * (hotbar-first via {@link ItemGrantUtil}, drop-at-block on overflow), then clears it. Empty for
+     * every completed-cycle boundary (each {@code Produce.To:Custody} AND each completed program
+     * cycle clears the ledger), so an orderly stop between cycles refunds NOTHING - refund and
+     * custody-return stay mutually exclusive per iteration.
+     */
+    private void refundIterationLedger(@Nonnull StationSession s) {
+        if (s.iterationConsumed.isEmpty()) {
+            return;
+        }
+        Store<EntityStore> ownerStore = null;
+        if (s.ref != null && s.ref.isValid()) {
+            try {
+                ownerStore = s.ref.getStore();
+            } catch (Throwable ignored) {
+                ownerStore = null;
+            }
+        }
+        Player player = null;
+        if (ownerStore != null && s.ref != null && s.ref.isValid()) {
+            try {
+                player = ownerStore.getComponent(s.ref, Player.getComponentType());
+            } catch (Throwable ignored) {
+                player = null;
+            }
+        }
+        for (Map.Entry<String, Integer> e : s.iterationConsumed.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null || e.getValue() <= 0) {
+                continue;
+            }
+            ItemStack stack = new ItemStack(e.getKey(), e.getValue());
+            try {
+                if (player != null) {
+                    ItemGrantUtil.grant(player, stack, ownerStore, s.blockX, s.blockY, s.blockZ);
+                } else {
+                    ItemDropUtil.dropAtBlock(ownerStore, s.blockX, s.blockY, s.blockZ, List.of(stack));
+                }
+            } catch (Throwable t) {
+                Log.warn("STATION iteration refund failed for '" + e.getKey() + "': " + t.getMessage());
+            }
+        }
+        s.iterationConsumed.clear();
+    }
+
+    /**
+     * Solves a bounded-A* walk path from the puppet's CURRENT position to the target anchor's
+     * block-top column (scope-2 wave 3, design 2.3): the reserved {@code "self"}/null anchor targets
+     * the primary block, any other id reads {@link StationSession#anchorBlocks}. Returns the
+     * block-centred waypoints, or {@code null} when the anchor is unresolved / the puppet is gone /
+     * the path is blocked (the walk-step-entry re-solve; the handler maps a null to a graceful
+     * {@link StopReason#PATH_BLOCKED} stop). WORLD-THREAD ONLY.
+     */
+    @Nullable
+    List<Vector3d> solveWalkPath(@Nonnull StationSession s, @Nullable String targetAnchorId) {
+        if (s.puppetRef == null || !s.puppetRef.isValid() || s.ref == null || !s.ref.isValid()) {
+            return null;
+        }
+        String blockKey = anchorBlockKeyFor(s, targetAnchorId);
+        if (blockKey == null) {
+            return null;
+        }
+        int[] coords = (targetAnchorId == null || targetAnchorId.isBlank()
+                || ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(targetAnchorId))
+                ? new int[] {s.blockX, s.blockY, s.blockZ}
+                : StationAnchors.parseCoords(blockKey);
+        if (coords == null) {
+            return null;
+        }
+        try {
+            World world = WorldEvictors.worldOf(s.ref);
+            Store<EntityStore> store = s.ref.getStore();
+            TransformComponent transform = store.getComponent(s.puppetRef, TransformComponent.getComponentType());
+            if (transform == null) {
+                return null;
+            }
+            Vector3d from = new Vector3d(transform.getPosition());
+            Vector3d to = new Vector3d(coords[0] + 0.5, coords[1] + 1.0, coords[2] + 0.5);
+            return PuppetNav.solve(world, store, from, to, StationAnchors.MAX_SCAN_RADIUS);
+        } catch (Throwable t) {
+            Log.warn("STATION walk path solve failed for '" + s.stationId + "': " + t.getMessage());
+            return null;
+        }
+    }
+
+    // ==================== Iteration refund ledger recorders (design 2.5/M1) ====================
+
+    /** Records a REAL exact-item consume into the iteration refund ledger. */
+    static void recordIterationConsumedItem(@Nonnull StationSession s, @Nonnull String itemId, int quantity) {
+        if (quantity > 0) {
+            s.iterationConsumed.merge(itemId, quantity, Integer::sum);
+        }
+    }
+
+    /** Records the REAL drained ids of a {@code ResourceTypeId} inventory consume into the iteration ledger. */
+    static void recordIterationConsumedResource(@Nonnull StationSession s, @Nullable ResourceTransaction tx,
+            @Nonnull String resourceTypeId) {
+        List<ConsumedSlot> slots = new ArrayList<>();
+        if (tx != null) {
+            for (ResourceSlotTransaction slotTx : tx.getList()) {
+                if (slotTx != null && slotTx.succeeded() && slotTx.getConsumed() > 0) {
+                    ItemStack before = slotTx.getSlotBefore();
+                    slots.add(new ConsumedSlot(before != null ? before.getItemId() : null, slotTx.getConsumed()));
+                }
+            }
+        }
+        tallyConsumedResource(s.iterationConsumed, slots, resourceTypeId);
+    }
+
+    /** Records a custody drain's REAL drained ids into the iteration ledger. */
+    static void recordIterationConsumedMap(@Nonnull StationSession s, @Nonnull Map<String, Integer> realIds) {
+        for (Map.Entry<String, Integer> e : realIds.entrySet()) {
+            if (e.getKey() != null && e.getValue() != null && e.getValue() > 0) {
+                s.iterationConsumed.merge(e.getKey(), e.getValue(), Integer::sum);
+            }
+        }
+    }
+
+    /**
+     * The M1 single rule (design 2.5): ANY {@code Produce.To:"Custody"} clears the ENTIRE current
+     * iteration's consumed ledger (the consumed inputs became the custody item {@code returnCustody}
+     * now hands back). Refund and custody-return are mutually exclusive per iteration.
+     */
+    static void clearIterationLedgerOnCustodyProduce(@Nonnull StationSession s) {
+        s.iterationConsumed.clear();
     }
 
     /**
@@ -2355,15 +2904,42 @@ public final class StationService {
      */
     void onCustodyBlockBroken(@Nonnull Store<EntityStore> store, @Nonnull CommandBuffer<EntityStore> commandBuffer,
             @Nonnull String blockKey, int x, int y, int z) {
+        // The broken block is no longer a discoverable station block (scope-2 wave 3, gate m4).
+        knownStationBlocks.remove(blockKey);
+        // FIRST: drop the broken block's OWN custody at the block (design 2.6's "broken block's
+        // custody drops at that block"), removing the claim so a following ANCHOR_LOST stop's
+        // anchor sweep does not also try to return it to inventory (mutually exclusive by removal).
         StationCustodyClaim claim = custodyByBlock.remove(blockKey);
-        if (claim == null) {
+        if (claim != null) {
+            StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
+            if (!claim.isEmpty()) {
+                dropCustodyAtBlock(store, x, y, z, claim.toItemStacks());
+            }
+        }
+        // THEN: if this block was a REMOTE anchor of a live session, stop it gracefully - its OTHER
+        // anchors auto-return + its in-flight iteration refunds through the one stop() funnel.
+        stopSessionOwningAnchor(blockKey, store, commandBuffer);
+    }
+
+    /**
+     * Stops the session that CLAIMED {@code blockKey} as a REMOTE anchor (design 2.6's ANCHOR_LOST):
+     * resolves the owner via the generalized {@link #byBlock} map and stops with
+     * {@link StopReason#ANCHOR_LOST}. A no-op when the block is the session's PRIMARY block (the
+     * heartbeat's block-gone check owns that, {@link StopReason#STATION_GONE}) or nothing claims it.
+     */
+    private void stopSessionOwningAnchor(@Nonnull String blockKey, @Nonnull Store<EntityStore> store,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        UUID owner = byBlock.get(blockKey);
+        if (owner == null) {
             return;
         }
-        StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
-        if (claim.isEmpty()) {
+        StationSession s = byPlayer.get(owner);
+        if (s == null || s.stopped.get() || blockKey.equals(s.blockKey)) {
             return;
         }
-        dropCustodyAtBlock(store, x, y, z, claim.toItemStacks());
+        if (s.anchorBlocks.containsValue(blockKey)) {
+            stop(s, StopReason.ANCHOR_LOST, store, commandBuffer);
+        }
     }
 
     /**
@@ -2640,6 +3216,24 @@ public final class StationService {
     }
 
     /**
+     * The display-name {@link Message} for a station id referenced only by id (an anchor's target
+     * station, scope-2 wave 3): the resolved asset's own {@code Identity.NameKey} when the station
+     * is loaded, else the {@code rpgstations.station.<id>.name} convention key - so an anchor-deny
+     * toast names the OTHER station the same way {@link #stationNameMsg} names the primary one.
+     */
+    @Nonnull
+    private static Message anchorStationNameMsg(@Nullable String stationId) {
+        if (stationId == null || stationId.isBlank()) {
+            return Msg.raw("");
+        }
+        StationAsset asset = StationCatalog.getInstance().getStation(stationId);
+        if (asset != null) {
+            return stationNameMsg(asset);
+        }
+        return Msg.key("rpgstations.station." + stationId.toLowerCase(java.util.Locale.ROOT) + ".name");
+    }
+
+    /**
      * Native item/block display name as a client-resolved {@link Message}: the native {@code
      * server.items.<id>.name} key (vanilla/base-game items - most consumed/produced ledger rows,
      * e.g. the sawmill's logs/planks or the anvil's bars) FIRST, then the {@code items.<id>.name}
@@ -2732,6 +3326,9 @@ public final class StationService {
             case STEP_FAILED -> "ui.station.stop.step_failed";
             case RITUAL_COMPLETE -> "ui.station.stop.complete";
             case ENHANCE_CAPPED -> "ui.station.stop.capped";
+            case INPUTS_EXHAUSTED -> "ui.station.stop.inputs_exhausted";
+            case ANCHOR_LOST -> "ui.station.stop.anchor_lost";
+            case PATH_BLOCKED -> "ui.station.stop.path_blocked";
             default -> null;
         };
     }

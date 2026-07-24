@@ -1,0 +1,6 @@
+# RPG Stations - avatarCustomization-namespace additions, ru-RU.
+# This file's basename targets Hytale's own "avatarCustomization" language namespace (the
+# namespace the client's emote UI reads emote names from).
+
+emotes.RPG_Emote_Saw.name = Пиление
+emotes.RPG_Emote_Knife.name = Чистка рыбы

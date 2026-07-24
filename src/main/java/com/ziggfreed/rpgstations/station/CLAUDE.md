@@ -9,23 +9,30 @@ or per an authored step program, loot rolls through `loot/`, and skill-XP declar
 (sections 2-3, decisions 33-41 in `../../../../../../.claude/research/rpg-stations-extraction-design.md`),
 superseding the phase-1/phase-2 design for everything the scope-2 redesign touches.
 
-## WAVE BOUNDARY (read first)
+## WAVE BOUNDARY (scope-2 wave 3 landed - the multi-station seam EXECUTES)
 
-The scope-2 schema (`../asset/CLAUDE.md`) carries the FULL multi-station field set, but this
-engine executes only a SUBSET of it this wave:
+The scope-2 schema (`../asset/CLAUDE.md`) carries the FULL multi-station field set; as of wave 3
+the WHOLE set executes:
 
-- **Executes now**: `Consume`/`Stamp`/`Produce` (`To:"Inventory"` only)/`Roll`/`Commands`/
-  `Duration`/`Repeat`, all at the PRIMARY station (`At` absent). Placed-input custody
-  (single-station), the anvil's Stamp ritual, the sawmill's implicit convert loop, camera/mount/
-  puppet presentation, exit hooks, validation - all unchanged and fully live.
-- **`[wave 3]` - decodes and validates, does NOT execute**: `StationStep.Walk` (puppet travel to
-  an anchor), `StationStep.At` (running a step at a non-primary anchor), `Produce.To:"Custody"`
-  (cross-station output), `ActionDef.Anchors` DISCOVERY/CLAIMING (the codec's `Anchors` map
-  decodes and the validator checks `Station` ids exist, but no engine code resolves a placed
-  block or claims one). A step authoring any of these (`StationStep.authorsWave3OnlyPhase()`)
-  draws a `WAVE3_PENDING`-style validator WARN at load and denies engage gracefully with a
-  localized toast - never a crash, never a partial program run. **No shipped wave-2 content
-  authors any of them.**
+- **Single-station (waves 1-2, unchanged)**: `Consume`/`Stamp`/`Produce`(`To:"Inventory"`)/`Roll`/
+  `Commands`/`Duration`/`Repeat` at the PRIMARY station. Placed-input custody, the anvil's Stamp
+  ritual, the sawmill's implicit convert loop, camera/mount/puppet, exit hooks - all unchanged.
+- **Multi-station (wave 3, NEW - this leg)**: `StationStep.Walk` (the puppet travels to an anchor
+  via `ziggfreed-common`'s `PuppetNav` bounded A* + `PlayerPuppetService.walkTick`/`setWalking`,
+  suspend/resume per frame through `StationWalkState`), `StationStep.At` (a step's `Consume`/
+  `Produce` custody resolves the anchor's blockKey, not the primary), `Produce.To:"Custody"`
+  (cross-station output into the anchor's claim + display), and `ActionDef.Anchors`
+  DISCOVERY/CLAIMING (lazy `knownStationBlocks` index fed by interaction warming + `PlaceBlockEvent`,
+  bounded ring scan last resort; atomic first-wins claim into the generalized `byBlock` map with the
+  gate-m5 own-session/custody precedence). New stop reasons `INPUTS_EXHAUSTED` (repeat-while-inputs,
+  design 2.4), `ANCHOR_LOST` (a remote anchor broken mid-program, design 2.6), `PATH_BLOCKED` (a
+  walk-step-entry re-solve failed). The `iterationConsumed` refund ledger (design 2.5/M1) refunds an
+  in-flight iteration's consumed inputs at `stop()`, cleared by any `Produce.To:Custody` (refund and
+  custody-return mutually exclusive). The `WAVE3_PENDING` validator warn is GONE; the anchor/walk
+  validator checks (`ANCHOR_STATION_UNKNOWN`/`WALK_TARGET_UNKNOWN_ANCHOR`/`STEP_AT_UNKNOWN_ANCHOR`/
+  `WALK_REQUIRES_PUPPET`) stay as the live discovery-time coverage. See `StationAnchors`
+  (pure cores), `StationWalkState`, `StationBlockPlaceSystem`, and the anchor section of
+  `StationService`.
 
 ## Content + catalogs
 

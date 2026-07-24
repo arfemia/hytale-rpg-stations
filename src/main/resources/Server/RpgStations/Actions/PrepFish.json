@@ -1,0 +1,85 @@
+{
+  "$Comment": "Scope-2 wave-3 leg W3-F (design section 2.7, GATE OUTCOMES m1 fix, decision 40): the flagship multi-station fish exemplar, attached to Server/RpgStations/Stations/CuttingBoard.json via {\"Ref\":\"prepfish\"}. Custody.Input is authored explicitly (ResourceTypeId 'Fish', the native family every caught-fish item shares via Template_Fish_Item.json) because this action has no Recipe.Conversions for the usual zero-extra-authoring fallback to derive from - it is a Steps program. M1 FIX (critique-adopted, gate Q3/Q23): the old design draft split fish-scaling into a single step that BOTH consumed the raw fish AND repeated 3x - a Consume inside a Repeat re-executes the consume every iteration, over-draining custody. Fixed here by splitting 'load' (a one-shot Consume, Repeat absent) from 'scale' (a pure Duration BEAT with no Consume phase, Repeat:{Times:3}) - the authoring guide's own footgun callout. Tool gate = the DAGGERS weapon family (gate decision 40, Q12 OVERRIDDEN from the design draft's sickle placeholder): the real vanilla item family is 'Weapon_Daggers_*' (plural - hytale-shared-source/HytaleAssets/Server/Item/Items/Weapon/Daggers/*.json), enumerated here as concrete Ids per this leg's brief (the vanilla items also carry Tags.Family:['Dagger'] via their shared Template_Weapon_Daggers.json parent, a Tags.Family route was available but Ids was the directed choice, mirroring the Anvil's own explicit-Ids convention). Anchors.fire targets the 'cookingfire' station (Server/RpgStations/Stations/CookingFire.json) within a 12-block radius (the design-2.2 default MaxRadius). Work.Repeat:true + the engine's new StopReason.INPUTS_EXHAUSTED (design 2.4) is 'repeats while fish remain' with zero mode flags - the session ends gracefully once no more Fish custody remains at the next 'load' step's Consume. Sound/particle ids are all REAL, already-shipped-elsewhere ids (verified against the shared source / this repo's own usage), never invented placeholders: SFX_Daggers_T1_Swing (the vanilla dagger's own primary-swing sound, Weapon_Daggers_Crude.json), Smoke_Black (Deco_Campfire_Off.json's own particle), SFX_Player_Drop_Item (the vanilla generic item-place sound).",
+  "Label": "rpgstations.action.prepfish.label",
+  "Custody": {
+    "MaxQuantity": 100,
+    "Input": { "ResourceTypeId": "Fish" },
+    "States": { "Empty": "Default", "Loaded": "Loaded" }
+  },
+  "Tool": {
+    "Ids": [
+      "Weapon_Daggers_Adamantite",
+      "Weapon_Daggers_Adamantite_Saurian",
+      "Weapon_Daggers_Bone",
+      "Weapon_Daggers_Bronze",
+      "Weapon_Daggers_Bronze_Ancient",
+      "Weapon_Daggers_Claw_Bone",
+      "Weapon_Daggers_Cobalt",
+      "Weapon_Daggers_Copper",
+      "Weapon_Daggers_Crude",
+      "Weapon_Daggers_Doomed",
+      "Weapon_Daggers_Fang_Doomed",
+      "Weapon_Daggers_Iron",
+      "Weapon_Daggers_Mithril",
+      "Weapon_Daggers_Onyxium",
+      "Weapon_Daggers_Stone_Trork",
+      "Weapon_Daggers_Thorium"
+    ]
+  },
+  "Work": {
+    "CycleMs": 500,
+    "MaxDurationMs": 600000,
+    "Exclusive": true,
+    "Repeat": true
+  },
+  "Anchors": {
+    "fire": { "Station": "cookingfire", "MaxRadius": 12 }
+  },
+  "Steps": [
+    {
+      "Id": "load",
+      "Consume": { "ResourceTypeId": "Fish", "Quantity": 1, "From": "Custody" }
+    },
+    {
+      "Id": "scale",
+      "Repeat": { "Times": 3 },
+      "Duration": { "Ms": 600 },
+      "Puppet": { "Clip": "RPG_Emote_Knife" },
+      "Presentation": { "Sound": "SFX_Daggers_T1_Swing" }
+    },
+    {
+      "Id": "walkout",
+      "Walk": { "To": "fire" },
+      "Puppet": { "Prop": { "Source": "ItemId", "ItemId": "Food_Fish_Raw" } }
+    },
+    {
+      "Id": "placeraw",
+      "At": "fire",
+      "Produce": { "ItemId": "Food_Fish_Raw", "Quantity": 1, "To": "Custody" },
+      "Duration": { "Ms": 400 }
+    },
+    {
+      "Id": "cook",
+      "At": "fire",
+      "Duration": { "Ms": 2500 },
+      "Presentation": { "Particles": "Smoke_Black" }
+    },
+    {
+      "Id": "harvest",
+      "At": "fire",
+      "Consume": { "ItemId": "Food_Fish_Raw", "Quantity": 1, "From": "Custody" },
+      "Duration": { "Ms": 400 }
+    },
+    {
+      "Id": "walkback",
+      "Walk": { "To": "self" },
+      "Puppet": { "Prop": { "Source": "ItemId", "ItemId": "Food_Fish_Grilled" } }
+    },
+    {
+      "Id": "deposit",
+      "Produce": { "ItemId": "Food_Fish_Grilled", "Quantity": 1, "To": "Custody" },
+      "Duration": { "Ms": 300 },
+      "Presentation": { "Sound": "SFX_Player_Drop_Item" }
+    }
+  ]
+}

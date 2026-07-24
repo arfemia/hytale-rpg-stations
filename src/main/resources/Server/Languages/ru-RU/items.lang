@@ -1,0 +1,12 @@
+RPG_Station_Sawmill.name = Лесопилка
+RPG_Station_Sawmill.description = Рабочая станция, которая распиливает брёвна на доски. Нажмите использование, чтобы начать работу.
+RPG_Station_Sawmill.hint.empty = Нажмите [{key}], чтобы загрузить брёвна
+RPG_Station_Sawmill.hint.loaded = Нажмите [{key}], чтобы работать
+RPG_Station_CuttingBoard.name = Разделочная доска
+RPG_Station_CuttingBoard.description = Рабочая станция, которая чистит рыбу и готовит её к готовке. Нажмите использование, чтобы начать работу.
+RPG_Station_CuttingBoard.hint.empty = Нажмите [{key}], чтобы загрузить рыбу
+RPG_Station_CuttingBoard.hint.loaded = Нажмите [{key}], чтобы работать
+RPG_Station_CookingFire.name = Костёр для готовки
+RPG_Station_CookingFire.description = Костёр, который жарит сырую рыбу. Нажмите использование, чтобы начать работу.
+RPG_Station_CookingFire.hint.empty = Нажмите [{key}], чтобы загрузить сырую рыбу
+RPG_Station_CookingFire.hint.loaded = Нажмите [{key}], чтобы работать

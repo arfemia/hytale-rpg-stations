@@ -1,0 +1,26 @@
+{
+  "$Comment": "Scope-2 wave-3 leg W3-F (design section 2.7, decision 32 - jar layer, ZERO progression): the PRIMARY station of the fish-prep multi-station exemplar. Deliberately thin - the only action is 'prepfish', attached by Ref to the standalone Server/RpgStations/Actions/PrepFish.json (design 1.5's attachment route), which owns every mechanical group (Custody/Tool/Work/Anchors/Steps). Puppet is authored HERE at station level (the default for the resolved 'prepfish' action per Puppet's own per-station-default/per-action-override rule - ActionDef.Puppet stays null on PrepFish.json so it inherits this group wholesale) because the design-28 binding rule requires it: a station whose action authors any Walk step REQUIRES Puppet enabled (validator WALK_REQUIRES_PUPPET) - the player stays hidden/held here while the puppet walks to the cooking-fire anchor and back. Hold/Camera mirror the Anvil's proven effect-mode default (the Entity standing-mount spike stays unverified elsewhere in this mod, not reused here).",
+  "Identity": {
+    "NameKey": "rpgstations.station.cuttingboard.name",
+    "DescKey": "rpgstations.station.cuttingboard.desc"
+  },
+  "Hold": {
+    "MovementLock": true,
+    "EffectId": "RPG_Station_Hold",
+    "InterruptOnDamage": true
+  },
+  "Camera": {
+    "Recipe": "look_rot"
+  },
+  "Puppet": {
+    "Enabled": true,
+    "Hide": { "Route": "Scale" },
+    "Look": { "Source": "PlayerClone" },
+    "Offset": { "X": 0.0, "Y": -0.4, "Z": 0.6 },
+    "Yaw": 0.0,
+    "Prop": { "Source": "MirrorHeld", "Slot": "Hotbar" }
+  },
+  "Actions": {
+    "prepfish": { "Ref": "prepfish" }
+  }
+}

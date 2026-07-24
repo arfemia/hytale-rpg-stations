@@ -49,7 +49,7 @@ import com.ziggfreed.rpgstations.validation.Finding;
  * {@code Conversion.Input/Output} (now top-level {@link Ingredient}) is rebuilt against the
  * A-SCHEMA leg's rewritten codecs. New sections cover {@code ACTION_REF_UNKNOWN},
  * {@code ANCHOR_STATION_UNKNOWN}, {@code WALK_TARGET_UNKNOWN_ANCHOR},
- * {@code STEP_AT_UNKNOWN_ANCHOR}, {@code WALK_REQUIRES_PUPPET}, {@code WAVE3_PENDING},
+ * {@code STEP_AT_UNKNOWN_ANCHOR}, {@code WALK_REQUIRES_PUPPET},
  * {@code LOOT_DOUBLE_LUCK}, the reshaped {@code Stamp.Caps.Budgets[]} checks, and the two new
  * standalone-collection validators ({@link StationValidator#validateActionAssets} /
  * {@link StationValidator#validateExtensions}) covering {@code EXTENSION_TARGET_UNKNOWN},
@@ -1206,7 +1206,7 @@ public class StationValidatorTest {
         assertFalse(codes(validateWithRefs(station, ANY_STATION, ANY_ACTION_ASSET)).contains("ANCHOR_STATION_UNKNOWN"));
     }
 
-    // ==================== Walk/At + WALK_REQUIRES_PUPPET + WAVE3_PENDING (design 2.1-2.3, [wave 3]) ====================
+    // ==================== Walk/At + WALK_REQUIRES_PUPPET (design 2.1-2.3, scope-2 wave 3) ====================
 
     @Test
     void walkWithoutPuppet_flaggedRequiresPuppet() {
@@ -1215,7 +1215,6 @@ public class StationValidatorTest {
         actions.put("ritual", actionDef().withSteps(new StationStep[]{step}).withAnchors(anchorsOf("fire", "cookingfire")));
         Set<String> codes = codes(validate(stationWithActions(actions)));
         assertTrue(codes.contains("WALK_REQUIRES_PUPPET"));
-        assertTrue(codes.contains("WAVE3_PENDING"), "Walk is always [wave 3]");
     }
 
     @Test
@@ -1273,24 +1272,9 @@ public class StationValidatorTest {
     }
 
     @Test
-    void produceToCustody_flaggedWave3Pending() {
+    void produceToCustody_notFlaggedWave3Pending() {
+        // Scope-2 wave 3: Produce.To:Custody EXECUTES now, so the temporary WAVE3_PENDING warn is gone.
         StationStep step = StationStep.of("deposit").withProduce(StationStep.Produce.of("Food_Fish_Grilled", 1, "Custody"));
-        Map<String, ActionDef> actions = new LinkedHashMap<>();
-        actions.put("ritual", actionDef().withSteps(new StationStep[]{step}));
-        assertTrue(codes(validate(stationWithActions(actions))).contains("WAVE3_PENDING"));
-    }
-
-    @Test
-    void produceToInventory_notFlaggedWave3Pending() {
-        StationStep step = StationStep.of("deposit").withProduce(StationStep.Produce.of("Food_Fish_Grilled", 1, "Inventory"));
-        Map<String, ActionDef> actions = new LinkedHashMap<>();
-        actions.put("ritual", actionDef().withSteps(new StationStep[]{step}));
-        assertFalse(codes(validate(stationWithActions(actions))).contains("WAVE3_PENDING"));
-    }
-
-    @Test
-    void pureBeatStep_neverFlagsWave3Pending() {
-        StationStep step = StationStep.of("strike").withDuration(StationStep.Duration.of(650L));
         Map<String, ActionDef> actions = new LinkedHashMap<>();
         actions.put("ritual", actionDef().withSteps(new StationStep[]{step}));
         assertFalse(codes(validate(stationWithActions(actions))).contains("WAVE3_PENDING"));

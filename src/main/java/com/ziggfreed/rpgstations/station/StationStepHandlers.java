@@ -18,11 +18,13 @@ import com.hypixel.hytale.server.core.inventory.ResourceQuantity;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransaction;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.ziggfreed.common.cast.step.StepHandler;
+import com.ziggfreed.common.entity.PlayerPuppetService;
 import com.ziggfreed.rpgstations.api.EnhanceLine;
 import com.ziggfreed.rpgstations.api.EnhanceStamper;
 import com.ziggfreed.rpgstations.api.StampInspection;
 import com.ziggfreed.rpgstations.api.StampResult;
 import com.ziggfreed.rpgstations.api.impl.EnhanceStamperRegistryImpl;
+import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.LootRef;
@@ -69,19 +71,18 @@ final class StationStepHandlers {
             StationSession s = ctx.session;
             long now = System.currentTimeMillis();
 
-            // WAVE-3 pending guard (decision boundary): a step authoring Walk/At/Produce.To:Custody
-            // decodes + validates this wave but the engine cannot execute it - deny gracefully.
-            // Engage should already have denied any such program (StationService#hasWave3PendingStep);
-            // this is the defensive last line.
-            if (step.authorsWave3OnlyPhase()) {
-                Log.warn("STATION step '" + step.getId() + "' at '" + s.stationId
-                        + "' authors a wave-3 phase (Walk/At/Produce.To:Custody) that cannot execute this wave");
-                s.stepIteration = 0;
-                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                        "step '" + step.getId() + "' authors a wave-3-only phase");
+            // === WALK in flight (scope-2 wave 3, design 2.3)? Advance it every frame ===
+            // A Walk phase suspends WITHOUT a stepDeadline (deadline stays 0 => the frame drain
+            // re-enters here every frame), driving the puppet until it arrives or times out.
+            if (s.walkState != null) {
+                if (!advanceWalk(ctx, now)) {
+                    return StationStepResult.suspend(now); // still walking; re-enter next frame
+                }
+                s.walkState = null; // arrived - the walk for iteration s.stepIteration is done
+                return runIterations(ctx, step, now, true, s.stepRepeatCount);
             }
 
-            // Resume of a Duration hold committed on a prior tick for THIS step's current iteration.
+            // === Duration hold resume (a prior tick committed a deadline for this iteration) ===
             boolean resumed = false;
             if (s.stepDeadlineMs != 0L) {
                 if (!StationStepDecisions.durationDue(now, s.stepDeadlineMs)) {
@@ -93,59 +94,148 @@ final class StationStepHandlers {
             }
 
             // Repeat resolves ONCE at step entry (design 2.1, m1): a fresh entry computes the count;
-            // a Duration-hold resume reuses the value cached at the hold, so a factor-scaled Repeat
-            // combined with a Duration hold never re-resolves its iteration count mid-loop.
+            // a Duration-hold/walk resume reuses the value cached at the hold, so a factor-scaled
+            // Repeat combined with a Duration hold never re-resolves its iteration count mid-loop.
             int repeatCount;
             if (resumed) {
                 repeatCount = s.stepRepeatCount;
             } else {
                 double contribution = StationStepDecisions.repeatFactorContribution(step.getRepeat(), ctx.snapshot::resolve);
                 repeatCount = StationStepDecisions.resolveRepeatCount(step.getRepeat(), contribution);
+                s.stepRepeatCount = repeatCount; // cache so a walk resume can read it back
             }
 
-            for (int i = s.stepIteration; i < repeatCount; i++) {
-                s.stepIteration = i;
-
-                StationStepResult phase;
-                if ((phase = consumePhase(ctx, step)) != null) {
-                    s.stepIteration = 0;
-                    return phase;
-                }
-                if ((phase = StampHandler.executeStampPhase(ctx, step)) != null) {
-                    s.stepIteration = 0;
-                    return phase;
-                }
-                if ((phase = producePhase(ctx, step)) != null) {
-                    s.stepIteration = 0;
-                    return phase;
-                }
-                if ((phase = rollPhase(ctx, step)) != null) {
-                    s.stepIteration = 0;
-                    return phase;
-                }
-                if ((phase = commandsPhase(ctx, step)) != null) {
-                    s.stepIteration = 0;
-                    return phase;
-                }
-
-                emitEntryCues(ctx, step);
-
-                StationStep.Duration duration = step.getDuration();
-                if (duration != null && duration.effectiveMs() > 0) {
-                    long deadline = StationStepDecisions.commitOrReadDeadline(now, duration.effectiveMs(), 0L);
-                    s.stepDeadlineMs = deadline;
-                    s.stepIteration = i;
-                    s.stepRepeatCount = repeatCount; // cache the resolved count for the resume (m1)
-                    if (!StationStepDecisions.durationDue(now, deadline)) {
-                        return StationStepResult.suspend(deadline);
-                    }
-                    s.stepDeadlineMs = 0L;
-                }
-            }
-
-            s.stepIteration = 0;
-            return StationStepResult.SUCCESS;
+            return runIterations(ctx, step, now, false, repeatCount);
         }
+    }
+
+    /**
+     * Walks the fixed phase order for iterations {@code [s.stepIteration, repeatCount)}: the
+     * {@code Walk} phase FIRST (suspending the walk across ticks), then
+     * {@code Consume -> Stamp -> Produce -> Roll -> Commands -> entry cues -> Duration}. On a
+     * post-walk-arrival re-entry {@code walkAlreadyDone} skips the Walk phase for the CURRENT
+     * iteration only (its walk already completed); every later iteration runs its own walk again.
+     */
+    private static StationStepResult runIterations(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
+            long now, boolean walkAlreadyDone, int repeatCount) {
+        StationSession s = ctx.session;
+        for (int i = s.stepIteration; i < repeatCount; i++) {
+            s.stepIteration = i;
+
+            // WALK phase (first). A fresh iteration begins the walk (suspends to drive it); a
+            // post-arrival re-entry skips it for THIS iteration.
+            if (!walkAlreadyDone && step.getWalk() != null) {
+                StationStepResult wr = beginWalk(ctx, step, now, repeatCount);
+                if (wr != null) {
+                    return wr; // suspend (walk driving) or fail (unreachable at walk-step entry)
+                }
+            }
+            walkAlreadyDone = false;
+
+            StationStepResult phase;
+            if ((phase = consumePhase(ctx, step)) != null) {
+                s.stepIteration = 0;
+                return phase;
+            }
+            if ((phase = StampHandler.executeStampPhase(ctx, step)) != null) {
+                s.stepIteration = 0;
+                return phase;
+            }
+            if ((phase = producePhase(ctx, step)) != null) {
+                s.stepIteration = 0;
+                return phase;
+            }
+            if ((phase = rollPhase(ctx, step)) != null) {
+                s.stepIteration = 0;
+                return phase;
+            }
+            if ((phase = commandsPhase(ctx, step)) != null) {
+                s.stepIteration = 0;
+                return phase;
+            }
+
+            emitEntryCues(ctx, step);
+
+            StationStep.Duration duration = step.getDuration();
+            if (duration != null && duration.effectiveMs() > 0) {
+                long deadline = StationStepDecisions.commitOrReadDeadline(now, duration.effectiveMs(), 0L);
+                s.stepDeadlineMs = deadline;
+                s.stepIteration = i;
+                s.stepRepeatCount = repeatCount; // cache the resolved count for the resume (m1)
+                if (!StationStepDecisions.durationDue(now, deadline)) {
+                    return StationStepResult.suspend(deadline);
+                }
+                s.stepDeadlineMs = 0L;
+            }
+        }
+
+        s.stepIteration = 0;
+        return StationStepResult.SUCCESS;
+    }
+
+    // ==================== Walk phase (scope-2 wave 3, design 2.3) ====================
+
+    /**
+     * Begins the {@code Walk} phase (design 2.3): re-solves a bounded-A* path from the puppet to the
+     * anchor (the walk-step-entry re-solve, so a mid-program blockage denies gracefully with
+     * {@link StationService.StopReason#PATH_BLOCKED}), flips the puppet's walk state on, and returns
+     * a {@code Suspend} so the frame drain drives it. Returns a {@code Fail} when the action has no
+     * active puppet (defensive - {@code WALK_REQUIRES_PUPPET} + engage already gate this) or the
+     * path is unreachable. Returns {@code null} ONLY if there is nothing to walk (never, since the
+     * caller guards {@code step.getWalk() != null}).
+     */
+    @Nullable
+    private static StationStepResult beginWalk(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
+            long now, int repeatCount) {
+        StationSession s = ctx.session;
+        StationStep.Walk walk = step.getWalk();
+        if (walk == null) {
+            return null;
+        }
+        String targetAnchor = walk.getTo();
+        if (!s.puppetActive || s.puppetRef == null || !s.puppetRef.isValid()) {
+            s.stepIteration = 0;
+            return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                    "Walk step '" + step.getId() + "' requires an active Puppet");
+        }
+        List<Vector3d> path = StationService.getInstance().solveWalkPath(s, targetAnchor);
+        if (path == null || path.isEmpty()) {
+            s.stepIteration = 0;
+            return StationStepResult.fail(StationService.StopReason.PATH_BLOCKED,
+                    "Walk step '" + step.getId() + "' cannot reach anchor '" + targetAnchor + "'");
+        }
+        s.walkState = new StationWalkState(
+                targetAnchor != null && !targetAnchor.isBlank() ? targetAnchor : ActionDef.Anchor.RESERVED_SELF,
+                path, walk.effectiveSpeedMps(), now);
+        s.stepRepeatCount = repeatCount; // cache for the per-frame walk resume
+        // Sync the walk step's carried prop at DEPARTURE so the puppet holds it while walking (the
+        // fish exemplar's walkout carries the raw fish); emitEntryCues re-syncs on arrival (a cheap
+        // dirty-gated no-op). No-op for a step authoring no prop / a puppet-less session.
+        StationPuppetController.syncStepProp(s, ctx.commandBuffer, ctx.player, step);
+        PlayerPuppetService.setWalking(ctx.commandBuffer, s.puppetRef, true);
+        return StationStepResult.suspend(now); // suspend (deadline stays 0) so the drain re-enters each frame
+    }
+
+    /**
+     * Advances the in-flight walk one frame (design 2.3): lerps the puppet along its waypoints and
+     * returns {@code true} when it ARRIVES (within the epsilon) or TIMES OUT (distance/speed + 2s
+     * grace, so a walk never wedges the program), flipping the walk state off on arrival. A gone
+     * puppet is treated as arrived (never wedge). {@code false} = still walking.
+     */
+    private static boolean advanceWalk(@Nonnull StationStepContext ctx, long now) {
+        StationSession s = ctx.session;
+        StationWalkState w = s.walkState;
+        if (w == null || s.puppetRef == null || !s.puppetRef.isValid()) {
+            return true;
+        }
+        double dtMs = Math.max(0.0, now - w.lastTickMs);
+        w.lastTickMs = now;
+        w.progress = PlayerPuppetService.walkTick(ctx.store, s.puppetRef, w.waypoints, w.progress, w.speedMps, dtMs);
+        if (w.arrived() || w.timedOut(now)) {
+            PlayerPuppetService.setWalking(ctx.commandBuffer, s.puppetRef, false);
+            return true;
+        }
+        return false;
     }
 
     // ==================== Per-iteration entry cues (presentation + puppet clip/prop) ====================
@@ -224,6 +314,9 @@ final class StationStepHandlers {
                         ? InventoryAccess.storageOf(ctx.player).removeResource(resource)
                         : InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeResource(resource);
                 StationService.tallyResourceConsumption(ctx.session, tx, inputRef);
+                // Iteration refund ledger (design 2.5/M1): record the REAL drained ids so a
+                // mid-iteration stop refunds them - unless a Produce.To:Custody clears the ledger.
+                StationService.recordIterationConsumedResource(ctx.session, tx, inputRef);
             } else {
                 ItemStack input = new ItemStack(inputRef, quantity);
                 if (InventoryAccess.storageOf(ctx.player).canRemoveItemStack(input)) {
@@ -232,6 +325,7 @@ final class StationStepHandlers {
                     InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeItemStack(input);
                 }
                 ctx.session.consumedItems.merge(inputRef, quantity, Integer::sum);
+                StationService.recordIterationConsumedItem(ctx.session, inputRef, quantity);
             }
         } catch (Throwable t) {
             Log.warn("STATION Consume step failed for '" + ctx.session.stationId + "': " + t.getMessage());
@@ -248,18 +342,24 @@ final class StationStepHandlers {
     @Nullable
     private static StationStepResult consumeFromCustody(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
             boolean isResource, @Nullable String resourceTypeId, @Nullable String itemId, int quantity) {
-        StationCustodyClaim claim = StationService.getInstance().custodyClaimFor(ctx.session.blockKey);
+        // Custody drains from the step's At-anchor block (scope-2 wave 3, design 2.2) - the primary
+        // block for a null/self At, a remote anchor's claim otherwise.
+        StationCustodyClaim claim = StationService.getInstance().custodyClaimForAnchor(ctx.session, step.getAt());
         Map<String, Integer> drainedOut = new LinkedHashMap<>();
         int drained = StationCustody.drain(claim, isResource ? null : itemId, isResource ? resourceTypeId : null,
                 quantity, StationService::liveResourceTypeIdsOf, drainedOut);
         if (drained < quantity) {
-            return StationStepResult.fail(StationService.StopReason.OUT_OF_INPUTS,
+            // Design 2.4: a REPEATING program's shortage is the graceful natural end
+            // (INPUTS_EXHAUSTED); a non-repeating one keeps OUT_OF_INPUTS.
+            boolean repeating = ctx.action.getWork() != null && ctx.action.getWork().effectiveRepeat();
+            return StationStepResult.fail(StationService.shortInputStopReason(repeating),
                     "Consume step '" + step.getId() + "' custody ran short ("
                             + drained + "/" + quantity + " of '" + (isResource ? resourceTypeId : itemId) + "')");
         }
         for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
             ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
         }
+        StationService.recordIterationConsumedMap(ctx.session, drainedOut);
         return null;
     }
 
@@ -281,13 +381,37 @@ final class StationStepHandlers {
             return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
                     "Produce step '" + step.getId() + "' has no Produce.ItemId");
         }
-        if (!StationStep.Produce.TO_INVENTORY.equalsIgnoreCase(produce.effectiveTo())) {
-            Log.warn("STATION Produce step '" + step.getId() + "' authors To '" + produce.effectiveTo()
-                    + "' which does not execute this wave (only 'Inventory' is implemented)");
-            return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                    "Produce.To '" + produce.effectiveTo() + "' is not implemented this wave");
-        }
         int quantity = produce.effectiveQuantity();
+        String to = produce.effectiveTo();
+
+        // To:"Custody" (scope-2 wave 3, design 2.2): store the output into the step's At-anchor
+        // custody claim (the primary block for a null/self At), then clear the iteration refund
+        // ledger (M1: the consumed inputs BECAME this custody item - refund + custody-return are
+        // mutually exclusive; returnCustody now hands the produced item back instead).
+        if (StationStep.Produce.TO_CUSTODY.equalsIgnoreCase(to)) {
+            try {
+                boolean placed = StationService.getInstance().produceIntoCustody(ctx.session, ctx.commandBuffer,
+                        step.getAt(), produce.getItemId(), quantity);
+                if (!placed) {
+                    return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                            "Produce step '" + step.getId() + "' could not resolve its To:Custody anchor '"
+                                    + step.getAt() + "'");
+                }
+                ctx.session.producedItems.merge(produce.getItemId(), quantity, Integer::sum);
+                StationService.clearIterationLedgerOnCustodyProduce(ctx.session);
+            } catch (Throwable t) {
+                Log.warn("STATION Produce To:Custody step failed for '" + ctx.session.stationId + "': "
+                        + t.getMessage());
+                return StationStepResult.fail(StationService.StopReason.STEP_FAILED, t.getMessage());
+            }
+            return null;
+        }
+        if (!StationStep.Produce.TO_INVENTORY.equalsIgnoreCase(to)) {
+            Log.warn("STATION Produce step '" + step.getId() + "' authors To '" + to
+                    + "' which has no handler (only 'Inventory'/'Custody' are implemented)");
+            return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                    "Produce.To '" + to + "' is not implemented");
+        }
         try {
             ItemGrantUtil.grant(ctx.player, new ItemStack(produce.getItemId(), quantity), ctx.store,
                     ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);

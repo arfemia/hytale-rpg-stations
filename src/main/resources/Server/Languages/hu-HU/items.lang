@@ -1,0 +1,12 @@
+RPG_Station_Sawmill.name = Fűrészmalom
+RPG_Station_Sawmill.description = Munkaállomás, amely rönköket fűrészel deszkává. Nyomd meg a használat gombot a munka megkezdéséhez.
+RPG_Station_Sawmill.hint.empty = Nyomd meg a [{key}] gombot az anyagok betöltéséhez
+RPG_Station_Sawmill.hint.loaded = Nyomd meg a [{key}] gombot a munkához
+RPG_Station_CuttingBoard.name = Vágódeszka
+RPG_Station_CuttingBoard.description = Munkaállomás, amely halakat tisztít meg és főzésre készít fel. Nyomd meg a használat gombot a munka megkezdéséhez.
+RPG_Station_CuttingBoard.hint.empty = Nyomd meg a [{key}] gombot a halak betöltéséhez
+RPG_Station_CuttingBoard.hint.loaded = Nyomd meg a [{key}] gombot a munkához
+RPG_Station_CookingFire.name = Főzőtűz
+RPG_Station_CookingFire.description = Munkaállomás, amely nyers halakat grill. Nyomd meg a használat gombot a munka megkezdéséhez.
+RPG_Station_CookingFire.hint.empty = Nyomd meg a [{key}] gombot a nyers halak betöltéséhez
+RPG_Station_CookingFire.hint.loaded = Nyomd meg a [{key}] gombot a munkához

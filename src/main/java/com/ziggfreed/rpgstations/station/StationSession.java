@@ -250,6 +250,38 @@ final class StationSession {
      */
     @Nullable String puppetHeldItemId;
 
+    /**
+     * The resolved anchor block keys (scope-2 wave 3, design 2.2/2.4 - decision 28c): {@code
+     * anchorId -> "<worldUuid>:<x>:<y>:<z>"} for every declared {@code Anchors} entry the engage
+     * DISCOVERED and CLAIMED (atomically, first-wins) plus the implicit reserved {@code "self"}
+     * anchor (the primary station block). A step's {@code At}/{@code Walk.To} resolves its target
+     * blockKey against this map; {@code stop()} releases every claimed anchor block (and returns its
+     * custody) via it. Empty for a single-station program (every wave-2 program) - only an action
+     * declaring {@code Anchors} and running a {@code Walk}/{@code At} step populates it.
+     */
+    final Map<String, String> anchorBlocks = new LinkedHashMap<>();
+
+    /**
+     * The in-flight walk state (scope-2 wave 3, design 2.3): non-null ONLY while a {@code Walk}
+     * phase is driving the puppet toward an anchor. Carries the solved waypoints + parametric
+     * progress so a walk survives suspend/resume across ticks (the composite handler re-enters it
+     * every frame). Cleared the instant the walk arrives (or its path becomes blocked). Never
+     * persisted, like every other session field.
+     */
+    @Nullable StationWalkState walkState;
+
+    /**
+     * The current program iteration's REFUND ledger (scope-2 wave 3, design 2.5, gate M1's single
+     * rule): {@code itemId -> qty} of everything a {@code Consume} phase drained since the last
+     * commit boundary. ANY {@code Produce.To:"Custody"} clears the ENTIRE map (the consumed inputs
+     * BECAME the custody item {@code returnCustody} now hands back - refund and custody-return are
+     * mutually exclusive per iteration). An orderly {@code stop()} refunds whatever remains here to
+     * the player before the custody return runs; a hard crash loses it (accepted). The mandatory
+     * cross-item transform-stop test asserts a mid-cook stop refunds NOTHING for the consumed Fish
+     * while the custody return hands back the raw fish.
+     */
+    final Map<String, Integer> iterationConsumed = new LinkedHashMap<>();
+
     // Item ledger (for the future standalone summary HUD, leg 3): consumedItems covers both
     // the exact-ItemId route AND the ResourceTypeId ("any log" family) route (tallying the
     // REAL item ids the transactional removal actually drained). luckItems covers both the

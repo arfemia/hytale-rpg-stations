@@ -62,9 +62,9 @@ import com.ziggfreed.rpgstations.validation.Report;
  * {@code EXTENSION_KEY_COLLISION}, {@code EXTENSION_ANCHOR_MISSING},
  * {@code EXTENSION_STEP_MISSING_ID}, {@code ANCHOR_STATION_UNKNOWN},
  * {@code WALK_TARGET_UNKNOWN_ANCHOR}, {@code STEP_AT_UNKNOWN_ANCHOR}, {@code WALK_REQUIRES_PUPPET},
- * {@code LOOT_DOUBLE_LUCK} (INFO), and a temporary {@code WAVE3_PENDING} warn for any step
- * authoring {@link StationStep#authorsWave3OnlyPhase()} (Walk/At/Produce.To:Custody - decodes and
- * validates this wave, does not execute until wave 3). Dropped (their reserved fields no longer
+ * and {@code LOOT_DOUBLE_LUCK} (INFO). The multi-station seam ({@code Walk}/{@code At}/
+ * {@code Produce.To:Custody}) EXECUTES as of scope-2 wave 3, so the temporary {@code WAVE3_PENDING}
+ * warn was removed - these anchor/walk checks are the live discovery-time coverage. Dropped (their reserved fields no longer
  * exist): {@code UNIMPLEMENTED_STEP_TYPE}, {@code UNIMPLEMENTED_CONSUME_SOURCE},
  * {@code UNIMPLEMENTED_PRODUCE_DEST}, {@code WAIT_BOTH_ROUTES}, {@code UNIMPLEMENTED_WAIT_BEATS}
  * (the {@code Type} union, the {@code Wait} type, and the reserved {@code Mount} type are gone).
@@ -1829,11 +1829,6 @@ public final class StationValidator {
                 out.add(Finding.warning(DOMAIN, "STEP_AT_UNKNOWN_ANCHOR",
                         stepLabel + ".At '" + at + "' is not a declared anchor id (or 'self')", id));
             }
-            if (step.authorsWave3OnlyPhase()) {
-                out.add(Finding.warning(DOMAIN, "WAVE3_PENDING",
-                        stepLabel + " authors " + wave3FieldsOf(step) + ", which the wave-2 engine does not"
-                                + " execute yet - engage denies gracefully until wave 3 lands", id));
-            }
 
             StationStep.Consume consume = step.getConsume();
             if (consume != null) {
@@ -1873,23 +1868,6 @@ public final class StationValidator {
             return true;
         }
         return knownAnchorIds.contains(v.toLowerCase(Locale.ROOT));
-    }
-
-    /** Builds the {@code WAVE3_PENDING} message's field list (Walk/At/Produce.To:Custody, whichever apply). */
-    @Nonnull
-    private static String wave3FieldsOf(@Nonnull StationStep step) {
-        List<String> fields = new ArrayList<>();
-        if (step.getWalk() != null) {
-            fields.add("Walk");
-        }
-        if (step.getAt() != null && !step.getAt().isBlank()) {
-            fields.add("At");
-        }
-        if (step.getProduce() != null
-                && StationStep.Produce.TO_CUSTODY.equalsIgnoreCase(step.getProduce().effectiveTo())) {
-            fields.add("Produce.To:Custody");
-        }
-        return String.join("/", fields);
     }
 
     /**
