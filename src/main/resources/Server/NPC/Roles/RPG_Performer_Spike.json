@@ -1,0 +1,47 @@
+{
+  "Comment": "SCOPE-3 NPC-performer spike role (throwaway). Minimal empty-brain Role after Empty_Role.json + HyCitizens Citizen_Role: one Walk controller + one marked-target Seek instruction. Invulnerable, zero knockback, NO DisplayNames (no nameplate), no InteractionInstruction (no F-prompt). The player-skin model is a spawn PARAM (not authored here), applied Java-side via NPCPlugin.spawnEntity's spawnModel + a postSpawn PlayerSkinComponent clone.",
+  "Type": "Generic",
+  "Appearance": "Mannequin",
+  "Invulnerable": true,
+  "KnockbackScale": 0,
+  "MotionControllerList": [
+    {
+      "Type": "Walk",
+      "MaxWalkSpeed": 4,
+      "Gravity": 10,
+      "MaxFallSpeed": 20,
+      "Acceleration": 10,
+      "MaxClimbHeight": 1,
+      "JumpHeight": 1.5,
+      "MinJumpHeight": 1,
+      "JumpForce": 1.5,
+      "JumpDescentSteepness": 1,
+      "DescentAnimationType": "Fall",
+      "DescentSteepness": 2.5,
+      "DescentBlending": 1
+    }
+  ],
+  "MaxHealth": { "Compute": "MaxHealth" },
+  "Parameters": {
+    "MaxHealth": {
+      "Value": 100,
+      "Description": "Max health for the performer spike NPC"
+    }
+  },
+  "Instructions": [
+    {
+      "Sensor": {
+        "Type": "Target",
+        "TargetSlot": "MoveTarget"
+      },
+      "BodyMotion": {
+        "Type": "Seek",
+        "UsePathfinder": true,
+        "StopDistance": 1.2,
+        "SlowDownDistance": 3,
+        "AbortDistance": 64
+      }
+    }
+  ],
+  "NameTranslationKey": "server.npcRoles.RPG_Performer_Spike.name"
+}

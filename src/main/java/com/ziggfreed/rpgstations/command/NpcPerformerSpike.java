@@ -1,0 +1,366 @@
+package com.ziggfreed.rpgstations.command;
+
+import java.awt.Color;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
+import org.joml.Vector3d;
+
+import com.hypixel.hytale.component.AddReason;
+import com.hypixel.hytale.component.Holder;
+import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.component.RemoveReason;
+import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.function.consumer.TriConsumer;
+import com.hypixel.hytale.math.vector.Rotation3f;
+import com.hypixel.hytale.protocol.PlayerSkin;
+import com.hypixel.hytale.server.core.Message;
+import com.hypixel.hytale.server.core.asset.type.model.config.Model;
+import com.hypixel.hytale.server.core.cosmetics.CosmeticsModule;
+import com.hypixel.hytale.server.core.entity.UUIDComponent;
+import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
+import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
+import com.hypixel.hytale.server.core.modules.entity.player.PlayerSkinComponent;
+import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
+import com.hypixel.hytale.server.core.modules.physics.util.PhysicsMath;
+import com.hypixel.hytale.server.core.universe.PlayerRef;
+import com.hypixel.hytale.server.core.universe.Universe;
+import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.hypixel.hytale.server.npc.NPCPlugin;
+import com.hypixel.hytale.server.npc.entities.NPCEntity;
+import com.hypixel.hytale.server.npc.role.Role;
+import com.ziggfreed.rpgstations.i18n.RpgMsg;
+import com.ziggfreed.rpgstations.util.Log;
+
+/**
+ * SCOPE-3 NPC-performer spike (throwaway dev harness): drives the {@code RPG_Performer_Spike}
+ * Role NPC through {@code /rpgstations npcspike start [noserialize] | walk | stop}, so the
+ * maintainer can smoke the open scope-3 questions a Role performer (as opposed to the shipped
+ * bare-{@code Holder} puppet) raises: does a cloned PLAYER skin render on a walking
+ * {@link NPCEntity}? does its native {@code MotionControllerWalk} gait / step-up beat the
+ * hand-rolled A* walker? is there really no nameplate / health bar / F-prompt / crosshair target?
+ * how does the {@code NonSerialized}-on-NPC variant behave across a relog?
+ *
+ * <p>The design authority is
+ * {@code .claude/research/raw/rpg-stations-npc-performer-feasibility-2026-07-24.md} (the MINIMAL
+ * SPIKE, section 5) + the recon digest
+ * {@code .claude/research/raw/npc-behavior-mods-recon-2026-07-24.md}. The mechanism, source-verified
+ * against the official shared source:
+ * <ul>
+ *   <li><b>spawn</b> - read the caller's live {@link PlayerSkinComponent}, clone the
+ *       {@link PlayerSkin}, build a {@link Model} via {@link CosmeticsModule} (the
+ *       {@code PlayerPuppetService} clone recipe, the in-repo precedent), and pass it as
+ *       {@link NPCPlugin#spawnEntity}'s {@code spawnModel} param (the model is a spawn param, NOT
+ *       Role-owned). {@code postSpawn} re-applies a fresh {@link PlayerSkinComponent} clone and
+ *       SEEDS the leash at the spawn pos ({@code setLeashPoint}/{@code setLeashHeading}/
+ *       {@code setLeashPitch} - the Hycompanion "plugin spawns skip the engine leash-seed" fix).
+ *       The {@code noserialize} variant additionally marks the NonSerialized component in
+ *       {@code preAddToWorld} (this variant tests the untested NonSerialized-on-NPC gap).</li>
+ *   <li><b>walk</b> - spawn a bare invisible marker entity (TransformComponent + NetworkId, no
+ *       ModelComponent so it renders nothing) ~8 blocks ahead of the caller's facing, mark it into
+ *       the Role's {@code MoveTarget} slot via {@link Role#setMarkedTarget(String, Ref)} (the only
+ *       walk-to-a-point route - the {@code Target} sensor / {@code Seek} BodyMotion in the role
+ *       asset path toward whatever is marked), and RE-ANCHOR the leash to the destination (or
+ *       background leash logic fights the Seek - the recon's leash gotcha).</li>
+ *   <li><b>stop</b> - despawn the NPC + the marker ({@code store.removeEntity}, REMOVE reason).</li>
+ * </ul>
+ *
+ * <p><b>World-thread discipline.</b> Every {@code Store}/{@code Ref}/{@code spawnEntity}/
+ * {@code removeEntity} touch runs inside {@code world.execute(...)} (the command dispatch thread is
+ * not the world thread); chat feedback goes through {@link PlayerRef#sendMessage} which is
+ * packet-based and thread-safe. Fully try-guarded - a throw degrades to a logged no-op, never
+ * escapes into the command. Per-player spawn state is tracked in {@link #byPlayer}; a fresh
+ * {@code start} first tears down any prior spawn for that player.
+ */
+public final class NpcPerformerSpike {
+
+    /** The jar-shipped throwaway Role asset id (filename minus {@code .json}). */
+    private static final String ROLE_ID = "RPG_Performer_Spike";
+
+    /** The marked-target slot name the role's {@code Target} sensor reads (must match the asset). */
+    private static final String MOVE_TARGET_SLOT = "MoveTarget";
+
+    /** Distance in front of the caller to place the spawned performer, in blocks. */
+    private static final double SPAWN_AHEAD = 2.0;
+
+    /** Distance in front of the caller to place the walk marker, in blocks. */
+    private static final double MARKER_AHEAD = 8.0;
+
+    /** Per-player live spawn state (the throwaway spike's own tracking). */
+    private final Map<UUID, Spawned> byPlayer = new ConcurrentHashMap<>();
+
+    /** The refs a single player's spike spawn owns: the performer NPC and its optional walk marker. */
+    private static final class Spawned {
+        @Nullable
+        private NPCEntity npc;
+        @Nullable
+        private Ref<EntityStore> npcRef;
+        @Nullable
+        private Ref<EntityStore> markerRef;
+    }
+
+    // ==================== subcommand entry points ====================
+
+    /**
+     * {@code /rpgstations npcspike start [noserialize]} - spawn the performer NPC ~2 blocks in
+     * front of {@code player}, cloning the player's own skin onto it.
+     */
+    public void start(@Nonnull PlayerRef player, boolean noSerialize) {
+        onWorld(player, (world, playerRef, store) -> doStart(player, playerRef, store, noSerialize));
+    }
+
+    /**
+     * {@code /rpgstations npcspike walk} - send the active performer walking toward a fresh
+     * invisible marker ~8 blocks ahead of {@code player}.
+     */
+    public void walk(@Nonnull PlayerRef player) {
+        onWorld(player, (world, playerRef, store) -> doWalk(player, playerRef, store));
+    }
+
+    /** {@code /rpgstations npcspike stop} - despawn the active performer NPC + its marker. */
+    public void stop(@Nonnull PlayerRef player) {
+        onWorld(player, (world, playerRef, store) -> doStop(player, store));
+    }
+
+    // ==================== operations (world thread) ====================
+
+    private void doStart(@Nonnull PlayerRef player, @Nonnull Ref<EntityStore> playerRef,
+            @Nonnull Store<EntityStore> store, boolean noSerialize) {
+        // A fresh start tears down any prior spawn for this player first.
+        despawnFor(player.getUuid(), store);
+
+        TransformComponent tc = store.getComponent(playerRef, TransformComponent.getComponentType());
+        HeadRotation hr = store.getComponent(playerRef, HeadRotation.getComponentType());
+        PlayerSkinComponent skinComp = store.getComponent(playerRef, PlayerSkinComponent.getComponentType());
+        if (tc == null || hr == null) {
+            Log.warn("[npcspike] start aborted: player has no transform/head-rotation yet");
+            player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+            return;
+        }
+        if (skinComp == null) {
+            Log.warn("[npcspike] start aborted: player has no PlayerSkinComponent to clone");
+            player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+            return;
+        }
+
+        NPCPlugin npc = NPCPlugin.get();
+        if (npc == null || !npc.hasRoleName(ROLE_ID)) {
+            Log.warn("[npcspike] role '" + ROLE_ID + "' not registered - is the asset pack loaded?");
+            player.sendMessage(RpgMsg.tr("command.npcspike.role_missing").color(Color.RED));
+            return;
+        }
+        int idx = npc.getIndex(ROLE_ID);
+        if (idx < 0) {
+            Log.warn("[npcspike] role '" + ROLE_ID + "' resolved to a negative index");
+            player.sendMessage(RpgMsg.tr("command.npcspike.role_missing").color(Color.RED));
+            return;
+        }
+
+        float playerYaw = hr.getRotation().y();
+        Vector3d spawnPos = ahead(tc.getPosition(), playerYaw, SPAWN_AHEAD);
+        // Face back toward the player so the cloned skin reads at a glance.
+        float spawnYaw = playerYaw + (float) Math.PI;
+        Rotation3f spawnRot = new Rotation3f(0f, spawnYaw, 0f);
+
+        PlayerSkin skinClone = new PlayerSkin(skinComp.getPlayerSkin());
+        Model model = CosmeticsModule.get().createModel(skinClone);
+
+        TriConsumer<NPCEntity, Holder<EntityStore>, Store<EntityStore>> preAdd = noSerialize
+                ? (npcEntity, holder, s) ->
+                        holder.ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType())
+                : null;
+
+        Spawned spawned = new Spawned();
+        Vector3d leashSeed = new Vector3d(spawnPos);
+        TriConsumer<NPCEntity, Ref<EntityStore>, Store<EntityStore>> postSpawn = (npcEntity, ref, s) -> {
+            // Apply the cloned player skin (the /npc spawn --randommodel precedent, minus the
+            // random-skin reload marker: ApplyRandomSkinPersistedComponent would re-roll a RANDOM
+            // skin on reload and wipe our clone - whether the clone survives a chunk reload without
+            // some reload marker is a documented spike gap).
+            s.putComponent(ref, PlayerSkinComponent.getComponentType(),
+                    new PlayerSkinComponent(new PlayerSkin(skinClone)));
+            // Seed the leash at the spawn pos (plugin spawns skip the engine's leash seed).
+            npcEntity.setLeashPoint(new Vector3d(leashSeed));
+            npcEntity.setLeashHeading(spawnYaw);
+            npcEntity.setLeashPitch(0f);
+            spawned.npc = npcEntity;
+            spawned.npcRef = ref;
+        };
+
+        try {
+            var result = npc.spawnEntity(store, idx, spawnPos, spawnRot, model, preAdd, postSpawn);
+            if (result == null || spawned.npcRef == null) {
+                Log.warn("[npcspike] spawnEntity returned null for role '" + ROLE_ID + "'");
+                player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+                return;
+            }
+        } catch (Throwable t) {
+            Log.warn("[npcspike] spawnEntity threw: " + t.getMessage());
+            player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+            return;
+        }
+
+        byPlayer.put(player.getUuid(), spawned);
+        Message ok = noSerialize
+                ? RpgMsg.tr("command.npcspike.spawned_noserialize").color(Color.GREEN)
+                : RpgMsg.tr("command.npcspike.spawned").color(Color.GREEN);
+        player.sendMessage(ok);
+        Log.info("[npcspike] spawned performer for " + player.getUuid() + " (noSerialize=" + noSerialize + ")");
+    }
+
+    private void doWalk(@Nonnull PlayerRef player, @Nonnull Ref<EntityStore> playerRef,
+            @Nonnull Store<EntityStore> store) {
+        Spawned spawned = byPlayer.get(player.getUuid());
+        if (spawned == null || spawned.npcRef == null || !spawned.npcRef.isValid() || spawned.npc == null) {
+            player.sendMessage(RpgMsg.tr("command.npcspike.walk_no_npc").color(Color.YELLOW));
+            return;
+        }
+
+        Role role = spawned.npc.getRole();
+        if (role == null) {
+            // The brain builds the Role on its first tick; a walk issued the same instant as start
+            // can race it. In practice the two commands are seconds apart, so this is rare.
+            player.sendMessage(RpgMsg.tr("command.npcspike.role_not_ready").color(Color.YELLOW));
+            return;
+        }
+
+        TransformComponent tc = store.getComponent(playerRef, TransformComponent.getComponentType());
+        HeadRotation hr = store.getComponent(playerRef, HeadRotation.getComponentType());
+        if (tc == null || hr == null) {
+            player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+            return;
+        }
+        Vector3d markerPos = ahead(tc.getPosition(), hr.getRotation().y(), MARKER_AHEAD);
+
+        // Replace any prior marker.
+        removeRef(spawned.markerRef, store);
+        spawned.markerRef = null;
+
+        Ref<EntityStore> markerRef = spawnMarker(store, markerPos);
+        if (markerRef == null) {
+            Log.warn("[npcspike] failed to spawn walk marker");
+            player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+            return;
+        }
+        spawned.markerRef = markerRef;
+
+        try {
+            role.setMarkedTarget(MOVE_TARGET_SLOT, markerRef);
+            // Re-anchor the leash to the destination (the recon leash gotcha).
+            spawned.npc.setLeashPoint(new Vector3d(markerPos));
+        } catch (Throwable t) {
+            Log.warn("[npcspike] setMarkedTarget/leash re-anchor failed: " + t.getMessage());
+            player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+            return;
+        }
+
+        player.sendMessage(RpgMsg.tr("command.npcspike.walking", (int) MARKER_AHEAD).color(Color.GREEN));
+        Log.info("[npcspike] walk target set " + (int) MARKER_AHEAD + " blocks ahead for " + player.getUuid());
+    }
+
+    private void doStop(@Nonnull PlayerRef player, @Nonnull Store<EntityStore> store) {
+        if (!byPlayer.containsKey(player.getUuid())) {
+            player.sendMessage(RpgMsg.tr("command.npcspike.stop_none").color(Color.YELLOW));
+            return;
+        }
+        despawnFor(player.getUuid(), store);
+        player.sendMessage(RpgMsg.tr("command.npcspike.stopped").color(Color.GREEN));
+        Log.info("[npcspike] despawned performer for " + player.getUuid());
+    }
+
+    // ==================== helpers ====================
+
+    /** Removes (and forgets) any spawned NPC + marker owned by {@code uuid}. World thread. */
+    private void despawnFor(@Nonnull UUID uuid, @Nonnull Store<EntityStore> store) {
+        Spawned spawned = byPlayer.remove(uuid);
+        if (spawned == null) {
+            return;
+        }
+        removeRef(spawned.markerRef, store);
+        removeRef(spawned.npcRef, store);
+    }
+
+    /** Spawns a bare, invisible (no ModelComponent), NonSerialized marker entity at {@code pos}. */
+    @Nullable
+    private static Ref<EntityStore> spawnMarker(@Nonnull Store<EntityStore> store, @Nonnull Vector3d pos) {
+        try {
+            Rotation3f rot = new Rotation3f(0f, 0f, 0f);
+            Holder<EntityStore> holder = EntityStore.REGISTRY.newHolder();
+            holder.addComponent(TransformComponent.getComponentType(), new TransformComponent(pos, rot));
+            holder.ensureComponent(UUIDComponent.getComponentType());
+            holder.addComponent(NetworkId.getComponentType(), new NetworkId(store.getExternalData().takeNextNetworkId()));
+            holder.ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType());
+            return store.addEntity(holder, AddReason.SPAWN);
+        } catch (Throwable t) {
+            Log.warn("[npcspike] spawnMarker failed: " + t.getMessage());
+            return null;
+        }
+    }
+
+    /** Removes {@code ref} if valid (no-op, never throws, otherwise). */
+    private static void removeRef(@Nullable Ref<EntityStore> ref, @Nonnull Store<EntityStore> store) {
+        if (ref == null || !ref.isValid()) {
+            return;
+        }
+        try {
+            store.removeEntity(ref, RemoveReason.REMOVE);
+        } catch (Throwable t) {
+            Log.warn("[npcspike] removeEntity failed: " + t.getMessage());
+        }
+    }
+
+    /** A horizontal point {@code distance} blocks ahead of {@code from} along {@code yaw}, same Y. */
+    @Nonnull
+    private static Vector3d ahead(@Nonnull Vector3d from, float yaw, double distance) {
+        Vector3d forward = new Vector3d();
+        PhysicsMath.vectorFromAngles(yaw, 0f, forward);
+        forward.y = 0.0;
+        if (forward.lengthSquared() < 1.0e-6) {
+            forward.set(0.0, 0.0, 1.0);
+        }
+        forward.normalize(distance);
+        return new Vector3d(from).add(forward);
+    }
+
+    /**
+     * Resolves {@code player}'s world + entity ref, then runs {@code op} on the world thread.
+     * Chat-errors (thread-safe) and returns on any missing piece.
+     */
+    private void onWorld(@Nonnull PlayerRef player, @Nonnull WorldOp op) {
+        try {
+            UUID worldUuid = player.getWorldUuid();
+            World world = worldUuid != null ? Universe.get().getWorld(worldUuid) : null;
+            Ref<EntityStore> playerRef = player.getReference();
+            if (world == null || !world.isAlive() || playerRef == null || !playerRef.isValid()) {
+                player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+                return;
+            }
+            world.execute(() -> {
+                try {
+                    Ref<EntityStore> ref = player.getReference();
+                    if (ref == null || !ref.isValid()) {
+                        player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+                        return;
+                    }
+                    op.run(world, ref, ref.getStore());
+                } catch (Throwable t) {
+                    Log.warn("[npcspike] world-thread op failed: " + t.getMessage());
+                    player.sendMessage(RpgMsg.tr("command.npcspike.spawn_failed").color(Color.RED));
+                }
+            });
+        } catch (Throwable t) {
+            Log.warn("[npcspike] onWorld dispatch failed: " + t.getMessage());
+        }
+    }
+
+    /** A world-thread operation over the caller's own {@link World}/{@link Ref}/{@link Store}. */
+    @FunctionalInterface
+    private interface WorldOp {
+        void run(@Nonnull World world, @Nonnull Ref<EntityStore> playerRef, @Nonnull Store<EntityStore> store);
+    }
+}

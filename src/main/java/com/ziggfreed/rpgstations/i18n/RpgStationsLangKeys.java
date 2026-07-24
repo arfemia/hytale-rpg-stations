@@ -81,7 +81,19 @@ public final class RpgStationsLangKeys {
             "rpgstations.command.camera.unknown_preset",
             "rpgstations.command.camera.set",
             "rpgstations.command.camera.list",
-            "rpgstations.command.validate.header");
+            "rpgstations.command.validate.header",
+            // SCOPE-3 NPC-performer spike (throwaway dev harness, /rpgstations npcspike).
+            "rpgstations.command.arg.opt",
+            "rpgstations.command.npcspike.usage",
+            "rpgstations.command.npcspike.spawned",
+            "rpgstations.command.npcspike.spawned_noserialize",
+            "rpgstations.command.npcspike.spawn_failed",
+            "rpgstations.command.npcspike.role_missing",
+            "rpgstations.command.npcspike.walking",
+            "rpgstations.command.npcspike.walk_no_npc",
+            "rpgstations.command.npcspike.role_not_ready",
+            "rpgstations.command.npcspike.stopped",
+            "rpgstations.command.npcspike.stop_none");
 
     private RpgStationsLangKeys() {
     }
