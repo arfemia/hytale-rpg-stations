@@ -14,13 +14,23 @@ import java.util.function.Predicate;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.hypixel.hytale.protocol.BenchRequirement;
+import com.hypixel.hytale.server.core.asset.type.entityeffect.config.EntityEffect;
+import com.hypixel.hytale.server.core.asset.type.item.config.CraftingRecipe;
+import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemDropList;
+import com.hypixel.hytale.server.core.asset.type.particle.config.ParticleSystem;
+import com.hypixel.hytale.server.core.asset.type.soundevent.config.SoundEvent;
+import com.hypixel.hytale.server.core.cosmetics.EmoteAsset;
+import com.hypixel.hytale.server.core.modules.interaction.interaction.config.RootInteraction;
+import com.hypixel.hytale.server.npc.NPCPlugin;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.FactorRef;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
@@ -195,6 +205,152 @@ public final class StationValidator {
             return com.ziggfreed.common.entity.PlayerModelService.modelExists(modelId);
         } catch (Throwable t) {
             return true; // a lookup failure is not evidence the id is wrong - don't flag it
+        }
+    }
+
+    /**
+     * Live native-asset existence checks (seam wave, decision 53's typo-detection ride): every id
+     * checked below resolves against a Hytale-NATIVE, engine-boot-populated asset map (vanilla or
+     * ANY loaded pack's own Sound/Particle/Emote/EntityEffect/RootInteraction content, or a
+     * registered NPC Role) - unlike this mod's own asset types (lang/lootable/rollpool/station/
+     * actionAsset), these never depend on THIS mod's own pack-fold order, so unlike
+     * {@link #dropListKnownLive}/{@link #modelKnownLive} (kept parameterized/deferred purely for
+     * uniformity with the two-pass split) these are called DIRECTLY, unconditionally, from both the
+     * structural per-fold pass and the full pass - a documented, deliberate scoped deviation from
+     * this class's general predicate-threading pattern, since there is no "not loaded yet" window to
+     * defer for a native asset map. All fail OPEN on a lookup error, matching every other live check
+     * in this file.
+     */
+    private static boolean soundKnownLive(@Nonnull String soundId) {
+        try {
+            return SoundEvent.getAssetMap().getAsset(soundId) != null;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    private static boolean particleKnownLive(@Nonnull String particleId) {
+        try {
+            return ParticleSystem.getAssetMap().getAsset(particleId) != null;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    private static boolean emoteKnownLive(@Nonnull String emoteId) {
+        try {
+            return EmoteAsset.getAssetMap().getAsset(emoteId) != null;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    private static boolean entityEffectKnownLive(@Nonnull String effectId) {
+        try {
+            return EntityEffect.getAssetMap().getAsset(effectId) != null;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    private static boolean interactionKnownLive(@Nonnull String interactionId) {
+        try {
+            return RootInteraction.getAssetMap().getAsset(interactionId) != null;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /** {@code NpcRole} full-pass role-id check (R1 handoff, decision 47/48): mirrors the spike's own {@code NPCPlugin.get().hasRoleName(...)} existence gate. */
+    private static boolean npcRoleKnownLive(@Nonnull String roleId) {
+        try {
+            NPCPlugin npc = NPCPlugin.get();
+            return npc != null && npc.hasRoleName(roleId);
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /**
+     * Live native {@code BenchRequirement.Id} scan (decision 51c/53's "open-string caveat" - a bench
+     * id is a bare, unregistered {@code Codec.STRING} matched by equality, never a real asset-map
+     * entry, so this is a best-effort cross-check against every live craftable {@link Item}'s own
+     * recipe {@link BenchRequirement}s rather than a true registry lookup). Fails OPEN on any lookup
+     * error, and (unlike the other native-ref checks above) on an EMPTY/unreadable asset map too -
+     * a cold/unit-JVM Item map must never manufacture a false "unknown bench" finding.
+     */
+    private static boolean benchIdKnownLive(@Nonnull String benchId) {
+        try {
+            var assetMap = Item.getAssetMap();
+            if (assetMap == null) {
+                return true;
+            }
+            for (Item item : assetMap.getAssetMap().values()) {
+                if (item == null || !item.hasRecipesToGenerate()) {
+                    continue;
+                }
+                List<CraftingRecipe> recipes = new ArrayList<>(1);
+                item.collectRecipesToGenerate(recipes);
+                for (CraftingRecipe recipe : recipes) {
+                    if (recipe == null) {
+                        continue;
+                    }
+                    BenchRequirement[] benches = recipe.getBenchRequirement();
+                    if (benches == null) {
+                        continue;
+                    }
+                    for (BenchRequirement bench : benches) {
+                        if (bench != null && bench.id != null && benchId.equalsIgnoreCase(bench.id)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Shared native-composition advisories for one authored {@link Presentation} (decision 51b/51d,
+     * ridden by decision 53's typo-detection mandate): {@code Sound}/{@code Particles} are INFO-only
+     * (a legitimately open, frequently-partial cue vocabulary - an unresolved id simply plays
+     * nothing, never a functional break) via {@link #soundKnownLive}/{@link #particleKnownLive};
+     * {@code Interaction.Id} is the STANDARD warn severity every other cross-asset reference in this
+     * class uses via {@link #interactionKnownLive}; {@link #getEffect()}'s ref runs through the
+     * shared {@link #checkEffectRef}.
+     */
+    private static void checkNativeRefs(@Nullable Presentation p, @Nonnull String label, @Nonnull String id,
+                                        @Nonnull List<Finding> out) {
+        if (p == null) {
+            return;
+        }
+        if (notBlank(p.getSound()) && !soundKnownLive(p.getSound())) {
+            out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_SOUND",
+                    label + " Sound '" + p.getSound() + "' is not a known SoundEvent id - check for a typo", id));
+        }
+        if (notBlank(p.getParticles()) && !particleKnownLive(p.getParticles())) {
+            out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_PARTICLES",
+                    label + " Particles '" + p.getParticles() + "' is not a known ParticleSystem id - check for a typo", id));
+        }
+        Presentation.Interaction interaction = p.getInteraction();
+        if (interaction != null && interaction.hasId() && !interactionKnownLive(interaction.getId())) {
+            out.add(Finding.warning(DOMAIN, "PRESENTATION_UNKNOWN_INTERACTION",
+                    label + " Interaction.Id '" + interaction.getId() + "' references an unknown RootInteraction", id));
+        }
+        checkEffectRef(p.getEffect(), label + ".Effect", id, out);
+    }
+
+    /** The shared {@link EffectRef} existence check (decision 51d), standard warn severity. */
+    private static void checkEffectRef(@Nullable EffectRef effect, @Nonnull String label, @Nonnull String id,
+                                       @Nonnull List<Finding> out) {
+        if (effect == null || !effect.hasId()) {
+            return;
+        }
+        if (!entityEffectKnownLive(effect.getId())) {
+            out.add(Finding.warning(DOMAIN, "UNKNOWN_ENTITY_EFFECT",
+                    label + " references unknown EntityEffect '" + effect.getId() + "'", id));
         }
     }
 
@@ -737,22 +893,61 @@ public final class StationValidator {
         if (look != null) {
             String rawSource = look.getSource();
             if (rawSource != null && !rawSource.isBlank() && !Puppet.LOOK_SOURCE_PLAYER_CLONE.equalsIgnoreCase(rawSource)
-                    && !Puppet.LOOK_SOURCE_MODEL.equalsIgnoreCase(rawSource)) {
+                    && !Puppet.LOOK_SOURCE_MODEL.equalsIgnoreCase(rawSource)
+                    && !Puppet.LOOK_SOURCE_NPC_ROLE.equalsIgnoreCase(rawSource)) {
                 out.add(Finding.warning(DOMAIN, "UNKNOWN_PUPPET_LOOK_SOURCE",
                         label + " Puppet.Look.Source '" + rawSource
-                                + "' is not one of PlayerClone/Model - falls back to PlayerClone at runtime", id));
+                                + "' is not one of PlayerClone/Model/NpcRole - falls back to PlayerClone at runtime", id));
             }
+            // Decision 47's Look nesting symmetry retro-nested the flat ModelId/FallbackModelId
+            // leaves into the Look.Model group (R1 schema handoff) - resolve through it here.
+            Puppet.Model model = look.getModel();
             if (Puppet.LOOK_SOURCE_MODEL.equalsIgnoreCase(look.effectiveSource())) {
-                String modelId = look.getModelId();
+                String modelId = model != null ? model.getModelId() : null;
                 boolean modelIdBlank = modelId == null || modelId.isBlank();
-                String fallback = look.getFallbackModelId();
+                String fallback = model != null ? model.getFallbackModelId() : null;
                 boolean fallbackAuthored = fallback != null && !fallback.isBlank();
                 if (!fallbackAuthored && (modelIdBlank || !modelKnown.test(modelId))) {
                     out.add(Finding.warning(DOMAIN, "PUPPET_LOOK_MODEL_UNKNOWN",
-                            label + " Puppet.Look.Source is \"Model\" but ModelId "
+                            label + " Puppet.Look.Source is \"Model\" but Look.Model.ModelId "
                                     + (modelIdBlank ? "is blank" : "'" + modelId + "' is not a known ModelAsset")
                                     + " and no FallbackModelId is authored - falls back to the default rig at runtime",
                             id));
+                }
+            }
+            // The NpcRole performer arm (seam wave, decision 47/48): the R1 handoff's flagged
+            // LOOK_ROLE_UNKNOWN check - a dangling RoleId falls back to the bare-Holder/
+            // FallbackModelId ladder, never a crash (design's engage-time fail-closed fallback).
+            if (Puppet.LOOK_SOURCE_NPC_ROLE.equalsIgnoreCase(look.effectiveSource())) {
+                Puppet.Role role = look.getRole();
+                boolean roleIdBlank = role == null || !role.hasRoleId();
+                if (roleIdBlank) {
+                    out.add(Finding.warning(DOMAIN, "PUPPET_LOOK_ROLE_MISSING",
+                            label + " Puppet.Look.Source is \"NpcRole\" but Look.Role.RoleId is blank - falls back"
+                                    + " to the bare-Holder performer at runtime", id));
+                } else if (!npcRoleKnownLive(role.getRoleId())) {
+                    out.add(Finding.warning(DOMAIN, "LOOK_ROLE_UNKNOWN",
+                            label + " Puppet.Look.Role.RoleId '" + role.getRoleId() + "' does not resolve to a"
+                                    + " registered NPC Role - engage falls back to the bare-Holder performer", id));
+                }
+                if (role != null) {
+                    String rawSkinSource = role.getSkinSource();
+                    if (rawSkinSource != null && !rawSkinSource.isBlank()
+                            && !Puppet.SKIN_SOURCE_PLAYER_CLONE.equalsIgnoreCase(rawSkinSource)
+                            && !Puppet.SKIN_SOURCE_ROLE_DEFAULT.equalsIgnoreCase(rawSkinSource)) {
+                        out.add(Finding.warning(DOMAIN, "UNKNOWN_PUPPET_ROLE_SKIN_SOURCE",
+                                label + " Puppet.Look.Role.SkinSource '" + rawSkinSource
+                                        + "' is not one of PlayerClone/RoleDefault - falls back to PlayerClone at runtime", id));
+                    }
+                }
+                // Prop/clip mirroring on NpcRole is UNPROVEN pending the spike (seam design section
+                // 2.4/Q5) - advise, never block, on a station authoring both.
+                if (puppet.getProp() != null
+                        && !Puppet.PROP_SOURCE_NONE.equalsIgnoreCase(puppet.getProp().effectiveSource())) {
+                    out.add(Finding.info(DOMAIN, "PUPPET_NPC_ROLE_PROP_UNPROVEN",
+                            label + " Puppet.Look.Source is \"NpcRole\" alongside a non-None Puppet.Prop - prop"
+                                    + " mirroring on the NpcRole performer is UNPROVEN pending the maintainer's"
+                                    + " in-game spike (best-effort/role-authored-only until confirmed)", id));
                 }
             }
         }
@@ -870,6 +1065,21 @@ public final class StationValidator {
         if (gather != null && !gatherTypeSet) {
             out.add(Finding.warning(DOMAIN, "BLANK_GATHER_TYPE",
                     label + " authors a Tool.Gather route with a blank GatherType; the functional test can never fire", id));
+        }
+        // Decision 53 (Tags.Family match, the PrepFish re-author): an authored Tags key whose value
+        // array is empty can never match ANY-of nothing - a silent no-op for that key specifically,
+        // distinct from EMPTY_TOOL_GATE (the whole group being empty).
+        if (anyTags) {
+            for (Map.Entry<String, String[]> entry : tool.getTags().entrySet()) {
+                String key = entry.getKey();
+                if (key == null || key.isBlank()) {
+                    continue;
+                }
+                if (!hasNonBlank(entry.getValue())) {
+                    out.add(Finding.warning(DOMAIN, "TOOL_TAGS_EMPTY_VALUES",
+                            label + " Tool.Tags['" + key + "'] has no non-blank values; this key can never match", id));
+                }
+            }
         }
         checkXpScale(tool, gatherTypeSet ? gather.getGatherType() : null, id, label, out);
         checkDurability(tool, id, label, out);
@@ -1114,6 +1324,7 @@ public final class StationValidator {
             }
             warnUnplayedPresentationLeaves(f.getPresentation(), fLabel + ".Presentation", id,
                     "LOOT_FLOOR_UNPLAYED_LEAVES", out);
+            checkNativeRefs(f.getPresentation(), fLabel + ".Presentation", id, out);
         }
     }
 
@@ -1174,6 +1385,14 @@ public final class StationValidator {
         if (dropListId != null && !dropListId.isBlank() && !dropListKnown.test(dropListId)) {
             out.add(Finding.warning(DOMAIN, "LOOT_UNKNOWN_DROPLIST",
                     label + " references unknown ItemDropList '" + dropListId + "'", id));
+        }
+        // Decision 51d (seam wave): a Grants.Effects[] entry is the SAME EffectRef id-ref-only
+        // vocabulary Presentation.Effect uses - the shared checkEffectRef core covers both.
+        EffectRef[] effects = grants.getEffects();
+        if (effects != null) {
+            for (int i = 0; i < effects.length; i++) {
+                checkEffectRef(effects[i], label + ".Effects[" + i + "]", id, out);
+            }
         }
     }
 
@@ -1245,15 +1464,61 @@ public final class StationValidator {
         return false;
     }
 
+    /**
+     * {@code Recipe.FromCrafting} coverage. The live deriver ({@code
+     * StationRecipeDeriver.deriveFromCrafting}) matches on {@code Categories} OR {@code Benches}
+     * (seam wave decision 51c), filtered by {@code Types}, and bakes the {@code NativeTime}
+     * transform into each derived conversion's {@code DurationMs} (decision 52), so a station
+     * scoping by {@code Benches} alone derives a live conversion - the only hard error left is
+     * authoring NEITHER {@code Categories} NOR {@code Benches} (nothing to derive from).
+     */
     private static void checkFromCrafting(@Nonnull StationAsset.FromCrafting fc, @Nonnull String id,
                                           @Nonnull String label, @Nonnull List<Finding> out) {
-        if (!hasNonBlank(fc.getCategories())) {
+        boolean hasCategories = hasNonBlank(fc.getCategories());
+        boolean hasBenches = hasNonBlank(fc.getBenches());
+        if (!hasCategories && !hasBenches) {
             out.add(Finding.error(DOMAIN, "FROMCRAFTING_NO_CATEGORIES",
-                    label + " Recipe.FromCrafting has no non-blank Categories - it can derive nothing", id));
+                    label + " Recipe.FromCrafting has neither non-blank Categories nor Benches - it can derive nothing", id));
         }
         if (fc.getOutputPerInput() != null && fc.getOutputPerInput() <= 0) {
             out.add(Finding.warning(DOMAIN, "NONPOSITIVE_OUTPUT_PER_INPUT",
                     label + " Recipe.FromCrafting has a nonpositive OutputPerInput (the deriver defaults it to 1)", id));
+        }
+        if (fc.getBenches() != null) {
+            for (String bench : fc.getBenches()) {
+                if (bench != null && !bench.isBlank() && !benchIdKnownLive(bench)) {
+                    out.add(Finding.info(DOMAIN, "FROMCRAFTING_UNKNOWN_BENCH",
+                            label + " Recipe.FromCrafting.Benches '" + bench + "' does not match any live native"
+                                    + " BenchRequirement.Id - Bench ids are open (unregistered) strings, so this is"
+                                    + " a best-effort typo check, not a definitive registry lookup", id));
+                }
+            }
+        }
+        if (fc.getTypes() != null) {
+            for (String type : fc.getTypes()) {
+                if (type != null && !type.isBlank()
+                        && !StationAsset.FromCrafting.TYPE_CRAFTING.equalsIgnoreCase(type)
+                        && !StationAsset.FromCrafting.TYPE_PROCESSING.equalsIgnoreCase(type)) {
+                    out.add(Finding.warning(DOMAIN, "FROMCRAFTING_UNKNOWN_TYPE",
+                            label + " Recipe.FromCrafting.Types '" + type
+                                    + "' is not one of Crafting/Processing", id));
+                }
+            }
+        }
+        StationAsset.FromCrafting.NativeTime nativeTime = fc.getNativeTime();
+        if (nativeTime != null) {
+            if (nativeTime.getScale() != null && nativeTime.getScale() <= 0) {
+                out.add(Finding.warning(DOMAIN, "FROMCRAFTING_NATIVETIME_NONPOSITIVE_SCALE",
+                        label + " Recipe.FromCrafting.NativeTime.Scale is not positive ("
+                                + nativeTime.getScale() + ") - the reader defaults it to "
+                                + StationAsset.FromCrafting.NativeTime.DEFAULT_SCALE, id));
+            }
+            if (nativeTime.getOffsetMs() != null && nativeTime.getOffsetMs() < 0) {
+                out.add(Finding.warning(DOMAIN, "FROMCRAFTING_NATIVETIME_NEGATIVE_OFFSET",
+                        label + " Recipe.FromCrafting.NativeTime.OffsetMs is negative ("
+                                + nativeTime.getOffsetMs() + ") - the reader defaults it to "
+                                + StationAsset.FromCrafting.NativeTime.DEFAULT_OFFSET_MS, id));
+            }
         }
     }
 
@@ -1384,16 +1649,26 @@ public final class StationValidator {
 
     private static void checkPresentationRefs(@Nonnull StationAsset a, @Nonnull String id,
                                               @Nonnull String label, @Nonnull List<Finding> out) {
-        if (a.getAnimation() != null && a.getAnimation().getEmoteId() != null
-                && a.getAnimation().getEmoteId().isBlank()) {
+        String emoteId = a.getAnimation() != null ? a.getAnimation().getEmoteId() : null;
+        if (emoteId != null && emoteId.isBlank()) {
             out.add(Finding.warning(DOMAIN, "BLANK_EMOTE_ID",
                     label + " authors an empty Animation.EmoteId", id));
+        } else if (notBlank(emoteId) && !emoteKnownLive(emoteId)) {
+            out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_EMOTE",
+                    label + " Animation.EmoteId '" + emoteId + "' is not a known Emote id - check for a typo", id));
         }
-        if (a.getHold() != null && a.getHold().getEffectId() != null
-                && a.getHold().getEffectId().isBlank()) {
+        String holdEffectId = a.getHold() != null ? a.getHold().getEffectId() : null;
+        if (holdEffectId != null && holdEffectId.isBlank()) {
             out.add(Finding.warning(DOMAIN, "BLANK_EFFECT_ID",
                     label + " authors an empty Hold.EffectId", id));
+        } else if (notBlank(holdEffectId) && !entityEffectKnownLive(holdEffectId)) {
+            out.add(Finding.warning(DOMAIN, "UNKNOWN_ENTITY_EFFECT",
+                    label + " Hold.EffectId '" + holdEffectId + "' references unknown EntityEffect", id));
         }
+        // Seam wave (decision 51b/51d, decision 53): the station's own cycle-moment Presentation
+        // gains the SAME native-composition advisory coverage every other Presentation site gets -
+        // this was a pre-existing gap (only Completion/Swing/Impact/flair Moments were checked).
+        checkNativeRefs(a.getPresentation(), label + ".Presentation", id, out);
     }
 
     private static void checkAnimation(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
@@ -1425,6 +1700,7 @@ public final class StationValidator {
         }
         warnUnplayedPresentationLeaves(swing.getPresentation(), swingLabel + ".Presentation", id,
                 "SWING_UNPLAYED_LEAVES", out);
+        checkNativeRefs(swing.getPresentation(), swingLabel + ".Presentation", id, out);
         checkImpact(swing, swingLabel, id, out);
     }
 
@@ -1448,6 +1724,7 @@ public final class StationValidator {
         }
         warnUnplayedPresentationLeaves(impact.getPresentation(), impactLabel + ".Presentation", id,
                 "IMPACT_UNPLAYED_LEAVES", out);
+        checkNativeRefs(impact.getPresentation(), impactLabel + ".Presentation", id, out);
     }
 
     private static void checkCamera(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
@@ -1519,6 +1796,7 @@ public final class StationValidator {
                                         @Nonnull List<Finding> out) {
         warnUnplayedPresentationLeaves(a.getCompletion(), label + ".Completion", id,
                 "COMPLETION_UNPLAYED_LEAVES", out);
+        checkNativeRefs(a.getCompletion(), label + ".Completion", id, out);
     }
 
     /**
@@ -1577,6 +1855,7 @@ public final class StationValidator {
             }
             warnUnplayedPresentationLeaves(entry.getValue(), label + ".Moments['" + momentId + "']", id,
                     "FLAIR_UNPLAYED_LEAVES", out);
+            checkNativeRefs(entry.getValue(), label + ".Moments['" + momentId + "']", id, out);
         }
     }
 
@@ -1824,7 +2103,16 @@ public final class StationValidator {
                                     + " Puppet group is not active - this override never plays", id));
                 }
                 checkPuppetProp(puppetOverride.getProp(), stepLabel + ".Puppet", id, out);
+                String clip = puppetOverride.getClip();
+                if (notBlank(clip) && !emoteKnownLive(clip)) {
+                    out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_EMOTE",
+                            stepLabel + ".Puppet.Clip '" + clip + "' is not a known Emote id - check for a typo", id));
+                }
             }
+            // Seam wave (decision 51b/51d): a step's own Presentation fires at iteration entry
+            // (station/CLAUDE.md's per-step Presentation rule) - gets the SAME native-composition
+            // advisory coverage every other Presentation site does.
+            checkNativeRefs(step.getPresentation(), stepLabel + ".Presentation", id, out);
 
             StationStep.Repeat repeat = step.getRepeat();
             if (repeat != null) {

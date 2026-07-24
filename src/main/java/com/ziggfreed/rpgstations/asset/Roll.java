@@ -275,6 +275,7 @@ public final class Roll {
         @Nullable protected Integer bonusOutputCopies;
         @Nullable protected String dropList;
         @Nullable protected String[] commands;
+        @Nullable protected EffectRef[] effects;
 
         public static final BuilderCodec<Grants> CODEC = BuilderCodec.builder(Grants.class, Grants::new)
                 .appendInherited(new KeyedCodec<>("BonusOutputCopies", Codec.INTEGER, false),
@@ -287,15 +288,25 @@ public final class Roll {
                 .appendInherited(new KeyedCodec<>("Commands", new ArrayCodec<>(Codec.STRING, String[]::new), false),
                         (o, v) -> o.commands = v, o -> o.commands, (o, p) -> o.commands = p.commands)
                 .documentation("Commands run with {player}/{uuid}/{station}/{action}/{cycles} placeholders substituted.").add()
+                .appendInherited(new KeyedCodec<>("Effects", new ArrayCodec<>(EffectRef.CODEC, EffectRef[]::new), false),
+                        (o, v) -> o.effects = v, o -> o.effects, (o, p) -> o.effects = p.effects)
+                .documentation("Native EntityEffects (id-ref-only, each with an optional DurationMs) applied to the player when the roll grants.").add()
                 .build();
 
         @Nonnull
         public static Grants of(@Nullable Integer bonusOutputCopies, @Nullable String dropList,
                 @Nullable String[] commands) {
+            return of(bonusOutputCopies, dropList, commands, null);
+        }
+
+        @Nonnull
+        public static Grants of(@Nullable Integer bonusOutputCopies, @Nullable String dropList,
+                @Nullable String[] commands, @Nullable EffectRef[] effects) {
             Grants g = new Grants();
             g.bonusOutputCopies = bonusOutputCopies;
             g.dropList = dropList;
             g.commands = commands;
+            g.effects = effects;
             return g;
         }
 
@@ -315,11 +326,18 @@ public final class Roll {
             return commands;
         }
 
-        /** True when neither leaf is authored (an empty group is a no-op, same as an absent one). */
+        /** Native EntityEffects (id-ref-only) applied when the roll grants; null = none. */
+        @Nullable
+        public EffectRef[] getEffects() {
+            return effects;
+        }
+
+        /** True when no leaf is authored (an empty group is a no-op, same as an absent one). */
         public boolean isEmpty() {
             return bonusOutputCopies == null
                     && (dropList == null || dropList.isBlank())
-                    && (commands == null || commands.length == 0);
+                    && (commands == null || commands.length == 0)
+                    && (effects == null || effects.length == 0);
         }
     }
 }

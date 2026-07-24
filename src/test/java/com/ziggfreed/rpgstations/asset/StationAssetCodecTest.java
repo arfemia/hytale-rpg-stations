@@ -530,11 +530,62 @@ public class StationAssetCodecTest {
     }
 
     @Test
-    void puppetLook_modelSource_decodesModelIdAndFallback() {
-        Puppet.Look look = Puppet.Look.of("Model", "NPC_Golem", "NPC_Generic_Worker");
+    void puppetLook_modelSource_decodesNestedModelGroupAndFallback() throws Exception {
+        // Seam wave decision 47: the flat ModelId/FallbackModelId retro-nest into Look.Model.
+        StationAsset a = decodeAsset("{ \"Puppet\": { \"Look\": { \"Source\": \"Model\","
+                + " \"Model\": { \"ModelId\": \"NPC_Golem\", \"FallbackModelId\": \"NPC_Generic_Worker\" } } } }");
+        Puppet.Look look = a.getPuppet().getLook();
         assertEquals(Puppet.LOOK_SOURCE_MODEL, look.effectiveSource());
-        assertEquals("NPC_Golem", look.getModelId());
-        assertEquals("NPC_Generic_Worker", look.getFallbackModelId());
+        assertNotNull(look.getModel());
+        assertEquals("NPC_Golem", look.getModel().getModelId());
+        assertEquals("NPC_Generic_Worker", look.getModel().getFallbackModelId());
+        assertNull(look.getRole());
+    }
+
+    @Test
+    void puppetLook_npcRoleSource_decodesRoleGroup() throws Exception {
+        // Seam wave decision 47/48: the NpcRole performer arm + its nested Role group.
+        StationAsset a = decodeAsset("{ \"Puppet\": { \"Look\": { \"Source\": \"NpcRole\","
+                + " \"Role\": { \"RoleId\": \"RPG_Performer_Worker\", \"SkinSource\": \"PlayerClone\","
+                + "   \"Persist\": false, \"SpeedMps\": 4.0 } } } }");
+        Puppet.Look look = a.getPuppet().getLook();
+        assertEquals(Puppet.LOOK_SOURCE_NPC_ROLE, look.effectiveSource());
+        Puppet.Role role = look.getRole();
+        assertNotNull(role);
+        assertEquals("RPG_Performer_Worker", role.getRoleId());
+        assertTrue(role.hasRoleId());
+        assertEquals(Puppet.SKIN_SOURCE_PLAYER_CLONE, role.effectiveSkinSource());
+        assertFalse(role.effectivePersist());
+        assertEquals(4.0, role.getSpeedMps());
+        assertNull(look.getModel());
+    }
+
+    @Test
+    void puppetRole_defaults_skinSourcePlayerClonePersistFalse() {
+        Puppet.Role role = Puppet.Role.of(null, null, null, null);
+        assertEquals(Puppet.SKIN_SOURCE_PLAYER_CLONE, role.effectiveSkinSource());
+        assertFalse(role.effectivePersist());
+        assertFalse(role.hasRoleId());
+        assertNull(role.getSpeedMps());
+    }
+
+    @Test
+    void puppetRole_roleDefaultSkinSource_decodes() {
+        Puppet.Role role = Puppet.Role.of("R", "RoleDefault", Boolean.TRUE, null);
+        assertEquals(Puppet.SKIN_SOURCE_ROLE_DEFAULT, role.effectiveSkinSource());
+        assertTrue(role.effectivePersist());
+    }
+
+    @Test
+    void puppetLook_roleGroup_siblingLeafInherit() throws Exception {
+        StationAsset parent = decodeWithParent("{ \"Puppet\": { \"Look\": { \"Source\": \"NpcRole\","
+                + " \"Role\": { \"RoleId\": \"RPG_Performer_Worker\", \"SpeedMps\": 4.0 } } } }",
+                null, "role_parent", null);
+        StationAsset child = decodeWithParent("{ \"Puppet\": { \"Look\": { \"Role\": { \"SpeedMps\": 2.0 } } } }",
+                parent, "role_child", "role_parent");
+        Puppet.Role role = child.getPuppet().getLook().getRole();
+        assertEquals(2.0, role.getSpeedMps(), "own leaf wins");
+        assertEquals("RPG_Performer_Worker", role.getRoleId(), "sibling leaf inherits three levels deep (Puppet->Look->Role)");
     }
 
     @Test
@@ -593,11 +644,11 @@ public class StationAssetCodecTest {
     void actionsPuppet_decodesPerActionOverride() throws Exception {
         StationAsset a = decodeAsset("{ \"Puppet\": { \"Enabled\": true, \"Hide\": { \"Route\": \"Scale\" } },"
                 + " \"Actions\": { \"enhance\": { \"Puppet\": { \"Enabled\": true,"
-                + "   \"Look\": { \"Source\": \"Model\", \"ModelId\": \"NPC_Blacksmith\" } } } } }");
+                + "   \"Look\": { \"Source\": \"Model\", \"Model\": { \"ModelId\": \"NPC_Blacksmith\" } } } } } }");
         assertEquals(Puppet.HIDE_ROUTE_SCALE, a.getPuppet().getHide().effectiveRoute());
         ActionDef enhance = a.getActions().get("enhance");
         assertNotNull(enhance.getPuppet());
-        assertEquals("NPC_Blacksmith", enhance.getPuppet().getLook().getModelId());
+        assertEquals("NPC_Blacksmith", enhance.getPuppet().getLook().getModel().getModelId());
         // ActionResolver.resolve is the RUNTIME whole-group-override choke point (a non-null
         // ActionDef.Puppet replaces the station-level group wholesale there) - see
         // station.ActionResolverTest for that resolution behavior; this test only exercises decode.
@@ -624,5 +675,108 @@ public class StationAssetCodecTest {
         StationAsset a = decodeAsset("{ \"Actions\": { \"ritual\": { \"Steps\": ["
                 + " { \"Id\": \"strike\", \"Duration\": { \"Ms\": 400 } } ] } } }");
         assertNull(a.getActions().get("ritual").getSteps()[0].getPuppet());
+    }
+
+    // ==================== FromCrafting (seam wave decision 51c/52: Benches/Types/NativeTime) ====================
+
+    @Test
+    void fromCrafting_benchesTypesNativeTime_decode() throws Exception {
+        StationAsset a = decodeAsset("{ \"Recipe\": { \"FromCrafting\": {"
+                + " \"Categories\": [\"WoodPlanks\"], \"OutputPerInput\": 2,"
+                + " \"Benches\": [\"RPG_Bench_Sawmill\"], \"Types\": [\"Crafting\", \"Processing\"],"
+                + " \"NativeTime\": { \"Scale\": 3.0, \"OffsetMs\": 1500 } } } }");
+        StationAsset.FromCrafting fc = a.getRecipe().getFromCrafting();
+        assertEquals("WoodPlanks", fc.getCategories()[0]);
+        assertEquals(2, fc.getOutputPerInput());
+        assertEquals("RPG_Bench_Sawmill", fc.getBenches()[0]);
+        assertEquals(StationAsset.FromCrafting.TYPE_CRAFTING, fc.getTypes()[0]);
+        assertEquals(StationAsset.FromCrafting.TYPE_PROCESSING, fc.getTypes()[1]);
+        assertEquals(3.0, fc.getNativeTime().effectiveScale());
+        assertEquals(1500L, fc.getNativeTime().effectiveOffsetMs());
+    }
+
+    @Test
+    void fromCraftingNativeTime_emptyGroup_defaultsStaySlowerThanVanilla() {
+        StationAsset.FromCrafting.NativeTime empty = StationAsset.FromCrafting.NativeTime.of(null, null);
+        assertEquals(StationAsset.FromCrafting.NativeTime.DEFAULT_SCALE, empty.effectiveScale());
+        assertEquals(StationAsset.FromCrafting.NativeTime.DEFAULT_OFFSET_MS, empty.effectiveOffsetMs(),
+                "an empty NativeTime still adds a non-instant offset floor");
+        assertTrue(empty.effectiveOffsetMs() > 0, "never instant like vanilla");
+    }
+
+    @Test
+    void conversion_durationMs_decodes() throws Exception {
+        StationAsset a = decodeAsset("{ \"Recipe\": { \"Conversions\": [ {"
+                + " \"Input\": { \"ResourceTypeId\": \"Wood_Hardwood_Trunk\", \"Quantity\": 1 },"
+                + " \"Output\": { \"ItemId\": \"Wood_Hardwood_Planks\", \"Quantity\": 2 },"
+                + " \"DurationMs\": 4200 } ] } }");
+        StationAsset.Conversion c = a.getRecipe().getConversions()[0];
+        assertEquals("Wood_Hardwood_Planks", c.getOutput().getItemId());
+        assertEquals(4200L, c.getDurationMs());
+    }
+
+    @Test
+    void conversion_durationMs_omitted_decodesNull() throws Exception {
+        StationAsset a = decodeAsset("{ \"Recipe\": { \"Conversions\": [ {"
+                + " \"Input\": { \"ItemId\": \"Coal\" }, \"Output\": { \"ItemId\": \"Coke\" } } ] } }");
+        assertNull(a.getRecipe().getConversions()[0].getDurationMs());
+    }
+
+    // ==================== Picker (seam wave decision 50) ====================
+
+    @Test
+    void picker_decodesShowLocked_defaultsTrue() throws Exception {
+        StationAsset a = decodeAsset("{ \"Picker\": { \"ShowLocked\": false },"
+                + " \"Actions\": { \"cut\": { \"Picker\": { \"ShowLocked\": true } } } }");
+        assertNotNull(a.getPicker());
+        assertFalse(a.getPicker().effectiveShowLocked());
+        assertTrue(a.getActions().get("cut").getPicker().effectiveShowLocked());
+        // omitted group => reader default true
+        assertTrue(Picker.of(null).effectiveShowLocked());
+    }
+
+    @Test
+    void picker_omitted_decodesNull() throws Exception {
+        StationAsset a = decodeAsset("{ \"Identity\": { \"NameKey\": \"rpgstations.station.x.name\" } }");
+        assertNull(a.getPicker());
+    }
+
+    // ==================== Presentation.Interaction / Presentation.Effect (seam wave decision 51b/51d) ====================
+
+    @Test
+    void presentationInteractionAndEffect_decode() throws Exception {
+        StationAsset a = decodeAsset("{ \"Presentation\": { \"Sound\": \"SFX_Forge\","
+                + " \"Interaction\": { \"Id\": \"RPG_Forge_Flourish\" },"
+                + " \"Effect\": { \"Id\": \"Buff_Focus\", \"DurationMs\": 3000 } } }");
+        Presentation p = a.getPresentation();
+        assertNotNull(p.getInteraction());
+        assertEquals("RPG_Forge_Flourish", p.getInteraction().getId());
+        assertTrue(p.getInteraction().hasId());
+        assertNotNull(p.getEffect());
+        assertEquals("Buff_Focus", p.getEffect().getId());
+        assertEquals(3000L, p.getEffect().getDurationMs());
+    }
+
+    @Test
+    void presentationEffect_noDuration_defersToAssetTtl() throws Exception {
+        StationAsset a = decodeAsset("{ \"Presentation\": { \"Effect\": { \"Id\": \"Buff_Focus\" } } }");
+        assertEquals("Buff_Focus", a.getPresentation().getEffect().getId());
+        assertNull(a.getPresentation().getEffect().getDurationMs(), "null duration defers to the effect asset's own TTL");
+    }
+
+    // ==================== Roll.Grants.Effects (seam wave decision 51d) ====================
+
+    @Test
+    void grantsEffects_decodeAsEffectRefArray() throws Exception {
+        StationAsset a = decodeAsset("{ \"Loot\": { \"Rolls\": [ { \"Trigger\": \"Completion\","
+                + " \"Grants\": { \"Effects\": [ { \"Id\": \"Buff_Lucky\", \"DurationMs\": 5000 },"
+                + "   { \"Id\": \"Buff_Rested\" } ] } } ] } }");
+        Roll.Grants g = a.getLoot().getRolls()[0].getGrants();
+        assertFalse(g.isEmpty(), "an Effects-only Grants is not empty");
+        assertEquals(2, g.getEffects().length);
+        assertEquals("Buff_Lucky", g.getEffects()[0].getId());
+        assertEquals(5000L, g.getEffects()[0].getDurationMs());
+        assertEquals("Buff_Rested", g.getEffects()[1].getId());
+        assertNull(g.getEffects()[1].getDurationMs());
     }
 }

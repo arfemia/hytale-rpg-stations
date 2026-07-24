@@ -32,6 +32,17 @@ import javax.annotation.Nonnull;
  * the toast matches a native pickup exactly - the quantity rides the item-slot count badge.
  * Decision 48 (batch-2 spike extension, 2026-07-24) adds the {@code command.npcspike.prop_*}/
  * {@code clip_*} keys backing {@code NpcPerformerSpike}'s {@code prop}/{@code clip} subcommands.
+ * The seam-wave picker leg (R3, decision 50) adds {@code ui.station.picker.title}/{@code .hint}/
+ * {@code .locked}/{@code .locked_generic} backing {@code pages.RpgStationPickerPage}.
+ * The seam-wave validator/content leg (R4) LOCKSTEP CLEANUP folds in the wave-3 gap this set had
+ * drifted from its own {@code rpgstations.lang}: {@code ui.station.no_action} (the multi-action
+ * "nothing this station can work with" toast), the wave-3 {@code ui.station.stop.complete}/
+ * {@code .capped}/{@code .inputs_exhausted}/{@code .anchor_lost}/{@code .path_blocked} stop-reason
+ * keys, {@code ui.station.anchor_missing}/{@code .anchor_busy} (the multi-station anchor-claim
+ * denial toasts), the shipped fish-exemplar content keys ({@code station.cuttingboard.name}/
+ * {@code .desc}, {@code station.cookingfire.name}/{@code .desc}, {@code action.prepfish.label}),
+ * and adds {@code ui.station.bench.hint} (the decision-51a native SNEAK+F bench-window advertise
+ * hint, the {@code retrieve.hint} sibling).
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -54,6 +65,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.practice",
             "rpgstations.ui.station.rare_find",
             "rpgstations.ui.station.lucky",
+            "rpgstations.ui.station.no_action",
             "rpgstations.ui.station.stop.player",
             "rpgstations.ui.station.stop.moved",
             "rpgstations.ui.station.stop.damaged",
@@ -64,6 +76,14 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.stop.tool_changed",
             "rpgstations.ui.station.stop.tool_broke",
             "rpgstations.ui.station.stop.step_failed",
+            "rpgstations.ui.station.stop.complete",
+            "rpgstations.ui.station.stop.capped",
+            "rpgstations.ui.station.stop.inputs_exhausted",
+            "rpgstations.ui.station.stop.anchor_lost",
+            "rpgstations.ui.station.stop.path_blocked",
+            "rpgstations.ui.station.anchor_missing",
+            "rpgstations.ui.station.anchor_busy",
+            "rpgstations.ui.station.bench.hint",
             "rpgstations.ui.station.summary.title",
             "rpgstations.ui.station.summary.cycles",
             "rpgstations.ui.station.summary.item_consumed",
@@ -74,6 +94,11 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.gain.produced",
             "rpgstations.station.sawmill.name",
             "rpgstations.station.sawmill.desc",
+            "rpgstations.station.cuttingboard.name",
+            "rpgstations.station.cuttingboard.desc",
+            "rpgstations.station.cookingfire.name",
+            "rpgstations.station.cookingfire.desc",
+            "rpgstations.action.prepfish.label",
             "rpgstations.command.desc",
             "rpgstations.command.arg.sub",
             "rpgstations.command.arg.action",
@@ -101,7 +126,12 @@ public final class RpgStationsLangKeys {
             "rpgstations.command.npcspike.prop_cleared",
             "rpgstations.command.npcspike.prop_unknown_item",
             "rpgstations.command.npcspike.clip_usage",
-            "rpgstations.command.npcspike.clip_attempted");
+            "rpgstations.command.npcspike.clip_attempted",
+            // Seam-wave picker leg (R3, decision 50).
+            "rpgstations.ui.station.picker.title",
+            "rpgstations.ui.station.picker.hint",
+            "rpgstations.ui.station.picker.locked",
+            "rpgstations.ui.station.picker.locked_generic");
 
     private RpgStationsLangKeys() {
     }

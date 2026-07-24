@@ -48,6 +48,18 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
   `Conditions` array evaluate over the api `FactorRegistry`. An unregistered factor id fails
   CLOSED (a gate on a server without the referencing progression mod stays locked, never silently
   open) - never a second condition schema.
+- **[`EffectRef`](EffectRef.java)** (NEW, seam wave decision 51d) - the ONE native-EntityEffect
+  reference leaf (`{Id, DurationMs?}`, id-ref-only per decision 53, never inlines the effect body).
+  Reused at BOTH altitudes an effect payload lands: `Presentation.Effect` (a single per-moment
+  effect group) and `Roll.Grants.Effects[]` (a reward-time effect array). `Id` is the native effect
+  asset id; `DurationMs` null defers to the effect asset's own TTL. The engine tracks session-scoped
+  effects so `stop()` removes them (engine scope); an unresolvable id is a validator INFO + apply
+  no-op.
+- **[`Picker`](Picker.java)** (NEW, seam wave decision 50) - the multi-output picker knob group
+  (`{ShowLocked?}`, reader-default `true`), a top-level `StationAsset.Picker` default whole-group
+  overridable per `ActionDef`. `ShowLocked` governs whether tool-gated output categories render
+  greyed (via `ui.gate.locked_*`) or hide entirely. A single-category station never shows a picker,
+  so the group is a no-op there.
 
 ## Content types
 
@@ -68,7 +80,14 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
   (per-flair-id cosmetic overrides, an authoring convenience - see [`FlairAsset`](FlairAsset.java)
   for the standalone route), `Puppet` (unchanged by scope-2 - see below), and `Actions` - a
   named, authored-order map of [`ActionDef`](ActionDef.java) whole-GROUP overrides, absent/empty
-  meaning the single implicit `"work"` action built from this asset's own groups. See
+  meaning the single implicit `"work"` action built from this asset's own groups, plus (seam wave,
+  decision 50) `Picker` (a [`Picker`](Picker.java), whole-group overridable per action). **Seam-wave
+  native-recipe composition (decisions 51c/52)**: `Recipe.FromCrafting` gains `Benches[]` (native
+  BenchRequirement id-refs), `Types[]` (`Crafting`|`Processing`; absent = both), and `NativeTime
+  {Scale, OffsetMs}` (the decision-52 linear `y = Scale*x + OffsetMs` transform over a derived
+  recipe's `TimeSeconds`, defaults intentionally slower than vanilla); `Recipe.Conversion` gains a
+  nullable `DurationMs`. Per-cycle time precedence (engine-side): authored `Conversion.DurationMs`
+  &gt; `FromCrafting.NativeTime` linear transform &gt; `Work.CycleMs`. See
   `../station/CLAUDE.md` for how every group drives the engine (`station.ActionResolver` is the
   resolution choke point).
 - **[`ActionDef`](ActionDef.java)** - one `Actions` map entry: nullable whole-group overrides of
@@ -173,7 +192,10 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
 - **[`Presentation`](Presentation.java)** - RpgStations' OWN codec (a deliberate small divergence
   from the MMO's copy of the same shape - no `FeedbackService` indirection here). Leaves:
   `Sound`, `Particles`, `Animation`, `AnimationItem`, `AnimationSlot`, `Camera`, `Shake` (nested
-  `{EffectId, Intensity}`). Unchanged by scope-2.
+  `{EffectId, Intensity}`), plus TWO seam-wave native-composition groups: `Interaction`
+  (`{Id}`, an inner class - fires a native RootInteraction chain by id, decision 51b) and `Effect`
+  (an [`EffectRef`](EffectRef.java) - applies a native EntityEffect by id, decision 51d). Both
+  id-ref-only.
 - **[`Puppet`](Puppet.java)** (unchanged by scope-2) - "mount the player, hide their player
   model, and spawn/display a visual of their character model performing the steps" - a top-level
   group sibling to `Hold`/`Camera`/`Animation`/`Custody` (ORTHOGONAL to whichever `Hold.Mount`
@@ -187,13 +209,20 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
   WORLD SPACE (unlike `Custody.Display`, which is facing-relative). `Prop.Source` defaults
   `"MirrorHeld"`; `"ItemId"` forces a specific prop, `"None"` empties the puppet's hands. A
   `StationStep` carries its own small `{Clip, Prop}` override (`StationStep.PuppetOverride`)
-  reusing this exact `Prop` codec for moment-to-moment swaps. See `../station/CLAUDE.md`'s
+  reusing this exact `Prop` codec for moment-to-moment swaps. **Seam wave (decision 47/48) - FULL
+  Look nesting symmetry**: `Look.Source` is now a THREE-arm union (`PlayerClone`|`Model`|`NpcRole`);
+  the flat `ModelId`/`FallbackModelId` retro-nest into the cohesive `Look.Model {ModelId,
+  FallbackModelId}` group (read for `Source:"Model"`; `FallbackModelId` is the any-source resolution
+  fallback), and the NpcRole performer arm's config is the parallel `Look.Role {RoleId, SkinSource
+  (PlayerClone|RoleDefault), Persist, SpeedMps}` group (read for `Source:"NpcRole"`; `Model`/`Role`
+  are inner classes of `Puppet`, siblings of `Hide`/`Prop`). See `../station/CLAUDE.md`'s
   puppet-engine bullet (`StationPuppetController`); both shipped stations author `Puppet` in
   `content-packs/skill-stations-pack`.
 - **[`Roll`](Roll.java)** (REWRITTEN for weighted-factor unification, design 4.2) - the
   conditional-lootable roll: `Trigger` (`Cycle`/`Completion`), `Conditions[]`, `Chance{BasePercent,
   AddFactors[], CapPercent}`, `Ladder{Values[], Floors[]}`, `Grants{BonusOutputCopies, DropList,
-  Commands[]}` (top-level AND per-floor, both fire). Scope-2 changes: `Chance.AddFactors` entries
+  Commands[], Effects[]}` (top-level AND per-floor, both fire; `Effects[]` is a seam-wave
+  [`EffectRef`](EffectRef.java) array applying native EntityEffects on grant, decision 51d). Scope-2 changes: `Chance.AddFactors` entries
   are now `FactorRef`s (gained `Weight`, previously bare `{Factor,Param}`); `Ladder.Value`
   (singular) is REPLACED by **`Ladder.Values[]`** (JSON key `Values`, a `FactorRef[]` summed
   BEFORE the floor lookup, so a ladder composes `stat` channels like `MMO_Luck` +

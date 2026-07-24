@@ -13,6 +13,7 @@ import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.ziggfreed.common.effect.AppliedEffectTracker;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationAsset;
@@ -298,6 +299,15 @@ final class StationSession {
      * summary. Session-scoped, never persisted, like every other ledger here.
      */
     final List<StationEnhanceOutcome> enhanceOutcomes = new ArrayList<>();
+
+    /**
+     * Session-scoped native {@code EntityEffect} bookkeeping (seam wave decision 51d): every
+     * {@code Presentation.Effect} this session applies via {@code NativeEffectUtil} (through the
+     * {@code emitMoment} choke point) is {@code track()}ed here, so the ONE {@code stop()} funnel
+     * {@code removeAll()}s them on EVERY exit path (re-press, walk-off, damage, death, disconnect,
+     * shutdown). Never persisted, world-thread only - matches every other session ledger here.
+     */
+    final AppliedEffectTracker appliedEffects = new AppliedEffectTracker();
 
     /** Idempotency gate: the first {@code compareAndSet(false, true)} wins the teardown. */
     final AtomicBoolean stopped = new AtomicBoolean(false);

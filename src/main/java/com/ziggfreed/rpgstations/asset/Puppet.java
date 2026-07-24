@@ -63,6 +63,12 @@ public final class Puppet {
     // ---- Look.Source union arms ----
     public static final String LOOK_SOURCE_PLAYER_CLONE = "PlayerClone";
     public static final String LOOK_SOURCE_MODEL = "Model";
+    /** The NpcRole performer arm (seam wave, decision 47): a Role-driven NPCEntity backend. */
+    public static final String LOOK_SOURCE_NPC_ROLE = "NpcRole";
+
+    // ---- Look.Role.SkinSource union arms ----
+    public static final String SKIN_SOURCE_PLAYER_CLONE = "PlayerClone";
+    public static final String SKIN_SOURCE_ROLE_DEFAULT = "RoleDefault";
 
     // ---- Prop.Source union arms ----
     public static final String PROP_SOURCE_MIRROR_HELD = "MirrorHeld";
@@ -215,44 +221,116 @@ public final class Puppet {
     }
 
     /**
-     * The puppet-appearance knob (design 3.4): {@link #source} is a UNION DISCRIMINATOR defaulting
-     * to {@link #LOOK_SOURCE_PLAYER_CLONE} (the puppet clones the live player skin). Deliberately
-     * an OPEN performer seam, per the round-4 maintainer decision: a FUTURE arm (a summoned
-     * minion, a provider-registered look) extends this union without breaking the schema - a new
-     * consumer only needs to teach the engine-side resolver a new {@link #source} string, never a
-     * new top-level field. {@link #modelId} backs {@link #LOOK_SOURCE_MODEL} (a fixed authored
-     * look, e.g. an apprentice/golem regardless of who works); {@link #fallbackModelId} is the
-     * resolution-ladder fallback for EITHER source when the primary look is unreadable/unresolvable
-     * (design 3.4's ladder: {@code PlayerClone} -&gt; {@code FallbackModelId} -&gt; the engine's
-     * default rig, never a red-X or a crash).
+     * The puppet-appearance knob (design 3.4, seam wave decision 47's FULL nesting symmetry):
+     * {@link #source} is a UNION DISCRIMINATOR defaulting to {@link #LOOK_SOURCE_PLAYER_CLONE} (the
+     * puppet clones the live player skin) with THREE arms - {@link #LOOK_SOURCE_PLAYER_CLONE},
+     * {@link #LOOK_SOURCE_MODEL} (a fixed authored model), and {@link #LOOK_SOURCE_NPC_ROLE} (the
+     * Role-driven NPCEntity performer backend). The seam stays open: a FUTURE arm (a provider-
+     * registered look) extends this union without a schema break - a new consumer only teaches the
+     * engine-side resolver a new {@link #source} string.
+     *
+     * <p><b>Nesting symmetry (decision 47):</b> the flat {@code ModelId}/{@code FallbackModelId}
+     * leaves retro-nest into the cohesive {@link Model} group (read only when {@link #source} is
+     * {@link #LOOK_SOURCE_MODEL}); the NpcRole arm's own configuration is the parallel {@link Role}
+     * group (read only when {@link #source} is {@link #LOOK_SOURCE_NPC_ROLE}). Each arm's group is
+     * ignored by the other arms, orthogonal knobs never a mode. {@link Model#getFallbackModelId()}
+     * doubles as the resolution-ladder fallback for the whole Look (any-source: an unresolvable
+     * primary look -&gt; {@code FallbackModelId} -&gt; the engine's default rig, never a red-X).
      */
     public static final class Look {
         @Nullable protected String source;
-        @Nullable protected String modelId;
-        @Nullable protected String fallbackModelId;
+        @Nullable protected Model model;
+        @Nullable protected Role role;
 
         public static final BuilderCodec<Look> CODEC = BuilderCodec.builder(Look.class, Look::new)
                 .appendInherited(new KeyedCodec<>("Source", Codec.STRING, false),
-                        (o, v) -> o.source = v, o -> o.source, (o, p) -> o.source = p.source).add()
-                .appendInherited(new KeyedCodec<>("ModelId", Codec.STRING, false),
-                        (o, v) -> o.modelId = v, o -> o.modelId, (o, p) -> o.modelId = p.modelId).add()
-                .appendInherited(new KeyedCodec<>("FallbackModelId", Codec.STRING, false),
-                        (o, v) -> o.fallbackModelId = v, o -> o.fallbackModelId,
-                        (o, p) -> o.fallbackModelId = p.fallbackModelId).add()
+                        (o, v) -> o.source = v, o -> o.source, (o, p) -> o.source = p.source)
+                .documentation("The puppet appearance discriminator: 'PlayerClone' (default), 'Model' (Look.Model), or 'NpcRole' (Look.Role).").add()
+                .appendInherited(new KeyedCodec<>("Model", Model.CODEC, false),
+                        (o, v) -> o.model = v, o -> o.model, (o, p) -> o.model = p.model)
+                .documentation("The fixed-model appearance group (read only when Source is 'Model'); also carries the any-source FallbackModelId.").add()
+                .appendInherited(new KeyedCodec<>("Role", Role.CODEC, false),
+                        (o, v) -> o.role = v, o -> o.role, (o, p) -> o.role = p.role)
+                .documentation("The NpcRole performer configuration group (read only when Source is 'NpcRole').").add()
                 .build();
 
         @Nonnull
-        public static Look of(@Nullable String source, @Nullable String modelId, @Nullable String fallbackModelId) {
+        public static Look of(@Nullable String source, @Nullable Model model, @Nullable Role role) {
             Look l = new Look();
             l.source = source;
-            l.modelId = modelId;
-            l.fallbackModelId = fallbackModelId;
+            l.model = model;
+            l.role = role;
             return l;
+        }
+
+        /** Convenience: a fixed-model look ({@code Source: "Model"} + a {@link Model} group). */
+        @Nonnull
+        public static Look model(@Nullable String modelId, @Nullable String fallbackModelId) {
+            return of(LOOK_SOURCE_MODEL, Model.of(modelId, fallbackModelId), null);
         }
 
         @Nullable
         public String getSource() {
             return source;
+        }
+
+        /** The fixed-model appearance group; null = none authored (read only when {@link #effectiveSource()} is {@link #LOOK_SOURCE_MODEL}). */
+        @Nullable
+        public Model getModel() {
+            return model;
+        }
+
+        /** The NpcRole performer group; null = none authored (read only when {@link #effectiveSource()} is {@link #LOOK_SOURCE_NPC_ROLE}). */
+        @Nullable
+        public Role getRole() {
+            return role;
+        }
+
+        /**
+         * {@link #source}, reader-defaulted (case-insensitive) to {@link #LOOK_SOURCE_PLAYER_CLONE}
+         * for anything other than an exact {@link #LOOK_SOURCE_MODEL}/{@link #LOOK_SOURCE_NPC_ROLE}
+         * match.
+         */
+        @Nonnull
+        public String effectiveSource() {
+            if (LOOK_SOURCE_MODEL.equalsIgnoreCase(source)) {
+                return LOOK_SOURCE_MODEL;
+            }
+            if (LOOK_SOURCE_NPC_ROLE.equalsIgnoreCase(source)) {
+                return LOOK_SOURCE_NPC_ROLE;
+            }
+            return LOOK_SOURCE_PLAYER_CLONE;
+        }
+    }
+
+    /**
+     * The fixed-model appearance group (decision 47's retro-nest of the old flat {@code ModelId}/
+     * {@code FallbackModelId} leaves). {@link #modelId} backs {@link #LOOK_SOURCE_MODEL} (a fixed
+     * authored look, e.g. an apprentice/golem regardless of who works); {@link #fallbackModelId} is
+     * the resolution-ladder fallback for the WHOLE Look (any source) when the primary look is
+     * unreadable/unresolvable ({@code PlayerClone} clone fails, a dangling {@code ModelId} or role,
+     * ...) - the ladder ends at the engine's default rig, never a red-X or a crash.
+     */
+    public static final class Model {
+        @Nullable protected String modelId;
+        @Nullable protected String fallbackModelId;
+
+        public static final BuilderCodec<Model> CODEC = BuilderCodec.builder(Model.class, Model::new)
+                .appendInherited(new KeyedCodec<>("ModelId", Codec.STRING, false),
+                        (o, v) -> o.modelId = v, o -> o.modelId, (o, p) -> o.modelId = p.modelId)
+                .documentation("The fixed model asset id used when Look.Source is 'Model'.").add()
+                .appendInherited(new KeyedCodec<>("FallbackModelId", Codec.STRING, false),
+                        (o, v) -> o.fallbackModelId = v, o -> o.fallbackModelId,
+                        (o, p) -> o.fallbackModelId = p.fallbackModelId)
+                .documentation("The any-source resolution-ladder fallback model id when the primary look is unresolvable.").add()
+                .build();
+
+        @Nonnull
+        public static Model of(@Nullable String modelId, @Nullable String fallbackModelId) {
+            Model m = new Model();
+            m.modelId = modelId;
+            m.fallbackModelId = fallbackModelId;
+            return m;
         }
 
         @Nullable
@@ -264,11 +342,98 @@ public final class Puppet {
         public String getFallbackModelId() {
             return fallbackModelId;
         }
+    }
 
-        /** {@link #source}, reader-defaulted (case-insensitive) to {@link #LOOK_SOURCE_PLAYER_CLONE}. */
+    /**
+     * The NpcRole performer configuration group (seam wave, decision 47/48; design
+     * {@code raw/rpg-stations-look-source-performer-seam-2026-07-24.md} section 1.2), read ONLY when
+     * {@link Look#effectiveSource()} is {@link #LOOK_SOURCE_NPC_ROLE}. Every leaf is an independently
+     * nullable orthogonal knob (no leaf bundles another's behavior):
+     *
+     * <ul>
+     *   <li>{@link #roleId} - the native Role asset id backing this performer
+     *   ({@code Server/NPC/Roles/<RoleId>.json}, id-ref-only; required when {@code Source:"NpcRole"};
+     *   a dangling id is a validator finding and engage falls back to the bare-Holder performer).
+     *   <li>{@link #skinSource} - a sub-union ({@link #SKIN_SOURCE_PLAYER_CLONE} default |
+     *   {@link #SKIN_SOURCE_ROLE_DEFAULT}) picking whose appearance the Role NPC wears: a cloned live
+     *   player skin, or the role asset's own default model.
+     *   <li>{@link #persist} - {@code false} (default) marks the NPC {@code NonSerialized} at spawn
+     *   (the transient posture, matching the bare Holder); {@code true} reserves the future
+     *   persistent-hireling posture (the identity component reconcile seam).
+     *   <li>{@link #speedMps} - the performer walk-speed override; null defers to the role asset's own
+     *   {@code MotionControllerWalk.MaxWalkSpeed} (bare-Holder parity default 2.5 m/s).
+     * </ul>
+     */
+    public static final class Role {
+        /** The bare-Holder-parity walk speed (m/s) documented when neither this leaf nor the role asset overrides it. */
+        public static final double DEFAULT_SPEED_MPS = 2.5;
+
+        @Nullable protected String roleId;
+        @Nullable protected String skinSource;
+        @Nullable protected Boolean persist;
+        @Nullable protected Double speedMps;
+
+        public static final BuilderCodec<Role> CODEC = BuilderCodec.builder(Role.class, Role::new)
+                .appendInherited(new KeyedCodec<>("RoleId", Codec.STRING, false),
+                        (o, v) -> o.roleId = v, o -> o.roleId, (o, p) -> o.roleId = p.roleId)
+                .documentation("The native Role asset id backing this performer (id-ref-only; required when Source is 'NpcRole').").add()
+                .appendInherited(new KeyedCodec<>("SkinSource", Codec.STRING, false),
+                        (o, v) -> o.skinSource = v, o -> o.skinSource, (o, p) -> o.skinSource = p.skinSource)
+                .documentation("Whose appearance the Role NPC wears: 'PlayerClone' (default, cloned live player skin) or 'RoleDefault' (the role's own model).").add()
+                .appendInherited(new KeyedCodec<>("Persist", Codec.BOOLEAN, false),
+                        (o, v) -> o.persist = v, o -> o.persist, (o, p) -> o.persist = p.persist)
+                .documentation("false (default) spawns the performer NonSerialized (transient); true reserves the persistent-hireling posture.").add()
+                .appendInherited(new KeyedCodec<>("SpeedMps", Codec.DOUBLE, false),
+                        (o, v) -> o.speedMps = v, o -> o.speedMps, (o, p) -> o.speedMps = p.speedMps)
+                .documentation("Performer walk-speed override (m/s); null defers to the role asset's own MotionControllerWalk speed.").add()
+                .build();
+
         @Nonnull
-        public String effectiveSource() {
-            return LOOK_SOURCE_MODEL.equalsIgnoreCase(source) ? LOOK_SOURCE_MODEL : LOOK_SOURCE_PLAYER_CLONE;
+        public static Role of(@Nullable String roleId, @Nullable String skinSource, @Nullable Boolean persist,
+                @Nullable Double speedMps) {
+            Role r = new Role();
+            r.roleId = roleId;
+            r.skinSource = skinSource;
+            r.persist = persist;
+            r.speedMps = speedMps;
+            return r;
+        }
+
+        @Nullable
+        public String getRoleId() {
+            return roleId;
+        }
+
+        @Nullable
+        public String getSkinSource() {
+            return skinSource;
+        }
+
+        @Nullable
+        public Boolean getPersist() {
+            return persist;
+        }
+
+        @Nullable
+        public Double getSpeedMps() {
+            return speedMps;
+        }
+
+        /** True when {@link #roleId} is authored (a non-blank native Role id). */
+        public boolean hasRoleId() {
+            return roleId != null && !roleId.isBlank();
+        }
+
+        /** {@link #skinSource}, reader-defaulted (case-insensitive) to {@link #SKIN_SOURCE_PLAYER_CLONE}. */
+        @Nonnull
+        public String effectiveSkinSource() {
+            return SKIN_SOURCE_ROLE_DEFAULT.equalsIgnoreCase(skinSource)
+                    ? SKIN_SOURCE_ROLE_DEFAULT : SKIN_SOURCE_PLAYER_CLONE;
+        }
+
+        /** {@link #persist}, reader-defaulted to {@code false} (the transient NonSerialized posture) when null. */
+        public boolean effectivePersist() {
+            return persist != null && persist;
         }
     }
 

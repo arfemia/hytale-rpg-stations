@@ -43,18 +43,35 @@ public final class StationRecipeDeriver {
 
     /**
      * A normalized read of one craftable item for the pure derivation core: the item's own id,
-     * every native bench-requirement category on its recipe (flattened), and its recipe inputs.
+     * every native bench-requirement category on its recipe (flattened), the native bench
+     * requirement ids + kinds (for the {@code Benches}/{@code Types} routes, seam wave decision
+     * 51c), the recipe's native {@code TimeSeconds} (for the {@code NativeTime} pacing transform,
+     * decision 52), and its recipe inputs.
      */
     public static final class CraftingCandidate {
         @Nonnull final String itemId;
         @Nonnull final List<String> categories;
+        @Nonnull final List<String> benchIds;
+        @Nonnull final List<String> types;
+        final float timeSeconds;
         @Nonnull final List<Ingredient> inputs;
 
+        /** Full constructor (seam wave): carries the bench-id/type/time reads the derived-recipe routes need. */
         public CraftingCandidate(@Nonnull String itemId, @Nonnull List<String> categories,
+                @Nonnull List<String> benchIds, @Nonnull List<String> types, float timeSeconds,
                 @Nonnull List<Ingredient> inputs) {
             this.itemId = itemId;
             this.categories = categories;
+            this.benchIds = benchIds;
+            this.types = types;
+            this.timeSeconds = timeSeconds;
             this.inputs = inputs;
+        }
+
+        /** Categories-only constructor (pre-seam-wave shape) - benchIds/types empty, timeSeconds 0. */
+        public CraftingCandidate(@Nonnull String itemId, @Nonnull List<String> categories,
+                @Nonnull List<Ingredient> inputs) {
+            this(itemId, categories, List.of(), List.of(), 0f, inputs);
         }
     }
 
@@ -96,26 +113,50 @@ public final class StationRecipeDeriver {
     }
 
     /**
-     * Derive one Conversion per candidate whose {@code categories} intersect the spec's
-     * {@code Categories} (case-insensitive) and whose recipe has EXACTLY ONE input.
+     * Derive one Conversion per candidate that MATCHES the spec (category intersect OR bench-id
+     * match, then filtered by the declared recipe kinds) and whose recipe has EXACTLY ONE input.
      * Deterministic order (sorted by output item id). Pure.
+     *
+     * <p><b>Match rule (seam wave decision 51c):</b> a candidate matches when its
+     * {@code categories} intersect the spec's {@code Categories} (case-insensitive) OR its
+     * {@code benchIds} include one of the spec's {@code Benches} (case-insensitive) - the two
+     * routes are additive, so a station may scope by native category, by native bench id, or both.
+     * The match is then filtered by {@code Types}: absent/empty derives BOTH kinds, else only a
+     * candidate whose recipe kind is in the declared set survives.
+     *
+     * <p><b>Native-time pacing (decision 52):</b> when the spec authors a {@code NativeTime} group,
+     * each derived conversion carries a baked {@code DurationMs} = {@code Scale * TimeSeconds*1000 +
+     * OffsetMs} (the linear transform over the recipe's own native time); with no {@code NativeTime}
+     * group the derived conversion carries a {@code null} {@code DurationMs} and the engine falls to
+     * {@code Work.CycleMs} - so a station that authors {@code Categories} alone (the shipped sawmill)
+     * derives byte-identically to before.
      */
     @Nonnull
     public static List<StationAsset.Conversion> deriveFromCrafting(@Nonnull StationAsset.FromCrafting spec,
             @Nonnull Collection<CraftingCandidate> candidates) {
         String[] wantCategories = spec.getCategories();
-        if (wantCategories == null || wantCategories.length == 0) {
-            Log.warn("STATION FromCrafting has no Categories; deriving zero conversions");
+        String[] wantBenches = spec.getBenches();
+        boolean hasCategories = wantCategories != null && wantCategories.length > 0;
+        boolean hasBenches = wantBenches != null && wantBenches.length > 0;
+        if (!hasCategories && !hasBenches) {
+            Log.warn("STATION FromCrafting has neither Categories nor Benches; deriving zero conversions");
             return List.of();
         }
+        String[] wantTypes = spec.getTypes();
         int outputPerInput = spec.getOutputPerInput() != null && spec.getOutputPerInput() > 0
                 ? spec.getOutputPerInput() : 1;
+        StationAsset.FromCrafting.NativeTime nativeTime = spec.getNativeTime();
         List<StationAsset.Conversion> derived = new ArrayList<>();
         for (CraftingCandidate cand : candidates) {
             if (cand == null || cand.itemId == null || cand.itemId.isBlank()) {
                 continue;
             }
-            if (!categoriesIntersect(cand.categories, wantCategories)) {
+            boolean catMatch = hasCategories && categoriesIntersect(cand.categories, wantCategories);
+            boolean benchMatch = hasBenches && stringsIntersect(cand.benchIds, wantBenches);
+            if (!catMatch && !benchMatch) {
+                continue;
+            }
+            if (!typesMatch(cand.types, wantTypes)) {
                 continue;
             }
             if (cand.inputs == null || cand.inputs.size() != 1) {
@@ -138,14 +179,32 @@ public final class StationRecipeDeriver {
                     ? Ingredient.resource(nativeInput.getResourceTypeId(), inQty)
                     : Ingredient.item(nativeInput.getItemId(), inQty);
             Ingredient output = Ingredient.item(cand.itemId, outputPerInput);
-            derived.add(StationAsset.Conversion.of(input, output));
+            Long durationMs = nativeDurationMs(nativeTime, cand.timeSeconds);
+            derived.add(StationAsset.Conversion.of(input, output, durationMs));
         }
         derived.sort(Comparator.comparing(c -> c.getOutput().getItemId(), String.CASE_INSENSITIVE_ORDER));
         if (derived.isEmpty()) {
             Log.warn("STATION FromCrafting matched no craftable items for Categories "
-                    + Arrays.toString(wantCategories) + "; deriving zero conversions");
+                    + Arrays.toString(wantCategories) + " / Benches " + Arrays.toString(wantBenches)
+                    + "; deriving zero conversions");
         }
         return derived;
+    }
+
+    /**
+     * PURE: the baked per-conversion {@code DurationMs} for the {@code NativeTime} linear transform
+     * (decision 52, {@code y = Scale * (TimeSeconds in ms) + OffsetMs}), or {@code null} when no
+     * {@code NativeTime} group is authored (the derived conversion then falls to {@code Work.CycleMs}).
+     * Reader-defaulted {@code Scale}/{@code OffsetMs} so even an empty {@code NativeTime: {}} stretches
+     * native time rather than leaving it instant.
+     */
+    @Nullable
+    static Long nativeDurationMs(@Nullable StationAsset.FromCrafting.NativeTime nativeTime, float timeSeconds) {
+        if (nativeTime == null) {
+            return null;
+        }
+        double ms = nativeTime.effectiveScale() * Math.max(0f, timeSeconds) * 1000.0 + nativeTime.effectiveOffsetMs();
+        return Math.round(ms);
     }
 
     // ==================== Live adapter (Item asset map) ====================
@@ -170,22 +229,35 @@ public final class StationRecipeDeriver {
                         continue;
                     }
                     List<String> categories = new ArrayList<>();
+                    List<String> benchIds = new ArrayList<>();
+                    List<String> types = new ArrayList<>();
                     BenchRequirement[] benches = recipe.getBenchRequirement();
                     if (benches != null) {
                         for (BenchRequirement bench : benches) {
-                            if (bench == null || bench.categories == null) {
+                            if (bench == null) {
                                 continue;
                             }
-                            for (String category : bench.categories) {
-                                if (category != null && !category.isBlank()) {
-                                    categories.add(category);
+                            if (bench.id != null && !bench.id.isBlank()) {
+                                benchIds.add(bench.id);
+                            }
+                            if (bench.type != null) {
+                                types.add(bench.type.name());
+                            }
+                            if (bench.categories != null) {
+                                for (String category : bench.categories) {
+                                    if (category != null && !category.isBlank()) {
+                                        categories.add(category);
+                                    }
                                 }
                             }
                         }
                     }
-                    if (categories.isEmpty()) {
+                    // A candidate is derivable when the station can scope to it by native category
+                    // OR by native bench id; skip only when it offers neither route.
+                    if (categories.isEmpty() && benchIds.isEmpty()) {
                         continue;
                     }
+                    float timeSeconds = recipe.getTimeSeconds();
                     List<Ingredient> inputs = new ArrayList<>();
                     MaterialQuantity[] mqs = recipe.getInput();
                     if (mqs != null) {
@@ -197,7 +269,8 @@ public final class StationRecipeDeriver {
                                     mq.getQuantity()));
                         }
                     }
-                    out.add(new CraftingCandidate(item.getId(), categories, inputs));
+                    out.add(new CraftingCandidate(item.getId(), categories, benchIds, types,
+                            timeSeconds, inputs));
                 }
             }
         } catch (Throwable t) {
@@ -227,6 +300,14 @@ public final class StationRecipeDeriver {
 
     /** True when any of the item's categories equals (case-insensitive) any wanted category. */
     private static boolean categoriesIntersect(@Nonnull List<String> have, @Nonnull String[] wanted) {
+        return stringsIntersect(have, wanted);
+    }
+
+    /** True when any value in {@code have} equals (case-insensitive) any value in {@code wanted}. */
+    private static boolean stringsIntersect(@Nonnull List<String> have, @Nullable String[] wanted) {
+        if (wanted == null) {
+            return false;
+        }
         for (String w : wanted) {
             if (w == null || w.isBlank()) {
                 continue;
@@ -238,5 +319,22 @@ public final class StationRecipeDeriver {
             }
         }
         return false;
+    }
+
+    /**
+     * True when a candidate's recipe {@code kinds} are allowed by the spec's {@code Types} filter:
+     * a null/empty {@code wantTypes} allows BOTH kinds (no filter); otherwise the candidate must
+     * carry at least one recipe kind named in the set (case-insensitive). A candidate with no
+     * declared kinds (the pre-seam-wave categories-only shape) always passes so the shipped sawmill
+     * derives unchanged.
+     */
+    static boolean typesMatch(@Nonnull List<String> kinds, @Nullable String[] wantTypes) {
+        if (wantTypes == null || wantTypes.length == 0) {
+            return true;
+        }
+        if (kinds.isEmpty()) {
+            return true;
+        }
+        return stringsIntersect(kinds, wantTypes);
     }
 }

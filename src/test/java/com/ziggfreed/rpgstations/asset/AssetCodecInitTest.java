@@ -24,6 +24,23 @@ public class AssetCodecInitTest {
     void presentationCodec_initializesWithoutThrowing() {
         assertDoesNotThrow(() -> assertNotNull(Presentation.CODEC));
         assertDoesNotThrow(() -> assertNotNull(Presentation.Shake.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(Presentation.Interaction.CODEC));
+    }
+
+    /** Seam wave shared leaves (decisions 50/51): the ONE EffectRef / Picker codecs. */
+    @Test
+    void seamWaveSharedLeafCodecs_initializeWithoutThrowing() {
+        assertDoesNotThrow(() -> assertNotNull(EffectRef.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(Picker.CODEC));
+    }
+
+    /** Seam wave Look nesting + FromCrafting native-composition groups (decisions 47/51c/52). */
+    @Test
+    void seamWaveNestedGroupCodecs_initializeWithoutThrowing() {
+        assertDoesNotThrow(() -> assertNotNull(Puppet.Look.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(Puppet.Model.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(Puppet.Role.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationAsset.FromCrafting.NativeTime.CODEC));
     }
 
     @Test

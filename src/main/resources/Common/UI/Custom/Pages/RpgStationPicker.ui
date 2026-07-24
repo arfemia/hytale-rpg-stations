@@ -1,0 +1,44 @@
+// The multi-output PICKER page (decision 50, demoted by decision 51's native-composition
+// amendment to the fallback route for a flow the native bench window cannot express). A compact
+// icon TAB STRIP: one card per available output category, appended from
+// RpgStationPickerPage.build via RpgStationPickerTab.ui. Never auto-opened; opened only on
+// sneak+F when a station's input matches recipes across multiple native categories.
+//
+// Document path + top-level ids are mod-namespaced (RpgStationPicker.ui / #RpgStationPicker*) so
+// a co-installed mod's page cannot clobber this one on the client's flat namespace.
+
+$C = "../Common.ui";
+$F = "../Common/ZigFrames.ui";
+
+@RpgStationPickerTitleStyle = (FontSize: 18, RenderBold: true, TextColor: #eef3fa, HorizontalAlignment: Center, VerticalAlignment: Center);
+@RpgStationPickerHintStyle = (FontSize: 12, TextColor: #9fb0c4, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
+
+Group #RpgStationPickerRoot {
+  Anchor: (Width: 480);
+
+  $F.@ZigDecoratedFrame {
+    @CloseButton = true;
+    Anchor: (Width: 480);
+
+    #Content {
+      Label #RpgStationPickerTitle {
+        Text: "";
+        Anchor: (Height: 24, Width: 444);
+        Style: @RpgStationPickerTitleStyle;
+      }
+
+      Label #RpgStationPickerHint {
+        Text: "";
+        Anchor: (Top: 4, Width: 444);
+        Style: @RpgStationPickerHintStyle;
+      }
+
+      // Icon tab strip - card templates append here (RpgStationPickerPage#build); wraps to a
+      // second row automatically once the cards exceed one line (LeftCenterWrap).
+      Group #RpgStationPickerTabs {
+        Anchor: (Top: 14, Width: 444);
+        LayoutMode: LeftCenterWrap;
+      }
+    }
+  }
+}

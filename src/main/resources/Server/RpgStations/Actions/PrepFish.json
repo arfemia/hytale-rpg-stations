@@ -1,5 +1,5 @@
 {
-  "$Comment": "Scope-2 wave-3 leg W3-F (design section 2.7, GATE OUTCOMES m1 fix, decision 40): the flagship multi-station fish exemplar, attached to Server/RpgStations/Stations/CuttingBoard.json via {\"Ref\":\"prepfish\"}. Custody.Input is authored explicitly (ResourceTypeId 'Fish', the native family every caught-fish item shares via Template_Fish_Item.json) because this action has no Recipe.Conversions for the usual zero-extra-authoring fallback to derive from - it is a Steps program. M1 FIX (critique-adopted, gate Q3/Q23): the old design draft split fish-scaling into a single step that BOTH consumed the raw fish AND repeated 3x - a Consume inside a Repeat re-executes the consume every iteration, over-draining custody. Fixed here by splitting 'load' (a one-shot Consume, Repeat absent) from 'scale' (a pure Duration BEAT with no Consume phase, Repeat:{Times:3}) - the authoring guide's own footgun callout. Tool gate = the DAGGERS weapon family (gate decision 40, Q12 OVERRIDDEN from the design draft's sickle placeholder): the real vanilla item family is 'Weapon_Daggers_*' (plural - hytale-shared-source/HytaleAssets/Server/Item/Items/Weapon/Daggers/*.json), enumerated here as concrete Ids per this leg's brief (the vanilla items also carry Tags.Family:['Dagger'] via their shared Template_Weapon_Daggers.json parent, a Tags.Family route was available but Ids was the directed choice, mirroring the Anvil's own explicit-Ids convention). Anchors.fire targets the 'cookingfire' station (Server/RpgStations/Stations/CookingFire.json) within a 12-block radius (the design-2.2 default MaxRadius). Work.Repeat:true + the engine's new StopReason.INPUTS_EXHAUSTED (design 2.4) is 'repeats while fish remain' with zero mode flags - the session ends gracefully once no more Fish custody remains at the next 'load' step's Consume. Sound/particle ids are all REAL, already-shipped-elsewhere ids (verified against the shared source / this repo's own usage), never invented placeholders: SFX_Daggers_T1_Swing (the vanilla dagger's own primary-swing sound, Weapon_Daggers_Crude.json), Smoke_Black (Deco_Campfire_Off.json's own particle), SFX_Player_Drop_Item (the vanilla generic item-place sound).",
+  "$Comment": "Scope-2 wave-3 leg W3-F (design section 2.7, GATE OUTCOMES m1 fix, decision 40): the flagship multi-station fish exemplar, attached to Server/RpgStations/Stations/CuttingBoard.json via {\"Ref\":\"prepfish\"}. Custody.Input is authored explicitly (ResourceTypeId 'Fish', the native family every caught-fish item shares via Template_Fish_Item.json) because this action has no Recipe.Conversions for the usual zero-extra-authoring fallback to derive from - it is a Steps program. M1 FIX (critique-adopted, gate Q3/Q23): the old design draft split fish-scaling into a single step that BOTH consumed the raw fish AND repeated 3x - a Consume inside a Repeat re-executes the consume every iteration, over-draining custody. Fixed here by splitting 'load' (a one-shot Consume, Repeat absent) from 'scale' (a pure Duration BEAT with no Consume phase, Repeat:{Times:3}) - the authoring guide's own footgun callout. Tool gate = the DAGGERS weapon family, RE-AUTHORED onto Tags.Family (seam wave, decision 53's MQ7 redirection, superseding gate decision 40's Ids enumeration): a scout confirmed vanilla weapons carry native Tags {Type:['Weapon'],Family:['Dagger']} on their shared Template_Weapon_Daggers.json parent, inherited to every material tier at decode time (appendInherited) - Tags.Family:['Dagger'] is the ANY-of match every Daggers tier satisfies with ZERO per-tier enumeration (a future dagger tier just works, matching the Anvil's own preference for the native-category composition shape over a hand-maintained id list; runtime read is Item.getData().getRawTags()). Anchors.fire targets the 'cookingfire' station (Server/RpgStations/Stations/CookingFire.json) within a 12-block radius (the design-2.2 default MaxRadius). Work.Repeat:true + the engine's new StopReason.INPUTS_EXHAUSTED (design 2.4) is 'repeats while fish remain' with zero mode flags - the session ends gracefully once no more Fish custody remains at the next 'load' step's Consume. Sound/particle/emote ids are all REAL, already-shipped-elsewhere ids (verified against the shared source / this repo's own usage), never invented placeholders: SFX_Daggers_T1_Swing (the vanilla dagger's own primary-swing sound, Weapon_Daggers_Crude.json), Smoke_Black (Deco_Campfire_Off.json's own particle), SFX_Player_Drop_Item (the vanilla generic item-place sound), RPG_Emote_Knife (this jar's own Server/Emote/RPG_Emote_Knife.json).",
   "Label": "rpgstations.action.prepfish.label",
   "Custody": {
     "MaxQuantity": 100,
@@ -7,24 +7,7 @@
     "States": { "Empty": "Default", "Loaded": "Loaded" }
   },
   "Tool": {
-    "Ids": [
-      "Weapon_Daggers_Adamantite",
-      "Weapon_Daggers_Adamantite_Saurian",
-      "Weapon_Daggers_Bone",
-      "Weapon_Daggers_Bronze",
-      "Weapon_Daggers_Bronze_Ancient",
-      "Weapon_Daggers_Claw_Bone",
-      "Weapon_Daggers_Cobalt",
-      "Weapon_Daggers_Copper",
-      "Weapon_Daggers_Crude",
-      "Weapon_Daggers_Doomed",
-      "Weapon_Daggers_Fang_Doomed",
-      "Weapon_Daggers_Iron",
-      "Weapon_Daggers_Mithril",
-      "Weapon_Daggers_Onyxium",
-      "Weapon_Daggers_Stone_Trork",
-      "Weapon_Daggers_Thorium"
-    ]
+    "Tags": { "Family": ["Dagger"] }
   },
   "Work": {
     "CycleMs": 500,

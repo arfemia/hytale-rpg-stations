@@ -1,0 +1,73 @@
+// One picker category card (appended into #RpgStationPickerTabs; see RpgStationPickerPage).
+// #TabBtn is a plain Button (never TextButton) wrapping an item-icon ItemGrid + a #Label pushed
+// via ZigRichButton.text onto .TextSpans (this mod's labeled-clickable-button hard rule) - so a
+// parameterized lock-reason message ("Requires {0}") actually substitutes instead of printing
+// the literal template. A locked category sets #TabBtn.Enabled = false (renders via the style's
+// Disabled state, native-greyed) and carries no click binding; #LockReason shows underneath.
+
+$C = "../Common.ui";
+
+@RpgStationPickerTabBtnStyle = ButtonStyle(
+  Default: (Background: PatchStyle(TexturePath: "../Common/Buttons/Secondary.png", Border: 12, Color: #41506a)),
+  Hovered: (Background: PatchStyle(TexturePath: "../Common/Buttons/Secondary_Hovered.png", Border: 12, Color: #5b6f8c)),
+  Pressed: (Background: PatchStyle(TexturePath: "../Common/Buttons/Secondary_Pressed.png", Border: 12, Color: #344156)),
+  Disabled: (Background: PatchStyle(TexturePath: "../Common/Buttons/Disabled.png", Border: 12)),
+  Sounds: $C.@ButtonSounds
+);
+
+@RpgStationPickerTabLabelStyle = (FontSize: 12, TextColor: #eef3fa, RenderBold: false, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
+@RpgStationPickerTabLockStyle = (FontSize: 10, TextColor: #d98f8f, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
+
+@RpgStationPickerIconGridStyle = ItemGridStyle(
+  SlotSize: 32,
+  SlotIconSize: 28,
+  SlotSpacing: 0,
+  SlotBackground: "../Common/ContainerPanelPatch.png",
+  QuantityPopupSlotOverlay: "../Common/ContainerPanelPatch.png",
+  BrokenSlotBackgroundOverlay: "../Common/ContainerPanelPatch.png",
+  BrokenSlotIconOverlay: "../Common/ContainerPanelPatch.png",
+  DefaultItemIcon: "../Common/ContainerPanelPatch.png",
+  DurabilityBar: "../Common/ContainerPanelPatch.png",
+  DurabilityBarBackground: "../Common/ContainerPanelPatch.png",
+  DurabilityBarAnchor: (Bottom: 0, Left: 0, Width: 0, Height: 0),
+  DurabilityBarColorStart: #a63232,
+  DurabilityBarColorEnd: #63b649,
+  CursedIconPatch: "../Common/ContainerPanelPatch.png",
+  CursedIconAnchor: (Bottom: 0, Left: 0, Width: 0, Height: 0)
+);
+
+Group #RpgStationPickerTab {
+  Anchor: (Width: 140, Right: 8, Bottom: 8);
+  LayoutMode: Top;
+
+  Button #TabBtn {
+    Style: @RpgStationPickerTabBtnStyle;
+    Anchor: (Height: 48, Width: 140);
+    LayoutMode: Left;
+    Padding: (Horizontal: 8);
+
+    ItemGrid #Icon {
+      Anchor: (Width: 32, Height: 32);
+      SlotsPerRow: 1;
+      AreItemsDraggable: false;
+      DisplayItemQuantity: false;
+      Style: @RpgStationPickerIconGridStyle;
+    }
+
+    Group { Anchor: (Width: 6); }
+
+    Label #Label {
+      Text: "";
+      FlexWeight: 1;
+      Anchor: (Height: 48);
+      Style: @RpgStationPickerTabLabelStyle;
+    }
+  }
+
+  Label #LockReason {
+    Text: "";
+    Anchor: (Top: 3, Width: 140);
+    Style: @RpgStationPickerTabLockStyle;
+    Visible: false;
+  }
+}

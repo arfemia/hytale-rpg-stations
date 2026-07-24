@@ -73,6 +73,11 @@ public final class StationAsset
     /** Named cosmetic flair overrides, keyed by flair id. */
     @Nullable private Map<String, Flair> flairs;
     /**
+     * The multi-output picker knob group (seam wave, decision 50); null = the default (locked
+     * categories shown greyed). Whole-group overridable per {@link ActionDef}.
+     */
+    @Nullable private Picker picker;
+    /**
      * Multi-action stations (design section 9.1): named, ordered whole-group overrides of this
      * asset's own groups. {@code null}/empty means the phase-1 single implicit {@code "work"}
      * action built from THIS asset's own groups - see {@code station.ActionResolver}. Native
@@ -143,6 +148,9 @@ public final class StationAsset
                             new MapCodec<>(ActionDef.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.actions = v, a -> a.actions, (a, parent) -> a.actions = parent.actions)
             .add()
+            .appendInherited(new KeyedCodec<>("Picker", Picker.CODEC, false),
+                    (a, v) -> a.picker = v, a -> a.picker, (a, parent) -> a.picker = parent.picker)
+            .documentation("The multi-output picker knob group (decision 50); default = locked categories shown greyed.").add()
             .build();
 
     public StationAsset() {
@@ -305,6 +313,12 @@ public final class StationAsset
     @Nullable
     public Map<String, Flair> getFlairs() {
         return flairs;
+    }
+
+    /** The multi-output picker knob group (decision 50); null = the default (locked categories shown greyed). */
+    @Nullable
+    public Picker getPicker() {
+        return picker;
     }
 
     /**
@@ -606,27 +620,66 @@ public final class StationAsset
     }
 
     /**
-     * Derive-from-native rule: one Conversion is derived per LIVE {@code Item} whose native
-     * bench-requirement categories intersect {@link #categories} and whose native recipe has
-     * EXACTLY ONE input. {@link #outputPerInput} (default 1) is the OPTIONAL yield multiplier.
+     * Derive-from-native rule (seam wave decision 51c/52, native-recipe composition): Conversions are
+     * derived from the engine's OWN recipe truth by reference. A recipe is selected when it scopes to
+     * one of this station's {@link #benches} (native {@code BenchRequirement} id match) AND its
+     * category intersects {@link #categories} AND its declared {@link #types} include the recipe's
+     * kind; the yield honours {@link #outputPerInput} (default 1).
+     *
+     * <p><b>Native-time pacing ({@link #nativeTime}, decision 52):</b> native recipes drive WHAT is
+     * produced, but a STATION owns the PACE - vanilla planks craft instantly, the sawmill's slower
+     * diegetic loop IS the value. {@link NativeTime} is the LINEAR transform (y = m*x + b:
+     * {@code Scale}*x + {@code OffsetMs}) over a derived recipe's own {@code TimeSeconds}, with
+     * defaults intended to keep stations MEANINGFULLY SLOWER than vanilla.
+     *
+     * <p><b>Per-cycle time resolution precedence</b> (documented here, applied engine-side):
+     * an authored {@code Conversion.DurationMs} &gt; this {@link NativeTime} linear transform over the
+     * recipe's {@code TimeSeconds} &gt; the station-level {@code Work.CycleMs} fallback.
      */
     public static final class FromCrafting {
+        /** The two recipe kinds a station may derive (decision 51c). */
+        public static final String TYPE_CRAFTING = "Crafting";
+        public static final String TYPE_PROCESSING = "Processing";
+
         @Nullable protected String[] categories;
         @Nullable protected Integer outputPerInput;
+        @Nullable protected String[] benches;
+        @Nullable protected String[] types;
+        @Nullable protected NativeTime nativeTime;
 
         public static final BuilderCodec<FromCrafting> CODEC = BuilderCodec.builder(FromCrafting.class, FromCrafting::new)
                 .appendInherited(new KeyedCodec<>("Categories", new ArrayCodec<>(Codec.STRING, String[]::new), false),
-                        (o, v) -> o.categories = v, o -> o.categories, (o, p) -> o.categories = p.categories).add()
+                        (o, v) -> o.categories = v, o -> o.categories, (o, p) -> o.categories = p.categories)
+                .documentation("Native recipe categories to derive Conversions from (e.g. 'WoodPlanks'); a pack-added category in the set just works.").add()
                 .appendInherited(new KeyedCodec<>("OutputPerInput", Codec.INTEGER, false),
                         (o, v) -> o.outputPerInput = v, o -> o.outputPerInput,
-                        (o, p) -> o.outputPerInput = p.outputPerInput).add()
+                        (o, p) -> o.outputPerInput = p.outputPerInput)
+                .documentation("Optional yield multiplier applied to each derived recipe's output (reader-defaults to 1).").add()
+                .appendInherited(new KeyedCodec<>("Benches", new ArrayCodec<>(Codec.STRING, String[]::new), false),
+                        (o, v) -> o.benches = v, o -> o.benches, (o, p) -> o.benches = p.benches)
+                .documentation("Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match).").add()
+                .appendInherited(new KeyedCodec<>("Types", new ArrayCodec<>(Codec.STRING, String[]::new), false),
+                        (o, v) -> o.types = v, o -> o.types, (o, p) -> o.types = p.types)
+                .documentation("The recipe kinds to derive: 'Crafting' and/or 'Processing'; absent = both.").add()
+                .appendInherited(new KeyedCodec<>("NativeTime", NativeTime.CODEC, false),
+                        (o, v) -> o.nativeTime = v, o -> o.nativeTime, (o, p) -> o.nativeTime = p.nativeTime)
+                .documentation("Linear transform (Scale*TimeSeconds + OffsetMs) over each derived recipe's native time; defaults stay slower than vanilla.").add()
                 .build();
 
         @Nonnull
         public static FromCrafting of(@Nullable String[] categories, @Nullable Integer outputPerInput) {
+            return of(categories, outputPerInput, null, null, null);
+        }
+
+        @Nonnull
+        public static FromCrafting of(@Nullable String[] categories, @Nullable Integer outputPerInput,
+                @Nullable String[] benches, @Nullable String[] types, @Nullable NativeTime nativeTime) {
             FromCrafting f = new FromCrafting();
             f.categories = categories;
             f.outputPerInput = outputPerInput;
+            f.benches = benches;
+            f.types = types;
+            f.nativeTime = nativeTime;
             return f;
         }
 
@@ -639,29 +692,123 @@ public final class StationAsset
         public Integer getOutputPerInput() {
             return outputPerInput;
         }
+
+        /** Native BenchRequirement bench ids this station's derived recipes scope to (id-ref-only); null = none. */
+        @Nullable
+        public String[] getBenches() {
+            return benches;
+        }
+
+        /** The recipe kinds to derive ({@code Crafting}/{@code Processing}); null/empty = both. */
+        @Nullable
+        public String[] getTypes() {
+            return types;
+        }
+
+        /** The linear native-time pacing transform; null = no native-time pacing (fall to Work.CycleMs). */
+        @Nullable
+        public NativeTime getNativeTime() {
+            return nativeTime;
+        }
+
+        /**
+         * The linear native-time pacing transform (decision 52, y = m*x + b): a derived recipe's
+         * effective per-cycle time = {@code Scale * (recipe TimeSeconds in ms) + OffsetMs}.
+         * {@link #scale} is the multiplier (m); {@link #offsetMs} is the additive floor (b) in
+         * milliseconds. The DEFAULTS deliberately keep a station slower than vanilla's instant craft:
+         * a null {@link #scale} reader-defaults to {@link #DEFAULT_SCALE} and a null {@link #offsetMs}
+         * to {@link #DEFAULT_OFFSET_MS}, so even an empty {@code NativeTime: {}} group stretches native
+         * time rather than leaving it instant. Overall precedence (engine-side): an authored
+         * {@code Conversion.DurationMs} &gt; this transform &gt; {@code Work.CycleMs}.
+         */
+        public static final class NativeTime {
+            /** Default multiplier when {@link #scale} is omitted (stretches native time; slower than vanilla). */
+            public static final double DEFAULT_SCALE = 1.0;
+            /** Default additive floor in ms when {@link #offsetMs} is omitted (a non-instant diegetic beat). */
+            public static final long DEFAULT_OFFSET_MS = 2000L;
+
+            @Nullable protected Double scale;
+            @Nullable protected Long offsetMs;
+
+            public static final BuilderCodec<NativeTime> CODEC = BuilderCodec.builder(NativeTime.class, NativeTime::new)
+                    .appendInherited(new KeyedCodec<>("Scale", Codec.DOUBLE, false),
+                            (o, v) -> o.scale = v, o -> o.scale, (o, p) -> o.scale = p.scale)
+                    .documentation("Multiplier (m) on the recipe's native time; reader-defaults to 1.0 (stretch, never speed up below vanilla).").add()
+                    .appendInherited(new KeyedCodec<>("OffsetMs", Codec.LONG, false),
+                            (o, v) -> o.offsetMs = v, o -> o.offsetMs, (o, p) -> o.offsetMs = p.offsetMs)
+                    .documentation("Additive floor (b) in milliseconds added after scaling; reader-defaults to 2000 so a station is never instant like vanilla.").add()
+                    .build();
+
+            @Nonnull
+            public static NativeTime of(@Nullable Double scale, @Nullable Long offsetMs) {
+                NativeTime n = new NativeTime();
+                n.scale = scale;
+                n.offsetMs = offsetMs;
+                return n;
+            }
+
+            @Nullable
+            public Double getScale() {
+                return scale;
+            }
+
+            @Nullable
+            public Long getOffsetMs() {
+                return offsetMs;
+            }
+
+            /** {@link #scale}, reader-defaulted to {@link #DEFAULT_SCALE} when null/non-positive. */
+            public double effectiveScale() {
+                return scale != null && scale > 0 ? scale : DEFAULT_SCALE;
+            }
+
+            /** {@link #offsetMs}, reader-defaulted to {@link #DEFAULT_OFFSET_MS} when null/negative. */
+            public long effectiveOffsetMs() {
+                return offsetMs != null && offsetMs >= 0 ? offsetMs : DEFAULT_OFFSET_MS;
+            }
+        }
     }
 
     /**
      * One native-shaped input-to-output conversion. {@code Input} is a native
      * {@link Ingredient} (exactly one of {@code ItemId}/{@code ResourceTypeId}); {@code Output}
      * is always an exact {@code ItemId} ingredient.
+     *
+     * <p><b>{@link #durationMs} (seam wave decision 52):</b> the OPTIONAL per-conversion authored
+     * pace override in milliseconds - the HIGHEST-precedence time source. Per-cycle time resolution
+     * precedence: an authored {@code DurationMs} &gt; a {@code FromCrafting.NativeTime} linear
+     * transform over a derived recipe's {@code TimeSeconds} &gt; the station-level {@code Work.CycleMs}.
+     * Null = this conversion has no authored pace (fall to the next precedence tier).
      */
     public static final class Conversion {
         @Nullable protected Ingredient input;
         @Nullable protected Ingredient output;
+        @Nullable protected Long durationMs;
 
         public static final BuilderCodec<Conversion> CODEC = BuilderCodec.builder(Conversion.class, Conversion::new)
                 .appendInherited(new KeyedCodec<>("Input", Ingredient.CODEC, false),
-                        (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input).add()
+                        (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input)
+                .documentation("The conversion input: a native Ingredient (exactly one of ItemId | ResourceTypeId).").add()
                 .appendInherited(new KeyedCodec<>("Output", Ingredient.CODEC, false),
-                        (o, v) -> o.output = v, o -> o.output, (o, p) -> o.output = p.output).add()
+                        (o, v) -> o.output = v, o -> o.output, (o, p) -> o.output = p.output)
+                .documentation("The conversion output: an exact-ItemId Ingredient.").add()
+                .appendInherited(new KeyedCodec<>("DurationMs", Codec.LONG, false),
+                        (o, v) -> o.durationMs = v, o -> o.durationMs, (o, p) -> o.durationMs = p.durationMs)
+                .documentation("Optional per-conversion pace override in ms; highest precedence (> NativeTime > Work.CycleMs). Null = none.").add()
                 .build();
 
         @Nonnull
         public static Conversion of(@Nullable Ingredient input, @Nullable Ingredient output) {
+            return of(input, output, null);
+        }
+
+        @Nonnull
+        public static Conversion of(@Nullable Ingredient input, @Nullable Ingredient output,
+                @Nullable Long durationMs) {
             Conversion c = new Conversion();
             c.input = input;
             c.output = output;
+            c.durationMs = durationMs;
             return c;
         }
 
@@ -673,6 +820,12 @@ public final class StationAsset
         @Nullable
         public Ingredient getOutput() {
             return output;
+        }
+
+        /** The optional per-conversion pace override in ms (highest time precedence); null = none. */
+        @Nullable
+        public Long getDurationMs() {
+            return durationMs;
         }
     }
 
@@ -945,7 +1098,8 @@ public final class StationAsset
         public static final BuilderCodec<Tool> CODEC = BuilderCodec.builder(Tool.class, Tool::new)
                 .appendInherited(new KeyedCodec<>("Tags",
                                 new MapCodec<>(new ArrayCodec<>(Codec.STRING, String[]::new), LinkedHashMap::new), false),
-                        (o, v) -> o.tags = v, o -> o.tags, (o, p) -> o.tags = p.tags).add()
+                        (o, v) -> o.tags = v, o -> o.tags, (o, p) -> o.tags = p.tags)
+                .documentation("Native tag family match (e.g. {\"Family\":[\"Dagger\"]}): matches ANY-of the values per key against the held Item's raw tags.").add()
                 .appendInherited(new KeyedCodec<>("Gather", Gather.CODEC, false),
                         (o, v) -> o.gather = v, o -> o.gather, (o, p) -> o.gather = p.gather).add()
                 .appendInherited(new KeyedCodec<>("Ids", new ArrayCodec<>(Codec.STRING, String[]::new), false),

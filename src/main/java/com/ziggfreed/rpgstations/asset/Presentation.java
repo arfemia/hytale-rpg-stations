@@ -27,6 +27,8 @@ public final class Presentation {
     @Nullable protected String animationSlot;
     @Nullable protected String camera;
     @Nullable protected Shake shake;
+    @Nullable protected Interaction interaction;
+    @Nullable protected EffectRef effect;
 
     public static final BuilderCodec<Presentation> CODEC = BuilderCodec.builder(Presentation.class, Presentation::new)
             .appendInherited(new KeyedCodec<>("Sound", Codec.STRING, false),
@@ -43,6 +45,12 @@ public final class Presentation {
                     (o, v) -> o.camera = v, o -> o.camera, (o, p) -> o.camera = p.camera).add()
             .appendInherited(new KeyedCodec<>("Shake", Shake.CODEC, false),
                     (o, v) -> o.shake = v, o -> o.shake, (o, p) -> o.shake = p.shake).add()
+            .appendInherited(new KeyedCodec<>("Interaction", Interaction.CODEC, false),
+                    (o, v) -> o.interaction = v, o -> o.interaction, (o, p) -> o.interaction = p.interaction)
+            .documentation("A native RootInteraction chain fired at this moment (id-ref-only); null = none.").add()
+            .appendInherited(new KeyedCodec<>("Effect", EffectRef.CODEC, false),
+                    (o, v) -> o.effect = v, o -> o.effect, (o, p) -> o.effect = p.effect)
+            .documentation("A native EntityEffect applied at this moment (id-ref-only, with an optional DurationMs); null = none.").add()
             .build();
 
     public Presentation() {
@@ -117,6 +125,18 @@ public final class Presentation {
         return shake;
     }
 
+    /** The native RootInteraction chain fired at this moment (id-ref-only); null = none. */
+    @Nullable
+    public Interaction getInteraction() {
+        return interaction;
+    }
+
+    /** The native EntityEffect applied at this moment (id-ref-only); null = none. */
+    @Nullable
+    public EffectRef getEffect() {
+        return effect;
+    }
+
     /**
      * One-shot camera shake, matching {@code com.ziggfreed.common.camera.CameraShakeService
      * #shake(PlayerRef, String cameraEffectId, float intensity)} EXACTLY (critique m6 binding
@@ -156,6 +176,41 @@ public final class Presentation {
         @Nullable
         public Double getIntensity() {
             return intensity;
+        }
+    }
+
+    /**
+     * The native RootInteraction chain-fire reference (seam wave, decision 51b): an ID-REF-ONLY
+     * {@code {Id}} naming a native Hytale {@code RootInteraction} chain to fire at this moment via
+     * the {@code ziggfreed-common} chain-fire lift (engine-side scope). A step/moment/flair carrying
+     * a {@code Presentation} can now trigger native interaction content by reference, never inlining
+     * the chain body (decision 53's id-ref-only). An unresolvable id is a validator INFO (typo
+     * detection) and a no-op at fire, never a throw.
+     */
+    public static final class Interaction {
+        @Nullable protected String id;
+
+        public static final BuilderCodec<Interaction> CODEC = BuilderCodec.builder(Interaction.class, Interaction::new)
+                .appendInherited(new KeyedCodec<>("Id", Codec.STRING, false),
+                        (o, v) -> o.id = v, o -> o.id, (o, p) -> o.id = p.id)
+                .documentation("The native RootInteraction chain id to fire at this moment (id-ref-only; never inlines the chain body).").add()
+                .build();
+
+        @Nonnull
+        public static Interaction of(@Nullable String id) {
+            Interaction i = new Interaction();
+            i.id = id;
+            return i;
+        }
+
+        @Nullable
+        public String getId() {
+            return id;
+        }
+
+        /** True when {@link #id} is authored (a non-blank interaction id). */
+        public boolean hasId() {
+            return id != null && !id.isBlank();
         }
     }
 }

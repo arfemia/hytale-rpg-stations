@@ -53,6 +53,7 @@ public final class ActionDef {
     @Nullable protected Requires requires;
     @Nullable protected StationStep[] steps;
     @Nullable protected Map<String, Anchor> anchors;
+    @Nullable protected Picker picker;
 
     public static final BuilderCodec<ActionDef> CODEC = BuilderCodec.builder(ActionDef.class, ActionDef::new)
             .appendInherited(new KeyedCodec<>("Label", Codec.STRING, false),
@@ -107,6 +108,9 @@ public final class ActionDef {
                             new MapCodec<>(Anchor.CODEC, LinkedHashMap::new), false),
                     (o, v) -> o.anchors = v, o -> o.anchors, (o, p) -> o.anchors = p.anchors)
             .documentation("Named multi-station anchor declarations (id -> {Station, MaxRadius}). [wave 3 discovery]").add()
+            .appendInherited(new KeyedCodec<>("Picker", Picker.CODEC, false),
+                    (o, v) -> o.picker = v, o -> o.picker, (o, p) -> o.picker = p.picker)
+            .documentation("Per-action multi-output picker override (whole-group replace of the station-level Picker).").add()
             .build();
 
     public ActionDef() {
@@ -243,6 +247,12 @@ public final class ActionDef {
         return this;
     }
 
+    @Nonnull
+    public ActionDef withPicker(@Nullable Picker picker) {
+        this.picker = picker;
+        return this;
+    }
+
     @Nullable
     public String getLabel() {
         return label;
@@ -335,6 +345,12 @@ public final class ActionDef {
     @Nullable
     public Map<String, Anchor> getAnchors() {
         return anchors;
+    }
+
+    /** The per-action multi-output picker override (whole-group replace); null = inherits the station's own {@link Picker}. */
+    @Nullable
+    public Picker getPicker() {
+        return picker;
     }
 
     /**

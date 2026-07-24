@@ -243,6 +243,47 @@ public class StationValidatorTest {
     }
 
     @Test
+    void fromCraftingBenchesOnly_isALiveDerivationRoute_noError() {
+        // Seam wave (decision 51c): Benches is a legitimate derivation ROUTE the live deriver now
+        // executes (StationRecipeDeriver matches Categories OR Benches), so a station scoping by
+        // Benches alone (a native recipe carrying no Categories, like CookingFire's Campfire bench)
+        // neither errors as dead-derivation NOR warns as not-yet-wired (the transitional
+        // FROMCRAFTING_BENCHES_NOT_YET_DERIVED warn was removed once the deriver caught up).
+        StationAsset a = StationAsset.of("benchesonly",
+                StationAsset.Identity.of("rpgstations.station.benchesonly.name", null, null),
+                null,
+                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(null, null,
+                        new String[]{"Campfire"}, new String[]{"Processing"}, null)),
+                null, null, null, null, null, null);
+        Set<String> codes = codes(validate(a));
+        assertFalse(codes.contains("FROMCRAFTING_NO_CATEGORIES"));
+        assertFalse(codes.contains("EMPTY_CONVERSIONS"));
+        assertFalse(codes.contains("FROMCRAFTING_BENCHES_NOT_YET_DERIVED"));
+    }
+
+    @Test
+    void fromCraftingUnknownType_flagged() {
+        StationAsset a = StationAsset.of("badtype",
+                StationAsset.Identity.of("rpgstations.station.badtype.name", null, null),
+                null,
+                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"WoodPlanks"}, null,
+                        null, new String[]{"Bogus"}, null)),
+                null, null, null, null, null, null);
+        assertTrue(codes(validate(a)).contains("FROMCRAFTING_UNKNOWN_TYPE"));
+    }
+
+    @Test
+    void fromCraftingNativeTimeNonpositiveScale_flagged() {
+        StationAsset a = StationAsset.of("badscale",
+                StationAsset.Identity.of("rpgstations.station.badscale.name", null, null),
+                null,
+                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"WoodPlanks"}, null,
+                        null, null, StationAsset.FromCrafting.NativeTime.of(0.0, null))),
+                null, null, null, null, null, null);
+        assertTrue(codes(validate(a)).contains("FROMCRAFTING_NATIVETIME_NONPOSITIVE_SCALE"));
+    }
+
+    @Test
     void fromCraftingNonpositiveOutputPerInput_flagged() {
         StationAsset a = StationAsset.of("badmult",
                 StationAsset.Identity.of("rpgstations.station.badmult.name", null, null),
@@ -345,6 +386,19 @@ public class StationValidatorTest {
         Set<String> codes = codes(validate(a));
         assertTrue(codes.contains("BLANK_GATHER_TYPE"));
         assertFalse(codes.contains("EMPTY_TOOL_GATE"));
+    }
+
+    @Test
+    void toolTagsEmptyValues_flagged() {
+        Map<String, String[]> tags = new LinkedHashMap<>();
+        tags.put("Family", new String[0]);
+        StationAsset a = StationAsset.of("emptytagvalues",
+                StationAsset.Identity.of("rpgstations.station.emptytagvalues.name", null, null),
+                null, oakRecipe(),
+                null,
+                StationAsset.Tool.of(tags, null, null),
+                null, null, null, null);
+        assertTrue(codes(validate(a)).contains("TOOL_TAGS_EMPTY_VALUES"));
     }
 
     @Test
@@ -873,7 +927,7 @@ public class StationValidatorTest {
 
     @Test
     void puppetLookModelUnknown_flagged() {
-        Puppet puppet = Puppet.of(true, null, Puppet.Look.of(Puppet.LOOK_SOURCE_MODEL, "NPC_Ghost", null),
+        Puppet puppet = Puppet.of(true, null, Puppet.Look.model("NPC_Ghost", null),
                 null, null, null);
         List<Finding> findings = StationValidator.validate(List.of(puppetStation("looksmodelunknown", puppet, null)),
                 ANY_LANG, ANY_DROP, ANY_FACTOR, id -> true, id -> true, NO_MODEL);
@@ -882,7 +936,7 @@ public class StationValidatorTest {
 
     @Test
     void puppetLookModelKnown_noFinding() {
-        Puppet puppet = Puppet.of(true, null, Puppet.Look.of(Puppet.LOOK_SOURCE_MODEL, "NPC_Ghost", null),
+        Puppet puppet = Puppet.of(true, null, Puppet.Look.model("NPC_Ghost", null),
                 null, null, null);
         List<Finding> findings = StationValidator.validate(List.of(puppetStation("looksmodelknown", puppet, null)),
                 ANY_LANG, ANY_DROP, ANY_FACTOR, id -> true, id -> true, ANY_MODEL);
@@ -892,11 +946,43 @@ public class StationValidatorTest {
     @Test
     void puppetLookModelUnknown_withFallback_noFinding() {
         Puppet puppet = Puppet.of(true, null,
-                Puppet.Look.of(Puppet.LOOK_SOURCE_MODEL, "NPC_Ghost", "NPC_Generic_Worker"), null, null, null);
+                Puppet.Look.model("NPC_Ghost", "NPC_Generic_Worker"), null, null, null);
         List<Finding> findings = StationValidator.validate(List.of(puppetStation("looksmodelfallback", puppet, null)),
                 ANY_LANG, ANY_DROP, ANY_FACTOR, id -> true, id -> true, NO_MODEL);
         assertFalse(codes(findings).contains("PUPPET_LOOK_MODEL_UNKNOWN"),
                 "a FallbackModelId covers an unknown primary ModelId");
+    }
+
+    // ==================== NpcRole performer arm (seam wave, decision 47/48, R1 handoff) ====================
+
+    @Test
+    void puppetLookNpcRole_isAcceptedSource_noUnknownSourceFinding() {
+        Puppet puppet = Puppet.of(true, null,
+                Puppet.Look.of(Puppet.LOOK_SOURCE_NPC_ROLE, null,
+                        Puppet.Role.of("RPG_Performer_Worker", null, null, null)),
+                null, null, null);
+        StationAsset a = puppetStation("nporolesource", puppet, null);
+        Set<String> codes = codes(validate(a));
+        assertFalse(codes.contains("UNKNOWN_PUPPET_LOOK_SOURCE"), "NpcRole is a recognized Look.Source arm");
+        assertFalse(codes.contains("PUPPET_LOOK_ROLE_MISSING"), "a non-blank RoleId is authored");
+    }
+
+    @Test
+    void puppetLookNpcRoleMissingRoleId_flagged() {
+        Puppet puppet = Puppet.of(true, null,
+                Puppet.Look.of(Puppet.LOOK_SOURCE_NPC_ROLE, null, null), null, null, null);
+        StationAsset a = puppetStation("nporolemissing", puppet, null);
+        assertTrue(codes(validate(a)).contains("PUPPET_LOOK_ROLE_MISSING"));
+    }
+
+    @Test
+    void puppetLookNpcRoleUnknownSkinSource_flagged() {
+        Puppet puppet = Puppet.of(true, null,
+                Puppet.Look.of(Puppet.LOOK_SOURCE_NPC_ROLE, null,
+                        Puppet.Role.of("RPG_Performer_Worker", "Bogus", null, null)),
+                null, null, null);
+        StationAsset a = puppetStation("nporoleskin", puppet, null);
+        assertTrue(codes(validate(a)).contains("UNKNOWN_PUPPET_ROLE_SKIN_SOURCE"));
     }
 
     @Test

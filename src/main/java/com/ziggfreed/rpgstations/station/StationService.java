@@ -22,9 +22,11 @@ import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.protocol.InteractionType;
 import com.hypixel.hytale.protocol.ItemResourceType;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
+import com.hypixel.hytale.server.core.asset.type.entityeffect.config.OverlapBehavior;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemArmor;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemTool;
@@ -50,6 +52,9 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.core.util.NotificationUtil;
 import com.ziggfreed.common.camera.CameraShakeService;
 import com.ziggfreed.common.cast.ModelParticleService;
+import com.ziggfreed.common.effect.AppliedEffectTracker;
+import com.ziggfreed.common.effect.NativeEffectUtil;
+import com.ziggfreed.common.interaction.NativeChainFire;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.cast.WorldKeyedQueues;
 import com.ziggfreed.common.cast.step.CastKernel;
@@ -73,6 +78,7 @@ import com.ziggfreed.rpgstations.api.impl.SummaryEnricherRegistryImpl;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
@@ -821,6 +827,14 @@ public final class StationService {
             if (s.idleMode) {
                 s.idleMode = false;
             }
+            // Per-conversion pace precedence (seam wave decision 52): a RUNNABLE conversion that
+            // authors its own DurationMs (or a baked FromCrafting.NativeTime transform) OVERRIDES
+            // the heartbeat's Work.CycleMs advance for the NEXT cycle. A conversion with no pace
+            // override (check.durationMs <= 0, e.g. the shipped sawmill) leaves the cycleMs advance
+            // untouched - byte-identical to before.
+            if (check.durationMs > 0) {
+                s.nextCycleAtMs = System.currentTimeMillis() + check.durationMs;
+            }
             return runRealCycle(s, store, commandBuffer, asset, action, player, check);
         } else if (check.state == ConversionState.NO_INPUTS && s.idleEnabled) {
             if (!s.idleMode) {
@@ -1546,6 +1560,28 @@ public final class StationService {
             float intensity = shake.getIntensity() != null ? shake.getIntensity().floatValue() : 1.0f;
             CameraShakeService.shake(s.playerRef, shake.getEffectId(), intensity);
         }
+        // Native-composition payloads (seam wave decisions 51b/51d), fired on the player entity:
+        // a Presentation.Interaction fires a native RootInteraction chain by id; a
+        // Presentation.Effect applies a native EntityEffect by id (session-tracked so stop() removes
+        // it). Both id-ref-only, both fail-closed (a missing id is a no-op, never a throw). The
+        // EntityEffect apply is byte-parity-safe from this processing-locked frame - the shipped
+        // hold effect already applies via the live store the same way (StationHoldController).
+        if (s.ref != null && s.ref.isValid()) {
+            Presentation.Interaction interaction = p.getInteraction();
+            if (interaction != null && interaction.hasId()) {
+                NativeChainFire.fire(store, s.ref, interaction.getId(), InteractionType.Use);
+            }
+            EffectRef effect = p.getEffect();
+            if (effect != null && effect.hasId()) {
+                Long durMs = effect.getDurationMs();
+                boolean applied = durMs != null && durMs > 0
+                        ? NativeEffectUtil.applyFor(store, s.ref, effect.getId(), durMs / 1000f, OverlapBehavior.OVERWRITE)
+                        : NativeEffectUtil.apply(store, s.ref, effect.getId());
+                if (applied) {
+                    s.appliedEffects.track(s.ref, effect.getId());
+                }
+            }
+        }
     }
 
     /**
@@ -1755,6 +1791,21 @@ public final class StationService {
         // heartbeat) - see StationPuppetController#revealAndDespawn for the full contract.
         StationPuppetController.revealAndDespawn(s, commandBuffer);
 
+        // Native EntityEffect teardown (seam wave decision 51d): strip every session-applied
+        // Presentation.Effect on EVERY exit path, mirroring returnCustody/revealAndDespawn's
+        // unconditional posture. removeAll is fail-closed per entry (a gone ref/effect no-ops), and
+        // clears the tracked list unconditionally. Prefer the live store when the entity is still
+        // resolvable (byte-parity with releaseHold's own store-routed removeEffect); else the
+        // tick-safe commandBuffer; else leave it (a disconnected/dead player's effects clear on
+        // relog/respawn anyway - the same tradeoff the null-commandBuffer puppet/anchor paths accept).
+        if (!s.appliedEffects.isEmpty()) {
+            if (store != null) {
+                s.appliedEffects.removeAll(store);
+            } else if (commandBuffer != null) {
+                s.appliedEffects.removeAll(commandBuffer);
+            }
+        }
+
         boolean entityAlive = store != null && s.ref != null && s.ref.isValid() && s.ref.getStore() == store;
         boolean silent = reason == StopReason.DISCONNECTED || reason == StopReason.SERVER_STOP
                 || reason == StopReason.DIED || reason == StopReason.WORLD_CHANGED;
@@ -1898,16 +1949,35 @@ public final class StationService {
         final int inputCount;
         final String outputItem;
         final int outputCount;
+        /**
+         * The chosen conversion's effective per-cycle pace override in ms (seam wave decision 52's
+         * {@code Conversion.DurationMs}, incl. a baked {@code FromCrafting.NativeTime} transform), or
+         * {@code <= 0} when this conversion authors none - the engine then falls to {@code
+         * Work.CycleMs}. Meaningful only for a {@code RUNNABLE} check.
+         */
+        final long durationMs;
 
         ConversionCheck(ConversionState state, boolean inputIsResource, String inputRef, int inputCount,
                         String outputItem, int outputCount) {
+            this(state, inputIsResource, inputRef, inputCount, outputItem, outputCount, 0L);
+        }
+
+        ConversionCheck(ConversionState state, boolean inputIsResource, String inputRef, int inputCount,
+                        String outputItem, int outputCount, long durationMs) {
             this.state = state;
             this.inputIsResource = inputIsResource;
             this.inputRef = inputRef;
             this.inputCount = inputCount;
             this.outputItem = outputItem;
             this.outputCount = outputCount;
+            this.durationMs = durationMs;
         }
+    }
+
+    /** PURE: a conversion's effective per-cycle pace override in ms, or {@code 0} when it authors none. */
+    private static long effectiveConversionDurationMs(@Nonnull StationAsset.Conversion c) {
+        Long d = c.getDurationMs();
+        return d != null && d > 0 ? d : 0L;
     }
 
     /**
@@ -1955,7 +2025,7 @@ public final class StationService {
                     continue;
                 }
                 return new ConversionCheck(ConversionState.RUNNABLE, isResource, inputRef, inCount,
-                        outItem, outCount);
+                        outItem, outCount, effectiveConversionDurationMs(c));
             }
         } catch (Throwable t) {
             Log.warn("STATION inventory check failed: " + t.getMessage());
@@ -2012,7 +2082,7 @@ public final class StationService {
                     continue;
                 }
                 return new ConversionCheck(ConversionState.RUNNABLE, isResource, inputRef, inCount,
-                        outItem, outCount);
+                        outItem, outCount, effectiveConversionDurationMs(c));
             }
         } catch (Throwable t) {
             Log.warn("STATION custody check failed: " + t.getMessage());
