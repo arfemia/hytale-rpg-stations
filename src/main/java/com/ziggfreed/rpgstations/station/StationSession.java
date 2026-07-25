@@ -14,6 +14,7 @@ import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.effect.AppliedEffectTracker;
+import com.ziggfreed.common.entity.performer.StationPerformer;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationAsset;
@@ -129,6 +130,19 @@ final class StationSession {
     StationAsset.Tool toolReq;
 
     /**
+     * The multi-output category the player chose at the picker (seam wave decision 50, Item 5),
+     * or {@code null} for a single-category station (every shipped station today - the sawmill
+     * authors one {@code FromCrafting.Categories} entry, the anvil none) and for a plain-F engage.
+     * The picker's {@code onSelect} writes it; the diegetic conversion selection is meant to
+     * consume it by narrowing the derived conversions to this category. DORMANT this leg (no
+     * consumer yet): the consumption filter needs each derived {@code Conversion} to carry its
+     * native category, which the do-not-rework {@code StationRecipeDeriver} does not tag today -
+     * the picker-open + category-tagging + filter land together as the follow-up sub-feature (see
+     * the leg report). Marked here so the schema/session is ready and no shipped path is affected.
+     */
+    @Nullable String chosenOutputCategory;
+
+    /**
      * The item id for the enlarged summary-panel crest icon. Resolved ONCE at engage:
      * {@code Identity.Icon} when authored, else the anchor block's own item/BlockType id
      * captured AT START (the block can be gone by stop time).
@@ -217,7 +231,20 @@ final class StationSession {
     // below at its default false/null - the classic in-body worker, byte-identical to a station
     // that never authors Puppet at all.
     boolean puppetActive;
-    /** The spawned puppet entity, or null when {@link #puppetActive} is false. */
+    /**
+     * The stateful performer backend driving the puppet double (seam wave decision 55): the bare-
+     * {@code Holder} skinned puppet ({@code HolderPerformer}, the crowned PlayerClone/Model path) or
+     * the Role-driven NPC ({@code NpcRolePerformer}). {@code StationPuppetController} owns ONE object
+     * and never branches on the look source; each of its later mutations threads a fresh per-call
+     * accessor into the performer. Null when {@link #puppetActive} is false.
+     */
+    @Nullable StationPerformer performer;
+    /**
+     * The spawned puppet entity, or null when {@link #puppetActive} is false (and null during an
+     * {@code NpcRole} backend's one-tick deferred-spawn window - {@link #performer}{@code .ref()} is
+     * the live source of truth; this field is the crowned-path snapshot the direct-{@code puppetRef}
+     * readers, e.g. the wave-3 {@code Walk} phase, use for the bare-Holder puppet).
+     */
     @Nullable Ref<EntityStore> puppetRef;
     /**
      * The resolved {@code Puppet.Hide.Route} ("Scale"/"Effect"/"None") applied at engage - drives

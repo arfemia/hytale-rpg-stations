@@ -3,6 +3,8 @@ package com.ziggfreed.rpgstations;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.annotation.Nonnull;
@@ -22,6 +24,7 @@ import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.asset.AssetStoreRegistrar;
+import com.ziggfreed.common.entity.performer.PerformerIdentityComponent;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.impl.EnhanceStamperRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
@@ -91,6 +94,14 @@ public class RpgStationsPlugin extends JavaPlugin {
      */
     private static final AtomicBoolean postLoadAuditLogged = new AtomicBoolean(false);
 
+    /**
+     * Worlds whose ONE-shot performer boot reconcile ({@link #registerPerformerReconcile}) has
+     * already run - keyed on the {@code World} object identity (a singleton per world), so a second
+     * player's ready in the same world never re-sweeps and clobbers a live puppet. Cleared only by a
+     * restart (a fresh plugin instance).
+     */
+    private final Set<World> performerBootSweptWorlds = ConcurrentHashMap.newKeySet();
+
     @Nonnull
     public static RpgStationsPlugin getInstance() {
         return instance;
@@ -107,6 +118,11 @@ public class RpgStationsPlugin extends JavaPlugin {
         RpgStationsApi.set(RpgStationsApiImpl.getInstance());
         FactorRegistryImpl.getInstance().registerBuiltins();
         EnhanceStamperRegistryImpl.getInstance().register(new DefaultEnhanceStamper());
+        // Performer identity component (seam wave decision 48/55): a library ECS component has no
+        // owning plugin, so THIS consumer registers it once at setup() - without it, a performer
+        // still spawns/despawns but the orphan-reconcile sweep finds nothing (TYPE stays null,
+        // every attach/query guards on it). Enables PerformerReconciler for persistent performers.
+        PerformerIdentityComponent.register(getEntityStoreRegistry());
         registerStationAssetStore();
         registerActionAssetStore();
         registerExtensionAssetStore();
@@ -121,6 +137,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerPostLoadAudit();
         registerSummaryHudInstall();
         registerPuppetSafetyNet();
+        registerPerformerReconcile();
         getCommandRegistry().registerCommand(new RpgStationsCommand());
         Log.info("RpgStations setup complete (leg 4 - the api artifact is live: events fire, "
                 + "the factor/flair-unlock/summary-enricher registries are wired into the engine).");
@@ -515,6 +532,40 @@ public class RpgStationsPlugin extends JavaPlugin {
                 });
             } catch (Throwable t) {
                 Log.warn("Puppet ready safety-net (outer) failed: " + t.getMessage());
+            }
+        });
+    }
+
+    /**
+     * The performer BOOT reconcile (seam wave decision 48/55): a ONE-shot-per-world sweep at first
+     * {@code PlayerReadyEvent} that despawns every orphan performer double (a persistent performer
+     * whose owning session died with the server - no in-memory {@link StationService} session
+     * survives a restart). Gated on the {@code World} object identity ({@link #performerBootSweptWorlds})
+     * so a second player's ready in the same world never re-sweeps and clobbers a live puppet.
+     * Mirrors {@link #registerPuppetSafetyNet}'s world.execute-hop shape; inert when the identity
+     * component is unregistered or no persistent orphan exists (a transient puppet is already gone).
+     */
+    private void registerPerformerReconcile() {
+        getEventRegistry().registerGlobal(PlayerReadyEvent.class, event -> {
+            try {
+                Player player = event.getPlayer();
+                World world = player.getWorld();
+                if (world == null || !performerBootSweptWorlds.add(world)) {
+                    return;
+                }
+                world.execute(() -> {
+                    try {
+                        Ref<EntityStore> ref = player.getReference();
+                        if (ref == null || !ref.isValid()) {
+                            return;
+                        }
+                        StationService.getInstance().reconcilePerformersAtBoot(ref.getStore());
+                    } catch (Throwable t) {
+                        Log.warn("Performer boot reconcile failed: " + t.getMessage());
+                    }
+                });
+            } catch (Throwable t) {
+                Log.warn("Performer boot reconcile (outer) failed: " + t.getMessage());
             }
         });
     }

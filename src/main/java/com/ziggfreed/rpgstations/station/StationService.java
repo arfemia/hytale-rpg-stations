@@ -59,6 +59,7 @@ import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.cast.WorldKeyedQueues;
 import com.ziggfreed.common.cast.step.CastKernel;
 import com.ziggfreed.common.entity.PuppetNav;
+import com.ziggfreed.common.entity.performer.PerformerReconciler;
 import com.ziggfreed.common.feedback.Notify;
 import com.ziggfreed.common.feedback.PickupMimic;
 import com.ziggfreed.common.i18n.Msg;
@@ -579,7 +580,14 @@ public final class StationService {
         // attach above - the puppet layers on WHATEVER hold/mount the real player already has
         // (seat, standing mount, or effect-mode movement lock), never replacing it. Non-fatal on
         // failure: s.puppetActive stays false and the session continues in-body.
-        StationPuppetController.spawnAndHide(s, commandBuffer, action.getPuppet(), player);
+        StationPuppetController.spawnAndHide(s, commandBuffer, world, action.getPuppet(), player);
+        // Performer orphan-reconcile at engage (seam wave decision 48/55): despawn any stale double
+        // left AT THIS block by a prior crashed session (a persistent performer whose owner is not
+        // the engaging player). Deferred one tick via world.execute so the native performer sweep
+        // (forEachEntityParallel) runs OUTSIDE toggle's write-processing lock; the freshly spawned
+        // own double is owned by the engaging player, so engageStale KEEPs it. Inert when no
+        // performer identity component is registered or no orphan exists.
+        reconcileStalePerformersAtEngage(world, store, s.playerUuid, s.blockKey);
 
         StationAsset.Camera camera = action.getCamera();
         String cameraMode = camera != null && camera.getMode() != null ? camera.getMode() : "ThirdPerson";
@@ -1936,6 +1944,54 @@ public final class StationService {
      */
     public void reassertPuppetOnReady(@Nonnull Ref<EntityStore> ref, @Nonnull Store<EntityStore> store) {
         StationPuppetController.reassertOnReady(ref, store);
+    }
+
+    /**
+     * Boot-time performer orphan reconcile (seam wave decision 48/55): despawn EVERY performer
+     * double in {@code store} (the boot policy - no in-memory {@link StationSession} survives a
+     * restart, so a persistent performer whose owning session died with the server would otherwise
+     * strand forever). Wired ONCE per world at first {@code PlayerReadyEvent} by
+     * {@code RpgStationsPlugin}; a transient ({@code NonSerialized}) performer is already gone at
+     * boot, so this is the load-bearing sweep for a persistent performer. Inert (empty summary,
+     * never throws) when {@code PerformerIdentityComponent} is not registered.
+     */
+    public void reconcilePerformersAtBoot(@Nonnull Store<EntityStore> store) {
+        try {
+            PerformerReconciler.ReconcileSummary summary =
+                    PerformerReconciler.sweep(store, PerformerReconciler.bootDespawnAll());
+            if (summary.despawned() > 0) {
+                Log.info("STATION performer boot reconcile: despawned " + summary.despawned()
+                        + " orphan performer(s) of " + summary.scanned() + " scanned");
+            }
+        } catch (Throwable t) {
+            Log.warn("STATION performer boot reconcile failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Engage-time performer orphan reconcile: despawn a stale double left AT {@code blockKey} by a
+     * prior crashed session whose owner is not {@code engagingOwner}. Deferred one tick via
+     * {@code world.execute} so the native performer sweep ({@code forEachEntityParallel}) runs
+     * OUTSIDE {@code toggle()}'s write-processing lock; the freshly spawned own double (owned by the
+     * engaging player) is KEPT by {@code engageStale}. Inert when the identity component is not
+     * registered or no orphan exists.
+     */
+    private void reconcileStalePerformersAtEngage(@Nullable World world, @Nonnull Store<EntityStore> store,
+            @Nonnull UUID engagingOwner, @Nonnull String blockKey) {
+        if (world == null) {
+            return;
+        }
+        try {
+            world.execute(() -> {
+                try {
+                    PerformerReconciler.sweep(store, PerformerReconciler.engageStale(engagingOwner, blockKey));
+                } catch (Throwable t) {
+                    Log.warn("STATION performer engage reconcile failed: " + t.getMessage());
+                }
+            });
+        } catch (Throwable t) {
+            Log.warn("STATION performer engage reconcile dispatch failed: " + t.getMessage());
+        }
     }
 
     // ==================== Convert transaction core ====================

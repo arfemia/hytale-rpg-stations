@@ -355,10 +355,24 @@ enhancement. See `../api/CLAUDE.md`'s `EnhanceStamperRegistry` entry for the api
 
 ## The puppet presentation engine (unchanged)
 
-[`StationPuppetController`](StationPuppetController.java) is the policy-thin glue over
-`ziggfreed-common`'s `entity.PlayerPuppetService`/`PlayerModelService` for "mount the player, hide
-their player model, and spawn/display a visual of their character model performing the steps" -
-sibling to `StationEntityMountController`/`StationHoldController`. **Spawn + hide, at engage**
+[`StationPuppetController`](StationPuppetController.java) drives ONE `ziggfreed-common`
+`entity.performer.StationPerformer` (seam wave decision 47/48/55) for "mount the player, hide their
+player model, and spawn/display a visual of their character model performing the steps" - sibling
+to `StationEntityMountController`/`StationHoldController`. **The performer swap (decision 55):** at
+engage `spawnAndHide` reads `Puppet.Look.Source` (`resolveLook`) and picks the backend
+(`createBackend`): `PlayerClone`/`Model` -> `HolderPerformer` (the crowned bare-Holder puppet,
+byte-parity with the pre-swap route), `NpcRole` -> `NpcRolePerformer` with an engage-time
+FAIL-CLOSED fallback to the Holder (one warn) when the role id is blank/unregistered. The performer
+lives on `StationSession.performer`; every later mutation threads a FRESH per-call accessor
+(clip/loop/step-clip via the live `store` = a network packet; `setProp`/despawn via the tick-safe
+`commandBuffer` = a Hotbar/entity mutation - the exact pre-swap split, so a `CommandBuffer` is never
+captured across frames). `s.puppetRef` stays populated with `performer.ref()` for the direct-puppetRef
+readers (the wave-3 `Walk` phase in `StationStepHandlers`, `solveWalkPath`); null during an
+`NpcRole` one-tick deferred-spawn window. Identity/reconcile: `RpgStationsPlugin` registers
+`PerformerIdentityComponent` at setup + a once-per-world `PerformerReconciler.sweep(bootDespawnAll)`
+at first ready (`StationService.reconcilePerformersAtBoot`); `toggle` fires a deferred `engageStale`
+sweep (`reconcileStalePerformersAtEngage`, via `world.execute` so the native sweep runs outside the
+processing lock). **Legacy mechanics carry over below.** **Spawn + hide, at engage**
 (`spawnAndHide`, called from `toggle` AFTER the mount-attach block): resolves `Puppet.Offset`/
 `Yaw` off the block-top anchor + the initial `Puppet.Prop`, spawns via `PlayerPuppetService
 .spawn`; a null spawn is non-fatal (session continues in-body). Only `Hide.Route:"Scale"`

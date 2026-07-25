@@ -12,9 +12,20 @@ import com.hypixel.hytale.protocol.AnimationSlot;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.entity.component.EntityScaleComponent;
+import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.hypixel.hytale.server.npc.NPCPlugin;
 import com.ziggfreed.common.entity.PlayerModelService;
 import com.ziggfreed.common.entity.PlayerPuppetService;
+import com.ziggfreed.common.entity.performer.ClipSpec;
+import com.ziggfreed.common.entity.performer.HolderPerformer;
+import com.ziggfreed.common.entity.performer.NpcRolePerformer;
+import com.ziggfreed.common.entity.performer.PerformerLook;
+import com.ziggfreed.common.entity.performer.PerformerLook.LookSource;
+import com.ziggfreed.common.entity.performer.PerformerLook.SkinSource;
+import com.ziggfreed.common.entity.performer.PerformerSpawnCtx;
+import com.ziggfreed.common.entity.performer.PropSpec;
+import com.ziggfreed.common.entity.performer.StationPerformer;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.util.InventoryAccess;
@@ -104,7 +115,7 @@ final class StationPuppetController {
      * actually hidden even though every shipped station authors {@code Hide.Route:"Scale"}.
      */
     static void spawnAndHide(@Nonnull StationSession s, @Nonnull CommandBuffer<EntityStore> commandBuffer,
-            @Nullable Puppet puppet, @Nullable Player player) {
+            @Nullable World world, @Nullable Puppet puppet, @Nullable Player player) {
         if (puppet == null || !puppet.effectiveEnabled() || s.ref == null) {
             return;
         }
@@ -122,24 +133,44 @@ final class StationPuppetController {
             Puppet.Prop prop = puppet.getProp();
             String propItemId = resolveEffectivePropItemId(heldItemIdOf(player), prop);
 
-            PlayerPuppetService.PuppetSpawnRequest.Builder reqBuilder = PlayerPuppetService.PuppetSpawnRequest.builder()
-                    .sourceRef(s.ref)
+            // Backend from Look.Source (seam wave decision 47/55): PlayerClone/Model -> the bare-
+            // Holder puppet (byte-parity with the shipped route); NpcRole -> the Role-driven NPC,
+            // with an engage-time fail-closed fallback to the Holder (one warn) when the role is
+            // unusable (decision 53's full-pass check + engage-time degrade).
+            PerformerLook look = resolveLook(puppet.getLook());
+            StationPerformer performer = createBackend(look, s);
+            boolean synchronousSpawn = performer instanceof HolderPerformer;
+
+            PerformerSpawnCtx.Builder ctxB = PerformerSpawnCtx.builder()
+                    .accessor(commandBuffer)
+                    .ownerRef(s.ref)
+                    .ownerUuid(s.playerUuid)
+                    .stationKey(s.blockKey)
                     .position(new Vector3d(pos[0], pos[1], pos[2]))
-                    .yawRadians(yawRadians);
+                    .yawRadians(yawRadians)
+                    .look(look);
+            if (world != null) {
+                ctxB.world(world);
+            }
             if (propItemId != null) {
-                reqBuilder.heldItemIdOverride(propItemId);
+                ctxB.initialProp(PropSpec.of(propItemId));
             }
             if (s.emoteId != null && !s.emoteId.isBlank()) {
-                reqBuilder.initialAnimation(AnimationSlot.Emote, s.emoteId);
+                ctxB.initialClip(ClipSpec.of(AnimationSlot.Emote, s.emoteId));
             }
+            performer.spawn(ctxB.build());
 
-            Ref<EntityStore> puppetRef = PlayerPuppetService.spawn(commandBuffer, reqBuilder.build());
-            if (puppetRef == null) {
+            Ref<EntityStore> puppetRef = performer.ref();
+            // A SYNCHRONOUS backend (the bare-Holder) with a null ref genuinely failed to spawn -
+            // continue in-body (byte-parity with the pre-swap route). An NpcRole spawn DEFERS one
+            // tick (its ref is honestly null in that window), so a null ref is expected, not a failure.
+            if (synchronousSpawn && puppetRef == null) {
                 Log.warn("STATION puppet spawn failed for station '" + s.stationId + "' action '" + s.actionId
                         + "' - continuing in-body");
                 return;
             }
 
+            s.performer = performer;
             s.puppetRef = puppetRef;
             s.puppetDefaultProp = prop;
             s.puppetHeldItemId = propItemId;
@@ -155,6 +186,61 @@ final class StationPuppetController {
         } catch (Throwable t) {
             Log.warn("STATION puppet spawn/hide failed: " + t.getMessage(), t);
         }
+    }
+
+    /**
+     * Resolve the {@code Puppet.Look} group into the common {@link PerformerLook} the backend reads
+     * (PURE). {@code Model} maps the nested {@code Look.Model} group; {@code NpcRole} maps the nested
+     * {@code Look.Role} group (skin source / persist / speed); anything else is the crowned
+     * player-clone default.
+     */
+    @Nonnull
+    static PerformerLook resolveLook(@Nullable Puppet.Look look) {
+        if (look == null) {
+            return PerformerLook.playerClone();
+        }
+        String source = look.effectiveSource();
+        if (Puppet.LOOK_SOURCE_MODEL.equals(source)) {
+            Puppet.Model m = look.getModel();
+            return PerformerLook.builder().source(LookSource.MODEL)
+                    .modelId(m != null ? m.getModelId() : null)
+                    .fallbackModelId(m != null ? m.getFallbackModelId() : null)
+                    .build();
+        }
+        if (Puppet.LOOK_SOURCE_NPC_ROLE.equals(source)) {
+            Puppet.Role r = look.getRole();
+            PerformerLook.Builder b = PerformerLook.builder().source(LookSource.NPC_ROLE);
+            if (r != null) {
+                b.roleId(r.getRoleId())
+                        .skinSource(Puppet.SKIN_SOURCE_ROLE_DEFAULT.equals(r.effectiveSkinSource())
+                                ? SkinSource.ROLE_DEFAULT : SkinSource.PLAYER_CLONE)
+                        .persist(r.effectivePersist())
+                        .speedMps(r.getSpeedMps());
+            }
+            return b.build();
+        }
+        return PerformerLook.playerClone();
+    }
+
+    /**
+     * Pick the backend for {@code look}, with the decision-53 engage-time fail-closed fallback: an
+     * {@code NpcRole} look whose role id is blank or not registered degrades to the bare-Holder
+     * performer (one warn) - a cosmetic tier never denies a session. The Holder still clones the
+     * live player skin, so the fallback reads as the crowned puppet, just not the NPC gait.
+     */
+    @Nonnull
+    private static StationPerformer createBackend(@Nonnull PerformerLook look, @Nonnull StationSession s) {
+        if (look.source() == LookSource.NPC_ROLE) {
+            String roleId = look.roleId();
+            NPCPlugin plugin = NPCPlugin.get();
+            boolean usable = roleId != null && !roleId.isBlank() && plugin != null && plugin.hasRoleName(roleId);
+            if (usable) {
+                return new NpcRolePerformer();
+            }
+            Log.warn("STATION puppet: NpcRole '" + roleId + "' unusable at engage for station '"
+                    + s.stationId + "' - falling back to the bare-Holder performer");
+        }
+        return new HolderPerformer();
     }
 
     // ==================== teardown: reveal + despawn ====================
@@ -199,13 +285,20 @@ final class StationPuppetController {
                     && commandBuffer != null) {
                 PlayerPuppetService.revealByScale(commandBuffer, s.ref, s.puppetSavedScale);
             }
-            PlayerPuppetService.despawn(s.puppetRef, commandBuffer);
+            // Despawn the double through the performer, threading the SAME tick-safe commandBuffer
+            // (byte-parity with the pre-swap PlayerPuppetService.despawn(puppetRef, commandBuffer)).
+            // A null commandBuffer (disconnect/shutdown sweep) skips the despawn exactly as the
+            // pre-swap despawn(ref, null) no-op did - the performer is NonSerialized, harmless.
+            if (s.performer != null && commandBuffer != null) {
+                s.performer.despawn(commandBuffer);
+            }
         } else {
             // Both the player ref and the puppet ref are gone/unresolvable - nothing left to
             // reveal or despawn via any store. Harmless: the puppet is NonSerialized (never
             // survives a restart regardless), and a gone player ref has no scale left to restore.
             Log.fine("STATION puppet teardown skipped (no resolvable store)");
         }
+        s.performer = null;
         s.puppetRef = null;
         s.puppetActive = false;
         s.puppetHideRoute = null;
@@ -244,10 +337,12 @@ final class StationPuppetController {
      * is false or the station authors no {@code Animation.EmoteId}.
      */
     static void playLoop(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
-        if (!s.puppetActive || s.emoteId == null || s.emoteId.isBlank()) {
+        if (!s.puppetActive || s.performer == null || s.emoteId == null || s.emoteId.isBlank()) {
             return;
         }
-        PlayerPuppetService.playAnimation(store, s.puppetRef, AnimationSlot.Emote, null, s.emoteId, true);
+        // The engage loop clip is a network packet (not a mutation) - route it through the live
+        // store, byte-parity with the pre-swap PlayerPuppetService.playAnimation(store, ...) call.
+        s.performer.playClip(store, ClipSpec.of(AnimationSlot.Emote, s.emoteId));
     }
 
     /**
@@ -270,14 +365,16 @@ final class StationPuppetController {
      */
     static void playSwing(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nullable Player player, boolean playClip) {
-        if (!s.puppetActive) {
+        if (!s.puppetActive || s.performer == null) {
             return;
         }
         StationStep.PuppetOverride override = activeStepPuppetOverride(s);
         if (playClip) {
             String clip = resolveEffectiveClip(override != null ? override.getClip() : null, s.emoteId);
             if (clip != null && !clip.isBlank()) {
-                PlayerPuppetService.playAnimation(store, s.puppetRef, AnimationSlot.Emote, null, clip, true);
+                // Clip = a network packet -> the live store; the prop sync below = a Hotbar mutation
+                // -> the tick-safe commandBuffer. Byte-parity with the pre-swap split.
+                s.performer.playClip(store, ClipSpec.of(AnimationSlot.Emote, clip));
             }
         }
         syncProp(s, commandBuffer, player, override);
@@ -296,10 +393,10 @@ final class StationPuppetController {
      * network packet, not a component mutation.
      */
     static void playStepClip(@Nonnull StationSession s, @Nonnull Store<EntityStore> store, @Nullable String clip) {
-        if (!s.puppetActive || clip == null || clip.isBlank()) {
+        if (!s.puppetActive || s.performer == null || clip == null || clip.isBlank()) {
             return;
         }
-        PlayerPuppetService.playAnimation(store, s.puppetRef, AnimationSlot.Emote, null, clip, true);
+        s.performer.playClip(store, ClipSpec.of(AnimationSlot.Emote, clip));
     }
 
     /**
@@ -317,7 +414,7 @@ final class StationPuppetController {
      */
     static void syncStepProp(@Nonnull StationSession s, @Nonnull CommandBuffer<EntityStore> commandBuffer,
             @Nullable Player player, @Nonnull StationStep step) {
-        if (!s.puppetActive) {
+        if (!s.puppetActive || s.performer == null) {
             return;
         }
         syncProp(s, commandBuffer, player, step.getPuppet());
@@ -339,13 +436,18 @@ final class StationPuppetController {
      */
     private static void syncProp(@Nonnull StationSession s, @Nonnull CommandBuffer<EntityStore> commandBuffer,
             @Nullable Player player, @Nullable StationStep.PuppetOverride override) {
-        if (s.puppetRef == null || !s.puppetRef.isValid()) {
+        StationPerformer performer = s.performer;
+        if (performer == null) {
             return;
         }
         Puppet.Prop effectiveProp = override != null && override.getProp() != null
                 ? override.getProp() : s.puppetDefaultProp;
         String itemId = resolveEffectivePropItemId(heldItemIdOf(player), effectiveProp);
-        s.puppetHeldItemId = PlayerPuppetService.updateHeldItem(commandBuffer, s.puppetRef, s.puppetHeldItemId, itemId);
+        // The performer owns its own dirty-gated last-mirrored value (seeded at spawn to the same
+        // propItemId s.puppetHeldItemId holds), so this is byte-parity with the pre-swap
+        // updateHeldItem(commandBuffer, puppetRef, s.puppetHeldItemId, itemId) - a Hotbar mutation,
+        // routed through the tick-safe commandBuffer. PropSpec.of(null) empties the puppet's hand.
+        performer.setProp(commandBuffer, PropSpec.of(itemId));
     }
 
     @Nullable
