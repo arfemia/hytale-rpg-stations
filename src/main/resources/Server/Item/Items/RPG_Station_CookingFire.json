@@ -1,5 +1,5 @@
 {
-  "$Comment": "The standalone RpgStations Cooking Fire work station block (scope-2 wave-3 leg W3-F, design section 2.7 fish exemplar, the remote-anchor half of the cutting-board/cooking-fire pair - it is BOTH a standalone direct cook loop AND the multi-station anchor CuttingBoard/PrepFish claims by proximity+type). Model/texture/hitbox lifted from the vanilla Deco_Campfire_Off (ledger [6cdea5ead]) - zero native Bench/Use fields; the vanilla Bench_Campfire is deliberately AVOIDED, it carries a native Bench:{Type:Processing} + Interactions.Use:'Open_Processing_Bench' that would fight this mod's own rpg_station_use interaction (the same RPG_Station_Sawmill-vs-Bench_Lumbermill discipline). State.Definitions.Lit swaps to the lit Blocks/Benches/Campfire.blockymodel plus embers Light + smoke Particles while a fish is cooking (Server/RpgStations/Stations/CookingFire.json's Custody.States.Loaded = 'Lit'); Default stays the unlit Campfire_Off model/texture. VariantRotation is authored NESW (a station-block placement convention, deliberately over the vanilla decorative RandomRotation) so the block's own facing composes correctly with Custody.Display's facing-relative Offset. When claimed as a remote anchor by another station's program, this block's OWN action is never invoked (design 2.2) - only its Custody claim and block state matter there.",
+  "$Comment": "The standalone RpgStations Cooking Fire work station block (scope-2 wave-3 leg W3-F, design section 2.7 fish exemplar, the remote-anchor half of the cutting-board/cooking-fire pair - it is BOTH a standalone direct cook loop AND the multi-station anchor CuttingBoard/PrepFish claims by proximity+type). Model/texture/hitbox lifted from the vanilla Deco_Campfire_Off (ledger [6cdea5ead]) - the diegetic F-loop deliberately keeps its OWN rpg_station_use RootInteraction on Interactions.Use rather than the vanilla Bench_Campfire's auto-open 'Open_Processing_Bench' (the same RPG_Station_Sawmill-vs-Bench_Lumbermill discipline: reuse the model, not the competing Use wiring). State.Definitions.Lit swaps to the lit Blocks/Benches/Campfire.blockymodel plus embers Light + smoke Particles while a fish is cooking (Server/RpgStations/Stations/CookingFire.json's Custody.States.Loaded = 'Lit'); Default stays the unlit Campfire_Off model/texture. VariantRotation is authored NESW (a station-block placement convention, deliberately over the vanilla decorative RandomRotation) so the block's own facing composes correctly with Custody.Display's facing-relative Offset. When claimed as a remote anchor by another station's program, this block's OWN action is never invoked (design 2.2) - only its Custody claim and block state matter there. SELECTION WAVE (decision 51a): the block ALSO carries a native BlockType.Bench{Type:Processing,Id:Campfire} + BlockType.BlockEntity.Components{BenchBlock,ProcessingBenchBlock} (ledger 'Can a mod reuse the native Bench crafting/processing WINDOW' entry, verbatim shape) purely so the engine's sneak+F handler can open the NATIVE processing window (Java-driven PageManager#setPageWithWindows, never an Interactions.Use auto-open) scoped to Bench.Id 'Campfire' - CraftingRecipe.BenchRequirement.Id is a bare open string match, so this reuses the vanilla Food_Fish_Raw -> Food_Fish_Grilled recipe (ledger [6cdea5ead], BenchRequirement:[{Id:'Campfire',Type:'Processing'}]) with ZERO recipe duplication. Bench.Fuel is deliberately OMITTED (ProcessingBenchBlock#tick treats a null Fuel array as fuel-less/always-active per source, ledger-verified) so the native window cooks the fish with no separate fuel item required; Input carries one FilterValidIngredients slot (the vanilla Campfire's own Input-slot shape) so the window has somewhere to receive the raw fish. Plain F still drives the diegetic custody/Lit loop above; sneak+F is the alternate, purely native, instant-crafting door onto the SAME recipe truth (decision 50/51, both routes coexist on one block).",
   "TranslationProperties": {
     "Name": "items.RPG_Station_CookingFire.name",
     "Description": "items.RPG_Station_CookingFire.description"
@@ -47,6 +47,19 @@
     "InteractionHint": "items.RPG_Station_CookingFire.hint.empty",
     "Interactions": {
       "Use": "RPG_Station_CookingFire_Use"
+    },
+    "Bench": {
+      "Type": "Processing",
+      "Id": "Campfire",
+      "Input": [
+        { "FilterValidIngredients": true }
+      ]
+    },
+    "BlockEntity": {
+      "Components": {
+        "BenchBlock": {},
+        "ProcessingBenchBlock": {}
+      }
     },
     "State": {
       "Definitions": {

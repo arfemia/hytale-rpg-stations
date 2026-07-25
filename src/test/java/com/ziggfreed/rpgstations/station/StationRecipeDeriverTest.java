@@ -273,4 +273,69 @@ public class StationRecipeDeriverTest {
         assertTrue(StationRecipeDeriver.typesMatch(List.of("Processing"), new String[]{"processing"}));
         assertFalse(StationRecipeDeriver.typesMatch(List.of("Crafting"), new String[]{"Processing"}));
     }
+
+    // ==================== Selection wave (decision 56): source-category stamp ====================
+
+    @Test
+    void categoryRouteMatch_stampsTheMatchedCategory() {
+        List<CraftingCandidate> candidates = List.of(
+                resourceCandidate("Wood_Hardwood_Planks", "WoodPlanks", "Wood_Hardwood_Trunk", 1));
+        List<StationAsset.Conversion> derived =
+                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
+        assertEquals(1, derived.size());
+        assertEquals("WoodPlanks", derived.get(0).getCategory());
+    }
+
+    @Test
+    void categoryStamp_usesTheCandidatesOwnCasing_notTheSpecs() {
+        // The candidate declares "woodplanks" (lower); the spec asks "WoodPlanks". The stamp is the
+        // candidate's own native category string (what the picker groups/labels by).
+        List<CraftingCandidate> candidates = List.of(
+                resourceCandidate("Wood_Hardwood_Planks", "woodplanks", "Wood_Hardwood_Trunk", 1));
+        List<StationAsset.Conversion> derived =
+                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
+        assertEquals(1, derived.size());
+        assertEquals("woodplanks", derived.get(0).getCategory());
+    }
+
+    @Test
+    void benchRouteMatch_noCandidateCategory_stampsTheBenchId() {
+        // A bench-route match on a candidate carrying NO native category: the stamp is the matched
+        // bench id (decision 56's "bench-route matches stamp the bench id when no category exists").
+        CraftingCandidate cand = new CraftingCandidate("Food_Fish_Grilled", List.of(),
+                List.of("Campfire"), List.of("Processing"), 2f, List.of(Ingredient.resource("Fish", 1)));
+        List<StationAsset.Conversion> derived = StationRecipeDeriver.deriveFromCrafting(
+                spec(null, null, new String[]{"Campfire"}, null, null), List.of(cand));
+        assertEquals(1, derived.size());
+        assertEquals("Campfire", derived.get(0).getCategory());
+    }
+
+    @Test
+    void benchRouteMatch_withCandidateCategory_stampsTheCategoryNotTheBench() {
+        // Matched only by bench, but the candidate DOES carry a native category - the category
+        // (the recipe's own source category) wins over the bench id.
+        CraftingCandidate cand = fullCandidate("Food_Fish_Grilled", List.of("Processing_Cook"),
+                List.of("Campfire"), List.of("Processing"), 2f, "Fish", 1);
+        List<StationAsset.Conversion> derived = StationRecipeDeriver.deriveFromCrafting(
+                spec(null, new String[]{"WoodPlanks"}, new String[]{"Campfire"}, null, null), List.of(cand));
+        assertEquals(1, derived.size());
+        assertEquals("Processing_Cook", derived.get(0).getCategory());
+    }
+
+    @Test
+    void deriveSourceCategory_pureCore() {
+        CraftingCandidate withCat = new CraftingCandidate("X", List.of("Alpha", "Beta"),
+                List.of("BenchA"), List.of("Crafting"), 0f, List.of(Ingredient.item("In", 1)));
+        // Category-route match returns the matched wanted category (first candidate cat intersecting).
+        assertEquals("Beta", StationRecipeDeriver.deriveSourceCategory(withCat,
+                new String[]{"beta"}, null, true));
+        // No category-route match but the candidate has categories -> its first native category.
+        assertEquals("Alpha", StationRecipeDeriver.deriveSourceCategory(withCat,
+                new String[]{"WoodPlanks"}, new String[]{"BenchA"}, false));
+        // No categories at all -> the matched bench id.
+        CraftingCandidate noCat = new CraftingCandidate("Y", List.of(),
+                List.of("BenchB"), List.of("Processing"), 0f, List.of(Ingredient.item("In", 1)));
+        assertEquals("BenchB", StationRecipeDeriver.deriveSourceCategory(noCat,
+                null, new String[]{"benchb"}, false));
+    }
 }

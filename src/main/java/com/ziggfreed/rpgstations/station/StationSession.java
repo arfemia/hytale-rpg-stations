@@ -130,15 +130,16 @@ final class StationSession {
     StationAsset.Tool toolReq;
 
     /**
-     * The multi-output category the player chose at the picker (seam wave decision 50, Item 5),
-     * or {@code null} for a single-category station (every shipped station today - the sawmill
-     * authors one {@code FromCrafting.Categories} entry, the anvil none) and for a plain-F engage.
-     * The picker's {@code onSelect} writes it; the diegetic conversion selection is meant to
-     * consume it by narrowing the derived conversions to this category. DORMANT this leg (no
-     * consumer yet): the consumption filter needs each derived {@code Conversion} to carry its
-     * native category, which the do-not-rework {@code StationRecipeDeriver} does not tag today -
-     * the picker-open + category-tagging + filter land together as the follow-up sub-feature (see
-     * the leg report). Marked here so the schema/session is ready and no shipped path is affected.
+     * The multi-output category the player chose at the picker (selection wave, decision 50/56), or
+     * {@code null} for a single-category station (every shipped station today - the sawmill authors
+     * one {@code FromCrafting.Categories} entry, the anvil none) and for a plain-F engage. LIVE this
+     * wave: the sneak+F picker's {@code onSelect} records a pending choice, the next plain-F engage
+     * consumes it into this field (see {@code StationService#consumePendingCategory}), and both the
+     * engage viability check AND every runtime cycle narrow the derived conversions to it via the
+     * pure {@code StationService#conversionsForCategory} filter ({@code null} = all, byte-identical
+     * to the pre-selection engine). Session-scoped: {@code stop()} clears it, so it never bleeds
+     * across sessions. Each derived {@code Conversion} now carries its native {@code Category}
+     * (stamped by {@code StationRecipeDeriver}, decision 56) for the filter to match against.
      */
     @Nullable String chosenOutputCategory;
 

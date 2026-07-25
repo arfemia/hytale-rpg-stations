@@ -91,6 +91,8 @@ import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.loot.FactorSnapshot;
 import com.ziggfreed.rpgstations.loot.LootEngine;
 import com.ziggfreed.rpgstations.ui.StationSummaryHud;
+import com.ziggfreed.rpgstations.pages.PickerCategories;
+import com.ziggfreed.rpgstations.pages.RpgStationPickerPage;
 import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.ItemDropUtil;
 import com.ziggfreed.rpgstations.util.ItemGrantUtil;
@@ -243,6 +245,23 @@ public final class StationService {
     private final ConcurrentHashMap<String, String> stationBlockItemToId = new ConcurrentHashMap<>();
 
     /**
+     * The multi-output picker's PENDING selection (selection wave, decision 50/56): {@code
+     * playerUuid -> (blockKey, categoryId)}, written by the sneak+F picker's {@code onSelect}
+     * callback and CONSUMED by the very next plain-F engage at the SAME block (the callback runs on
+     * a page-event thread with no command buffer, so it cannot engage a session itself - it records
+     * the choice, the player presses F to begin). Keyed by player so at most one pending choice
+     * exists at a time; a choice for a DIFFERENT block than the one the player next engages is
+     * ignored (blockKey mismatch) and overwritten by any newer selection. Consumed pending choices
+     * become {@code StationSession.chosenOutputCategory}, which the conversion filter honors for the
+     * whole session and which dies with the session ("cleared at stop"). Never persisted.
+     */
+    private final ConcurrentHashMap<UUID, PendingSelection> pendingByPlayer = new ConcurrentHashMap<>();
+
+    /** One player's pending picker choice: the block it was made at + the chosen category id. */
+    private record PendingSelection(@Nonnull String blockKey, @Nonnull String category) {
+    }
+
+    /**
      * A single-shot {@code (factorId, param) -> value} lookup, pure/testable independent of the
      * live api registry (used by {@link #conditionPasses}). {@link #checkRequires} builds one
      * inline against {@link FactorRegistryImpl} + a fresh {@link FactorContext} (leg 4 - replaces
@@ -281,13 +300,16 @@ public final class StationService {
     public void toggle(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
                        @Nonnull PlayerRef playerRef, @Nonnull Player player,
                        @Nonnull CommandBuffer<EntityStore> commandBuffer,
-                       @Nonnull String stationId, int blockX, int blockY, int blockZ) {
+                       @Nonnull String stationId, int blockX, int blockY, int blockZ, boolean sneaking) {
         UUID playerUuid = playerRef.getUuid();
         if (playerUuid == null) {
             return;
         }
         StationSession existing = byPlayer.get(playerUuid);
         if (existing != null) {
+            // A press of any kind while a session runs toggles it OFF (sneak included - crouch is
+            // also the diegetic exit input, so a sneak+F over a running session ends it, never
+            // re-opens a selection surface on top of it).
             stop(existing, StopReason.PLAYER_EXIT, store, commandBuffer);
             return;
         }
@@ -348,6 +370,16 @@ public final class StationService {
         // the RESOLVED action's own override when authored, else the station-level default.
         if (!checkRequires(action.getRequires(), playerRef, asset)) {
             toast(playerRef, RpgMsg.tr("ui.station.locked"));
+            return;
+        }
+
+        // 2.6) Sneak+F selection surface (selection wave, decision 50/51/56): an EXPLICIT
+        // multi-output request that PRE-EMPTS the classic engage (never places into custody, never
+        // starts work). Only fires on sneak; only opens a surface when there IS one (a native bench
+        // window, or the picker for 2+ derived output categories). Otherwise (plain F, or a
+        // single-category / no-bench station) it returns false and the engage below runs unchanged.
+        if (sneaking && routeSneakSelection(world, store, ref, playerRef, player, playerUuid, asset, action,
+                blockX, blockY, blockZ)) {
             return;
         }
 
@@ -430,6 +462,10 @@ public final class StationService {
         StationAsset.Work.Idle idleGroup = work != null ? work.getIdle() : null;
         boolean idleEnabled = !stepsProgram && idleGroup != null
                 && idleGroup.getEnabled() != null && idleGroup.getEnabled();
+        // Selection wave (decision 56): consume any pending picker choice made (sneak+F) at THIS
+        // block into the session's chosen output category. Null = no choice (the byte-identical
+        // all-categories behavior); a stale choice for another block is ignored by consumePending.
+        String chosenCategory = consumePendingCategory(playerUuid, blockKey);
         ConversionCheck check;
         if (stepsProgram) {
             boolean runnable = custody == null || (preClaim != null && !preClaim.isEmpty());
@@ -438,6 +474,14 @@ public final class StationService {
         } else {
             StationAsset.Conversion[] conversions =
                     StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
+            // Narrow to the EFFECTIVE output category (decision 56/57): the player's explicit picker
+            // choice when one was made, else the station's first-authored default for a multi-category
+            // station (decision 57 - plain-F = the first FromCrafting.Categories entry), else null =
+            // all (byte-identical to the pre-selection engine for a single-category station).
+            StationAsset.FromCrafting fromCrafting =
+                    action.getRecipe() != null ? action.getRecipe().getFromCrafting() : null;
+            conversions = conversionsForCategory(conversions,
+                    effectiveCategory(chosenCategory, fromCrafting, conversions));
             check = custody != null
                     ? firstRunnableConversionFromCustody(preClaim, player, conversions)
                     : firstRunnableConversion(player, conversions);
@@ -480,6 +524,7 @@ public final class StationService {
         s.playerRef = playerRef;
         s.stationId = asset.getId();
         s.actionId = action.getActionId();
+        s.chosenOutputCategory = chosenCategory;
         s.blockKey = blockKey;
         s.blockX = blockX;
         s.blockY = blockY;
@@ -828,6 +873,14 @@ public final class StationService {
         Custody custody = action.getCustody();
         StationAsset.Conversion[] conversions =
                 StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
+        // Selection wave (decision 56/57): honor the session's EFFECTIVE output category every cycle -
+        // the explicit choice when one was made, else the station's first-authored default (decision
+        // 57); null = all (byte-identical to the pre-selection engine). The same one helper both the
+        // engage viability check and this per-cycle filter resolve through.
+        StationAsset.FromCrafting fromCrafting =
+                action.getRecipe() != null ? action.getRecipe().getFromCrafting() : null;
+        conversions = conversionsForCategory(conversions,
+                effectiveCategory(s.chosenOutputCategory, fromCrafting, conversions));
         ConversionCheck check = custody != null
                 ? firstRunnableConversionFromCustody(custodyByBlock.get(s.blockKey), player, conversions)
                 : firstRunnableConversion(player, conversions);
@@ -1773,6 +1826,10 @@ public final class StationService {
         if (s.blockKey != null) {
             byBlock.remove(s.blockKey, s.playerUuid);
         }
+        // Selection wave (decision 56): the chosen output category is session-scoped - clear it on
+        // every stop path so it can never bleed into a future session (the session object is
+        // discarded anyway; this is the explicit "cleared at stop" guarantee).
+        s.chosenOutputCategory = null;
         s.pendingImpactAtMs = 0L;
 
         // Placed-input custody auto-return (design 9.4): EVERY exit path, silent included - the
@@ -2028,6 +2085,263 @@ public final class StationService {
             this.outputCount = outputCount;
             this.durationMs = durationMs;
         }
+    }
+
+    // ==================== Multi-output selection (selection wave, decision 50/56) ====================
+
+    /** The sneak+F routing outcome (pure decision core, {@link #decideRoute}). */
+    enum Route {
+        /** No selection surface applies: run the classic engage (plain F, or single-category / no bench). */
+        TOGGLE,
+        /** Open the native crafting/processing bench window (the block authors a {@code Bench} identity). */
+        BENCH,
+        /** Open the multi-output picker page (2+ derived output categories, no bench). */
+        PICKER
+    }
+
+    /**
+     * PURE (decision 50/51/56): the sneak+F routing decision. A non-sneak press always
+     * {@link Route#TOGGLE}s (plain F engages work). A sneak press opens the native
+     * {@link Route#BENCH} window when the block has a bench identity; else the {@link Route#PICKER}
+     * when the station derives 2+ distinct output categories; else {@link Route#TOGGLE} (a
+     * single-category station never shows a picker). Unit-tested across every combination.
+     */
+    @Nonnull
+    static Route decideRoute(boolean sneaking, boolean hasBench, int distinctCategoryCount) {
+        if (!sneaking) {
+            return Route.TOGGLE;
+        }
+        if (hasBench) {
+            return Route.BENCH;
+        }
+        if (distinctCategoryCount > 1) {
+            return Route.PICKER;
+        }
+        return Route.TOGGLE;
+    }
+
+    /**
+     * PURE (decision 56): the conversions a session with the given chosen output category may run.
+     * {@code chosenCategory} null/blank returns the input array UNCHANGED (the byte-identical
+     * all-categories behavior every station has today); a set category returns only the conversions
+     * whose {@code Category} matches it (case-insensitive). A null input array returns null. An
+     * untagged conversion (null {@code Category}) is EXCLUDED once a category is chosen - a chosen
+     * output never silently falls back to an untagged conversion.
+     */
+    @Nullable
+    static StationAsset.Conversion[] conversionsForCategory(@Nullable StationAsset.Conversion[] all,
+            @Nullable String chosenCategory) {
+        if (all == null || chosenCategory == null || chosenCategory.isBlank()) {
+            return all;
+        }
+        List<StationAsset.Conversion> kept = new ArrayList<>(all.length);
+        for (StationAsset.Conversion c : all) {
+            if (c != null && c.getCategory() != null && chosenCategory.equalsIgnoreCase(c.getCategory())) {
+                kept.add(c);
+            }
+        }
+        return kept.toArray(new StationAsset.Conversion[0]);
+    }
+
+    /**
+     * PURE (decision 57): the EFFECTIVE output-category filter a session runs with, given the
+     * player's explicit choice (if any), the resolved action's {@code FromCrafting} spec, and the
+     * derived conversions. An explicit picker choice ({@code chosenCategory} non-blank) ALWAYS wins
+     * verbatim. With NO explicit choice, a MULTI-category station (its derived conversions span
+     * &gt;1 distinct source category) defaults to its FIRST AUTHORED priority - the first
+     * {@code FromCrafting.Categories} entry that actually produced a derived conversion (the array
+     * order IS the default priority; authors control the plain-F default by ordering), falling back
+     * to the first derived conversion's own category when {@code FromCrafting} is absent (a purely
+     * hand-authored multi-category station). A single-category or fully-untagged station returns
+     * {@code null} - the byte-identical all-pass, so {@link #conversionsForCategory} leaves the
+     * array untouched exactly as the pre-selection engine did (the null-with-one-category case).
+     */
+    @Nullable
+    static String effectiveCategory(@Nullable String chosenCategory,
+            @Nullable StationAsset.FromCrafting fromCrafting,
+            @Nullable StationAsset.Conversion[] conversions) {
+        if (chosenCategory != null && !chosenCategory.isBlank()) {
+            return chosenCategory;
+        }
+        List<String> distinct = distinctConversionCategories(conversions);
+        if (distinct.size() <= 1) {
+            return null;
+        }
+        // Multi-category, no explicit choice: the first authored FromCrafting category that is
+        // actually present in the derived set is the default (a first-authored category that
+        // derived nothing must not blank out the station, so skip to the next present one).
+        if (fromCrafting != null && fromCrafting.getCategories() != null) {
+            for (String authored : fromCrafting.getCategories()) {
+                if (authored == null || authored.isBlank()) {
+                    continue;
+                }
+                for (String present : distinct) {
+                    if (present.equalsIgnoreCase(authored)) {
+                        return present;
+                    }
+                }
+            }
+        }
+        return distinct.get(0);
+    }
+
+    /**
+     * PURE (decision 56): the ORDERED, case-insensitively-distinct list of source-category tags
+     * across {@code conversions} (untagged conversions contribute nothing). First-seen order is
+     * preserved so the picker's tab strip is deterministic. Empty when nothing is tagged (a
+     * single-category or fully-untagged station - no picker), size &gt; 1 gates the picker.
+     */
+    @Nonnull
+    static List<String> distinctConversionCategories(@Nullable StationAsset.Conversion[] conversions) {
+        List<String> out = new ArrayList<>();
+        if (conversions == null) {
+            return out;
+        }
+        for (StationAsset.Conversion c : conversions) {
+            if (c == null || c.getCategory() == null || c.getCategory().isBlank()) {
+                continue;
+            }
+            String cat = c.getCategory();
+            boolean seen = false;
+            for (String existing : out) {
+                if (existing.equalsIgnoreCase(cat)) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) {
+                out.add(cat);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * PURE (decision 56): a representative output ITEM id for a category (the first conversion in
+     * order whose {@code Category} matches), used as the picker tab's icon. Null when no tagged
+     * conversion for that category has a resolvable output item id (the caller then skips the tab).
+     */
+    @Nullable
+    static String representativeOutputFor(@Nullable StationAsset.Conversion[] conversions, @Nonnull String category) {
+        if (conversions == null) {
+            return null;
+        }
+        for (StationAsset.Conversion c : conversions) {
+            if (c == null || c.getCategory() == null || !category.equalsIgnoreCase(c.getCategory())) {
+                continue;
+            }
+            String outItem = c.getOutput() != null ? c.getOutput().getItemId() : null;
+            if (outItem != null && !outItem.isBlank()) {
+                return outItem;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The sneak+F selection router (decision 50/51/56): opens a native bench window or the
+     * multi-output picker, returning {@code true} iff a surface was opened (the caller then skips
+     * the classic engage). Impure (it opens pages + reads the block/catalog); the DECISION is the
+     * pure {@link #decideRoute}, the FILTER math the pure {@link #distinctConversionCategories}.
+     */
+    private boolean routeSneakSelection(@Nonnull World world, @Nonnull Store<EntityStore> store,
+            @Nonnull Ref<EntityStore> ref, @Nonnull PlayerRef playerRef, @Nonnull Player player,
+            @Nonnull UUID playerUuid, @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action,
+            int blockX, int blockY, int blockZ) {
+        boolean hasBench = benchPresentAt(world, blockX, blockY, blockZ);
+        StationAsset.Conversion[] conversions = hasBench ? null
+                : StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
+        List<String> categories = hasBench ? List.of() : distinctConversionCategories(conversions);
+        Route route = decideRoute(true, hasBench, categories.size());
+        switch (route) {
+            case BENCH:
+                return StationBenchWindow.open(world, store, ref, player, playerUuid, blockX, blockY, blockZ);
+            case PICKER: {
+                String blockKey = playerRef.getWorldUuid() + ":" + blockX + ":" + blockY + ":" + blockZ;
+                boolean showLocked = pickerShowLocked(asset);
+                List<PickerCategories.Category> tabs = buildPickerCategories(conversions, categories);
+                if (tabs.size() < 2) {
+                    // Every representative output resolved empty (defensive) - nothing meaningful to
+                    // show; fall through to the plain engage rather than opening an empty picker.
+                    return false;
+                }
+                return RpgStationPickerPage.open(ref, store, playerRef, tabs, showLocked,
+                        (selRef, selStore, categoryId) -> onPickerSelect(selRef, selStore, playerUuid, blockKey,
+                                categoryId));
+            }
+            case TOGGLE:
+            default:
+                return false;
+        }
+    }
+
+    /** Build the picker's ordered tab list (one unlocked tab per category with a resolvable output icon). */
+    @Nonnull
+    private static List<PickerCategories.Category> buildPickerCategories(
+            @Nullable StationAsset.Conversion[] conversions, @Nonnull List<String> categories) {
+        List<PickerCategories.Category> tabs = new ArrayList<>(categories.size());
+        for (String cat : categories) {
+            String icon = representativeOutputFor(conversions, cat);
+            if (icon == null) {
+                continue; // no representative item to render as the tab icon; skip this category
+            }
+            // Icon-only tab (no label): a category id is not itself a localized display name, so the
+            // representative output icon differentiates the tabs. No new per-category lang key needed.
+            tabs.add(PickerCategories.Category.unlocked(cat, icon, null));
+        }
+        return tabs;
+    }
+
+    /**
+     * The picker's {@code onSelect} callback (runs on a page-event thread with no command buffer):
+     * record the choice as this player's PENDING selection at that block. The player's next plain-F
+     * engage at the same block consumes it ({@link #consumePendingCategory}) into the new session's
+     * {@code chosenOutputCategory}. A localized toast advertises "press F to begin".
+     */
+    private void onPickerSelect(@Nonnull Ref<EntityStore> ref, @Nonnull Store<EntityStore> store,
+            @Nonnull UUID playerUuid, @Nonnull String blockKey, @Nonnull String categoryId) {
+        pendingByPlayer.put(playerUuid, new PendingSelection(blockKey, categoryId));
+        PlayerRef pr = InventoryAccess.playerRefOf(store.getComponent(ref, Player.getComponentType()));
+        if (pr != null) {
+            toast(pr, RpgMsg.tr("ui.station.picker.selected"));
+        }
+    }
+
+    /**
+     * Consume this player's pending picker choice IFF it was made at {@code blockKey} (a stale
+     * choice for another block is left in place, not applied). Returns the chosen category id, or
+     * null when there is no matching pending choice (the all-categories default).
+     */
+    @Nullable
+    private String consumePendingCategory(@Nonnull UUID playerUuid, @Nonnull String blockKey) {
+        PendingSelection pending = pendingByPlayer.get(playerUuid);
+        if (pending == null || !pending.blockKey().equals(blockKey)) {
+            return null;
+        }
+        pendingByPlayer.remove(playerUuid, pending);
+        return pending.category();
+    }
+
+    /** True when the block at {@code (x,y,z)} authors a native {@code BlockType.Bench} identity. */
+    private static boolean benchPresentAt(@Nonnull World world, int x, int y, int z) {
+        try {
+            BlockType bt = world.getBlockType(x, y, z);
+            return bt != null && bt.getBench() != null;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * The effective {@code Picker.ShowLocked} for this station (the station-level {@code Picker}
+     * group, else the reader default {@code true}). No per-category tool gate exists yet, so no
+     * locked tabs are produced this leg - the knob is threaded through for the moment the content
+     * leg adds one. (The per-action {@code ActionDef.Picker} override is decoded but not yet folded
+     * into {@code ActionResolver.ResolvedAction}; dormant, no shipped content authors it.)
+     */
+    private static boolean pickerShowLocked(@Nonnull StationAsset asset) {
+        com.ziggfreed.rpgstations.asset.Picker picker = asset.getPicker();
+        return picker == null || picker.effectiveShowLocked();
     }
 
     /** PURE: a conversion's effective per-cycle pace override in ms, or {@code 0} when it authors none. */

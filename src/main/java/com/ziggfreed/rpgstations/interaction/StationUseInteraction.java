@@ -5,12 +5,14 @@ import javax.annotation.Nonnull;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.protocol.InteractionState;
 import com.hypixel.hytale.protocol.InteractionType;
 import com.hypixel.hytale.server.core.entity.InteractionContext;
 import com.hypixel.hytale.server.core.entity.entities.Player;
+import com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent;
 import com.hypixel.hytale.server.core.modules.interaction.interaction.CooldownHandler;
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.SimpleInstantInteraction;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
@@ -96,15 +98,43 @@ public final class StationUseInteraction extends SimpleInstantInteraction {
                 return;
             }
 
+            // Sneak read at fire time (selection wave, decision 50): the SAME crouch flag the
+            // heartbeat reads as the diegetic exit input (MovementStatesComponent.crouching,
+            // client-populated + synced) - a sneak+F press routes to the multi-output selection
+            // surface instead of the plain work toggle. Fetched off the command buffer here exactly
+            // as the Player component above is; a missing component reads as not-sneaking (plain
+            // toggle). In-game timing reliability of the crouch flag at the interaction instant is a
+            // smoke item; the round-3 selector-entity press-F pattern is the documented fallback if
+            // it misbehaves.
+            boolean sneaking = readSneaking(commandBuffer, ctx.getEntity());
+
             String id = stationId != null ? stationId.toLowerCase() : "";
             StationService.getInstance().toggle(store, ref, playerRef, player, commandBuffer, id,
-                    targetBlock.x, targetBlock.y, targetBlock.z);
+                    targetBlock.x, targetBlock.y, targetBlock.z, sneaking);
 
             ctx.getState().state = InteractionState.Finished;
 
         } catch (Exception e) {
             Log.severe("Error toggling station session: " + e.getMessage());
             ctx.getState().state = InteractionState.Failed;
+        }
+    }
+
+    /**
+     * The clean sneak read at fire time: the player's {@code MovementStatesComponent.crouching}
+     * flag (client-populated, server-synced) - the SAME flag {@code StationService}'s heartbeat
+     * reads as the crouch exit. Fetched off the command buffer exactly like the {@code Player}
+     * component; a missing component or any read failure resolves to {@code false} (plain toggle),
+     * never a throw into the interaction handler.
+     */
+    private static boolean readSneaking(@Nonnull CommandBuffer<EntityStore> commandBuffer,
+            @Nonnull Ref<EntityStore> entity) {
+        try {
+            MovementStatesComponent ms =
+                    commandBuffer.getComponent(entity, MovementStatesComponent.getComponentType());
+            return ms != null && ms.getMovementStates() != null && ms.getMovementStates().crouching;
+        } catch (Throwable t) {
+            return false;
         }
     }
 }

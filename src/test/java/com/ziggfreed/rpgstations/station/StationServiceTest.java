@@ -3,6 +3,7 @@ package com.ziggfreed.rpgstations.station;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.LinkedHashMap;
@@ -12,6 +13,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.Ingredient;
+import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
  * Pure tests for {@link StationService}'s extracted decision cores. Ported (trimmed) from the
@@ -280,5 +283,171 @@ public class StationServiceTest {
             assertEquals("MINING", param);
             return 5.0;
         }));
+    }
+
+    // ==================== Selection wave (decision 50/56): routing + category filter ====================
+
+    private static StationAsset.Conversion conv(String outItem, String category) {
+        return StationAsset.Conversion.of(Ingredient.resource("Wood_Trunk", 1),
+                Ingredient.item(outItem, 1), null, category);
+    }
+
+    @Test
+    void decideRoute_plainPress_alwaysToggles() {
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, true, 5));
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, false, 5));
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, false, 0));
+    }
+
+    @Test
+    void decideRoute_sneakWithBench_opensBench() {
+        assertEquals(StationService.Route.BENCH, StationService.decideRoute(true, true, 0));
+        assertEquals(StationService.Route.BENCH, StationService.decideRoute(true, true, 3));
+    }
+
+    @Test
+    void decideRoute_sneakMultiCategoryNoBench_opensPicker() {
+        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, false, 2));
+        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, false, 9));
+    }
+
+    @Test
+    void decideRoute_sneakSingleOrZeroCategoryNoBench_toggles() {
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(true, false, 1));
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(true, false, 0));
+    }
+
+    @Test
+    void conversionsForCategory_nullChosen_returnsAllUnchanged() {
+        StationAsset.Conversion[] all = {conv("Oak", "WoodPlanks"), conv("Iron", "Metal")};
+        assertSame(all, StationService.conversionsForCategory(all, null));
+    }
+
+    @Test
+    void conversionsForCategory_blankChosen_returnsAllUnchanged() {
+        // "stop clears" -> the field is back to null/blank -> the filter yields ALL again.
+        StationAsset.Conversion[] all = {conv("Oak", "WoodPlanks"), conv("Iron", "Metal")};
+        assertSame(all, StationService.conversionsForCategory(all, "   "));
+    }
+
+    @Test
+    void conversionsForCategory_nullArray_returnsNull() {
+        assertNull(StationService.conversionsForCategory(null, "WoodPlanks"));
+    }
+
+    @Test
+    void conversionsForCategory_chosen_keepsOnlyMatching_caseInsensitive() {
+        StationAsset.Conversion[] all = {conv("Oak", "WoodPlanks"), conv("Iron", "Metal"),
+                conv("Birch", "woodplanks"), conv("Untagged", null)};
+        StationAsset.Conversion[] filtered = StationService.conversionsForCategory(all, "WoodPlanks");
+        assertEquals(2, filtered.length);
+        assertEquals("Oak", filtered[0].getOutput().getItemId());
+        assertEquals("Birch", filtered[1].getOutput().getItemId());
+    }
+
+    @Test
+    void conversionsForCategory_chosen_excludesUntaggedConversions() {
+        StationAsset.Conversion[] all = {conv("Untagged", null)};
+        assertEquals(0, StationService.conversionsForCategory(all, "WoodPlanks").length);
+    }
+
+    @Test
+    void distinctConversionCategories_orderedDistinctCaseInsensitive_untaggedIgnored() {
+        StationAsset.Conversion[] all = {conv("Oak", "WoodPlanks"), conv("Iron", "Metal"),
+                conv("Birch", "woodplanks"), conv("Untagged", null), conv("Steel", "Metal")};
+        assertEquals(List.of("WoodPlanks", "Metal"), StationService.distinctConversionCategories(all));
+    }
+
+    @Test
+    void distinctConversionCategories_nullOrAllUntagged_isEmpty() {
+        assertTrue(StationService.distinctConversionCategories(null).isEmpty());
+        assertTrue(StationService.distinctConversionCategories(
+                new StationAsset.Conversion[]{conv("A", null), conv("B", "  ")}).isEmpty());
+    }
+
+    @Test
+    void representativeOutputFor_firstMatchingOutputItem() {
+        StationAsset.Conversion[] all = {conv("Oak", "WoodPlanks"), conv("Birch", "WoodPlanks"),
+                conv("Iron", "Metal")};
+        assertEquals("Oak", StationService.representativeOutputFor(all, "WoodPlanks"));
+        assertEquals("Iron", StationService.representativeOutputFor(all, "metal"));
+        assertNull(StationService.representativeOutputFor(all, "Unknown"));
+        assertNull(StationService.representativeOutputFor(null, "WoodPlanks"));
+    }
+
+    // ============ Selection-wave SEAL (decision 57): first-authored-category default ============
+
+    /** The shipped multi-category sawmill shape: 3 derived output categories, WoodPlanks authored first. */
+    private static StationAsset.FromCrafting sawmillFromCrafting() {
+        return StationAsset.FromCrafting.of(
+                new String[]{"WoodPlanks", "DecorativePlanks", "OrnatePlanks"}, null);
+    }
+
+    /** Derived conversions arrive alphabetically by output id (Decorative < Ornate < Planks). */
+    private static StationAsset.Conversion[] sawmillConversions() {
+        return new StationAsset.Conversion[]{
+                conv("Oak_Decorative", "DecorativePlanks"),
+                conv("Oak_Ornate", "OrnatePlanks"),
+                conv("Oak_Planks", "WoodPlanks")};
+    }
+
+    @Test
+    void effectiveCategory_multiCategoryNoChoice_defaultsToFirstAuthored() {
+        // The deriver's alphabetical output-id sort would make Decorative the first RUNNABLE, but
+        // decision 57 defaults to the first AUTHORED FromCrafting category (WoodPlanks = Planks).
+        assertEquals("WoodPlanks",
+                StationService.effectiveCategory(null, sawmillFromCrafting(), sawmillConversions()));
+    }
+
+    @Test
+    void effectiveCategory_singleCategoryNoChoice_returnsNull_byteIdenticalAllPass() {
+        StationAsset.Conversion[] all = {conv("Oak_Planks", "WoodPlanks"),
+                conv("Birch_Planks", "woodplanks")};
+        StationAsset.FromCrafting fc = StationAsset.FromCrafting.of(new String[]{"WoodPlanks"}, null);
+        assertNull(StationService.effectiveCategory(null, fc, all));
+        // The all-pass stays byte-identical: the same array reference flows through unchanged.
+        assertSame(all, StationService.conversionsForCategory(all,
+                StationService.effectiveCategory(null, fc, all)));
+    }
+
+    @Test
+    void effectiveCategory_explicitChoiceOverridesDefault() {
+        assertEquals("DecorativePlanks", StationService.effectiveCategory(
+                "DecorativePlanks", sawmillFromCrafting(), sawmillConversions()));
+    }
+
+    @Test
+    void effectiveCategory_stopClearResetsToDefault() {
+        // A live session with an explicit pick honours it; after stop (the field is nulled) the
+        // next resolve re-derives the first-authored default.
+        assertEquals("OrnatePlanks", StationService.effectiveCategory(
+                "OrnatePlanks", sawmillFromCrafting(), sawmillConversions()));
+        assertEquals("WoodPlanks",
+                StationService.effectiveCategory(null, sawmillFromCrafting(), sawmillConversions()));
+    }
+
+    @Test
+    void effectiveCategory_noFromCrafting_multiCategory_fallsBackToFirstDerived() {
+        // Purely hand-authored multi-category conversions (no FromCrafting): the default is the
+        // FIRST derived conversion's own category, in array order.
+        StationAsset.Conversion[] all = {conv("A", "Beta"), conv("B", "Alpha")};
+        assertEquals("Beta", StationService.effectiveCategory(null, null, all));
+    }
+
+    @Test
+    void effectiveCategory_firstAuthoredCategoryDerivedNothing_skipsToNextPresent() {
+        // "Empty" is authored first but derived no conversion; the default is the first authored
+        // category actually PRESENT in the derived set, so a dead first entry cannot blank the loop.
+        StationAsset.FromCrafting fc = StationAsset.FromCrafting.of(
+                new String[]{"Empty", "WoodPlanks", "DecorativePlanks"}, null);
+        assertEquals("WoodPlanks", StationService.effectiveCategory(null, fc, sawmillConversions()));
+    }
+
+    @Test
+    void effectiveCategory_blankChoiceFallsThroughToDefault() {
+        // A blank chosen category is treated as "no choice" (mirrors conversionsForCategory), so the
+        // first-authored default still applies.
+        assertEquals("WoodPlanks",
+                StationService.effectiveCategory("  ", sawmillFromCrafting(), sawmillConversions()));
     }
 }

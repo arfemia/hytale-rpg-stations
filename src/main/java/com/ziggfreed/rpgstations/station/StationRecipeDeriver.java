@@ -180,7 +180,11 @@ public final class StationRecipeDeriver {
                     : Ingredient.item(nativeInput.getItemId(), inQty);
             Ingredient output = Ingredient.item(cand.itemId, outputPerInput);
             Long durationMs = nativeDurationMs(nativeTime, cand.timeSeconds);
-            derived.add(StationAsset.Conversion.of(input, output, durationMs));
+            // Selection wave (decision 56): stamp the derived conversion with its native source
+            // category so a multi-output station can group the picker by it. The do-not-rework
+            // guard on this deriver lifts for exactly this addition.
+            String category = deriveSourceCategory(cand, wantCategories, wantBenches, catMatch);
+            derived.add(StationAsset.Conversion.of(input, output, durationMs, category));
         }
         derived.sort(Comparator.comparing(c -> c.getOutput().getItemId(), String.CASE_INSENSITIVE_ORDER));
         if (derived.isEmpty()) {
@@ -301,6 +305,51 @@ public final class StationRecipeDeriver {
     /** True when any of the item's categories equals (case-insensitive) any wanted category. */
     private static boolean categoriesIntersect(@Nonnull List<String> have, @Nonnull String[] wanted) {
         return stringsIntersect(have, wanted);
+    }
+
+    /**
+     * PURE (selection wave, decision 56): the source-category tag stamped onto a derived
+     * conversion. Precedence: (1) a category-route match stamps the MATCHED native category (the
+     * first of the candidate's own categories that intersects the wanted set - the meaningful
+     * grouping key the picker shows); (2) failing that, if the candidate carries ANY native
+     * category, its first one (the recipe's own source category, even on a bench-route match);
+     * (3) only "when no category exists" does a bench-route match stamp the matched BENCH id.
+     * {@code null} only when a candidate matched with neither a category nor a resolvable bench id
+     * (unreachable given the caller already matched, but null-safe). Deterministic + testable
+     * without a live item map.
+     */
+    @Nullable
+    static String deriveSourceCategory(@Nonnull CraftingCandidate cand, @Nullable String[] wantCategories,
+            @Nullable String[] wantBenches, boolean catMatch) {
+        if (catMatch) {
+            String matched = firstIntersecting(cand.categories, wantCategories);
+            if (matched != null) {
+                return matched;
+            }
+        }
+        if (!cand.categories.isEmpty()) {
+            return cand.categories.get(0);
+        }
+        return firstIntersecting(cand.benchIds, wantBenches);
+    }
+
+    /** The FIRST value in {@code have} equal (case-insensitive) to any value in {@code wanted}; null if none. */
+    @Nullable
+    private static String firstIntersecting(@Nonnull List<String> have, @Nullable String[] wanted) {
+        if (wanted == null) {
+            return null;
+        }
+        for (String h : have) {
+            if (h == null || h.isBlank()) {
+                continue;
+            }
+            for (String w : wanted) {
+                if (w != null && w.equalsIgnoreCase(h)) {
+                    return h;
+                }
+            }
+        }
+        return null;
     }
 
     /** True when any value in {@code have} equals (case-insensitive) any value in {@code wanted}. */

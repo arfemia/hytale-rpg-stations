@@ -779,11 +779,19 @@ public final class StationAsset
      * precedence: an authored {@code DurationMs} &gt; a {@code FromCrafting.NativeTime} linear
      * transform over a derived recipe's {@code TimeSeconds} &gt; the station-level {@code Work.CycleMs}.
      * Null = this conversion has no authored pace (fall to the next precedence tier).
+     *
+     * <p><b>{@link #category} (selection wave, decision 56):</b> the OPTIONAL source-category tag a
+     * multi-output station groups conversions by for the sneak+F output PICKER. The
+     * {@code StationRecipeDeriver} STAMPS each derived conversion with its native source category
+     * (the matched recipe category, else the matched bench id when the recipe carries no category);
+     * a hand-authored conversion MAY author it directly. Null = untagged (the conversion belongs to
+     * no named category, so it is only ever produced by the unfiltered - no picker selection - path).
      */
     public static final class Conversion {
         @Nullable protected Ingredient input;
         @Nullable protected Ingredient output;
         @Nullable protected Long durationMs;
+        @Nullable protected String category;
 
         public static final BuilderCodec<Conversion> CODEC = BuilderCodec.builder(Conversion.class, Conversion::new)
                 .appendInherited(new KeyedCodec<>("Input", Ingredient.CODEC, false),
@@ -795,6 +803,9 @@ public final class StationAsset
                 .appendInherited(new KeyedCodec<>("DurationMs", Codec.LONG, false),
                         (o, v) -> o.durationMs = v, o -> o.durationMs, (o, p) -> o.durationMs = p.durationMs)
                 .documentation("Optional per-conversion pace override in ms; highest precedence (> NativeTime > Work.CycleMs). Null = none.").add()
+                .appendInherited(new KeyedCodec<>("Category", Codec.STRING, false),
+                        (o, v) -> o.category = v, o -> o.category, (o, p) -> o.category = p.category)
+                .documentation("Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged.").add()
                 .build();
 
         @Nonnull
@@ -805,10 +816,17 @@ public final class StationAsset
         @Nonnull
         public static Conversion of(@Nullable Ingredient input, @Nullable Ingredient output,
                 @Nullable Long durationMs) {
+            return of(input, output, durationMs, null);
+        }
+
+        @Nonnull
+        public static Conversion of(@Nullable Ingredient input, @Nullable Ingredient output,
+                @Nullable Long durationMs, @Nullable String category) {
             Conversion c = new Conversion();
             c.input = input;
             c.output = output;
             c.durationMs = durationMs;
+            c.category = category;
             return c;
         }
 
@@ -826,6 +844,16 @@ public final class StationAsset
         @Nullable
         public Long getDurationMs() {
             return durationMs;
+        }
+
+        /**
+         * The optional source-category tag (selection wave, decision 56) the multi-output picker
+         * groups conversions by; stamped by {@code StationRecipeDeriver} on derived conversions, or
+         * hand-authored. Null = untagged.
+         */
+        @Nullable
+        public String getCategory() {
+            return category;
         }
     }
 

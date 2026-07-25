@@ -46,6 +46,7 @@ ui.station.picker.title = Elige qué producir
 ui.station.picker.hint = Esta estación puede hacer más de una cosa con lo que tienes.
 ui.station.picker.locked = Requiere {0}
 ui.station.picker.locked_generic = Bloqueado
+ui.station.picker.selected = Selección hecha. Interactúa de nuevo para empezar a trabajar.
 station.sawmill.name = Aserradero
 station.sawmill.desc = Sierra troncos de tu inventario para hacer tablones, un ciclo a la vez.
 station.cuttingboard.name = Tabla de Corte

@@ -33,7 +33,9 @@ import javax.annotation.Nonnull;
  * Decision 48 (batch-2 spike extension, 2026-07-24) adds the {@code command.npcspike.prop_*}/
  * {@code clip_*} keys backing {@code NpcPerformerSpike}'s {@code prop}/{@code clip} subcommands.
  * The seam-wave picker leg (R3, decision 50) adds {@code ui.station.picker.title}/{@code .hint}/
- * {@code .locked}/{@code .locked_generic} backing {@code pages.RpgStationPickerPage}.
+ * {@code .locked}/{@code .locked_generic} backing {@code pages.RpgStationPickerPage}, plus
+ * {@code ui.station.picker.selected} (the selection-confirm toast fired from
+ * {@code StationService#onPickerSelect}, added in the selection-wave verify-fix).
  * The seam-wave validator/content leg (R4) LOCKSTEP CLEANUP folds in the wave-3 gap this set had
  * drifted from its own {@code rpgstations.lang}: {@code ui.station.no_action} (the multi-action
  * "nothing this station can work with" toast), the wave-3 {@code ui.station.stop.complete}/
@@ -135,6 +137,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.picker.hint",
             "rpgstations.ui.station.picker.locked",
             "rpgstations.ui.station.picker.locked_generic",
+            "rpgstations.ui.station.picker.selected",
             // SCOPE-3 standing-mount verify PREP (throwaway dev spike, /rpgstations - the block's
             // own Use interaction, no new command). Delete alongside MountSpike.json.
             "rpgstations.station.mountspike.name",
