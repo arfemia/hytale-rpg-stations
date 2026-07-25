@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Next.js build output (static export)
+.next/
+out/
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env
+.env
+.env.local
+
+# Docs synced at build time from the mod root (scripts/copy-docs.js);
+# the mod root is the single source of truth, not this checkout.
+src/data/CHANGELOG.md
+src/data/CURSEFORGE.md
+src/data/patch-notes/

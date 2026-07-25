@@ -1,0 +1,3360 @@
+{
+  "generatedFrom": "SchemaDocWriter (walks each authorable type's static CODEC via BuilderCodec#getEntries())",
+  "rootTypes": [
+    "StationAsset",
+    "ActionAsset",
+    "ActionDef",
+    "StationStep",
+    "Ingredient",
+    "FactorRef",
+    "LootRef",
+    "Roll",
+    "Condition",
+    "Custody",
+    "Puppet",
+    "Requires",
+    "Presentation",
+    "StatRollEntry",
+    "RollPool",
+    "LootableAsset",
+    "FlairAsset",
+    "ExtensionAsset",
+    "SettingsAsset"
+  ],
+  "types": {
+    "StationAsset": {
+      "fields": [
+        {
+          "key": "Tags",
+          "required": false,
+          "documentation": "Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.\n\nFor example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.\n\nTags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**.",
+          "type": "map",
+          "of": {
+            "type": "array",
+            "of": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "key": "Name",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "Identity",
+          "required": false,
+          "type": "object",
+          "nestedType": "Identity",
+          "fields": [
+            {
+              "key": "NameKey",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "DescKey",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "Icon",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Work",
+          "required": false,
+          "type": "object",
+          "nestedType": "Work",
+          "fields": [
+            {
+              "key": "CycleMs",
+              "required": false,
+              "type": "long"
+            },
+            {
+              "key": "MaxDurationMs",
+              "required": false,
+              "type": "long"
+            },
+            {
+              "key": "MaxMoveMeters",
+              "required": false,
+              "type": "double"
+            },
+            {
+              "key": "Exclusive",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "Xp",
+              "required": false,
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "WorkXp",
+                "fields": [
+                  {
+                    "key": "Skill",
+                    "required": false,
+                    "type": "string"
+                  },
+                  {
+                    "key": "PerCycle",
+                    "required": false,
+                    "type": "double"
+                  }
+                ]
+              }
+            },
+            {
+              "key": "Idle",
+              "required": false,
+              "type": "object",
+              "nestedType": "Idle",
+              "fields": [
+                {
+                  "key": "Enabled",
+                  "required": false,
+                  "type": "boolean"
+                },
+                {
+                  "key": "CycleMs",
+                  "required": false,
+                  "type": "long"
+                },
+                {
+                  "key": "XpFraction",
+                  "required": false,
+                  "type": "double"
+                }
+              ]
+            },
+            {
+              "key": "Repeat",
+              "required": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        {
+          "key": "Recipe",
+          "required": false,
+          "type": "object",
+          "nestedType": "Recipe",
+          "fields": [
+            {
+              "key": "Conversions",
+              "required": false,
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "Conversion",
+                "fields": [
+                  {
+                    "key": "Input",
+                    "required": false,
+                    "documentation": "The conversion input: a native Ingredient (exactly one of ItemId | ResourceTypeId).",
+                    "type": "object",
+                    "nestedType": "Ingredient",
+                    "ref": "Ingredient"
+                  },
+                  {
+                    "key": "Output",
+                    "required": false,
+                    "documentation": "The conversion output: an exact-ItemId Ingredient.",
+                    "type": "object",
+                    "nestedType": "Ingredient",
+                    "ref": "Ingredient"
+                  },
+                  {
+                    "key": "DurationMs",
+                    "required": false,
+                    "documentation": "Optional per-conversion pace override in ms; highest precedence (> NativeTime > Work.CycleMs). Null = none.",
+                    "type": "long"
+                  },
+                  {
+                    "key": "Category",
+                    "required": false,
+                    "documentation": "Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged.",
+                    "type": "string"
+                  }
+                ]
+              }
+            },
+            {
+              "key": "FromCrafting",
+              "required": false,
+              "type": "object",
+              "nestedType": "FromCrafting",
+              "fields": [
+                {
+                  "key": "Categories",
+                  "required": false,
+                  "documentation": "Native recipe categories to derive Conversions from (e.g. 'WoodPlanks'); a pack-added category in the set just works.",
+                  "type": "array",
+                  "of": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "key": "OutputPerInput",
+                  "required": false,
+                  "documentation": "Optional yield multiplier applied to each derived recipe's output (reader-defaults to 1).",
+                  "type": "integer"
+                },
+                {
+                  "key": "Benches",
+                  "required": false,
+                  "documentation": "Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match).",
+                  "type": "array",
+                  "of": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "key": "Types",
+                  "required": false,
+                  "documentation": "The recipe kinds to derive: 'Crafting' and/or 'Processing'; absent = both.",
+                  "type": "array",
+                  "of": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "key": "NativeTime",
+                  "required": false,
+                  "documentation": "Linear transform (Scale*TimeSeconds + OffsetMs) over each derived recipe's native time; defaults stay slower than vanilla.",
+                  "type": "object",
+                  "nestedType": "NativeTime",
+                  "fields": [
+                    {
+                      "key": "Scale",
+                      "required": false,
+                      "documentation": "Multiplier (m) on the recipe's native time; reader-defaults to 1.0 (stretch, never speed up below vanilla).",
+                      "type": "double"
+                    },
+                    {
+                      "key": "OffsetMs",
+                      "required": false,
+                      "documentation": "Additive floor (b) in milliseconds added after scaling; reader-defaults to 2000 so a station is never instant like vanilla.",
+                      "type": "long"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Hold",
+          "required": false,
+          "type": "object",
+          "nestedType": "Hold",
+          "fields": [
+            {
+              "key": "MovementLock",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "EffectId",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "InterruptOnDamage",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "Mount",
+              "required": false,
+              "type": "object",
+              "nestedType": "Mount",
+              "fields": [
+                {
+                  "key": "Surface",
+                  "required": false,
+                  "type": "string"
+                },
+                {
+                  "key": "Entity",
+                  "required": false,
+                  "type": "object",
+                  "nestedType": "Entity",
+                  "fields": [
+                    {
+                      "key": "Offset",
+                      "required": false,
+                      "type": "object",
+                      "nestedType": "Offset",
+                      "fields": [
+                        {
+                          "key": "X",
+                          "required": false,
+                          "type": "double"
+                        },
+                        {
+                          "key": "Y",
+                          "required": false,
+                          "type": "double"
+                        },
+                        {
+                          "key": "Z",
+                          "required": false,
+                          "type": "double"
+                        }
+                      ]
+                    },
+                    {
+                      "key": "DismountOnMove",
+                      "required": false,
+                      "type": "boolean"
+                    },
+                    {
+                      "key": "Steerable",
+                      "required": false,
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Tool",
+          "required": false,
+          "type": "object",
+          "nestedType": "Tool",
+          "fields": [
+            {
+              "key": "Tags",
+              "required": false,
+              "documentation": "Native tag family match (e.g. {\"Family\":[\"Dagger\"]}): matches ANY-of the values per key against the held Item's raw tags.",
+              "type": "map",
+              "of": {
+                "type": "array",
+                "of": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "key": "Gather",
+              "required": false,
+              "type": "object",
+              "nestedType": "Gather",
+              "fields": [
+                {
+                  "key": "GatherType",
+                  "required": false,
+                  "type": "string"
+                },
+                {
+                  "key": "MinPower",
+                  "required": false,
+                  "type": "double"
+                }
+              ]
+            },
+            {
+              "key": "Ids",
+              "required": false,
+              "type": "array",
+              "of": {
+                "type": "string"
+              }
+            },
+            {
+              "key": "XpScale",
+              "required": false,
+              "type": "object",
+              "nestedType": "XpScale",
+              "fields": [
+                {
+                  "key": "GatherType",
+                  "required": false,
+                  "type": "string"
+                },
+                {
+                  "key": "ReferencePower",
+                  "required": false,
+                  "type": "double"
+                },
+                {
+                  "key": "Exponent",
+                  "required": false,
+                  "type": "double"
+                },
+                {
+                  "key": "MinMult",
+                  "required": false,
+                  "type": "double"
+                },
+                {
+                  "key": "MaxMult",
+                  "required": false,
+                  "type": "double"
+                }
+              ]
+            },
+            {
+              "key": "Durability",
+              "required": false,
+              "type": "object",
+              "nestedType": "Durability",
+              "fields": [
+                {
+                  "key": "PerSwing",
+                  "required": false,
+                  "type": "integer"
+                },
+                {
+                  "key": "PerCycle",
+                  "required": false,
+                  "type": "integer"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Loot",
+          "required": false,
+          "documentation": "Conditional loot for the implicit action: a LootRef (referenced Lootables + inline Rolls).",
+          "type": "object",
+          "nestedType": "LootRef",
+          "ref": "LootRef"
+        },
+        {
+          "key": "Camera",
+          "required": false,
+          "type": "object",
+          "nestedType": "Camera",
+          "fields": [
+            {
+              "key": "Mode",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "Locked",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "FaceBlock",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "Recipe",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Animation",
+          "required": false,
+          "type": "object",
+          "nestedType": "Animation",
+          "fields": [
+            {
+              "key": "EmoteId",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "Swing",
+              "required": false,
+              "type": "object",
+              "nestedType": "Swing",
+              "fields": [
+                {
+                  "key": "IntervalMs",
+                  "required": false,
+                  "type": "long"
+                },
+                {
+                  "key": "Presentation",
+                  "required": false,
+                  "type": "object",
+                  "nestedType": "Presentation",
+                  "ref": "Presentation"
+                },
+                {
+                  "key": "Impact",
+                  "required": false,
+                  "type": "object",
+                  "nestedType": "Impact",
+                  "fields": [
+                    {
+                      "key": "DelayMs",
+                      "required": false,
+                      "type": "long"
+                    },
+                    {
+                      "key": "Presentation",
+                      "required": false,
+                      "type": "object",
+                      "nestedType": "Presentation",
+                      "ref": "Presentation"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "key": "ActionClip",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Presentation",
+          "required": false,
+          "type": "object",
+          "nestedType": "Presentation",
+          "ref": "Presentation"
+        },
+        {
+          "key": "Completion",
+          "required": false,
+          "type": "object",
+          "nestedType": "Presentation",
+          "ref": "Presentation"
+        },
+        {
+          "key": "Requires",
+          "required": false,
+          "type": "object",
+          "nestedType": "Requires",
+          "ref": "Requires"
+        },
+        {
+          "key": "Custody",
+          "required": false,
+          "type": "object",
+          "nestedType": "Custody",
+          "ref": "Custody"
+        },
+        {
+          "key": "Puppet",
+          "required": false,
+          "type": "object",
+          "nestedType": "Puppet",
+          "ref": "Puppet"
+        },
+        {
+          "key": "Flairs",
+          "required": false,
+          "type": "map",
+          "of": {
+            "type": "object",
+            "nestedType": "Flair",
+            "fields": [
+              {
+                "key": "Moments",
+                "required": false,
+                "type": "map",
+                "of": {
+                  "type": "object",
+                  "nestedType": "Presentation",
+                  "ref": "Presentation"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "Actions",
+          "required": false,
+          "type": "map",
+          "of": {
+            "type": "object",
+            "nestedType": "ActionDef",
+            "ref": "ActionDef"
+          }
+        },
+        {
+          "key": "Picker",
+          "required": false,
+          "documentation": "The multi-output picker knob group (decision 50); default = locked categories shown greyed.",
+          "type": "object",
+          "nestedType": "Picker",
+          "fields": [
+            {
+              "key": "ShowLocked",
+              "required": false,
+              "documentation": "Whether tool-gated (locked) output categories render greyed in the picker (default true); false hides them entirely.",
+              "type": "boolean"
+            }
+          ]
+        }
+      ]
+    },
+    "ActionAsset": {
+      "fields": [
+        {
+          "key": "Tags",
+          "required": false,
+          "documentation": "Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.\n\nFor example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.\n\nTags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**.",
+          "type": "map",
+          "of": {
+            "type": "array",
+            "of": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "key": "Name",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "Label",
+          "required": false,
+          "documentation": "An advisory localization key for admin/UI display of the action's name.",
+          "type": "string"
+        },
+        {
+          "key": "Input",
+          "required": false,
+          "documentation": "The diegetic action-selection matcher (held item / custody). Absent = a catch-all action.",
+          "type": "object",
+          "nestedType": "ActionInput",
+          "fields": [
+            {
+              "key": "ItemId",
+              "required": false,
+              "documentation": "Match an exact held item id (one of several optional routes; match = ANY route satisfied).",
+              "type": "string"
+            },
+            {
+              "key": "ResourceTypeId",
+              "required": false,
+              "documentation": "Match a native resource-type family of the held item.",
+              "type": "string"
+            },
+            {
+              "key": "Tags",
+              "required": false,
+              "documentation": "Match the held item's native tags (tag family -> accepted values).",
+              "type": "map",
+              "of": {
+                "type": "array",
+                "of": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "key": "Function",
+              "required": false,
+              "documentation": "Match the held item's live function: 'Weapon' | 'Armor' | 'Tool'.",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Custody",
+          "required": false,
+          "documentation": "Placed-input custody for this action.",
+          "type": "object",
+          "nestedType": "Custody",
+          "ref": "Custody"
+        },
+        {
+          "key": "Puppet",
+          "required": false,
+          "documentation": "The puppet-presentation group for this action.",
+          "type": "object",
+          "nestedType": "Puppet",
+          "ref": "Puppet"
+        },
+        {
+          "key": "Work",
+          "required": false,
+          "documentation": "The work-loop cadence for this action.",
+          "type": "object",
+          "nestedType": "Work",
+          "fields": [
+            {
+              "key": "CycleMs",
+              "required": false,
+              "type": "long"
+            },
+            {
+              "key": "MaxDurationMs",
+              "required": false,
+              "type": "long"
+            },
+            {
+              "key": "MaxMoveMeters",
+              "required": false,
+              "type": "double"
+            },
+            {
+              "key": "Exclusive",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "Xp",
+              "required": false,
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "WorkXp",
+                "fields": [
+                  {
+                    "key": "Skill",
+                    "required": false,
+                    "type": "string"
+                  },
+                  {
+                    "key": "PerCycle",
+                    "required": false,
+                    "type": "double"
+                  }
+                ]
+              }
+            },
+            {
+              "key": "Idle",
+              "required": false,
+              "type": "object",
+              "nestedType": "Idle",
+              "fields": [
+                {
+                  "key": "Enabled",
+                  "required": false,
+                  "type": "boolean"
+                },
+                {
+                  "key": "CycleMs",
+                  "required": false,
+                  "type": "long"
+                },
+                {
+                  "key": "XpFraction",
+                  "required": false,
+                  "type": "double"
+                }
+              ]
+            },
+            {
+              "key": "Repeat",
+              "required": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        {
+          "key": "Recipe",
+          "required": false,
+          "documentation": "The convert recipe for this action.",
+          "type": "object",
+          "nestedType": "Recipe",
+          "fields": [
+            {
+              "key": "Conversions",
+              "required": false,
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "Conversion",
+                "fields": [
+                  {
+                    "key": "Input",
+                    "required": false,
+                    "documentation": "The conversion input: a native Ingredient (exactly one of ItemId | ResourceTypeId).",
+                    "type": "object",
+                    "nestedType": "Ingredient",
+                    "ref": "Ingredient"
+                  },
+                  {
+                    "key": "Output",
+                    "required": false,
+                    "documentation": "The conversion output: an exact-ItemId Ingredient.",
+                    "type": "object",
+                    "nestedType": "Ingredient",
+                    "ref": "Ingredient"
+                  },
+                  {
+                    "key": "DurationMs",
+                    "required": false,
+                    "documentation": "Optional per-conversion pace override in ms; highest precedence (> NativeTime > Work.CycleMs). Null = none.",
+                    "type": "long"
+                  },
+                  {
+                    "key": "Category",
+                    "required": false,
+                    "documentation": "Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged.",
+                    "type": "string"
+                  }
+                ]
+              }
+            },
+            {
+              "key": "FromCrafting",
+              "required": false,
+              "type": "object",
+              "nestedType": "FromCrafting",
+              "fields": [
+                {
+                  "key": "Categories",
+                  "required": false,
+                  "documentation": "Native recipe categories to derive Conversions from (e.g. 'WoodPlanks'); a pack-added category in the set just works.",
+                  "type": "array",
+                  "of": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "key": "OutputPerInput",
+                  "required": false,
+                  "documentation": "Optional yield multiplier applied to each derived recipe's output (reader-defaults to 1).",
+                  "type": "integer"
+                },
+                {
+                  "key": "Benches",
+                  "required": false,
+                  "documentation": "Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match).",
+                  "type": "array",
+                  "of": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "key": "Types",
+                  "required": false,
+                  "documentation": "The recipe kinds to derive: 'Crafting' and/or 'Processing'; absent = both.",
+                  "type": "array",
+                  "of": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "key": "NativeTime",
+                  "required": false,
+                  "documentation": "Linear transform (Scale*TimeSeconds + OffsetMs) over each derived recipe's native time; defaults stay slower than vanilla.",
+                  "type": "object",
+                  "nestedType": "NativeTime",
+                  "fields": [
+                    {
+                      "key": "Scale",
+                      "required": false,
+                      "documentation": "Multiplier (m) on the recipe's native time; reader-defaults to 1.0 (stretch, never speed up below vanilla).",
+                      "type": "double"
+                    },
+                    {
+                      "key": "OffsetMs",
+                      "required": false,
+                      "documentation": "Additive floor (b) in milliseconds added after scaling; reader-defaults to 2000 so a station is never instant like vanilla.",
+                      "type": "long"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Tool",
+          "required": false,
+          "documentation": "The held-tool gate for this action.",
+          "type": "object",
+          "nestedType": "Tool",
+          "fields": [
+            {
+              "key": "Tags",
+              "required": false,
+              "documentation": "Native tag family match (e.g. {\"Family\":[\"Dagger\"]}): matches ANY-of the values per key against the held Item's raw tags.",
+              "type": "map",
+              "of": {
+                "type": "array",
+                "of": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "key": "Gather",
+              "required": false,
+              "type": "object",
+              "nestedType": "Gather",
+              "fields": [
+                {
+                  "key": "GatherType",
+                  "required": false,
+                  "type": "string"
+                },
+                {
+                  "key": "MinPower",
+                  "required": false,
+                  "type": "double"
+                }
+              ]
+            },
+            {
+              "key": "Ids",
+              "required": false,
+              "type": "array",
+              "of": {
+                "type": "string"
+              }
+            },
+            {
+              "key": "XpScale",
+              "required": false,
+              "type": "object",
+              "nestedType": "XpScale",
+              "fields": [
+                {
+                  "key": "GatherType",
+                  "required": false,
+                  "type": "string"
+                },
+                {
+                  "key": "ReferencePower",
+                  "required": false,
+                  "type": "double"
+                },
+                {
+                  "key": "Exponent",
+                  "required": false,
+                  "type": "double"
+                },
+                {
+                  "key": "MinMult",
+                  "required": false,
+                  "type": "double"
+                },
+                {
+                  "key": "MaxMult",
+                  "required": false,
+                  "type": "double"
+                }
+              ]
+            },
+            {
+              "key": "Durability",
+              "required": false,
+              "type": "object",
+              "nestedType": "Durability",
+              "fields": [
+                {
+                  "key": "PerSwing",
+                  "required": false,
+                  "type": "integer"
+                },
+                {
+                  "key": "PerCycle",
+                  "required": false,
+                  "type": "integer"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Hold",
+          "required": false,
+          "documentation": "The movement-hold / mount for this action.",
+          "type": "object",
+          "nestedType": "Hold",
+          "fields": [
+            {
+              "key": "MovementLock",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "EffectId",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "InterruptOnDamage",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "Mount",
+              "required": false,
+              "type": "object",
+              "nestedType": "Mount",
+              "fields": [
+                {
+                  "key": "Surface",
+                  "required": false,
+                  "type": "string"
+                },
+                {
+                  "key": "Entity",
+                  "required": false,
+                  "type": "object",
+                  "nestedType": "Entity",
+                  "fields": [
+                    {
+                      "key": "Offset",
+                      "required": false,
+                      "type": "object",
+                      "nestedType": "Offset",
+                      "fields": [
+                        {
+                          "key": "X",
+                          "required": false,
+                          "type": "double"
+                        },
+                        {
+                          "key": "Y",
+                          "required": false,
+                          "type": "double"
+                        },
+                        {
+                          "key": "Z",
+                          "required": false,
+                          "type": "double"
+                        }
+                      ]
+                    },
+                    {
+                      "key": "DismountOnMove",
+                      "required": false,
+                      "type": "boolean"
+                    },
+                    {
+                      "key": "Steerable",
+                      "required": false,
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Camera",
+          "required": false,
+          "documentation": "The camera pull for this action.",
+          "type": "object",
+          "nestedType": "Camera",
+          "fields": [
+            {
+              "key": "Mode",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "Locked",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "FaceBlock",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "Recipe",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Animation",
+          "required": false,
+          "documentation": "The work animation for this action.",
+          "type": "object",
+          "nestedType": "Animation",
+          "fields": [
+            {
+              "key": "EmoteId",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "Swing",
+              "required": false,
+              "type": "object",
+              "nestedType": "Swing",
+              "fields": [
+                {
+                  "key": "IntervalMs",
+                  "required": false,
+                  "type": "long"
+                },
+                {
+                  "key": "Presentation",
+                  "required": false,
+                  "type": "object",
+                  "nestedType": "Presentation",
+                  "ref": "Presentation"
+                },
+                {
+                  "key": "Impact",
+                  "required": false,
+                  "type": "object",
+                  "nestedType": "Impact",
+                  "fields": [
+                    {
+                      "key": "DelayMs",
+                      "required": false,
+                      "type": "long"
+                    },
+                    {
+                      "key": "Presentation",
+                      "required": false,
+                      "type": "object",
+                      "nestedType": "Presentation",
+                      "ref": "Presentation"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "key": "ActionClip",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Presentation",
+          "required": false,
+          "documentation": "The per-cycle presentation moment for this action.",
+          "type": "object",
+          "nestedType": "Presentation",
+          "ref": "Presentation"
+        },
+        {
+          "key": "Completion",
+          "required": false,
+          "documentation": "The session-completion presentation moment for this action.",
+          "type": "object",
+          "nestedType": "Presentation",
+          "ref": "Presentation"
+        },
+        {
+          "key": "Loot",
+          "required": false,
+          "documentation": "The conditional-loot (LootRef) for this action.",
+          "type": "object",
+          "nestedType": "LootRef",
+          "ref": "LootRef"
+        },
+        {
+          "key": "Requires",
+          "required": false,
+          "documentation": "The start gate for this action.",
+          "type": "object",
+          "nestedType": "Requires",
+          "ref": "Requires"
+        },
+        {
+          "key": "Steps",
+          "required": false,
+          "documentation": "The authored step PROGRAM; absent = the implicit classic-convert-loop program.",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "StationStep",
+            "ref": "StationStep"
+          }
+        },
+        {
+          "key": "Anchors",
+          "required": false,
+          "documentation": "Named multi-station anchor declarations (id -> {Station, MaxRadius}). [wave 3 discovery]",
+          "type": "map",
+          "of": {
+            "type": "object",
+            "nestedType": "Anchor",
+            "fields": [
+              {
+                "key": "Station",
+                "required": false,
+                "documentation": "The target station id this anchor resolves against (a type filter).",
+                "type": "string"
+              },
+              {
+                "key": "MaxRadius",
+                "required": false,
+                "documentation": "The horizontal block radius to search for the anchor station (reader-defaults to 12).",
+                "type": "double"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "ActionDef": {
+      "fields": [
+        {
+          "key": "Label",
+          "required": false,
+          "documentation": "An advisory localization key for admin/UI display of the action's name.",
+          "type": "string"
+        },
+        {
+          "key": "Ref",
+          "required": false,
+          "documentation": "Names a standalone ActionAsset as the BASE; other groups authored here overlay it group-wise.",
+          "type": "string"
+        },
+        {
+          "key": "Input",
+          "required": false,
+          "documentation": "The diegetic action-selection matcher (held item / custody). Absent = a catch-all action.",
+          "type": "object",
+          "nestedType": "ActionInput",
+          "fields": [
+            {
+              "key": "ItemId",
+              "required": false,
+              "documentation": "Match an exact held item id (one of several optional routes; match = ANY route satisfied).",
+              "type": "string"
+            },
+            {
+              "key": "ResourceTypeId",
+              "required": false,
+              "documentation": "Match a native resource-type family of the held item.",
+              "type": "string"
+            },
+            {
+              "key": "Tags",
+              "required": false,
+              "documentation": "Match the held item's native tags (tag family -> accepted values).",
+              "type": "map",
+              "of": {
+                "type": "array",
+                "of": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "key": "Function",
+              "required": false,
+              "documentation": "Match the held item's live function: 'Weapon' | 'Armor' | 'Tool'.",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Custody",
+          "required": false,
+          "documentation": "Per-action placed-input custody override.",
+          "type": "object",
+          "nestedType": "Custody",
+          "ref": "Custody"
+        },
+        {
+          "key": "Puppet",
+          "required": false,
+          "documentation": "Per-action puppet-presentation override (whole-group replace).",
+          "type": "object",
+          "nestedType": "Puppet",
+          "ref": "Puppet"
+        },
+        {
+          "key": "Work",
+          "required": false,
+          "documentation": "Per-action work-loop cadence override.",
+          "type": "object",
+          "nestedType": "Work",
+          "fields": [
+            {
+              "key": "CycleMs",
+              "required": false,
+              "type": "long"
+            },
+            {
+              "key": "MaxDurationMs",
+              "required": false,
+              "type": "long"
+            },
+            {
+              "key": "MaxMoveMeters",
+              "required": false,
+              "type": "double"
+            },
+            {
+              "key": "Exclusive",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "Xp",
+              "required": false,
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "WorkXp",
+                "fields": [
+                  {
+                    "key": "Skill",
+                    "required": false,
+                    "type": "string"
+                  },
+                  {
+                    "key": "PerCycle",
+                    "required": false,
+                    "type": "double"
+                  }
+                ]
+              }
+            },
+            {
+              "key": "Idle",
+              "required": false,
+              "type": "object",
+              "nestedType": "Idle",
+              "fields": [
+                {
+                  "key": "Enabled",
+                  "required": false,
+                  "type": "boolean"
+                },
+                {
+                  "key": "CycleMs",
+                  "required": false,
+                  "type": "long"
+                },
+                {
+                  "key": "XpFraction",
+                  "required": false,
+                  "type": "double"
+                }
+              ]
+            },
+            {
+              "key": "Repeat",
+              "required": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        {
+          "key": "Recipe",
+          "required": false,
+          "documentation": "Per-action convert recipe override.",
+          "type": "object",
+          "nestedType": "Recipe",
+          "fields": [
+            {
+              "key": "Conversions",
+              "required": false,
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "Conversion",
+                "fields": [
+                  {
+                    "key": "Input",
+                    "required": false,
+                    "documentation": "The conversion input: a native Ingredient (exactly one of ItemId | ResourceTypeId).",
+                    "type": "object",
+                    "nestedType": "Ingredient",
+                    "ref": "Ingredient"
+                  },
+                  {
+                    "key": "Output",
+                    "required": false,
+                    "documentation": "The conversion output: an exact-ItemId Ingredient.",
+                    "type": "object",
+                    "nestedType": "Ingredient",
+                    "ref": "Ingredient"
+                  },
+                  {
+                    "key": "DurationMs",
+                    "required": false,
+                    "documentation": "Optional per-conversion pace override in ms; highest precedence (> NativeTime > Work.CycleMs). Null = none.",
+                    "type": "long"
+                  },
+                  {
+                    "key": "Category",
+                    "required": false,
+                    "documentation": "Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged.",
+                    "type": "string"
+                  }
+                ]
+              }
+            },
+            {
+              "key": "FromCrafting",
+              "required": false,
+              "type": "object",
+              "nestedType": "FromCrafting",
+              "fields": [
+                {
+                  "key": "Categories",
+                  "required": false,
+                  "documentation": "Native recipe categories to derive Conversions from (e.g. 'WoodPlanks'); a pack-added category in the set just works.",
+                  "type": "array",
+                  "of": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "key": "OutputPerInput",
+                  "required": false,
+                  "documentation": "Optional yield multiplier applied to each derived recipe's output (reader-defaults to 1).",
+                  "type": "integer"
+                },
+                {
+                  "key": "Benches",
+                  "required": false,
+                  "documentation": "Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match).",
+                  "type": "array",
+                  "of": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "key": "Types",
+                  "required": false,
+                  "documentation": "The recipe kinds to derive: 'Crafting' and/or 'Processing'; absent = both.",
+                  "type": "array",
+                  "of": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "key": "NativeTime",
+                  "required": false,
+                  "documentation": "Linear transform (Scale*TimeSeconds + OffsetMs) over each derived recipe's native time; defaults stay slower than vanilla.",
+                  "type": "object",
+                  "nestedType": "NativeTime",
+                  "fields": [
+                    {
+                      "key": "Scale",
+                      "required": false,
+                      "documentation": "Multiplier (m) on the recipe's native time; reader-defaults to 1.0 (stretch, never speed up below vanilla).",
+                      "type": "double"
+                    },
+                    {
+                      "key": "OffsetMs",
+                      "required": false,
+                      "documentation": "Additive floor (b) in milliseconds added after scaling; reader-defaults to 2000 so a station is never instant like vanilla.",
+                      "type": "long"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Tool",
+          "required": false,
+          "documentation": "Per-action held-tool gate override.",
+          "type": "object",
+          "nestedType": "Tool",
+          "fields": [
+            {
+              "key": "Tags",
+              "required": false,
+              "documentation": "Native tag family match (e.g. {\"Family\":[\"Dagger\"]}): matches ANY-of the values per key against the held Item's raw tags.",
+              "type": "map",
+              "of": {
+                "type": "array",
+                "of": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "key": "Gather",
+              "required": false,
+              "type": "object",
+              "nestedType": "Gather",
+              "fields": [
+                {
+                  "key": "GatherType",
+                  "required": false,
+                  "type": "string"
+                },
+                {
+                  "key": "MinPower",
+                  "required": false,
+                  "type": "double"
+                }
+              ]
+            },
+            {
+              "key": "Ids",
+              "required": false,
+              "type": "array",
+              "of": {
+                "type": "string"
+              }
+            },
+            {
+              "key": "XpScale",
+              "required": false,
+              "type": "object",
+              "nestedType": "XpScale",
+              "fields": [
+                {
+                  "key": "GatherType",
+                  "required": false,
+                  "type": "string"
+                },
+                {
+                  "key": "ReferencePower",
+                  "required": false,
+                  "type": "double"
+                },
+                {
+                  "key": "Exponent",
+                  "required": false,
+                  "type": "double"
+                },
+                {
+                  "key": "MinMult",
+                  "required": false,
+                  "type": "double"
+                },
+                {
+                  "key": "MaxMult",
+                  "required": false,
+                  "type": "double"
+                }
+              ]
+            },
+            {
+              "key": "Durability",
+              "required": false,
+              "type": "object",
+              "nestedType": "Durability",
+              "fields": [
+                {
+                  "key": "PerSwing",
+                  "required": false,
+                  "type": "integer"
+                },
+                {
+                  "key": "PerCycle",
+                  "required": false,
+                  "type": "integer"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Hold",
+          "required": false,
+          "documentation": "Per-action movement-hold / mount override.",
+          "type": "object",
+          "nestedType": "Hold",
+          "fields": [
+            {
+              "key": "MovementLock",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "EffectId",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "InterruptOnDamage",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "Mount",
+              "required": false,
+              "type": "object",
+              "nestedType": "Mount",
+              "fields": [
+                {
+                  "key": "Surface",
+                  "required": false,
+                  "type": "string"
+                },
+                {
+                  "key": "Entity",
+                  "required": false,
+                  "type": "object",
+                  "nestedType": "Entity",
+                  "fields": [
+                    {
+                      "key": "Offset",
+                      "required": false,
+                      "type": "object",
+                      "nestedType": "Offset",
+                      "fields": [
+                        {
+                          "key": "X",
+                          "required": false,
+                          "type": "double"
+                        },
+                        {
+                          "key": "Y",
+                          "required": false,
+                          "type": "double"
+                        },
+                        {
+                          "key": "Z",
+                          "required": false,
+                          "type": "double"
+                        }
+                      ]
+                    },
+                    {
+                      "key": "DismountOnMove",
+                      "required": false,
+                      "type": "boolean"
+                    },
+                    {
+                      "key": "Steerable",
+                      "required": false,
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Camera",
+          "required": false,
+          "documentation": "Per-action camera-pull override.",
+          "type": "object",
+          "nestedType": "Camera",
+          "fields": [
+            {
+              "key": "Mode",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "Locked",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "FaceBlock",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "Recipe",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Animation",
+          "required": false,
+          "documentation": "Per-action work-animation override.",
+          "type": "object",
+          "nestedType": "Animation",
+          "fields": [
+            {
+              "key": "EmoteId",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "Swing",
+              "required": false,
+              "type": "object",
+              "nestedType": "Swing",
+              "fields": [
+                {
+                  "key": "IntervalMs",
+                  "required": false,
+                  "type": "long"
+                },
+                {
+                  "key": "Presentation",
+                  "required": false,
+                  "type": "object",
+                  "nestedType": "Presentation",
+                  "ref": "Presentation"
+                },
+                {
+                  "key": "Impact",
+                  "required": false,
+                  "type": "object",
+                  "nestedType": "Impact",
+                  "fields": [
+                    {
+                      "key": "DelayMs",
+                      "required": false,
+                      "type": "long"
+                    },
+                    {
+                      "key": "Presentation",
+                      "required": false,
+                      "type": "object",
+                      "nestedType": "Presentation",
+                      "ref": "Presentation"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "key": "ActionClip",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Presentation",
+          "required": false,
+          "documentation": "Per-action per-cycle presentation moment override.",
+          "type": "object",
+          "nestedType": "Presentation",
+          "ref": "Presentation"
+        },
+        {
+          "key": "Completion",
+          "required": false,
+          "documentation": "Per-action session-completion presentation moment override.",
+          "type": "object",
+          "nestedType": "Presentation",
+          "ref": "Presentation"
+        },
+        {
+          "key": "Loot",
+          "required": false,
+          "documentation": "Per-action conditional-loot override (a LootRef: Lootables + inline Rolls).",
+          "type": "object",
+          "nestedType": "LootRef",
+          "ref": "LootRef"
+        },
+        {
+          "key": "Requires",
+          "required": false,
+          "documentation": "Per-action start gate override.",
+          "type": "object",
+          "nestedType": "Requires",
+          "ref": "Requires"
+        },
+        {
+          "key": "Steps",
+          "required": false,
+          "documentation": "The authored step PROGRAM; absent = the implicit classic-convert-loop program.",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "StationStep",
+            "ref": "StationStep"
+          }
+        },
+        {
+          "key": "Anchors",
+          "required": false,
+          "documentation": "Named multi-station anchor declarations (id -> {Station, MaxRadius}). [wave 3 discovery]",
+          "type": "map",
+          "of": {
+            "type": "object",
+            "nestedType": "Anchor",
+            "fields": [
+              {
+                "key": "Station",
+                "required": false,
+                "documentation": "The target station id this anchor resolves against (a type filter).",
+                "type": "string"
+              },
+              {
+                "key": "MaxRadius",
+                "required": false,
+                "documentation": "The horizontal block radius to search for the anchor station (reader-defaults to 12).",
+                "type": "double"
+              }
+            ]
+          }
+        },
+        {
+          "key": "Picker",
+          "required": false,
+          "documentation": "Per-action multi-output picker override (whole-group replace of the station-level Picker).",
+          "type": "object",
+          "nestedType": "Picker",
+          "fields": [
+            {
+              "key": "ShowLocked",
+              "required": false,
+              "documentation": "Whether tool-gated (locked) output categories render greyed in the picker (default true); false hides them entirely.",
+              "type": "boolean"
+            }
+          ]
+        }
+      ]
+    },
+    "StationStep": {
+      "fields": [
+        {
+          "key": "Id",
+          "required": false,
+          "documentation": "Unique step id within one action's Steps array; required when another step or extension insertion anchors on it.",
+          "type": "string"
+        },
+        {
+          "key": "Conditions",
+          "required": false,
+          "documentation": "Gate re-checked at each iteration entry; a failing check runs OnConditionFail.",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "Condition",
+            "ref": "Condition"
+          }
+        },
+        {
+          "key": "OnConditionFail",
+          "required": false,
+          "documentation": "What a failing Conditions check does: Skip (no-op continue) or Fail (default); Goto jumps to a step Id.",
+          "type": "object",
+          "nestedType": "OnConditionFail",
+          "fields": [
+            {
+              "key": "Result",
+              "required": false,
+              "documentation": "On a failing Conditions check: 'Skip' (treat as a no-op success and continue) or 'Fail' (default).",
+              "type": "string"
+            },
+            {
+              "key": "Goto",
+              "required": false,
+              "documentation": "An authored step Id to jump to on a success-continuing result; null = classic linear advance.",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "At",
+          "required": false,
+          "documentation": "The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'self'. [wave 3]",
+          "type": "string"
+        },
+        {
+          "key": "Repeat",
+          "required": false,
+          "documentation": "Per-step iteration count: a fixed Times, or Min/Max/AddFactors resolved once at step entry.",
+          "type": "object",
+          "nestedType": "Repeat",
+          "fields": [
+            {
+              "key": "Times",
+              "required": false,
+              "documentation": "A fixed iteration count. Authored INSTEAD of Min/Max/AddFactors (the fixed route).",
+              "type": "integer"
+            },
+            {
+              "key": "Min",
+              "required": false,
+              "documentation": "Lower bound of the factor-resolved iteration count (the ranged route).",
+              "type": "integer"
+            },
+            {
+              "key": "Max",
+              "required": false,
+              "documentation": "Upper bound of the factor-resolved iteration count (the ranged route).",
+              "type": "integer"
+            },
+            {
+              "key": "AddFactors",
+              "required": false,
+              "documentation": "Weighted factor references summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max).",
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "FactorRef",
+                "ref": "FactorRef"
+              }
+            }
+          ]
+        },
+        {
+          "key": "Duration",
+          "required": false,
+          "documentation": "A post-phase hold in ms per iteration; prop/presentation persist across the hold.",
+          "type": "object",
+          "nestedType": "Duration",
+          "fields": [
+            {
+              "key": "Ms",
+              "required": false,
+              "documentation": "The hold length in milliseconds for this iteration.",
+              "type": "long"
+            }
+          ]
+        },
+        {
+          "key": "Presentation",
+          "required": false,
+          "documentation": "A sound/particles/etc. cue played once at step ITERATION entry.",
+          "type": "object",
+          "nestedType": "Presentation",
+          "ref": "Presentation"
+        },
+        {
+          "key": "Puppet",
+          "required": false,
+          "documentation": "Per-step puppet override: a Clip played at iteration entry and/or a Prop swap for this beat.",
+          "type": "object",
+          "nestedType": "PuppetOverride",
+          "fields": [
+            {
+              "key": "Clip",
+              "required": false,
+              "documentation": "The puppet clip id played once at this step's iteration entry; null = inherit the action's default clip.",
+              "type": "string"
+            },
+            {
+              "key": "Prop",
+              "required": false,
+              "documentation": "The puppet's held prop for this beat; null = inherit the action's default Prop.",
+              "type": "object",
+              "nestedType": "Prop",
+              "fields": [
+                {
+                  "key": "Source",
+                  "required": false,
+                  "type": "string"
+                },
+                {
+                  "key": "ItemId",
+                  "required": false,
+                  "type": "string"
+                },
+                {
+                  "key": "Slot",
+                  "required": false,
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Walk",
+          "required": false,
+          "documentation": "Move the puppet to an anchor (To) at SpeedMps. Requires Puppet enabled. [wave 3]",
+          "type": "object",
+          "nestedType": "Walk",
+          "fields": [
+            {
+              "key": "To",
+              "required": false,
+              "documentation": "The anchor id to walk the puppet to (or the reserved 'self' = the primary station).",
+              "type": "string"
+            },
+            {
+              "key": "SpeedMps",
+              "required": false,
+              "documentation": "Straight-line walk speed in meters per second (reader-defaults to 2.5).",
+              "type": "double"
+            }
+          ]
+        },
+        {
+          "key": "Consume",
+          "required": false,
+          "documentation": "Consume Quantity of ItemId|ResourceTypeId From Inventory (default) or Custody.",
+          "type": "object",
+          "nestedType": "Consume",
+          "fields": [
+            {
+              "key": "ItemId",
+              "required": false,
+              "documentation": "Exact item id to consume (exactly one of ItemId | ResourceTypeId).",
+              "type": "string"
+            },
+            {
+              "key": "ResourceTypeId",
+              "required": false,
+              "documentation": "A native resource-type family to consume (exactly one of ItemId | ResourceTypeId).",
+              "type": "string"
+            },
+            {
+              "key": "Quantity",
+              "required": false,
+              "documentation": "The count to consume (reader-defaults to 1).",
+              "type": "integer"
+            },
+            {
+              "key": "From",
+              "required": false,
+              "documentation": "The source: 'Inventory' (default) or 'Custody' (the block's placed-input claim).",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Produce",
+          "required": false,
+          "documentation": "Produce Quantity of ItemId To Inventory (default). To Custody is [wave 3].",
+          "type": "object",
+          "nestedType": "Produce",
+          "fields": [
+            {
+              "key": "ItemId",
+              "required": false,
+              "documentation": "The exact item id to produce.",
+              "type": "string"
+            },
+            {
+              "key": "Quantity",
+              "required": false,
+              "documentation": "The count to produce (reader-defaults to 1).",
+              "type": "integer"
+            },
+            {
+              "key": "To",
+              "required": false,
+              "documentation": "The destination: 'Inventory' (default). 'Custody' is [wave 3].",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Roll",
+          "required": false,
+          "documentation": "Evaluate a loot pass through the shared LootRef (Lootables + inline Rolls) vocabulary.",
+          "type": "object",
+          "nestedType": "LootRef",
+          "ref": "LootRef"
+        },
+        {
+          "key": "Commands",
+          "required": false,
+          "documentation": "Run commands through the shared CommandRewardExecutor with the usual placeholder substitutions.",
+          "type": "array",
+          "of": {
+            "type": "string"
+          }
+        },
+        {
+          "key": "Stamp",
+          "required": false,
+          "documentation": "The enhance-commit phase (reagents + durability + stat rolls) - see Stamp.",
+          "type": "object",
+          "nestedType": "Stamp",
+          "fields": [
+            {
+              "key": "Reagents",
+              "required": false,
+              "documentation": "Ingredient reagents consumed from the player's inventory at this step's commit.",
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "Ingredient",
+                "ref": "Ingredient"
+              }
+            },
+            {
+              "key": "Durability",
+              "required": false,
+              "documentation": "RpgStations-native durability upgrade (AddMax). Real without any progression mod.",
+              "type": "object",
+              "nestedType": "Durability",
+              "fields": [
+                {
+                  "key": "AddMax",
+                  "required": false,
+                  "documentation": "The amount added to the stack's MaxDurability (and its current durability).",
+                  "type": "double"
+                }
+              ]
+            },
+            {
+              "key": "Stats",
+              "required": false,
+              "documentation": "The composable stat-roll + cap model, delegated to the registered EnhanceStamper.",
+              "type": "object",
+              "nestedType": "Stats",
+              "fields": [
+                {
+                  "key": "Pool",
+                  "required": false,
+                  "documentation": "A reusable RollPool asset id to pick stat entries from (alternative/addition to inline Entries).",
+                  "type": "string"
+                },
+                {
+                  "key": "Entries",
+                  "required": false,
+                  "documentation": "Inline candidate stat-roll entries (shares the StatRollEntry shape with RollPool).",
+                  "type": "array",
+                  "of": {
+                    "type": "object",
+                    "nestedType": "StatRollEntry",
+                    "ref": "StatRollEntry"
+                  }
+                },
+                {
+                  "key": "Picks",
+                  "required": false,
+                  "documentation": "How many pool entries the weighted route picks (Always entries are extra).",
+                  "type": "object",
+                  "nestedType": "Picks",
+                  "fields": [
+                    {
+                      "key": "Min",
+                      "required": false,
+                      "documentation": "The minimum number of weighted picks (reader-defaults to 1).",
+                      "type": "integer"
+                    },
+                    {
+                      "key": "Max",
+                      "required": false,
+                      "documentation": "The maximum number of weighted picks (reader-defaults to Min).",
+                      "type": "integer"
+                    }
+                  ]
+                },
+                {
+                  "key": "Unique",
+                  "required": false,
+                  "documentation": "When true, a stat id is never picked twice in one stamp (default false).",
+                  "type": "boolean"
+                },
+                {
+                  "key": "Caps",
+                  "required": false,
+                  "documentation": "Budget/per-stat/economics clamps applied after the roll.",
+                  "type": "object",
+                  "nestedType": "Caps",
+                  "fields": [
+                    {
+                      "key": "Budgets",
+                      "required": false,
+                      "documentation": "Total-point budget entries; the EFFECTIVE budget is the MIN over every entry (M2 rule).",
+                      "type": "array",
+                      "of": {
+                        "type": "object",
+                        "nestedType": "Budget",
+                        "fields": [
+                          {
+                            "key": "Points",
+                            "required": false,
+                            "documentation": "A flat total budget (the flat route). Author INSTEAD of PointsPer+Factors.",
+                            "type": "double"
+                          },
+                          {
+                            "key": "PointsPer",
+                            "required": false,
+                            "documentation": "Per-unit budget multiplied by the summed Factors (the factor-scaled route).",
+                            "type": "double"
+                          },
+                          {
+                            "key": "Factors",
+                            "required": false,
+                            "documentation": "Weighted factor references summed and multiplied by PointsPer: PointsPer * sum(resolve*Weight).",
+                            "type": "array",
+                            "of": {
+                              "type": "object",
+                              "nestedType": "FactorRef",
+                              "ref": "FactorRef"
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": "PerStat",
+                      "required": false,
+                      "documentation": "A per-stat-id ceiling layered ON TOP of the total budget (stat id -> max points).",
+                      "type": "map",
+                      "of": {
+                        "type": "double"
+                      }
+                    },
+                    {
+                      "key": "Economics",
+                      "required": false,
+                      "documentation": "Reagent-cost scaling per prior stamp count; never affects the point budget.",
+                      "type": "object",
+                      "nestedType": "Economics",
+                      "fields": [
+                        {
+                          "key": "RepeatCostMultiplier",
+                          "required": false,
+                          "documentation": "Scales reagent cost per prior stamp count: ceil(base * (1 + mult * stampCount)).",
+                          "type": "double"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "Ingredient": {
+      "fields": [
+        {
+          "key": "ItemId",
+          "required": false,
+          "documentation": "Exact item id (exactly one of ItemId | ResourceTypeId). An OUTPUT uses only ItemId.",
+          "type": "string"
+        },
+        {
+          "key": "ResourceTypeId",
+          "required": false,
+          "documentation": "A native Item.ResourceTypes family id (the 'any log' route); INPUT only. Exactly one of ItemId | ResourceTypeId.",
+          "type": "string"
+        },
+        {
+          "key": "Quantity",
+          "required": false,
+          "documentation": "The item count; reader-defaults to 1 when omitted or non-positive.",
+          "type": "integer"
+        }
+      ]
+    },
+    "FactorRef": {
+      "fields": [
+        {
+          "key": "Factor",
+          "required": false,
+          "documentation": "The namespaced factor channel id (e.g. 'stat', 'rpgstations:tool_power'). Unregistered = resolves to 0 (fail-closed).",
+          "type": "string"
+        },
+        {
+          "key": "Param",
+          "required": false,
+          "documentation": "Optional provider-interpreted argument (for 'stat' the native stat channel id, e.g. 'MMO_Luck'; for a skill factor a skill id).",
+          "type": "string"
+        },
+        {
+          "key": "Weight",
+          "required": false,
+          "documentation": "Multiplier on this factor's resolved value; reader-defaults to 1.0 when omitted. Composition is sum(resolve * Weight).",
+          "type": "double"
+        }
+      ]
+    },
+    "LootRef": {
+      "fields": [
+        {
+          "key": "Lootables",
+          "required": false,
+          "documentation": "Referenced LootableAsset ids (case-insensitive at resolve). Each table's Rolls evaluate.",
+          "type": "array",
+          "of": {
+            "type": "string"
+          }
+        },
+        {
+          "key": "Rolls",
+          "required": false,
+          "documentation": "Inline Rolls authored directly at this site, in addition to any referenced Lootables.",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "Roll",
+            "ref": "Roll"
+          }
+        }
+      ]
+    },
+    "Roll": {
+      "fields": [
+        {
+          "key": "Trigger",
+          "required": false,
+          "documentation": "When this roll fires: 'Cycle' (per completed cycle, the default) or 'Completion' (at session stop).",
+          "type": "string"
+        },
+        {
+          "key": "Conditions",
+          "required": false,
+          "documentation": "Gate: every Condition must pass (bounded factor checks) before the roll is considered.",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "Condition",
+            "ref": "Condition"
+          }
+        },
+        {
+          "key": "Chance",
+          "required": false,
+          "documentation": "Probabilistic gate over the WHOLE roll (Ladder included); absent = a deterministic pass.",
+          "type": "object",
+          "nestedType": "Chance",
+          "fields": [
+            {
+              "key": "BasePercent",
+              "required": false,
+              "documentation": "The flat base chance in percent (0..100) before any factor contributions.",
+              "type": "double"
+            },
+            {
+              "key": "AddFactors",
+              "required": false,
+              "documentation": "Weighted factor references summed onto BasePercent: sum(resolve(Factor, Param) * Weight).",
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "FactorRef",
+                "ref": "FactorRef"
+              }
+            },
+            {
+              "key": "CapPercent",
+              "required": false,
+              "documentation": "The maximum effective chance in percent; the summed chance clamps to [0, CapPercent].",
+              "type": "double"
+            }
+          ]
+        },
+        {
+          "key": "Ladder",
+          "required": false,
+          "documentation": "A floor ladder over a summed factor value; the highest reached floor's Grants fire.",
+          "type": "object",
+          "nestedType": "Ladder",
+          "fields": [
+            {
+              "key": "Values",
+              "required": false,
+              "documentation": "Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array.",
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "FactorRef",
+                "ref": "FactorRef"
+              }
+            },
+            {
+              "key": "Floors",
+              "required": false,
+              "documentation": "The reward floors; the HIGHEST floor whose Min <= the summed value grants.",
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "Floor",
+                "fields": [
+                  {
+                    "key": "Min",
+                    "required": false,
+                    "documentation": "The summed-value threshold this floor requires (inclusive).",
+                    "type": "double"
+                  },
+                  {
+                    "key": "Grants",
+                    "required": false,
+                    "documentation": "This floor's ONLY reward path (no sibling DropList leaf, M3 fix 2).",
+                    "type": "object",
+                    "nestedType": "Grants",
+                    "fields": [
+                      {
+                        "key": "BonusOutputCopies",
+                        "required": false,
+                        "documentation": "N extra copies of THIS cycle's Output (Cycle trigger only); silently skipped when inventory is full.",
+                        "type": "integer"
+                      },
+                      {
+                        "key": "DropList",
+                        "required": false,
+                        "documentation": "A native ItemDropList asset id, rolled via ItemModule.getRandomItemDrops.",
+                        "type": "string"
+                      },
+                      {
+                        "key": "Commands",
+                        "required": false,
+                        "documentation": "Commands run with {player}/{uuid}/{station}/{action}/{cycles} placeholders substituted.",
+                        "type": "array",
+                        "of": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "key": "Effects",
+                        "required": false,
+                        "documentation": "Native EntityEffects (id-ref-only, each with an optional DurationMs) applied to the player when the roll grants.",
+                        "type": "array",
+                        "of": {
+                          "type": "object",
+                          "nestedType": "EffectRef",
+                          "fields": [
+                            {
+                              "key": "Id",
+                              "required": false,
+                              "documentation": "The native EntityEffect asset id to apply (id-ref-only; never inlines the effect body).",
+                              "type": "string"
+                            },
+                            {
+                              "key": "DurationMs",
+                              "required": false,
+                              "documentation": "Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL.",
+                              "type": "long"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "key": "Presentation",
+                    "required": false,
+                    "documentation": "Played on the rare-find moment when this floor is reached and grants something.",
+                    "type": "object",
+                    "nestedType": "Presentation",
+                    "ref": "Presentation"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "key": "Grants",
+          "required": false,
+          "documentation": "Top-level rewards granted when the roll fires (in addition to any reached Ladder floor's Grants).",
+          "type": "object",
+          "nestedType": "Grants",
+          "fields": [
+            {
+              "key": "BonusOutputCopies",
+              "required": false,
+              "documentation": "N extra copies of THIS cycle's Output (Cycle trigger only); silently skipped when inventory is full.",
+              "type": "integer"
+            },
+            {
+              "key": "DropList",
+              "required": false,
+              "documentation": "A native ItemDropList asset id, rolled via ItemModule.getRandomItemDrops.",
+              "type": "string"
+            },
+            {
+              "key": "Commands",
+              "required": false,
+              "documentation": "Commands run with {player}/{uuid}/{station}/{action}/{cycles} placeholders substituted.",
+              "type": "array",
+              "of": {
+                "type": "string"
+              }
+            },
+            {
+              "key": "Effects",
+              "required": false,
+              "documentation": "Native EntityEffects (id-ref-only, each with an optional DurationMs) applied to the player when the roll grants.",
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "EffectRef",
+                "fields": [
+                  {
+                    "key": "Id",
+                    "required": false,
+                    "documentation": "The native EntityEffect asset id to apply (id-ref-only; never inlines the effect body).",
+                    "type": "string"
+                  },
+                  {
+                    "key": "DurationMs",
+                    "required": false,
+                    "documentation": "Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL.",
+                    "type": "long"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "Condition": {
+      "fields": [
+        {
+          "key": "Factor",
+          "required": false,
+          "documentation": "The namespaced factor channel id to gate on. Unregistered = fails CLOSED (the gate never silently opens).",
+          "type": "string"
+        },
+        {
+          "key": "Param",
+          "required": false,
+          "documentation": "Optional provider-interpreted argument (e.g. a skill id, or a 'stat' channel id).",
+          "type": "string"
+        },
+        {
+          "key": "Min",
+          "required": false,
+          "documentation": "Lower bound (inclusive); the resolved factor value must be >= Min. Omit for no lower bound.",
+          "type": "double"
+        },
+        {
+          "key": "Max",
+          "required": false,
+          "documentation": "Upper bound (inclusive); the resolved factor value must be <= Max. Omit for no upper bound.",
+          "type": "double"
+        }
+      ]
+    },
+    "Custody": {
+      "fields": [
+        {
+          "key": "MaxQuantity",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "key": "Input",
+          "required": false,
+          "type": "object",
+          "nestedType": "ActionInput",
+          "fields": [
+            {
+              "key": "ItemId",
+              "required": false,
+              "documentation": "Match an exact held item id (one of several optional routes; match = ANY route satisfied).",
+              "type": "string"
+            },
+            {
+              "key": "ResourceTypeId",
+              "required": false,
+              "documentation": "Match a native resource-type family of the held item.",
+              "type": "string"
+            },
+            {
+              "key": "Tags",
+              "required": false,
+              "documentation": "Match the held item's native tags (tag family -> accepted values).",
+              "type": "map",
+              "of": {
+                "type": "array",
+                "of": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "key": "Function",
+              "required": false,
+              "documentation": "Match the held item's live function: 'Weapon' | 'Armor' | 'Tool'.",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "States",
+          "required": false,
+          "type": "object",
+          "nestedType": "States",
+          "fields": [
+            {
+              "key": "Empty",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "Loaded",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Display",
+          "required": false,
+          "type": "object",
+          "nestedType": "Display",
+          "fields": [
+            {
+              "key": "Offset",
+              "required": false,
+              "type": "object",
+              "nestedType": "Offset",
+              "fields": [
+                {
+                  "key": "X",
+                  "required": false,
+                  "type": "double"
+                },
+                {
+                  "key": "Y",
+                  "required": false,
+                  "type": "double"
+                },
+                {
+                  "key": "Z",
+                  "required": false,
+                  "type": "double"
+                }
+              ]
+            },
+            {
+              "key": "Scale",
+              "required": false,
+              "type": "double"
+            },
+            {
+              "key": "Rotation",
+              "required": false,
+              "type": "object",
+              "nestedType": "Rotation",
+              "fields": [
+                {
+                  "key": "X",
+                  "required": false,
+                  "documentation": "Pitch in degrees (tips the prop forward/back - the 'lay it flat' axis). Default 0.",
+                  "type": "double"
+                },
+                {
+                  "key": "Y",
+                  "required": false,
+                  "documentation": "Yaw in degrees (turns about vertical; the placed block's facing is added at spawn). Default 0.",
+                  "type": "double"
+                },
+                {
+                  "key": "Z",
+                  "required": false,
+                  "documentation": "Roll in degrees (tips sideways about the prop's own long axis). Default 0.",
+                  "type": "double"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "Puppet": {
+      "fields": [
+        {
+          "key": "Enabled",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "key": "Hide",
+          "required": false,
+          "type": "object",
+          "nestedType": "Hide",
+          "fields": [
+            {
+              "key": "Route",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "EffectId",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Look",
+          "required": false,
+          "type": "object",
+          "nestedType": "Look",
+          "fields": [
+            {
+              "key": "Source",
+              "required": false,
+              "documentation": "The puppet appearance discriminator: 'PlayerClone' (default), 'Model' (Look.Model), or 'NpcRole' (Look.Role).",
+              "type": "string"
+            },
+            {
+              "key": "Model",
+              "required": false,
+              "documentation": "The fixed-model appearance group (read only when Source is 'Model'); also carries the any-source FallbackModelId.",
+              "type": "object",
+              "nestedType": "Model",
+              "fields": [
+                {
+                  "key": "ModelId",
+                  "required": false,
+                  "documentation": "The fixed model asset id used when Look.Source is 'Model'.",
+                  "type": "string"
+                },
+                {
+                  "key": "FallbackModelId",
+                  "required": false,
+                  "documentation": "The any-source resolution-ladder fallback model id when the primary look is unresolvable.",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "key": "Role",
+              "required": false,
+              "documentation": "The NpcRole performer configuration group (read only when Source is 'NpcRole').",
+              "type": "object",
+              "nestedType": "Role",
+              "fields": [
+                {
+                  "key": "RoleId",
+                  "required": false,
+                  "documentation": "The native Role asset id backing this performer (id-ref-only; required when Source is 'NpcRole').",
+                  "type": "string"
+                },
+                {
+                  "key": "SkinSource",
+                  "required": false,
+                  "documentation": "Whose appearance the Role NPC wears: 'PlayerClone' (default, cloned live player skin) or 'RoleDefault' (the role's own model).",
+                  "type": "string"
+                },
+                {
+                  "key": "Persist",
+                  "required": false,
+                  "documentation": "false (default) spawns the performer NonSerialized (transient); true reserves the persistent-hireling posture.",
+                  "type": "boolean"
+                },
+                {
+                  "key": "SpeedMps",
+                  "required": false,
+                  "documentation": "Performer walk-speed override (m/s); null defers to the role asset's own MotionControllerWalk speed.",
+                  "type": "double"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "Offset",
+          "required": false,
+          "type": "object",
+          "nestedType": "Offset",
+          "fields": [
+            {
+              "key": "X",
+              "required": false,
+              "type": "double"
+            },
+            {
+              "key": "Y",
+              "required": false,
+              "type": "double"
+            },
+            {
+              "key": "Z",
+              "required": false,
+              "type": "double"
+            }
+          ]
+        },
+        {
+          "key": "Yaw",
+          "required": false,
+          "type": "double"
+        },
+        {
+          "key": "Prop",
+          "required": false,
+          "type": "object",
+          "nestedType": "Prop",
+          "fields": [
+            {
+              "key": "Source",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "ItemId",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "Slot",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        }
+      ]
+    },
+    "Requires": {
+      "fields": [
+        {
+          "key": "Permission",
+          "required": false,
+          "documentation": "A permission node the player must hold to start; null = no permission gate.",
+          "type": "string"
+        },
+        {
+          "key": "Conditions",
+          "required": false,
+          "documentation": "Factor gate: every Condition must pass to start; an unregistered factor fails CLOSED.",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "Condition",
+            "ref": "Condition"
+          }
+        }
+      ]
+    },
+    "Presentation": {
+      "fields": [
+        {
+          "key": "Sound",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "Particles",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "Animation",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "AnimationItem",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "AnimationSlot",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "Camera",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "Shake",
+          "required": false,
+          "type": "object",
+          "nestedType": "Shake",
+          "fields": [
+            {
+              "key": "EffectId",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "Intensity",
+              "required": false,
+              "type": "double"
+            }
+          ]
+        },
+        {
+          "key": "Interaction",
+          "required": false,
+          "documentation": "A native RootInteraction chain fired at this moment (id-ref-only); null = none.",
+          "type": "object",
+          "nestedType": "Interaction",
+          "fields": [
+            {
+              "key": "Id",
+              "required": false,
+              "documentation": "The native RootInteraction chain id to fire at this moment (id-ref-only; never inlines the chain body).",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Effect",
+          "required": false,
+          "documentation": "A native EntityEffect applied at this moment (id-ref-only, with an optional DurationMs); null = none.",
+          "type": "object",
+          "nestedType": "EffectRef",
+          "fields": [
+            {
+              "key": "Id",
+              "required": false,
+              "documentation": "The native EntityEffect asset id to apply (id-ref-only; never inlines the effect body).",
+              "type": "string"
+            },
+            {
+              "key": "DurationMs",
+              "required": false,
+              "documentation": "Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL.",
+              "type": "long"
+            }
+          ]
+        }
+      ]
+    },
+    "StatRollEntry": {
+      "fields": [
+        {
+          "key": "Stat",
+          "required": false,
+          "documentation": "The stat id this entry rolls points into (opaque to this engine; the registered EnhanceStamper interprets it).",
+          "type": "string"
+        },
+        {
+          "key": "Points",
+          "required": false,
+          "documentation": "The point value range (with optional weighted factor scaling) a hit on this entry rolls within.",
+          "type": "object",
+          "nestedType": "Points",
+          "fields": [
+            {
+              "key": "Min",
+              "required": false,
+              "documentation": "Inclusive lower bound of the rolled point value (reader-defaults to 1.0).",
+              "type": "double"
+            },
+            {
+              "key": "Max",
+              "required": false,
+              "documentation": "Inclusive upper bound of the rolled point value (reader-defaults to Min - a fixed value).",
+              "type": "double"
+            },
+            {
+              "key": "AddFactors",
+              "required": false,
+              "documentation": "Weighted factor references summed ONTO the rolled points: sum(resolve(Factor, Param) * Weight).",
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "FactorRef",
+                "ref": "FactorRef"
+              }
+            }
+          ]
+        },
+        {
+          "key": "Weight",
+          "required": false,
+          "documentation": "Relative pick weight in the weighted route (default 1.0, must be > 0 to ever be picked).",
+          "type": "double"
+        },
+        {
+          "key": "Always",
+          "required": false,
+          "documentation": "When true, granted unconditionally on every stamp (independent of the weighted pool and Picks). Default false.",
+          "type": "boolean"
+        }
+      ]
+    },
+    "RollPool": {
+      "fields": [
+        {
+          "key": "Tags",
+          "required": false,
+          "documentation": "Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.\n\nFor example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.\n\nTags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**.",
+          "type": "map",
+          "of": {
+            "type": "array",
+            "of": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "key": "Name",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "Entries",
+          "required": false,
+          "documentation": "The candidate stat-roll entries this reusable pool contributes to a Stamp step.",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "StatRollEntry",
+            "ref": "StatRollEntry"
+          }
+        }
+      ]
+    },
+    "LootableAsset": {
+      "fields": [
+        {
+          "key": "Tags",
+          "required": false,
+          "documentation": "Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.\n\nFor example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.\n\nTags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**.",
+          "type": "map",
+          "of": {
+            "type": "array",
+            "of": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "key": "Name",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "Rolls",
+          "required": false,
+          "documentation": "The conditional-lootable rolls this reusable table contributes.",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "Roll",
+            "ref": "Roll"
+          }
+        }
+      ]
+    },
+    "FlairAsset": {
+      "fields": [
+        {
+          "key": "Tags",
+          "required": false,
+          "documentation": "Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.\n\nFor example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.\n\nTags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**.",
+          "type": "map",
+          "of": {
+            "type": "array",
+            "of": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "key": "Name",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "Stations",
+          "required": false,
+          "documentation": "Station ids this flair applies to; null/empty = every station.",
+          "type": "array",
+          "of": {
+            "type": "string"
+          }
+        },
+        {
+          "key": "Moments",
+          "required": false,
+          "documentation": "Moment id (cycle/swing/impact/rare_find/completion or step:<action>:<step>) -> the presentation overlay.",
+          "type": "map",
+          "of": {
+            "type": "object",
+            "nestedType": "Presentation",
+            "ref": "Presentation"
+          }
+        }
+      ]
+    },
+    "ExtensionAsset": {
+      "fields": [
+        {
+          "key": "Tags",
+          "required": false,
+          "documentation": "Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.\n\nFor example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.\n\nTags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**.",
+          "type": "map",
+          "of": {
+            "type": "array",
+            "of": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "key": "Name",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "Target",
+          "required": false,
+          "documentation": "Exactly one of Station | Action | Lootable | RollPool - what this extension adds to.",
+          "type": "object",
+          "nestedType": "Target",
+          "fields": [
+            {
+              "key": "Station",
+              "required": false,
+              "documentation": "A station id to extend (exactly one of Station | Action | Lootable | RollPool).",
+              "type": "string"
+            },
+            {
+              "key": "Action",
+              "required": false,
+              "documentation": "An ActionAsset id to extend (exactly one of Station | Action | Lootable | RollPool).",
+              "type": "string"
+            },
+            {
+              "key": "Lootable",
+              "required": false,
+              "documentation": "A LootableAsset id to extend (exactly one of Station | Action | Lootable | RollPool).",
+              "type": "string"
+            },
+            {
+              "key": "RollPool",
+              "required": false,
+              "documentation": "A RollPool id to extend (exactly one of Station | Action | Lootable | RollPool).",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "Priority",
+          "required": false,
+          "documentation": "Apply-order priority (default 0); a higher priority applies LATER and wins a key collision among extensions.",
+          "type": "integer"
+        },
+        {
+          "key": "Xp",
+          "required": false,
+          "documentation": "Appended Work.Xp declarations (Station/Action target).",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "WorkXp",
+            "fields": [
+              {
+                "key": "Skill",
+                "required": false,
+                "type": "string"
+              },
+              {
+                "key": "PerCycle",
+                "required": false,
+                "type": "double"
+              }
+            ]
+          }
+        },
+        {
+          "key": "Loot",
+          "required": false,
+          "documentation": "Appended loot references and inline Rolls (Station/Action target).",
+          "type": "object",
+          "nestedType": "LootRef",
+          "ref": "LootRef"
+        },
+        {
+          "key": "Actions",
+          "required": false,
+          "documentation": "NEW actions only (Station target); base wins a key collision.",
+          "type": "map",
+          "of": {
+            "type": "object",
+            "nestedType": "ActionDef",
+            "ref": "ActionDef"
+          }
+        },
+        {
+          "key": "Conversions",
+          "required": false,
+          "documentation": "Appended Recipe.Conversions (Station/Action target).",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "Conversion",
+            "fields": [
+              {
+                "key": "Input",
+                "required": false,
+                "documentation": "The conversion input: a native Ingredient (exactly one of ItemId | ResourceTypeId).",
+                "type": "object",
+                "nestedType": "Ingredient",
+                "ref": "Ingredient"
+              },
+              {
+                "key": "Output",
+                "required": false,
+                "documentation": "The conversion output: an exact-ItemId Ingredient.",
+                "type": "object",
+                "nestedType": "Ingredient",
+                "ref": "Ingredient"
+              },
+              {
+                "key": "DurationMs",
+                "required": false,
+                "documentation": "Optional per-conversion pace override in ms; highest precedence (> NativeTime > Work.CycleMs). Null = none.",
+                "type": "long"
+              },
+              {
+                "key": "Category",
+                "required": false,
+                "documentation": "Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged.",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "key": "Steps",
+          "required": false,
+          "documentation": "Ordered step insertions into a named action (Station/Action target).",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "StepInsertion",
+            "fields": [
+              {
+                "key": "Action",
+                "required": false,
+                "documentation": "Which action's step program to insert into (e.g. 'work'); omit for a Target:{Action} extension.",
+                "type": "string"
+              },
+              {
+                "key": "Anchor",
+                "required": false,
+                "documentation": "The insertion position: exactly one of After | Before | AtStart | AtEnd.",
+                "type": "object",
+                "nestedType": "Anchor",
+                "fields": [
+                  {
+                    "key": "After",
+                    "required": false,
+                    "documentation": "Insert AFTER the step with this Id (exactly one of After | Before | AtStart | AtEnd).",
+                    "type": "string"
+                  },
+                  {
+                    "key": "Before",
+                    "required": false,
+                    "documentation": "Insert BEFORE the step with this Id (exactly one of After | Before | AtStart | AtEnd).",
+                    "type": "string"
+                  },
+                  {
+                    "key": "AtStart",
+                    "required": false,
+                    "documentation": "Insert at the START of the program (exactly one of After | Before | AtStart | AtEnd).",
+                    "type": "boolean"
+                  },
+                  {
+                    "key": "AtEnd",
+                    "required": false,
+                    "documentation": "Insert at the END of the program (exactly one of After | Before | AtStart | AtEnd; the degrade default).",
+                    "type": "boolean"
+                  }
+                ]
+              },
+              {
+                "key": "Insert",
+                "required": false,
+                "documentation": "The steps to insert; each REQUIRES an Id so later extensions can anchor on them.",
+                "type": "array",
+                "of": {
+                  "type": "object",
+                  "nestedType": "StationStep",
+                  "ref": "StationStep"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "Anchors",
+          "required": false,
+          "documentation": "NEW anchor declarations only (Station/Action target); base wins a key collision.",
+          "type": "map",
+          "of": {
+            "type": "object",
+            "nestedType": "Anchor",
+            "fields": [
+              {
+                "key": "Station",
+                "required": false,
+                "documentation": "The target station id this anchor resolves against (a type filter).",
+                "type": "string"
+              },
+              {
+                "key": "MaxRadius",
+                "required": false,
+                "documentation": "The horizontal block radius to search for the anchor station (reader-defaults to 12).",
+                "type": "double"
+              }
+            ]
+          }
+        },
+        {
+          "key": "Rolls",
+          "required": false,
+          "documentation": "Appended Rolls (Lootable target).",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "Roll",
+            "ref": "Roll"
+          }
+        },
+        {
+          "key": "Entries",
+          "required": false,
+          "documentation": "Appended StatRollEntry entries (RollPool target).",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "StatRollEntry",
+            "ref": "StatRollEntry"
+          }
+        }
+      ]
+    },
+    "SettingsAsset": {
+      "fields": [
+        {
+          "key": "Tags",
+          "required": false,
+          "documentation": "Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.\n\nFor example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.\n\nTags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**.",
+          "type": "map",
+          "of": {
+            "type": "array",
+            "of": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "key": "Name",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "key": "Enabled",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "key": "SummaryHud",
+          "required": false,
+          "type": "object",
+          "nestedType": "SummaryHud",
+          "fields": [
+            {
+              "key": "Enabled",
+              "required": false,
+              "type": "boolean"
+            },
+            {
+              "key": "Position",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "key": "OffsetY",
+              "required": false,
+              "type": "integer"
+            },
+            {
+              "key": "TtlMs",
+              "required": false,
+              "type": "long"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

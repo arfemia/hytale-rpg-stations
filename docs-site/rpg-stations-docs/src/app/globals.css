@@ -1,0 +1,228 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222.2 47.4% 11.2%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 47.4% 11.2%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 47.4% 11.2%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 199 89% 48%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 199 89% 48%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 199 89% 48%;
+    --radius: 0.5rem;
+  }
+}
+
+/* Legacy CSS variable aliases for existing code */
+:root {
+  --background-hex: #0f172a;
+  --foreground-hex: #f8fafc;
+  --muted-hex: #64748b;
+  --border-hex: #334155;
+  --accent-hex: #0ea5e9;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  touch-action: manipulation;
+  overflow-x: hidden;
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  overflow-x: hidden;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background-hex);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-hex);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-hex);
+}
+
+/* Prevent iOS Safari auto-zoom on input focus (requires font-size >= 16px) */
+@media screen and (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Code blocks */
+pre {
+  @apply bg-dark-900 border border-dark-700 rounded-lg p-4 overflow-x-auto text-sm;
+  max-width: 100%;
+}
+
+code {
+  @apply bg-dark-800 px-1.5 py-0.5 rounded text-sm font-mono text-primary-400;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+pre code {
+  @apply bg-transparent p-0;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+/* Tables - horizontal scroll on mobile */
+.doc-content table {
+  @apply w-full border-collapse;
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.doc-content table thead,
+.doc-content table tbody,
+.doc-content table tr {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+@media screen and (max-width: 767px) {
+  .doc-content table thead,
+  .doc-content table tbody,
+  .doc-content table tr {
+    table-layout: auto;
+  }
+}
+
+table {
+  @apply w-full border-collapse;
+}
+
+th {
+  @apply bg-dark-800 text-left px-4 py-2 border border-dark-700 font-semibold text-sm;
+}
+
+td {
+  @apply px-4 py-2 border border-dark-700 text-sm;
+}
+
+@media screen and (max-width: 767px) {
+  th, td {
+    @apply px-2 py-1.5;
+  }
+}
+
+tr:hover td {
+  @apply bg-dark-800/50;
+}
+
+/* Prevent doc content from overflowing on mobile */
+.doc-content {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Links (exclude button-style links with no-underline class) */
+.doc-content a:not(.no-underline) {
+  @apply text-primary-400 hover:text-primary-300 underline underline-offset-2;
+}
+
+/* Headings */
+.doc-content h1 {
+  @apply text-3xl font-bold mb-6 pb-2 border-b border-dark-700;
+}
+
+.doc-content h2,
+.doc-content h3,
+.doc-content h4 {
+  @apply relative;
+}
+
+.doc-content h2 {
+  @apply text-2xl font-bold mt-10 mb-4 pb-2 border-b border-dark-800;
+}
+
+.doc-content h3 {
+  @apply text-xl font-semibold mt-8 mb-3;
+}
+
+.doc-content h4 {
+  @apply text-lg font-semibold mt-6 mb-2;
+}
+
+/* Reset heading margins/borders when used inside flex layouts (cards, icon rows, etc.) */
+.doc-content .flex h1,
+.doc-content .flex h2,
+.doc-content .flex h3,
+.doc-content .flex h4,
+.doc-content .grid h1,
+.doc-content .grid h2,
+.doc-content .grid h3,
+.doc-content .grid h4 {
+  @apply mt-0 mb-0 pb-0 border-none;
+}
+
+/* Anchor links */
+.doc-content h2 .anchor-link,
+.doc-content h3 .anchor-link,
+.doc-content h4 .anchor-link {
+  @apply opacity-0 ml-2 text-dark-500 hover:text-primary-400 transition-opacity cursor-pointer;
+}
+
+.doc-content h2:hover .anchor-link,
+.doc-content h3:hover .anchor-link,
+.doc-content h4:hover .anchor-link {
+  @apply opacity-100;
+}
+
+.doc-content .anchor-link.copied {
+  @apply text-green-400;
+}
+
+.doc-content p {
+  @apply mb-4 leading-relaxed;
+}
+
+.doc-content ul, .doc-content ol {
+  @apply mb-4 pl-6;
+}
+
+.doc-content ul {
+  @apply list-disc;
+}
+
+.doc-content ol {
+  @apply list-decimal;
+}
+
+.doc-content li {
+  @apply mb-1;
+}
+
+.doc-content blockquote {
+  @apply border-l-4 border-primary-500 bg-dark-800/50 px-4 py-2 my-4 italic;
+}
