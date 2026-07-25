@@ -6,6 +6,7 @@ import java.util.function.BiFunction;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.ziggfreed.common.entity.performer.WalkHandle;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.FactorMath;
@@ -172,6 +173,25 @@ final class StationStepDecisions {
      */
     static boolean shouldSyncPropOnEntry(@Nonnull StationStep step, @Nullable StationStep resumingStep) {
         return step != resumingStep;
+    }
+
+    // ==================== Walk phase completion (seam route, F2) ====================
+
+    /**
+     * Whether an in-flight {@code Walk} phase is DONE this frame (scope-2 wave 3, decision 55 seam
+     * route): a still-{@link WalkHandle.State#WALKING} handle keeps driving UNLESS design 2.3's
+     * anti-wedge {@code timedOut} guard fired; {@link WalkHandle.State#ARRIVED},
+     * {@link WalkHandle.State#STUCK}, and {@link WalkHandle.State#FAILED} all complete the step -
+     * never wedge the program. STUCK/FAILED completing-as-arrived mirrors the pre-seam behavior
+     * exactly (the old {@code advanceWalk} returned "done" on a gone puppet and on the distance/speed
+     * timeout), so a stuck NPC or a lost Holder ends the walk gracefully rather than suspending
+     * forever.
+     */
+    static boolean walkStepDone(@Nonnull WalkHandle.State state, boolean timedOut) {
+        if (state == WalkHandle.State.WALKING) {
+            return timedOut;
+        }
+        return true;
     }
 
     // ==================== Goto branch target ====================

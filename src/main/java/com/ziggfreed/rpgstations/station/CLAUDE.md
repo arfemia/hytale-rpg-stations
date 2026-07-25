@@ -366,9 +366,13 @@ FAIL-CLOSED fallback to the Holder (one warn) when the role id is blank/unregist
 lives on `StationSession.performer`; every later mutation threads a FRESH per-call accessor
 (clip/loop/step-clip via the live `store` = a network packet; `setProp`/despawn via the tick-safe
 `commandBuffer` = a Hotbar/entity mutation - the exact pre-swap split, so a `CommandBuffer` is never
-captured across frames). `s.puppetRef` stays populated with `performer.ref()` for the direct-puppetRef
-readers (the wave-3 `Walk` phase in `StationStepHandlers`, `solveWalkPath`); null during an
-`NpcRole` one-tick deferred-spawn window. Identity/reconcile: `RpgStationsPlugin` registers
+captured across frames). `s.puppetRef` is RE-POINTED at `performer.ref()` every frame by
+`StationPuppetController#refreshPuppetRef` (F2 part a, called from `tickFrameOnce`), covering the
+`NpcRole` backend's one-tick deferred-spawn window (its `ref()` is null at engage, non-null once the
+deferred spawn lands) so the direct-puppetRef readers (the `storeFor` store fallback, custody
+retrieval) never go stale. The `Walk` phase itself drives the performer seam
+(`s.performer.walkTo`/`WalkHandle`, F2 part b - `StationService#resolveWalkTarget` supplies the anchor
+target, the backend re-solves the path), not the raw ref. Identity/reconcile: `RpgStationsPlugin` registers
 `PerformerIdentityComponent` at setup + a once-per-world `PerformerReconciler.sweep(bootDespawnAll)`
 at first ready (`StationService.reconcilePerformersAtBoot`); `toggle` fires a deferred `engageStale`
 sweep (`reconcileStalePerformersAtEngage`, via `world.execute` so the native sweep runs outside the

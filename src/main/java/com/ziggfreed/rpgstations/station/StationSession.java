@@ -241,10 +241,14 @@ final class StationSession {
      */
     @Nullable StationPerformer performer;
     /**
-     * The spawned puppet entity, or null when {@link #puppetActive} is false (and null during an
-     * {@code NpcRole} backend's one-tick deferred-spawn window - {@link #performer}{@code .ref()} is
-     * the live source of truth; this field is the crowned-path snapshot the direct-{@code puppetRef}
-     * readers, e.g. the wave-3 {@code Walk} phase, use for the bare-Holder puppet).
+     * The spawned puppet entity, or null when {@link #puppetActive} is false. {@link #performer}
+     * {@code .ref()} is the live source of truth; this field mirrors it and is RE-POINTED at it every
+     * frame by {@code StationPuppetController#refreshPuppetRef} (F2 part a), covering the
+     * {@code NpcRole} backend's one-tick deferred-spawn window (its {@code ref()} is null at engage,
+     * non-null once the deferred spawn lands). Read by the direct-{@code puppetRef} consumers that
+     * still need a raw ref (the {@code StationPuppetController#storeFor} store fallback, custody
+     * retrieval); the {@code Walk} phase itself now drives the performer seam, not this field (F2
+     * part b).
      */
     @Nullable Ref<EntityStore> puppetRef;
     /**

@@ -18,6 +18,14 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
  * {@code station.ActionResolver} is the resolution choke point). Decision 50 keeps this a
  * standalone nested group rather than a flat prefixed boolean so future picker knobs (ordering,
  * grouping) nest here without a schema smell.
+ *
+ * <p><b>DORMANT by data model (honest note):</b> {@code ShowLocked} is fully plumbed (schema +
+ * {@code station.PickerCategories} locked-tab filtering), but NO producer of a LOCKED category
+ * exists yet - {@code buildPickerCategories} emits only unlocked tabs, because the current data
+ * model has no PER-CATEGORY tool gate (the {@code Tool} gate is per-action, not per-output-category).
+ * So every rendered picker tab is unlocked today and the knob has no observable effect. It goes live
+ * the moment per-conversion / per-category tool gates exist (a future leg); until then the default
+ * ({@code true}) and {@code false} render identically.
  */
 public final class Picker {
 

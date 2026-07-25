@@ -18,7 +18,7 @@ import com.hypixel.hytale.server.core.inventory.ResourceQuantity;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransaction;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.ziggfreed.common.cast.step.StepHandler;
-import com.ziggfreed.common.entity.PlayerPuppetService;
+import com.ziggfreed.common.entity.performer.WalkHandle;
 import com.ziggfreed.rpgstations.api.EnhanceLine;
 import com.ziggfreed.rpgstations.api.EnhanceStamper;
 import com.ziggfreed.rpgstations.api.StampInspection;
@@ -176,13 +176,16 @@ final class StationStepHandlers {
     // ==================== Walk phase (scope-2 wave 3, design 2.3) ====================
 
     /**
-     * Begins the {@code Walk} phase (design 2.3): re-solves a bounded-A* path from the puppet to the
-     * anchor (the walk-step-entry re-solve, so a mid-program blockage denies gracefully with
-     * {@link StationService.StopReason#PATH_BLOCKED}), flips the puppet's walk state on, and returns
-     * a {@code Suspend} so the frame drain drives it. Returns a {@code Fail} when the action has no
-     * active puppet (defensive - {@code WALK_REQUIRES_PUPPET} + engage already gate this) or the
-     * path is unreachable. Returns {@code null} ONLY if there is nothing to walk (never, since the
-     * caller guards {@code step.getWalk() != null}).
+     * Begins the {@code Walk} phase (design 2.3), routed through the performer seam (decision 55,
+     * F2): resolves the target anchor column, then hands the walk to {@code s.performer.walkTo} - the
+     * Holder backend re-solves the SAME bounded-A* {@code PuppetNav} path and drives
+     * {@code PlayerPuppetService.walkTick} under the hood (byte-parity for the PlayerClone puppet),
+     * the NpcRole backend drives its NATIVE gait toward a marked target, and {@code walkTo} itself
+     * flips the puppet's walk state on. Stores the returned {@link WalkHandle} on the session and
+     * returns a {@code Suspend} so the frame drain polls it. Returns a {@code Fail} when there is no
+     * active performer ({@code WALK_REQUIRES_PUPPET} + engage already gate this) or the anchor is
+     * unresolved / unreachable (the {@code walkTo} FAILED handle). Returns {@code null} ONLY if there
+     * is nothing to walk (never, since the caller guards {@code step.getWalk() != null}).
      */
     @Nullable
     private static StationStepResult beginWalk(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
@@ -193,49 +196,62 @@ final class StationStepHandlers {
             return null;
         }
         String targetAnchor = walk.getTo();
-        if (!s.puppetActive || s.puppetRef == null || !s.puppetRef.isValid()) {
+        if (!s.puppetActive || s.performer == null || !s.performer.isAlive()) {
             s.stepIteration = 0;
             return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
                     "Walk step '" + step.getId() + "' requires an active Puppet");
         }
-        List<Vector3d> path = StationService.getInstance().solveWalkPath(s, targetAnchor);
-        if (path == null || path.isEmpty()) {
+        Vector3d target = StationService.getInstance().resolveWalkTarget(s, targetAnchor);
+        if (target == null) {
             s.stepIteration = 0;
             return StationStepResult.fail(StationService.StopReason.PATH_BLOCKED,
                     "Walk step '" + step.getId() + "' cannot reach anchor '" + targetAnchor + "'");
         }
+        // Drive the walk through the ONE performer seam (no look-source branch): the backend picks
+        // the mechanism (Holder = PuppetNav/walkTick, NpcRole = native gait). The starting frame's
+        // accessor is the tick-safe commandBuffer (path solve + the walk-state archetype add).
+        WalkHandle handle = s.performer.walkTo(ctx.commandBuffer, target, walk.effectiveSpeedMps());
+        if (handle.state() == WalkHandle.State.FAILED) {
+            s.stepIteration = 0;
+            return StationStepResult.fail(StationService.StopReason.PATH_BLOCKED,
+                    "Walk step '" + step.getId() + "' cannot reach anchor '" + targetAnchor + "'");
+        }
+        Vector3d blockCenter = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
         s.walkState = new StationWalkState(
                 targetAnchor != null && !targetAnchor.isBlank() ? targetAnchor : ActionDef.Anchor.RESERVED_SELF,
-                path, walk.effectiveSpeedMps(), now);
+                handle, walk.effectiveSpeedMps(), blockCenter.distance(target), now);
         s.stepRepeatCount = repeatCount; // cache for the per-frame walk resume
         // Sync the walk step's carried prop at DEPARTURE so the puppet holds it while walking (the
         // fish exemplar's walkout carries the raw fish); emitEntryCues re-syncs on arrival (a cheap
         // dirty-gated no-op). No-op for a step authoring no prop / a puppet-less session.
         StationPuppetController.syncStepProp(s, ctx.commandBuffer, ctx.player, step);
-        PlayerPuppetService.setWalking(ctx.commandBuffer, s.puppetRef, true);
         return StationStepResult.suspend(now); // suspend (deadline stays 0) so the drain re-enters each frame
     }
 
     /**
-     * Advances the in-flight walk one frame (design 2.3): lerps the puppet along its waypoints and
-     * returns {@code true} when it ARRIVES (within the epsilon) or TIMES OUT (distance/speed + 2s
-     * grace, so a walk never wedges the program), flipping the walk state off on arrival. A gone
-     * puppet is treated as arrived (never wedge). {@code false} = still walking.
+     * Advances the in-flight walk one frame (design 2.3), by POLLING the performer's
+     * {@link WalkHandle} (decision 55, F2): {@code poll} over the live store advances the Holder's
+     * transform (the in-place {@code walkTick} write the engine tracker broadcasts each frame -
+     * byte-parity with the pre-seam path) or measures the NpcRole's distance to its marked target.
+     * Returns {@code true} when the handle terminates (ARRIVED / STUCK / FAILED) or design 2.3's
+     * anti-wedge timeout fires while still WALKING; {@code false} = still walking. A gone performer
+     * is treated as arrived (never wedge). Terminal-state mapping lives in the pure
+     * {@link StationStepDecisions#walkStepDone}.
      */
     private static boolean advanceWalk(@Nonnull StationStepContext ctx, long now) {
         StationSession s = ctx.session;
         StationWalkState w = s.walkState;
-        if (w == null || s.puppetRef == null || !s.puppetRef.isValid()) {
+        if (w == null || s.performer == null || !s.performer.isAlive()) {
             return true;
         }
         double dtMs = Math.max(0.0, now - w.lastTickMs);
         w.lastTickMs = now;
-        w.progress = PlayerPuppetService.walkTick(ctx.store, s.puppetRef, w.waypoints, w.progress, w.speedMps, dtMs);
-        if (w.arrived() || w.timedOut(now)) {
-            PlayerPuppetService.setWalking(ctx.commandBuffer, s.puppetRef, false);
-            return true;
+        WalkHandle.State state = w.handle.poll(ctx.store, dtMs);
+        boolean timedOut = state == WalkHandle.State.WALKING && w.timedOut(now);
+        if (timedOut) {
+            w.handle.cancel(); // still walking past the grace window - drop the walk, complete the step
         }
-        return false;
+        return StationStepDecisions.walkStepDone(state, timedOut);
     }
 
     // ==================== Per-iteration entry cues (presentation + puppet clip/prop) ====================

@@ -735,6 +735,11 @@ public final class StationService {
                 continue;
             }
             try {
+                // F2 part (a): keep s.puppetRef pointed at the performer's live ref every frame -
+                // covers the NpcRole backend's one-tick deferred-spawn window (see
+                // StationPuppetController#refreshPuppetRef). Runs upstream of the heartbeat AND the
+                // step-frame drive below, so both see a fresh ref.
+                StationPuppetController.refreshPuppetRef(s);
                 if (now >= s.nextHeartbeatAtMs) {
                     s.nextHeartbeatAtMs = now + HEARTBEAT_MS;
                     if (!heartbeat(s, world, store, commandBuffer)) {
@@ -1362,6 +1367,48 @@ public final class StationService {
             }
             for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
                 notifyItemGain(s.playerRef, e.getKey(), e.getValue(), true);
+            }
+        }
+        // F1 (decision 51d): every granted Roll's Grants.Effects[] now goes LIVE - apply each native
+        // EntityEffect on the player and TRACK it on the session so stop()'s teardown (appliedEffects
+        // .removeAll) strips it, exactly like a Presentation.Effect (emitMoment). BOTH roll routes
+        // (per-cycle step Roll + Completion) fold through applyGrantResult, so this ONE site covers
+        // both. Fail-closed (a missing/invalid ref or effect id no-ops via NativeEffectUtil).
+        if (s.ref != null && s.ref.isValid() && !result.getEffectGrants().isEmpty()) {
+            applyAndTrackEffects(result.getEffectGrants(), s.ref, s.appliedEffects,
+                    (effectId, durMs) -> durMs != null && durMs > 0
+                            ? NativeEffectUtil.applyFor(store, s.ref, effectId, durMs / 1000f, OverlapBehavior.OVERWRITE)
+                            : NativeEffectUtil.apply(store, s.ref, effectId));
+        }
+    }
+
+    /**
+     * The injectable per-effect apply seam for {@link #applyAndTrackEffects} - returns whether the
+     * effect actually applied, so only a SUCCESS is tracked. Production passes a {@link
+     * NativeEffectUtil} lambda; a fixture test passes a fake, letting the "granted effect lands in
+     * the tracked list, teardown clears it" contract be verified without a live effect asset map
+     * (constructing an {@code EntityEffect} throws outside a running server).
+     */
+    @FunctionalInterface
+    interface EffectApplier {
+        boolean apply(@Nonnull String effectId, @Nullable Long durationMs);
+    }
+
+    /**
+     * Applies every granted {@link EffectRef} through {@code applier} and tracks each SUCCESS on
+     * {@code tracker}, so the session's {@code stop()} teardown ({@link AppliedEffectTracker#removeAll})
+     * removes them (decision 51d, mirroring a {@code Presentation.Effect}'s live path). A blank-id ref
+     * is skipped; a failed apply is never tracked. Pure over the applier seam (unit-tested with a fake
+     * applier + the null-ref tracker stand-in).
+     */
+    static void applyAndTrackEffects(@Nonnull List<EffectRef> effects, @Nonnull Ref<EntityStore> ref,
+            @Nonnull AppliedEffectTracker tracker, @Nonnull EffectApplier applier) {
+        for (EffectRef effect : effects) {
+            if (effect == null || !effect.hasId()) {
+                continue;
+            }
+            if (applier.apply(effect.getId(), effect.getDurationMs())) {
+                tracker.track(ref, effect.getId());
             }
         }
     }
@@ -2888,16 +2935,19 @@ public final class StationService {
     }
 
     /**
-     * Solves a bounded-A* walk path from the puppet's CURRENT position to the target anchor's
-     * block-top column (scope-2 wave 3, design 2.3): the reserved {@code "self"}/null anchor targets
-     * the primary block, any other id reads {@link StationSession#anchorBlocks}. Returns the
-     * block-centred waypoints, or {@code null} when the anchor is unresolved / the puppet is gone /
-     * the path is blocked (the walk-step-entry re-solve; the handler maps a null to a graceful
-     * {@link StopReason#PATH_BLOCKED} stop). WORLD-THREAD ONLY.
+     * Resolves the target anchor's block-top column point (scope-2 wave 3, design 2.3): the reserved
+     * {@code "self"}/null anchor targets the primary block, any other id reads
+     * {@link StationSession#anchorBlocks}. Returns the block-centred column point (the walk goal), or
+     * {@code null} when the anchor is unresolved (the handler maps a null to a graceful
+     * {@link StopReason#PATH_BLOCKED} stop). The actual PATH SOLVE now lives behind the performer
+     * seam (decision 55, F2): {@code StationPerformer.walkTo} takes this target and re-solves the
+     * bounded-A* path from the puppet's own current position under the hood (the Holder backend
+     * still uses {@code PuppetNav}, byte-parity), so this method no longer reads the puppet or solves
+     * a path itself. WORLD-THREAD ONLY.
      */
     @Nullable
-    List<Vector3d> solveWalkPath(@Nonnull StationSession s, @Nullable String targetAnchorId) {
-        if (s.puppetRef == null || !s.puppetRef.isValid() || s.ref == null || !s.ref.isValid()) {
+    Vector3d resolveWalkTarget(@Nonnull StationSession s, @Nullable String targetAnchorId) {
+        if (s.ref == null || !s.ref.isValid()) {
             return null;
         }
         String blockKey = anchorBlockKeyFor(s, targetAnchorId);
@@ -2911,20 +2961,7 @@ public final class StationService {
         if (coords == null) {
             return null;
         }
-        try {
-            World world = WorldEvictors.worldOf(s.ref);
-            Store<EntityStore> store = s.ref.getStore();
-            TransformComponent transform = store.getComponent(s.puppetRef, TransformComponent.getComponentType());
-            if (transform == null) {
-                return null;
-            }
-            Vector3d from = new Vector3d(transform.getPosition());
-            Vector3d to = new Vector3d(coords[0] + 0.5, coords[1] + 1.0, coords[2] + 0.5);
-            return PuppetNav.solve(world, store, from, to, StationAnchors.MAX_SCAN_RADIUS);
-        } catch (Throwable t) {
-            Log.warn("STATION walk path solve failed for '" + s.stationId + "': " + t.getMessage());
-            return null;
-        }
+        return new Vector3d(coords[0] + 0.5, coords[1] + 1.0, coords[2] + 0.5);
     }
 
     // ==================== Iteration refund ledger recorders (design 2.5/M1) ====================

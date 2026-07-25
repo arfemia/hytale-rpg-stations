@@ -96,6 +96,28 @@ final class StationPuppetController {
     private StationPuppetController() {
     }
 
+    /**
+     * F2 part (a): re-point {@link StationSession#puppetRef} at the performer's LIVE ref, called
+     * once per frame from {@code StationService#tickFrameOnce}. The {@code NpcRole} backend spawns
+     * its {@code NPCEntity} one tick LATE (a lock-held engage caller has only a {@code CommandBuffer};
+     * {@code NPCPlugin.spawnEntity} needs a concrete store, so the spawn defers via {@code
+     * world.execute}), so {@code performer.ref()} is honestly null at engage and becomes non-null
+     * only once that deferred spawn lands - and nothing else refreshed {@code puppetRef} afterward,
+     * leaving every direct-{@code puppetRef} reader (the store fallback, the Walk phase) permanently
+     * stale for the NpcRole arm. Cheap + null-guarded: only ASSIGNS on a non-null live ref (a null
+     * ref = still deferring, leave the prior value); the Holder backend spawns synchronously, so
+     * this is a byte-neutral no-op re-assign for it.
+     */
+    static void refreshPuppetRef(@Nonnull StationSession s) {
+        if (s.performer == null) {
+            return;
+        }
+        Ref<EntityStore> live = s.performer.ref();
+        if (live != null) {
+            s.puppetRef = live;
+        }
+    }
+
     // ==================== engage: spawn + hide ====================
 
     /**

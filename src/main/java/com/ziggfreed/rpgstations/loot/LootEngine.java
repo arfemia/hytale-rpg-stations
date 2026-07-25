@@ -16,6 +16,7 @@ import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.item.ItemModule;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
@@ -55,6 +56,7 @@ public final class LootEngine {
         private final Map<String, Integer> bonusCopyItems = new LinkedHashMap<>();
         private final Map<String, Integer> dropListItems = new LinkedHashMap<>();
         private final List<Presentation> floorPresentations = new ArrayList<>();
+        private final List<EffectRef> effectGrants = new ArrayList<>();
         private int commandsRun;
 
         /** Bonus-output-copy items granted this pass (item id -> total quantity). */
@@ -75,13 +77,26 @@ public final class LootEngine {
             return floorPresentations;
         }
 
+        /**
+         * Every granted {@code Roll.Grants.Effects[]} entry (top-level AND per-floor), in
+         * roll-evaluation order (decision 51d). Reported here rather than applied inline: this class
+         * stays presentation/session-agnostic (it only reports WHAT to apply), and the caller
+         * ({@code StationService.applyGrantResult}) applies each native {@code EntityEffect} on the
+         * player and TRACKS it on the session so {@code stop()}'s teardown removes them - exactly the
+         * "reports what, caller acts" split {@link #getFloorPresentations} already uses.
+         */
+        @Nonnull
+        public List<EffectRef> getEffectGrants() {
+            return effectGrants;
+        }
+
         public int getCommandsRun() {
             return commandsRun;
         }
 
         public boolean anyGranted() {
             return !bonusCopyItems.isEmpty() || !dropListItems.isEmpty()
-                    || !floorPresentations.isEmpty() || commandsRun > 0;
+                    || !floorPresentations.isEmpty() || !effectGrants.isEmpty() || commandsRun > 0;
         }
     }
 
@@ -162,7 +177,9 @@ public final class LootEngine {
         return result;
     }
 
-    private static void applyGrants(@Nullable Roll.Grants grants, @Nonnull Player player,
+    // Package-visible for the effect-collection fixture test (an effects-only Grants never touches
+    // player/store, so the test drives it with null engine handles - see LootEngineEffectGrantTest).
+    static void applyGrants(@Nullable Roll.Grants grants, @Nonnull Player player,
             @Nullable ItemStack cycleOutput, @Nullable CommandRewardExecutor.Placeholders placeholders,
             @Nonnull GrantResult result, @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
         if (grants == null) {
@@ -184,6 +201,17 @@ public final class LootEngine {
                 }
                 CommandRewardExecutor.run(raw, placeholders);
                 result.commandsRun++;
+            }
+        }
+        // Grants.Effects[] (decision 51d): COLLECT every authored native-effect ref so the caller
+        // applies + session-tracks it (the "reports what, caller acts" split - see
+        // GrantResult.getEffectGrants). A blank-id ref is dropped here (never surfaced).
+        EffectRef[] effects = grants.getEffects();
+        if (effects != null) {
+            for (EffectRef effect : effects) {
+                if (effect != null && effect.hasId()) {
+                    result.effectGrants.add(effect);
+                }
             }
         }
     }

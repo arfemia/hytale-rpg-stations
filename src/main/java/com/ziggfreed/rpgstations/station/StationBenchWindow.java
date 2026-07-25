@@ -43,8 +43,8 @@ import com.ziggfreed.rpgstations.util.Log;
  * <p><b>Defensive on every degradation path, returns {@code false} (never throws) so the caller
  * falls through to the plain diegetic toggle:</b>
  * <ul>
- *   <li>no {@code BlockType.Bench} on the block (the common case - no shipped station authors one
- *   yet; the exemplar bench-backed station is the content leg's deliverable);</li>
+ *   <li>no {@code BlockType.Bench} on the block (the common case - the Sawmill/CuttingBoard/MountSpike
+ *   blocks are plain diegetic stations, no {@code Bench} identity);</li>
  *   <li>{@code BlockType.getItem() == null} - the {@code BenchWindow} ctor THROWS on a bench block
  *   with no associated item ({@code BenchWindow.java}'s explicit guard), pre-checked here;</li>
  *   <li>the block carries no {@code BenchBlock} chunk-store component (or, for Processing, no
@@ -54,11 +54,13 @@ import com.ziggfreed.rpgstations.util.Log;
  *   diegetic station (only {@code Crafting} + {@code Processing} route to a window here).</li>
  * </ul>
  *
- * <p>DORMANT this leg: no shipped station block authors a {@code Bench} identity, so every live
- * press hits the first bullet and falls through - this path is unsmokeable until the content leg's
- * bench-backed exemplar ships. All ECS access here is READ-ONLY component fetches plus the native
- * window registration the first-party openers themselves run inside an interaction context, so it
- * is safe from {@code StationUseInteraction#firstRun}'s own command-buffer context.
+ * <p>LIVE: the CookingFire block authors a native {@code BlockType.Bench{Type:Processing,
+ * Id:Campfire}} (plus the {@code BenchBlock}/{@code ProcessingBenchBlock} components), so a sneak+F
+ * on it opens this native fuel-less Processing window (the classic non-bench stations still fall
+ * through the first bullet to the diegetic toggle). All ECS access here is READ-ONLY component
+ * fetches plus the native window registration the first-party openers themselves run inside an
+ * interaction context, so it is safe from {@code StationUseInteraction#firstRun}'s own
+ * command-buffer context.
  */
 final class StationBenchWindow {
 
