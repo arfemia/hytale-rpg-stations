@@ -1370,10 +1370,22 @@ public final class StationService {
             }
         }
         // F1 (decision 51d): every granted Roll's Grants.Effects[] now goes LIVE - apply each native
-        // EntityEffect on the player and TRACK it on the session so stop()'s teardown (appliedEffects
-        // .removeAll) strips it, exactly like a Presentation.Effect (emitMoment). BOTH roll routes
-        // (per-cycle step Roll + Completion) fold through applyGrantResult, so this ONE site covers
-        // both. Fail-closed (a missing/invalid ref or effect id no-ops via NativeEffectUtil).
+        // EntityEffect on the player and TRACK it on the session, exactly like a Presentation.Effect
+        // (emitMoment). BOTH roll routes (per-cycle step Roll + Completion) fold through
+        // applyGrantResult, so this ONE site covers both apply calls - but the TWO ROUTES HAVE
+        // DIFFERENT TEARDOWN SEMANTICS, by design (arc-close MIN-1, maintainer-ruled, not a bug):
+        //   - Per-cycle route (rollPhase, mid-WORKING): tracked BEFORE this session's own stop() ever
+        //     runs, so the appliedEffects teardown below (stop()'s removeAll, well before this
+        //     method's own completion-route call site) strips it when the session ends.
+        //   - Completion route (rollCompletionLoot): invoked from INSIDE stop() itself, AFTER that
+        //     same appliedEffects.removeAll teardown already ran - so a completion-trigger effect is
+        //     tracked here but NEVER stripped by this stop() call. That is deliberate: a
+        //     completion-trigger effect is an end-of-work FINISHING REWARD meant to persist for its
+        //     own authored/asset duration (running teardown after it would immediately no-op the
+        //     reward, defeating the point of granting one) - it is not session-scoped like the
+        //     per-cycle route's effects. Do not reorder stop()'s teardown/rollCompletionLoot call
+        //     order to "fix" this; it is the intended contract.
+        // Fail-closed (a missing/invalid ref or effect id no-ops via NativeEffectUtil).
         if (s.ref != null && s.ref.isValid() && !result.getEffectGrants().isEmpty()) {
             applyAndTrackEffects(result.getEffectGrants(), s.ref, s.appliedEffects,
                     (effectId, durMs) -> durMs != null && durMs > 0

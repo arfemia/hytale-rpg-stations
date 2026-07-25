@@ -290,7 +290,12 @@ public final class Roll {
                 .documentation("Commands run with {player}/{uuid}/{station}/{action}/{cycles} placeholders substituted.").add()
                 .appendInherited(new KeyedCodec<>("Effects", new ArrayCodec<>(EffectRef.CODEC, EffectRef[]::new), false),
                         (o, v) -> o.effects = v, o -> o.effects, (o, p) -> o.effects = p.effects)
-                .documentation("Native EntityEffects (id-ref-only, each with an optional DurationMs) applied to the player when the roll grants.").add()
+                .documentation("Native EntityEffects (id-ref-only, each with an optional DurationMs) applied to the player "
+                        + "when the roll grants. Teardown differs by Trigger (arc-close MIN-1, deliberate): a Cycle-trigger "
+                        + "roll's effect is session-tracked and torn down when the session stops; a Completion-trigger "
+                        + "roll's effect applies from INSIDE that same stop() (after its teardown already ran) and "
+                        + "deliberately PERSISTS for its own authored/asset duration as a finishing reward, never "
+                        + "stripped by this session.").add()
                 .build();
 
         @Nonnull

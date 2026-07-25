@@ -71,4 +71,33 @@ class StationEffectGrantTest {
         assertEquals(java.util.Arrays.asList(null, 5000L), durations,
                 "the authored DurationMs override (null = asset TTL) reaches the applier verbatim");
     }
+
+    /**
+     * MIN-1 (arc-close): {@code StationService.stop()} calls the appliedEffects teardown
+     * (removeAll) BEFORE it calls {@code rollCompletionLoot} - so a Completion-trigger roll's
+     * granted effect is tracked AFTER this same stop()'s teardown already ran, and therefore is
+     * deliberately NEVER stripped by it (a finishing reward that persists for its own
+     * authored/asset duration, not session-scoped like the per-cycle route). Simulated here with
+     * the exact same pure {@code applyAndTrackEffects}/{@code AppliedEffectTracker} seam, in the
+     * REAL call order stop() uses (teardown, THEN the completion grant) - see the corrected
+     * comment at {@code StationService#applyGrantResult} and {@code Roll.Grants.Effects}'
+     * {@code .documentation} for the full two-route contract.
+     */
+    @Test
+    void completionRouteEffect_appliedAfterTeardown_deliberatelyPersists_isNotTornDownByThisStop() {
+        AppliedEffectTracker tracker = new AppliedEffectTracker();
+
+        // stop()'s appliedEffects.removeAll runs first, well before rollCompletionLoot is ever
+        // reached (nothing tracked yet in this simulation - a mid-session per-cycle grant, if any,
+        // would already have been stripped by this same call).
+        tracker.removeAll(NULL_STORE);
+
+        // rollCompletionLoot -> applyGrantResult -> applyAndTrackEffects runs AFTER that teardown.
+        StationService.applyAndTrackEffects(List.of(EffectRef.of("FinishingBuff", 30_000L)),
+                NULL_REF, tracker, (id, dur) -> true);
+
+        assertEquals(1, tracker.size(), "the completion-route effect lands in the tracked list AFTER "
+                + "this stop()'s own teardown already ran, so it deliberately persists (never torn down "
+                + "by this session, unlike the per-cycle route)");
+    }
 }

@@ -12,12 +12,15 @@ import javax.annotation.Nullable;
 
 import org.joml.Vector3d;
 
+import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.inventory.ResourceQuantity;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransaction;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
+import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.cast.step.StepHandler;
+import com.ziggfreed.common.entity.PlayerPuppetService;
 import com.ziggfreed.common.entity.performer.WalkHandle;
 import com.ziggfreed.rpgstations.api.EnhanceLine;
 import com.ziggfreed.rpgstations.api.EnhanceStamper;
@@ -237,6 +240,12 @@ final class StationStepHandlers {
      * anti-wedge timeout fires while still WALKING; {@code false} = still walking. A gone performer
      * is treated as arrived (never wedge). Terminal-state mapping lives in the pure
      * {@link StationStepDecisions#walkStepDone}.
+     *
+     * <p><b>Timeout-path walking-flag clear (MIN-2, arc-close):</b> {@link WalkHandle#cancel()}
+     * carries no accessor (decision 55), so on its own it never flips the puppet's walking
+     * movement-state off - see {@link #completeTimedOutWalk} for the fix (the SAME {@code ctx.store}
+     * accessor {@code poll} already used, mirroring the arrival path's own in-place flip inside
+     * {@code HolderWalkHandle.poll}).
      */
     private static boolean advanceWalk(@Nonnull StationStepContext ctx, long now) {
         StationSession s = ctx.session;
@@ -248,10 +257,43 @@ final class StationStepHandlers {
         w.lastTickMs = now;
         WalkHandle.State state = w.handle.poll(ctx.store, dtMs);
         boolean timedOut = state == WalkHandle.State.WALKING && w.timedOut(now);
-        if (timedOut) {
-            w.handle.cancel(); // still walking past the grace window - drop the walk, complete the step
-        }
+        completeTimedOutWalk(w.handle, s.performer.ref(), timedOut,
+                ref -> PlayerPuppetService.setWalking(ctx.store, ref, false));
         return StationStepDecisions.walkStepDone(state, timedOut);
+    }
+
+    /**
+     * The injectable walking-flag-clear seam {@link #completeTimedOutWalk} calls (MIN-2, arc-close)
+     * - production passes {@link PlayerPuppetService#setWalking}, a fixture test passes a fake, so
+     * "the clear fires exactly on a timeout, never otherwise" is verifiable without a live
+     * {@code ComponentAccessor}.
+     */
+    @FunctionalInterface
+    interface WalkingFlagClearer {
+        void clearWalking(@Nullable Ref<EntityStore> ref);
+    }
+
+    /**
+     * The timeout-exit cleanup for {@link #advanceWalk} (MIN-2, arc-close, unlisted parity
+     * deviation from the pre-seam {@code advanceWalk}, which cleared the walk animation on BOTH the
+     * arrival AND the timeout exit): {@link WalkHandle#cancel()} (decision 55) deliberately carries
+     * no accessor, so it only latches the terminal state and never flips the puppet's walking
+     * movement-state off - left unaddressed, a Holder/PlayerClone puppet that hits the anti-wedge
+     * timeout is left animating a walk-in-place until the session's {@code revealAndDespawn}
+     * eventually removes it. Cancels {@code handle} and clears the flag through the injected
+     * {@code clearer} ONLY when {@code timedOut} is true (the ARRIVED path already clears in-place
+     * inside the handle's own {@code poll} - see {@code HolderWalkHandle.poll}; STUCK/FAILED reached
+     * via {@code poll} need no separate clearing here, same as before this fix). A no-op
+     * (never cancels, never calls the clearer) when {@code timedOut} is false. Pure over the
+     * handle+clearer seam, unit-tested with fakes (no live {@code ComponentAccessor} needed).
+     */
+    static void completeTimedOutWalk(@Nonnull WalkHandle handle, @Nullable Ref<EntityStore> performerRef,
+            boolean timedOut, @Nonnull WalkingFlagClearer clearer) {
+        if (!timedOut) {
+            return;
+        }
+        handle.cancel(); // still walking past the grace window - drop the walk, complete the step
+        clearer.clearWalking(performerRef);
     }
 
     // ==================== Per-iteration entry cues (presentation + puppet clip/prop) ====================

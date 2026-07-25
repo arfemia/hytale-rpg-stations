@@ -4,11 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import javax.annotation.Nonnull;
 
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.component.ComponentAccessor;
+import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.entity.performer.WalkHandle;
 
@@ -87,5 +91,59 @@ class StationWalkStateTest {
         // so a stuck NPC or a lost Holder ends the walk gracefully rather than suspending forever.
         assertTrue(StationStepDecisions.walkStepDone(WalkHandle.State.STUCK, false));
         assertTrue(StationStepDecisions.walkStepDone(WalkHandle.State.FAILED, false));
+    }
+
+    // ==================== Timeout-path walking-flag clear (MIN-2, arc-close) ====================
+
+    /** Records every {@link #cancel()} call; a {@link WalkHandle} fake for {@code completeTimedOutWalk}. */
+    private static final class CancelTrackingHandle implements WalkHandle {
+        int cancelCalls;
+
+        @Override
+        @Nonnull
+        public State poll(@Nonnull ComponentAccessor<EntityStore> accessor, double dtMs) {
+            return State.WALKING;
+        }
+
+        @Override
+        @Nonnull
+        public State state() {
+            return State.WALKING;
+        }
+
+        @Override
+        public void cancel() {
+            cancelCalls++;
+        }
+    }
+
+    @Test
+    void completeTimedOutWalk_timedOut_cancelsAndClearsTheWalkingFlag() {
+        // MIN-2 (arc-close): cancel() alone (decision 55) never flips the puppet's walking
+        // movement-state off - StationStepHandlers.advanceWalk must ALSO clear it on the timeout
+        // exit, the same in-place-flip safety the arrival path already relies on.
+        CancelTrackingHandle handle = new CancelTrackingHandle();
+        List<Ref<EntityStore>> cleared = new ArrayList<>();
+        Ref<EntityStore> performerRef = null; // a null ref exercises the no-live-server fixture path
+
+        StationStepHandlers.completeTimedOutWalk(handle, performerRef, true, cleared::add);
+
+        assertEquals(1, handle.cancelCalls, "the timeout branch still cancels the handle");
+        assertEquals(1, cleared.size(), "the timeout branch clears the walking flag exactly once");
+        assertEquals(performerRef, cleared.get(0), "the SAME performer ref the caller resolved is threaded to the clearer");
+    }
+
+    @Test
+    void completeTimedOutWalk_notTimedOut_neverCancelsOrClears() {
+        // Still WALKING (no timeout) or a terminal ARRIVED/STUCK/FAILED reached via poll: neither
+        // needs this timeout-only cleanup (ARRIVED already clears in-place inside the handle's own
+        // poll, per HolderWalkHandle).
+        CancelTrackingHandle handle = new CancelTrackingHandle();
+        List<Ref<EntityStore>> cleared = new ArrayList<>();
+
+        StationStepHandlers.completeTimedOutWalk(handle, null, false, cleared::add);
+
+        assertEquals(0, handle.cancelCalls, "no timeout - the handle is left driving, never cancelled here");
+        assertTrue(cleared.isEmpty(), "no timeout - the walking flag is never touched by this cleanup");
     }
 }
