@@ -33,16 +33,18 @@ import com.hypixel.hytale.codec.codecs.map.MapCodec;
  * groups (all nullable; authoring a group the target type cannot carry is validator
  * {@code EXTENSION_PAYLOAD_MISMATCH} - see {@link #payloadAllowedFor}):
  * <table><tr><th>Target</th><th>Payload keys</th></tr>
- * <tr><td>Station</td><td>Xp, Loot, Actions, Conversions, Steps, Anchors</td></tr>
- * <tr><td>Action</td><td>Steps, Anchors, Loot, Conversions, Xp</td></tr>
+ * <tr><td>Station</td><td>Xp, Loot, Actions, Conversions, Steps, Anchors, Puppet, Custody</td></tr>
+ * <tr><td>Action</td><td>Steps, Anchors, Loot, Conversions, Xp, Puppet, Custody</td></tr>
  * <tr><td>Lootable</td><td>Rolls</td></tr>
  * <tr><td>RollPool</td><td>Entries</td></tr></table>
  *
  * <p><b>Merge + conflict semantics (deterministic, applied engine-side in
  * {@code ExtensionCatalog.applyTo} - leg A3):</b>
  * <ol>
- *   <li>ADDITIVE ONLY - never mutate/replace/remove an existing entry (replacing a whole file
- *   stays load-order's job).
+ *   <li>ADDITIVE ONLY for every COLLECTION payload - never mutate/replace/remove an existing entry
+ *   (replacing a whole file stays load-order's job). The two PRESENTATION-overlay payloads
+ *   ({@link #puppet}/{@link #custody}, rule 5) are the deliberate exception: they carry no
+ *   collection at all, so "additive" there means per-leaf, never a whole-group clobber.
  *   <li>Keyed collections ({@code Actions}, {@code Anchors}): the BASE always wins a key collision
  *   ({@code EXTENSION_KEY_COLLISION}, entry skipped); among extensions the {@link #APPLY_ORDER}
  *   tuple ({@code Priority} asc so higher applies LATER, then extension id lex) decides, with the
@@ -54,6 +56,13 @@ import com.hypixel.hytale.codec.codecs.map.MapCodec;
  *   anchor step id degrades to {@code AtEnd} + {@code EXTENSION_ANCHOR_MISSING}; inserted steps
  *   need {@code Id}s so LATER extensions can anchor on them. Co-anchored insertions from different
  *   extensions apply in {@link #APPLY_ORDER} (m2).
+ *   <li>NESTED PER-LEAF OVERLAY ({@code Puppet}, {@code Custody}): recursively, at EVERY nesting
+ *   depth, an AUTHORED extension leaf wins and a NULL extension leaf leaves the base's value
+ *   intact - the {@code appendInherited}/nullable-nested-leaves convention applied across assets
+ *   instead of across a {@code Parent} chain. So a {@code Custody} overlay carrying only
+ *   {@code Display} never touches the base's {@code States}/{@code MaxQuantity}/{@code Input}, and
+ *   a {@code Display} carrying only {@code Scale} never clears the base's {@code Offset}. Among
+ *   extensions the later (higher-priority) one overlays on top, so IT wins a same-leaf contest.
  * </ol>
  *
  * <p><b>Composition order (m7, stated for the docsite):</b> extensions apply to the
@@ -62,8 +71,16 @@ import com.hypixel.hytale.codec.codecs.map.MapCodec;
  * {@code Target:{Station}} step-insert applies post-Ref to THAT station only.
  *
  * <p><b>Deliberately NON-extensible</b> (docs state each): {@code Requires}, {@code Settings},
- * {@code Custody.States}, scalar groups (Work/Hold/Camera/Animation/Puppet), the INTERNALS of an
- * existing {@code Roll}, and {@code FlairAsset.Moments} (extend by shipping another FlairAsset).
+ * scalar groups (Work/Hold/Camera/Animation), the INTERNALS of an existing {@code Roll}, and
+ * {@code FlairAsset.Moments} (extend by shipping another FlairAsset).
+ *
+ * <p><b>The presentation-overlay exception ({@link #puppet}/{@link #custody}):</b> {@code Puppet}
+ * and the whole {@code Custody} group (incl. {@code Custody.States}) ARE overlayable, under rule 5's
+ * per-leaf semantics. They were on the non-extensible list through wave 2 on the "override is
+ * load-order's job" argument; a pack that only wants to RE-SKIN a base station's presentation had to
+ * ship a full-file station override to do it, and deleting such an override silently dropped every
+ * group it was the sole author of. A per-leaf overlay is the non-destructive route: a re-skinning
+ * pack authors just the leaves it re-tunes and inherits the rest of the base station.
  */
 public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAssetMap<String, ExtensionAsset>> {
 
@@ -74,6 +91,8 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     public static final String PAYLOAD_CONVERSIONS = "Conversions";
     public static final String PAYLOAD_STEPS = "Steps";
     public static final String PAYLOAD_ANCHORS = "Anchors";
+    public static final String PAYLOAD_PUPPET = "Puppet";
+    public static final String PAYLOAD_CUSTODY = "Custody";
     public static final String PAYLOAD_ROLLS = "Rolls";
     public static final String PAYLOAD_ENTRIES = "Entries";
 
@@ -98,6 +117,8 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     @Nullable private StationAsset.Conversion[] conversions;
     @Nullable private StepInsertion[] steps;
     @Nullable private Map<String, ActionDef.Anchor> anchors;
+    @Nullable private Puppet puppet;
+    @Nullable private Custody custody;
     @Nullable private Roll[] rolls;
     @Nullable private StatRollEntry[] entries;
 
@@ -137,6 +158,12 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
             .appendInherited(new KeyedCodec<>("Anchors", new MapCodec<>(ActionDef.Anchor.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.anchors = v, a -> a.anchors, (a, p) -> a.anchors = p.anchors)
             .documentation("NEW anchor declarations only (Station/Action target); base wins a key collision.").add()
+            .appendInherited(new KeyedCodec<>("Puppet", Puppet.CODEC, false),
+                    (a, v) -> a.puppet = v, a -> a.puppet, (a, p) -> a.puppet = p.puppet)
+            .documentation("Puppet presentation overlay (Station/Action target), merged PER LEAF at every depth: an authored leaf wins, an omitted leaf keeps the base station's own value.").add()
+            .appendInherited(new KeyedCodec<>("Custody", Custody.CODEC, false),
+                    (a, v) -> a.custody = v, a -> a.custody, (a, p) -> a.custody = p.custody)
+            .documentation("Custody overlay (Station/Action target), merged PER LEAF at every depth: an overlay carrying only Display never clears the base's States, MaxQuantity or Input.").add()
             .appendInherited(new KeyedCodec<>("Rolls", new ArrayCodec<>(Roll.CODEC, Roll[]::new), false),
                     (a, v) -> a.rolls = v, a -> a.rolls, (a, p) -> a.rolls = p.rolls)
             .documentation("Appended Rolls (Lootable target).").add()
@@ -213,6 +240,26 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         return anchors;
     }
 
+    /**
+     * The {@code Puppet} presentation overlay (Station/Action target); null = none. Merged PER LEAF
+     * onto the base station's own group (rule 5), never as a whole-group replace - so a re-skinning
+     * pack authors only the leaves it re-tunes.
+     */
+    @Nullable
+    public Puppet getPuppet() {
+        return puppet;
+    }
+
+    /**
+     * The {@code Custody} overlay (Station/Action target); null = none. Merged PER LEAF onto the base
+     * station's own group (rule 5): an overlay carrying only {@code Display} leaves the base's
+     * {@code States}/{@code MaxQuantity}/{@code Input} exactly as they were.
+     */
+    @Nullable
+    public Custody getCustody() {
+        return custody;
+    }
+
     /** Appended Rolls (Lootable target); null = none. */
     @Nullable
     public Roll[] getRolls() {
@@ -251,11 +298,13 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
             case Target.STATION:
                 return PAYLOAD_XP.equals(payloadKey) || PAYLOAD_LOOT.equals(payloadKey)
                         || PAYLOAD_ACTIONS.equals(payloadKey) || PAYLOAD_CONVERSIONS.equals(payloadKey)
-                        || PAYLOAD_STEPS.equals(payloadKey) || PAYLOAD_ANCHORS.equals(payloadKey);
+                        || PAYLOAD_STEPS.equals(payloadKey) || PAYLOAD_ANCHORS.equals(payloadKey)
+                        || PAYLOAD_PUPPET.equals(payloadKey) || PAYLOAD_CUSTODY.equals(payloadKey);
             case Target.ACTION:
                 return PAYLOAD_STEPS.equals(payloadKey) || PAYLOAD_ANCHORS.equals(payloadKey)
                         || PAYLOAD_LOOT.equals(payloadKey) || PAYLOAD_CONVERSIONS.equals(payloadKey)
-                        || PAYLOAD_XP.equals(payloadKey);
+                        || PAYLOAD_XP.equals(payloadKey)
+                        || PAYLOAD_PUPPET.equals(payloadKey) || PAYLOAD_CUSTODY.equals(payloadKey);
             case Target.LOOTABLE:
                 return PAYLOAD_ROLLS.equals(payloadKey);
             case Target.ROLLPOOL:

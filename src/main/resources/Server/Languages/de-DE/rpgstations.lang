@@ -47,6 +47,7 @@ ui.station.picker.hint = Diese Station kann mehr als eine Sache aus dem, was du 
 ui.station.picker.locked = Benötigt {0}
 ui.station.picker.locked_generic = Gesperrt
 ui.station.picker.selected = Auswahl getroffen. Interagiere erneut, um mit der Arbeit zu beginnen.
+ui.station.picker.cost = {0}x {1} -> {2}x {3}
 station.sawmill.name = Sägewerk
 station.sawmill.desc = Säge Baumstämme aus deinem Inventar Zyklus um Zyklus zu Brettern.
 station.cuttingboard.name = Zubereitungsbrett

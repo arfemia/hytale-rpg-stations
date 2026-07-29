@@ -465,7 +465,7 @@ public final class StationValidator {
             checkMount(a, id, label, out);
             checkCompletion(a, id, label, out);
             checkFlairs(a, id, label, out);
-            checkCustody(a.getCustody(), a.getRecipe(), label, id, out);
+            checkCustody(a.getCustody(), a.getRecipe(), false, label, id, out);
             checkPuppet(a.getPuppet(), a.getHold(), label, id, modelKnown, out);
             checkActions(a, id, label, dropListKnown, factorKnown, lootableKnown, rollPoolKnown, modelKnown,
                     stationKnown, actionAssetKnown, out);
@@ -604,6 +604,21 @@ public final class StationValidator {
                     targetType, label, extId, out);
             checkExtensionPayload(ext.getEntries() != null && ext.getEntries().length > 0,
                     ExtensionAsset.PAYLOAD_ENTRIES, targetType, label, extId, out);
+            checkExtensionPayload(ext.getPuppet() != null, ExtensionAsset.PAYLOAD_PUPPET,
+                    targetType, label, extId, out);
+            checkExtensionPayload(ext.getCustody() != null, ExtensionAsset.PAYLOAD_CUSTODY,
+                    targetType, label, extId, out);
+            // Adversarial-verify F3: the two overlay payloads get the SAME content walk every
+            // other structured payload in this block gets (a Look.Source NpcRole overlay without
+            // a Role.RoleId must warn here too). A standalone overlay carries no effective
+            // recipe/hold context (null), and cross-layer model-id existence stays deferred like
+            // this validator's other reference checks - overlay STRUCTURE is what is checkable.
+            if (ext.getPuppet() != null) {
+                checkPuppet(ext.getPuppet(), null, label + ".Puppet", extId, id -> true, out);
+            }
+            if (ext.getCustody() != null) {
+                checkCustody(ext.getCustody(), null, true, label + ".Custody", extId, out);
+            }
 
             if (ext.getLoot() != null) {
                 checkLootRef(ext.getLoot(), extId, label + ".Loot", dropListKnown, factorKnown, lootableKnown, out);
@@ -819,13 +834,17 @@ public final class StationValidator {
      * neither an explicit {@link Custody#getInput()} NOR an {@code effectiveRecipe} to derive
      * placement acceptance from has no way to ever accept a held stack - the state-dependent F
      * interaction can never place anything (a silent dead-content trap, not merely cosmetic).
+     * {@code overlay} suppresses ONLY that check (delta re-check, F3 follow-up): an
+     * {@code ExtensionAsset} Custody overlay is a DELTA, not a complete group - the canonical
+     * Display-only re-skin inherits Input/Recipe from the BASE, so warning "nothing can ever be
+     * placed" about it would actively mislead. The value-range checks below still run either way.
      */
     private static void checkCustody(@Nullable Custody custody, @Nullable StationAsset.Recipe effectiveRecipe,
-            @Nonnull String label, @Nonnull String id, @Nonnull List<Finding> out) {
+            boolean overlay, @Nonnull String label, @Nonnull String id, @Nonnull List<Finding> out) {
         if (custody == null) {
             return;
         }
-        if (custody.getInput() == null && effectiveRecipe == null) {
+        if (!overlay && custody.getInput() == null && effectiveRecipe == null) {
             out.add(Finding.warning(DOMAIN, "CUSTODY_NO_INPUT_MATCHER",
                     label + " authors a Custody group with no Input matcher AND no Recipe to derive"
                             + " placement acceptance from - nothing can ever be placed", id));
@@ -1995,7 +2014,7 @@ public final class StationValidator {
             checkLootRef(def.getLoot(), id, actionLabel + ".Loot", dropListKnown, factorKnown, lootableKnown, out);
         }
         if (def.getCustody() != null) {
-            checkCustody(def.getCustody(), effectiveRecipeForCustody, actionLabel, id, out);
+            checkCustody(def.getCustody(), effectiveRecipeForCustody, false, actionLabel, id, out);
         }
         if (def.getPuppet() != null) {
             checkPuppet(def.getPuppet(), effectiveHold, actionLabel, id, modelKnown, out);

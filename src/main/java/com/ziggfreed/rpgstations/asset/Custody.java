@@ -27,8 +27,10 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
  *
  * <p>{@link #states} is nullable: authoring it opts the BLOCK's {@code State.Definitions} into
  * the empty/loaded hint flip (a pack-authored {@code BlockType} state pair, see
- * {@code station.StationService#flipCustodyState}); omitting it means custody still works
- * mechanically (placement/drain/auto-return) with no visual/hint flip.
+ * {@code station.StationService#flipCustodyState}) and, when its own nullable {@code Working} leaf
+ * is authored, into the actively-working flip on top ({@code station.StationService
+ * #enterWorkingState}); omitting it means custody still works mechanically (placement/drain/
+ * auto-return) with no visual/hint flip.
  *
  * <p>{@link #display} is nullable (design section 9's Visuals leg, phase 2 leg G): authoring it
  * opts the placed input into a PLACED-AS-ENTITY visual (a static, network-replicated,
@@ -38,7 +40,8 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
  * custody still works mechanically with no visual (the leg-C default).
  *
  * <pre>{@code
- * "Custody": { "MaxQuantity": 100, "States": { "Empty": "Default", "Loaded": "Loaded" },
+ * "Custody": { "MaxQuantity": 100,
+ *              "States": { "Empty": "Default", "Loaded": "Loaded", "Working": "Lit" },
  *              "Display": { "Offset": { "Y": 0.55 }, "Scale": 1.0 } }
  * }</pre>
  */
@@ -109,23 +112,63 @@ public final class Custody {
         return display;
     }
 
-    /** The block-state names custody flips between; nullable leaves each mean "no flip for that side". */
+    /**
+     * The block-state names custody flips between; nullable leaves each mean "no flip for that
+     * side". Three INDEPENDENT, individually-nullable knobs, never a mode: a station may author any
+     * subset (an {@code Empty}-only pair is legal, a {@code Working}-only station is legal), and an
+     * unauthored leaf simply skips that flip.
+     *
+     * <p><b>{@link #working} (the actively-working look):</b> the state the engine holds the block
+     * in WHILE a work step is actually executing there, flipping back to {@link #loaded} (claim
+     * non-empty) or {@link #empty} (claim empty) the moment it is not - on step exit, program
+     * completion, and EVERY session stop path (re-press, walk-off, damage, death, disconnect,
+     * shutdown, {@code ANCHOR_LOST}, {@code PATH_BLOCKED}, {@code INPUTS_EXHAUSTED}, ...), plus
+     * across a multi-station program's {@code Walk} phases. Semantics are "actively working", NOT
+     * "has input in it": the cooking fire's burning look lives here, so placing raw fish on a cold
+     * fire leaves it unlit until the cook beat begins. Applies to the block a step runs AT, so both
+     * the primary station block and a claimed remote anchor get it (engine side:
+     * {@code station.StationService#enterWorkingState}/{@code #exitWorkingState}). Which steps count
+     * as work is the step's own {@code Working} knob ({@code asset.StationStep#isWorkingStep}),
+     * defaulting to "a step that both Consumes and Produces is a convert". Omitting {@code Working}
+     * is byte-identical to the pre-knob behavior - no extra flip ever happens.
+     *
+     * <p>Every named state must exist in the block's own {@code BlockType.State.Definitions} (a
+     * state variant is a generated {@code BlockType} asset); a name the block never authored is a
+     * silent no-op, retried on the next flip.
+     */
     public static final class States {
         @Nullable protected String empty;
         @Nullable protected String loaded;
+        @Nullable protected String working;
 
         public static final BuilderCodec<States> CODEC = BuilderCodec.builder(States.class, States::new)
                 .appendInherited(new KeyedCodec<>("Empty", Codec.STRING, false),
-                        (o, v) -> o.empty = v, o -> o.empty, (o, p) -> o.empty = p.empty).add()
+                        (o, v) -> o.empty = v, o -> o.empty, (o, p) -> o.empty = p.empty)
+                .documentation("The block State.Definitions name shown while no input is held in custody.").add()
                 .appendInherited(new KeyedCodec<>("Loaded", Codec.STRING, false),
-                        (o, v) -> o.loaded = v, o -> o.loaded, (o, p) -> o.loaded = p.loaded).add()
+                        (o, v) -> o.loaded = v, o -> o.loaded, (o, p) -> o.loaded = p.loaded)
+                .documentation("The block State.Definitions name shown while custody holds input but no work is running.").add()
+                .appendInherited(new KeyedCodec<>("Working", Codec.STRING, false),
+                        (o, v) -> o.working = v, o -> o.working, (o, p) -> o.working = p.working)
+                .documentation("The block State.Definitions name shown ONLY while a work step is actively executing at this block; reverts to Loaded/Empty on step exit and every session stop. Omit for no working flip.").add()
                 .build();
 
+        /**
+         * Two-leaf factory (no {@link #working}); kept for callers that only compose the
+         * empty/loaded pair. Prefer {@link #of(String, String, String)} in new code.
+         */
         @Nonnull
         public static States of(@Nullable String empty, @Nullable String loaded) {
+            return of(empty, loaded, null);
+        }
+
+        /** Java-side factory; sets the same fields the codec fills. */
+        @Nonnull
+        public static States of(@Nullable String empty, @Nullable String loaded, @Nullable String working) {
             States s = new States();
             s.empty = empty;
             s.loaded = loaded;
+            s.working = working;
             return s;
         }
 
@@ -137,6 +180,11 @@ public final class Custody {
         @Nullable
         public String getLoaded() {
             return loaded;
+        }
+
+        @Nullable
+        public String getWorking() {
+            return working;
         }
     }
 

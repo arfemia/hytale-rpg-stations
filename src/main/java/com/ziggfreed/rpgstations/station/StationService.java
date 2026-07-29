@@ -11,6 +11,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -223,6 +224,25 @@ public final class StationService {
      * block-state layer on the next interaction - see {@link #toggle}).
      */
     private final ConcurrentHashMap<String, StationCustodyClaim> custodyByBlock = new ConcurrentHashMap<>();
+
+    /**
+     * The live "this block is ACTIVELY BEING WORKED" block-state flip, one per player (a player runs
+     * at most one session, and a session works at most one block at a time - a program's steps are
+     * strictly sequential, so a second concurrent working block is unrepresentable by construction).
+     * Written ONLY by {@link #enterWorkingState}/{@link #exitWorkingState}, never persisted -
+     * a restart drops it, self-healed by the same next-interaction reset the Loaded state already
+     * relies on. Empty for every station whose resolved {@code Custody.States.Working} is
+     * unauthored, which is every pre-knob station.
+     */
+    private final ConcurrentHashMap<UUID, WorkingFlip> workingByPlayer = new ConcurrentHashMap<>();
+
+    /**
+     * One live Working flip: the block currently wearing its actively-working look, plus the anchor
+     * id it was entered under (so the exit re-resolves the SAME {@code Custody} group that chose the
+     * Working name) and its already-parsed coordinates (so the exit never re-parses a blockKey).
+     */
+    private record WorkingFlip(@Nonnull String blockKey, @Nullable String anchorId, int x, int y, int z) {
+    }
 
     /**
      * The lazy per-block station index (scope-2 wave 3, gate m4, design 2.2): {@code blockKey ->
@@ -580,7 +600,7 @@ public final class StationService {
             // Steerable (default false) applies the hold effect + heartbeat snap-back to defeat
             // the native WASD-steers-the-anchor behavior (design 9.2); Steerable true skips both,
             // reserved for a future vehicle-like station.
-            Ref<EntityStore> anchorRef = StationEntityMountController.spawnAnchor(commandBuffer, blockX, blockY, blockZ);
+            Ref<EntityStore> anchorRef = StationEntityMountController.spawnAnchor(commandBuffer, blockX, blockY, blockZ, entityGroup);
             boolean attached = anchorRef != null
                     && StationEntityMountController.attach(ref, anchorRef, commandBuffer, entityGroup);
             if (attached) {
@@ -687,6 +707,17 @@ public final class StationService {
             byBlock.put(blockKey, playerUuid);
         }
         sessionsByWorld.queueFor(world).offer(s);
+
+        // Actively-working block state (Custody.States.Working) for the CLASSIC convert loop: an
+        // implicit-program session has no authored step to light its block on entry, and its first
+        // conversion only commits a full CycleMs from now - but that whole CycleMs IS the work (the
+        // cooking fire's 2500ms cook time), so the block must burn from engage rather than a cycle
+        // late. An authored Steps program deliberately does NOT light here (its first step is a
+        // load/walk beat, not work - it lights per-step instead), and idle practice mode converts
+        // nothing so it never lights. No-op unless the resolved Custody authors a Working name.
+        if (!stepsProgram && !s.idleMode) {
+            enterWorkingState(s, null);
+        }
 
         StationHoldController.applyHold(s, store);
         StationHoldController.applyCamera(s);
@@ -892,6 +923,10 @@ public final class StationService {
         if (check.state == ConversionState.RUNNABLE) {
             if (s.idleMode) {
                 s.idleMode = false;
+                // Adversarial-verify F2 (decision 61a): materials arrived mid-session, the
+                // classic loop is genuinely working again - relight the primary block
+                // (idempotent; a no-Working station no-ops).
+                enterWorkingState(s, null);
             }
             // Per-conversion pace precedence (seam wave decision 52): a RUNNABLE conversion that
             // authors its own DurationMs (or a baked FromCrafting.NativeTime transform) OVERRIDES
@@ -906,6 +941,9 @@ public final class StationService {
             if (!s.idleMode) {
                 s.idleMode = true;
                 toast(s.playerRef, RpgMsg.tr("ui.station.practice"));
+                // Adversarial-verify F2 (decision 61a): idle practice converts nothing, so the
+                // working look goes out (idempotent) - "off in every other state".
+                exitWorkingState(s);
             }
             s.nextCycleAtMs = System.currentTimeMillis() + s.idleCycleMs;
             return runIdleCycle(s, store, commandBuffer, action);
@@ -948,7 +986,10 @@ public final class StationService {
         // Scope-2 (design 1.8): fold Station/Action-targeted ExtensionAsset Loot into the cycle's
         // effective loot refs (the SawmillProgression extension's luck-tier lootable lands here).
         LootRef effectiveLoot = ExtensionCatalog.getInstance().applyToStationLoot(s.stationId, action.getLoot());
-        effectiveLoot = ExtensionCatalog.getInstance().applyToActionLoot(action.getActionId(), effectiveLoot);
+        String lootActionTarget = actionTargetIdFor(s, action.getActionId());
+        if (lootActionTarget != null) {
+            effectiveLoot = ExtensionCatalog.getInstance().applyToActionLoot(lootActionTarget, effectiveLoot);
+        }
         Roll[] resolvedRolls = LootEngine.resolveRolls(effectiveLoot).toArray(new Roll[0]);
         List<StationStep> steps = ImplicitProgram.build(consumeStep, produceStep, resolvedRolls,
                 action.getPresentation());
@@ -1236,7 +1277,10 @@ public final class StationService {
         // never a re-add of a skill the base already grants (that would double it - A8 review M1).
         StationAsset.WorkXp[] baseXp = action.getWork() != null ? action.getWork().getXp() : null;
         StationAsset.WorkXp[] mergedXp = ExtensionCatalog.getInstance().applyToStationXp(s.stationId, baseXp);
-        mergedXp = ExtensionCatalog.getInstance().applyToActionXp(action.getActionId(), mergedXp);
+        String xpActionTarget = actionTargetIdFor(s, action.getActionId());
+        if (xpActionTarget != null) {
+            mergedXp = ExtensionCatalog.getInstance().applyToActionXp(xpActionTarget, mergedXp);
+        }
         List<XpAsk> asks = xpAsksFromXp(mergedXp, idle, s.idleXpFraction);
         StationEvents.fireCycleCompleted(store, commandBuffer, s.playerRef, s.playerUuid, s.sessionId,
                 s.stationId, action.getActionId(), cycleIndex, idle, asks, toolMultiplier);
@@ -1908,6 +1952,17 @@ public final class StationService {
         Custody stopCustody = stopAsset != null ? ActionResolver.resolve(stopAsset, stopActionId).getCustody() : null;
         returnCustody(s, stopCustody, commandBuffer);
 
+        // Actively-working block state (Custody.States.Working): work has stopped by definition, so
+        // darken whatever block this session left burning/running. Unconditional and idempotent,
+        // the same posture as returnCustody above and revealAndDespawn below - this ONE call covers
+        // EVERY stop reason (RITUAL_COMPLETE, INPUTS_EXHAUSTED, ANCHOR_LOST, PATH_BLOCKED,
+        // STEP_FAILED, TOOL_CHANGED, damage, death, disconnect, shutdown, ...) with no per-reason
+        // hook, because a failing step program reaches here through dispatchProgram's Failed branch.
+        // Deliberately AFTER releaseAnchorClaims + returnCustody: both have already handed the
+        // claims back, so the Loaded-vs-Empty read below sees the post-return truth and a remote
+        // anchor darkens all the way to Empty instead of stranding a Loaded look over nothing.
+        exitWorkingState(s);
+
         // Puppet reveal + despawn (round-4 design, doc section 4.4): the SAME unconditional-on-
         // every-exit-path posture as returnCustody above, threading the SAME nullable
         // commandBuffer (accessor-bug fix, fix round: the mutation itself must go through the
@@ -2276,12 +2331,16 @@ public final class StationService {
     }
 
     /**
-     * PURE (decision 56): a representative output ITEM id for a category (the first conversion in
-     * order whose {@code Category} matches), used as the picker tab's icon. Null when no tagged
-     * conversion for that category has a resolvable output item id (the caller then skips the tab).
+     * PURE (decision 56, picker cost/name wave): the representative CONVERSION for a category -
+     * the FIRST conversion in order whose {@code Category} matches and whose output resolves a
+     * usable item id. Null when no tagged conversion for that category has a resolvable output
+     * item id. {@link #representativeOutputFor} and {@link #pickerCostLine} both derive from this
+     * SAME scan so a picker tab's icon/name and its cost line always describe ONE conversion, never
+     * two independently-chosen ones.
      */
     @Nullable
-    static String representativeOutputFor(@Nullable StationAsset.Conversion[] conversions, @Nonnull String category) {
+    static StationAsset.Conversion representativeConversionFor(@Nullable StationAsset.Conversion[] conversions,
+            @Nonnull String category) {
         if (conversions == null) {
             return null;
         }
@@ -2291,10 +2350,51 @@ public final class StationService {
             }
             String outItem = c.getOutput() != null ? c.getOutput().getItemId() : null;
             if (outItem != null && !outItem.isBlank()) {
-                return outItem;
+                return c;
             }
         }
         return null;
+    }
+
+    /**
+     * PURE (decision 56): a representative output ITEM id for a category, used as the picker tab's
+     * icon. Null when {@link #representativeConversionFor} finds nothing. Thin wrapper kept for its
+     * existing callers/tests; {@link #buildPickerCategories} calls {@link #representativeConversionFor}
+     * directly since it needs the whole conversion, not just the output id.
+     */
+    @Nullable
+    static String representativeOutputFor(@Nullable StationAsset.Conversion[] conversions, @Nonnull String category) {
+        StationAsset.Conversion rep = representativeConversionFor(conversions, category);
+        return rep != null && rep.getOutput() != null ? rep.getOutput().getItemId() : null;
+    }
+
+    /**
+     * The picker tab's cost line (maintainer smoke fix, directive (3)): {@code "{qty}x {input} ->
+     * {qty}x {output}"}, both sides a client-resolved native item-name {@link Message}
+     * ({@link NativeNames#itemNameMsg}). The input side resolves through the SAME helper whether
+     * the conversion authors an exact {@code ItemId} or a {@code ResourceTypeId} family (e.g. the
+     * sawmill's "any Trunk of this species" input, {@code asset.Ingredient}'s exactly-one-of
+     * route): a resource-type id has no native item-name key, so {@code itemNameMsg}'s own
+     * existence-probe safely falls through to its prettified-raw fallback rather than handing the
+     * client a broken translation key. Null when either side has no resolvable id (defensive; the
+     * caller already required a resolvable OUTPUT before calling this, so this only guards a
+     * missing/blank INPUT).
+     */
+    @Nullable
+    static Message pickerCostLine(@Nonnull StationAsset.Conversion conversion) {
+        Ingredient input = conversion.getInput();
+        Ingredient output = conversion.getOutput();
+        if (input == null || output == null) {
+            return null;
+        }
+        String inputId = input.getItemId() != null && !input.getItemId().isBlank()
+                ? input.getItemId() : input.getResourceTypeId();
+        String outputId = output.getItemId();
+        if (inputId == null || inputId.isBlank() || outputId == null || outputId.isBlank()) {
+            return null;
+        }
+        return RpgMsg.tr("ui.station.picker.cost", input.effectiveQuantity(), NativeNames.itemNameMsg(inputId),
+                output.effectiveQuantity(), NativeNames.itemNameMsg(outputId));
     }
 
     /**
@@ -2334,19 +2434,27 @@ public final class StationService {
         }
     }
 
-    /** Build the picker's ordered tab list (one unlocked tab per category with a resolvable output icon). */
+    /**
+     * Build the picker's ordered tab list (one unlocked tab per category with a resolvable output
+     * icon). Maintainer smoke fix: a category id is not itself a localized display name, so each
+     * tab's NAME is its representative output item's own native item name ({@link
+     * NativeNames#itemNameMsg}, client-resolved in the viewer's own locale - no hand-authored
+     * per-category lang key needed), and its COST LINE is that same representative conversion's
+     * input-to-output shape ({@link #pickerCostLine}).
+     */
     @Nonnull
     private static List<PickerCategories.Category> buildPickerCategories(
             @Nullable StationAsset.Conversion[] conversions, @Nonnull List<String> categories) {
         List<PickerCategories.Category> tabs = new ArrayList<>(categories.size());
         for (String cat : categories) {
-            String icon = representativeOutputFor(conversions, cat);
-            if (icon == null) {
+            StationAsset.Conversion rep = representativeConversionFor(conversions, cat);
+            if (rep == null || rep.getOutput() == null) {
                 continue; // no representative item to render as the tab icon; skip this category
             }
-            // Icon-only tab (no label): a category id is not itself a localized display name, so the
-            // representative output icon differentiates the tabs. No new per-category lang key needed.
-            tabs.add(PickerCategories.Category.unlocked(cat, icon, null));
+            String icon = rep.getOutput().getItemId();
+            Message name = NativeNames.itemNameMsg(icon);
+            Message cost = pickerCostLine(rep);
+            tabs.add(PickerCategories.Category.unlocked(cat, icon, name, cost));
         }
         return tabs;
     }
@@ -2809,9 +2917,7 @@ public final class StationService {
         if (blockKey == null || itemId.isBlank() || quantity <= 0) {
             return false;
         }
-        int[] coords = anchorId == null || ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(anchorId)
-                ? new int[] {s.blockX, s.blockY, s.blockZ}
-                : StationAnchors.parseCoords(blockKey);
+        int[] coords = anchorCoords(s, anchorId, blockKey);
         if (coords == null) {
             return false;
         }
@@ -2825,7 +2931,7 @@ public final class StationService {
         // Display spawn: the anchor station's own Custody.Display when it authors one, else the
         // running action's (design 2.2). Only when the claim has no live display yet.
         if (claim.displayRef() == null) {
-            Custody displayCustody = anchorDisplayCustody(s, anchorId);
+            Custody displayCustody = anchorCustody(s, anchorId, c -> c.getDisplay() != null, true);
             Custody.Display displayGroup = displayCustody != null ? displayCustody.getDisplay() : null;
             if (displayGroup != null) {
                 ItemStack visualStack = claim.uniqueStack() != null ? claim.uniqueStack() : new ItemStack(itemId, 1);
@@ -2838,38 +2944,87 @@ public final class StationService {
     }
 
     /**
-     * The {@code Custody} group governing an anchor's display: for a named anchor, the ANCHOR
-     * station's own resolved {@code "work"}-action Custody (its own {@code Display} knobs), else the
-     * running action's Custody (for {@code "self"}). A best-effort lookup - a missing anchor station
-     * falls back to the running action's Custody.
+     * The {@code Custody} group governing an anchor, for whichever nested group the caller needs:
+     * for a named anchor, the ANCHOR station's own resolved {@code "work"}-action Custody (its own
+     * {@code Display}/{@code States} knobs) when that Custody actually CARRIES the wanted group,
+     * else the running action's Custody (always, for the reserved {@code "self"}). A best-effort
+     * lookup - a missing/unknown anchor station falls back to the running action's Custody.
+     *
+     * <p>{@code carriesGroup} is the per-caller "does the anchor's own Custody answer this
+     * question" predicate ({@code c -> c.getDisplay() != null} for the placed-as-entity visual,
+     * {@code c -> c.getStates() != null} for the block-state flips) - ONE resolution rule shared by
+     * both readers instead of two near-identical walks.
+     *
+     * <p>{@code allowRunningFallback} splits the two reader families (adversarial-verify F1): the
+     * DISPLAY reader passes {@code true} - the running action's Display knobs are a sensible
+     * fallback visual for a produced item at a bare anchor. The STATES readers pass {@code false} -
+     * a block's state VOCABULARY belongs to its OWN station, never the running one's, so a remote
+     * anchor whose station authors no {@code Custody.States} is simply never flipped (writing the
+     * running action's state names there would clobber a foreign block's state with a
+     * near-universally-resolvable name like {@code "Default"}). The {@code "self"} branch is
+     * unconditional either way: the primary block's vocabulary IS the running action's.
      */
     @Nullable
-    private Custody anchorDisplayCustody(@Nonnull StationSession s, @Nullable String anchorId) {
+    private Custody anchorCustody(@Nonnull StationSession s, @Nullable String anchorId,
+            @Nonnull Predicate<Custody> carriesGroup, boolean allowRunningFallback) {
         if (anchorId == null || ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(anchorId)) {
-            StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
-            return asset != null && s.actionId != null
-                    ? ActionResolver.resolve(asset, s.actionId).getCustody() : null;
+            return runningActionCustody(s);
         }
         String blockKey = s.anchorBlocks.get(normAnchorId(anchorId));
         String anchorStationId = blockKey != null ? knownStationBlocks.get(blockKey) : null;
         if (anchorStationId != null) {
             StationAsset anchorAsset = StationCatalog.getInstance().getStation(anchorStationId);
             if (anchorAsset != null) {
-                Custody anchorCustody = ActionResolver.resolve(anchorAsset, ACTION_WORK).getCustody();
-                if (anchorCustody != null && anchorCustody.getDisplay() != null) {
-                    return anchorCustody;
+                Custody custody = ActionResolver.resolve(anchorAsset, ACTION_WORK).getCustody();
+                if (custody != null && carriesGroup.test(custody)) {
+                    return custody;
                 }
             }
         }
+        return allowRunningFallback ? runningActionCustody(s) : null;
+    }
+
+    /** The {@code Custody} group of the action this session is actually running (the {@code "self"} answer). */
+    @Nullable
+    private static Custody runningActionCustody(@Nonnull StationSession s) {
         StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
         return asset != null && s.actionId != null ? ActionResolver.resolve(asset, s.actionId).getCustody() : null;
     }
 
     /**
+     * This session's {@code Target:{Action}} extension identity (adversarial-verify F4): the ONE
+     * {@link ActionResolver#actionTargetId} rule, resolved off the live catalog. {@code null} =
+     * the implicit action of a no-{@code Actions} station (Action-targeted payloads deliberately
+     * never reach it - the Station target is its addressing route).
+     */
+    @Nullable
+    private static String actionTargetIdFor(@Nonnull StationSession s, @Nonnull String actionId) {
+        StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
+        return asset != null ? ActionResolver.actionTargetId(asset, actionId) : null;
+    }
+
+    /**
+     * The world coordinates an anchor id resolves to for THIS session: the reserved {@code "self"}
+     * (or a null/blank id) is the primary station block, any other id parses the already-resolved
+     * {@code blockKey}. The ONE derivation every anchor-addressed call site shares
+     * ({@code Produce.To:Custody}, the Working flip, the walk target) - {@code null} when the key is
+     * unparseable.
+     */
+    @Nullable
+    private static int[] anchorCoords(@Nonnull StationSession s, @Nullable String anchorId,
+            @Nonnull String blockKey) {
+        if (anchorId == null || anchorId.isBlank() || ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(anchorId)) {
+            return new int[] {s.blockX, s.blockY, s.blockZ};
+        }
+        return StationAnchors.parseCoords(blockKey);
+    }
+
+    /**
      * Releases every ANCHOR block this session claimed (design 2.6, {@code stop()}'s teardown):
-     * clears the {@link #byBlock} occupancy for each non-{@code self} anchor and returns any custody
-     * standing at that anchor to the owner (else drops it at the block). Skips {@code self} (the
-     * primary block's own claim + custody are handled by the existing {@code stop()} paths).
+     * clears the {@link #byBlock} occupancy for each non-{@code self} anchor, returns any custody
+     * standing at that anchor to the owner (else drops it at the block), and resets that anchor's
+     * own {@code Custody.States} block state back to Empty. Skips {@code self} (the primary block's
+     * own claim + custody are handled by the existing {@code stop()} paths).
      */
     private void releaseAnchorClaims(@Nonnull StationSession s, @Nullable CommandBuffer<EntityStore> commandBuffer) {
         if (s.anchorBlocks.isEmpty()) {
@@ -2891,12 +3046,30 @@ public final class StationService {
             }
             byBlock.remove(blockKey, s.playerUuid);
             StationCustodyClaim claim = custodyByBlock.get(blockKey);
-            if (claim == null || !claim.ownerId.equals(s.playerUuid)) {
+            if (claim != null && claim.ownerId.equals(s.playerUuid)) {
+                custodyByBlock.remove(blockKey, claim);
+                StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
+                giveClaimToOwner(ownerStore, s.ref, claim, claim.blockX, claim.blockY, claim.blockZ);
+            }
+            // Anchor block-state reset, mirroring the flip returnCustody already does for the
+            // PRIMARY block. Previously absent and harmless (a remote anchor was never flipped at
+            // all); load-bearing now that Custody.States.Working exists, because a program can hand
+            // an anchor its Loaded look and then harvest it empty several steps later, stranding a
+            // "has input" hint over nothing. Deliberately NOT gated on this session having owned a
+            // claim here, but skipped when a FOREIGN claim still stands (never reset someone else's
+            // Loaded look) and when the anchor authors no States at all.
+            if (custodyByBlock.get(blockKey) != null) {
                 continue;
             }
-            custodyByBlock.remove(blockKey, claim);
-            StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
-            giveClaimToOwner(ownerStore, s.ref, claim, claim.blockX, claim.blockY, claim.blockZ);
+            Custody anchorStates = anchorCustody(s, anchorId, c -> c.getStates() != null, false);
+            if (anchorStates == null) {
+                continue;
+            }
+            int[] coords = anchorCoords(s, anchorId, blockKey);
+            World world = sessionWorld(s);
+            if (coords != null && world != null) {
+                flipCustodyState(world, coords[0], coords[1], coords[2], anchorStates, false);
+            }
         }
     }
 
@@ -2966,10 +3139,7 @@ public final class StationService {
         if (blockKey == null) {
             return null;
         }
-        int[] coords = (targetAnchorId == null || targetAnchorId.isBlank()
-                || ActionDef.Anchor.RESERVED_SELF.equalsIgnoreCase(targetAnchorId))
-                ? new int[] {s.blockX, s.blockY, s.blockZ}
-                : StationAnchors.parseCoords(blockKey);
+        int[] coords = anchorCoords(s, targetAnchorId, blockKey);
         if (coords == null) {
             return null;
         }
@@ -3472,18 +3642,123 @@ public final class StationService {
         if (states == null) {
             return;
         }
-        String stateName = toLoaded ? states.getLoaded() : states.getEmpty();
+        setBlockState(world, x, y, z, toLoaded ? states.getLoaded() : states.getEmpty());
+    }
+
+    /**
+     * The ONE raw block-interaction-state write in this engine (extracted from
+     * {@link #flipCustodyState} so the Working flip below shares the exact same guards rather than
+     * re-deriving them): a null/blank name, a block that is gone, or a name the block's own
+     * {@code State.Definitions} never authored all no-op (a state variant is a DISTINCT generated
+     * BlockType key - an unauthored name has nothing to resolve to). Returns {@code true} only when
+     * the write actually went through, so a caller can decide whether to REMEMBER the flip.
+     */
+    private static boolean setBlockState(@Nonnull World world, int x, int y, int z, @Nullable String stateName) {
         if (stateName == null || stateName.isBlank()) {
-            return;
+            return false;
         }
         try {
             BlockType bt = world.getBlockType(x, y, z);
             if (bt == null || bt.getData() == null || bt.getBlockForState(stateName) == null) {
-                return;
+                return false;
             }
             world.setBlockInteractionState(new Vector3i(x, y, z), bt, stateName);
+            return true;
         } catch (Throwable t) {
-            Log.fine("STATION custody state flip failed: " + t.getMessage());
+            Log.fine("STATION block state flip to '" + stateName + "' failed: " + t.getMessage());
+            return false;
+        }
+    }
+
+    // ==================== The actively-working block state (Custody.States.Working) ====================
+
+    /**
+     * Puts the block a work step runs AT into its {@code Custody.States.Working} look, for as long
+     * as that work is genuinely running there. The semantic is "actively working", NOT "has input in
+     * it" - the cooking fire's burning look lives on this state, so raw fish sitting on a cold fire
+     * leaves it unlit until the cook beat begins.
+     *
+     * <p>Covers BOTH altitudes with one call, because it resolves through the SAME
+     * {@link #anchorBlockKeyFor} the step phases already use: an absent/{@code "self"} anchor is the
+     * primary station block (the cooking fire's own plain-F convert loop), any other id is the
+     * claimed remote anchor (the cutting board's fish program lighting the fire it walked to).
+     *
+     * <p>IDEMPOTENT per block: re-entering the SAME block never re-writes the state, so the implicit
+     * convert program (one working step re-dispatched every cycle) holds a steady look instead of
+     * flickering once per cycle. Entering a DIFFERENT block exits the previous one first, so at most
+     * one block per player is ever left working. A no-op when the resolved {@code Custody} authors
+     * no {@code Working} name - every pre-knob station is byte-identical.
+     */
+    void enterWorkingState(@Nonnull StationSession s, @Nullable String anchorId) {
+        String blockKey = anchorBlockKeyFor(s, anchorId);
+        if (blockKey == null) {
+            return;
+        }
+        WorkingFlip live = workingByPlayer.get(s.playerUuid);
+        if (live != null && live.blockKey().equals(blockKey)) {
+            return;
+        }
+        exitWorkingState(s);
+        Custody custody = anchorCustody(s, anchorId, c -> c.getStates() != null, false);
+        Custody.States states = custody != null ? custody.getStates() : null;
+        if (states == null || states.getWorking() == null || states.getWorking().isBlank()) {
+            return;
+        }
+        int[] coords = anchorCoords(s, anchorId, blockKey);
+        if (coords == null) {
+            return;
+        }
+        World world = sessionWorld(s);
+        if (world == null) {
+            return;
+        }
+        if (setBlockState(world, coords[0], coords[1], coords[2], states.getWorking())) {
+            workingByPlayer.put(s.playerUuid, new WorkingFlip(blockKey, anchorId, coords[0], coords[1], coords[2]));
+        }
+    }
+
+    /**
+     * Takes whatever block this player's session left in its Working look back OUT of it - to
+     * {@code Loaded} when a custody claim still stands there, else {@code Empty}. Idempotent (a
+     * session with no live flip no-ops), so it can be called freely from every "work is no longer
+     * running here" moment: the step engine calls it on entering any non-working step and on
+     * entering a {@code Walk} phase, and {@link #stop} calls it unconditionally so EVERY exit path
+     * (re-press, crouch, walk-off, tool changed, damage, death, disconnect, world change, shutdown,
+     * {@code RITUAL_COMPLETE}, {@code INPUTS_EXHAUSTED}, {@code ANCHOR_LOST}, {@code PATH_BLOCKED},
+     * {@code STEP_FAILED}, ...) darkens it - a step-program failure reaches {@link #stop} through
+     * {@code dispatchProgram}'s Failed branch, so no reason needs its own hook here.
+     */
+    void exitWorkingState(@Nonnull StationSession s) {
+        WorkingFlip flip = workingByPlayer.remove(s.playerUuid);
+        if (flip == null) {
+            return;
+        }
+        Custody custody = anchorCustody(s, flip.anchorId(), c -> c.getStates() != null, false);
+        if (custody == null) {
+            return;
+        }
+        // A gone entity (disconnect/shutdown) has no world to write through: the flip is dropped
+        // here and the block is left wearing its Working look until the next interaction, which is
+        // EXACTLY the pre-existing restart-orphan story for the Loaded state - toggle()'s
+        // not-loaded self-heal resets it idempotently (custody is never persisted by construction).
+        World world = sessionWorld(s);
+        if (world == null) {
+            return;
+        }
+        StationCustodyClaim claim = custodyByBlock.get(flip.blockKey());
+        flipCustodyState(world, flip.x(), flip.y(), flip.z(), custody, claim != null && claim.totalQuantity() > 0);
+    }
+
+    /** This session's world, or {@code null} when its entity is gone (a shutdown/disconnect stop). */
+    @Nullable
+    private static World sessionWorld(@Nonnull StationSession s) {
+        if (s.ref == null || !s.ref.isValid()) {
+            return null;
+        }
+        try {
+            return WorldEvictors.worldOf(s.ref);
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 

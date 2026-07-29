@@ -320,6 +320,11 @@
                       "key": "Steerable",
                       "required": false,
                       "type": "boolean"
+                    },
+                    {
+                      "key": "VisibleAnchorItemId",
+                      "required": false,
+                      "type": "string"
                     }
                   ]
                 }
@@ -1038,6 +1043,11 @@
                       "key": "Steerable",
                       "required": false,
                       "type": "boolean"
+                    },
+                    {
+                      "key": "VisibleAnchorItemId",
+                      "required": false,
+                      "type": "string"
                     }
                   ]
                 }
@@ -1628,6 +1638,11 @@
                       "key": "Steerable",
                       "required": false,
                       "type": "boolean"
+                    },
+                    {
+                      "key": "VisibleAnchorItemId",
+                      "required": false,
+                      "type": "string"
                     }
                   ]
                 }
@@ -2206,6 +2221,12 @@
               ]
             }
           ]
+        },
+        {
+          "key": "Working",
+          "required": false,
+          "documentation": "Does this step count as WORK at its At-anchor block (driving that block's Custody.States.Working look)? Default: true for a Consume+Produce convert step, false otherwise. Author true on a pure beat that IS the work (a cook hold), false to suppress.",
+          "type": "boolean"
         }
       ]
     },
@@ -2566,11 +2587,19 @@
             {
               "key": "Empty",
               "required": false,
+              "documentation": "The block State.Definitions name shown while no input is held in custody.",
               "type": "string"
             },
             {
               "key": "Loaded",
               "required": false,
+              "documentation": "The block State.Definitions name shown while custody holds input but no work is running.",
+              "type": "string"
+            },
+            {
+              "key": "Working",
+              "required": false,
+              "documentation": "The block State.Definitions name shown ONLY while a work step is actively executing at this block; reverts to Loaded/Empty on step exit and every session stop. Omit for no working flip.",
               "type": "string"
             }
           ]
@@ -3277,6 +3306,22 @@
               }
             ]
           }
+        },
+        {
+          "key": "Puppet",
+          "required": false,
+          "documentation": "Puppet presentation overlay (Station/Action target), merged PER LEAF at every depth: an authored leaf wins, an omitted leaf keeps the base station's own value.",
+          "type": "object",
+          "nestedType": "Puppet",
+          "ref": "Puppet"
+        },
+        {
+          "key": "Custody",
+          "required": false,
+          "documentation": "Custody overlay (Station/Action target), merged PER LEAF at every depth: an overlay carrying only Display never clears the base's States, MaxQuantity or Input.",
+          "type": "object",
+          "nestedType": "Custody",
+          "ref": "Custody"
         },
         {
           "key": "Rolls",

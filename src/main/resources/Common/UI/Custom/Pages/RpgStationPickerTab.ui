@@ -4,6 +4,15 @@
 // parameterized lock-reason message ("Requires {0}") actually substitutes instead of printing
 // the literal template. A locked category sets #TabBtn.Enabled = false (renders via the style's
 // Disabled state, native-greyed) and carries no click binding; #LockReason shows underneath.
+//
+// Maintainer smoke fix (icon-only tabs): #Label now carries the representative output item's own
+// native name (RpgStationPickerPage sets it whenever Category.label() is non-null - effectively
+// always now) and #Cost, a NEW plain Label below the button, shows that same representative
+// conversion's cost shape ("1x Trunk -> 4x Planks"), set directly via .TextSpans (a plain Label,
+// not inside the Button, so no ZigRichButton wrapper needed - same direct-set pattern as
+// #LockReason). Card widened 140->170 so both extra lines have room to wrap without excessive
+// line-wrapping; the outer #RpgStationPickerTab Group keeps LayoutMode: Top with no explicit
+// Height so the card hugs its own content (button + cost line + optional lock reason).
 
 $C = "../Common.ui";
 
@@ -16,6 +25,7 @@ $C = "../Common.ui";
 );
 
 @RpgStationPickerTabLabelStyle = (FontSize: 12, TextColor: #eef3fa, RenderBold: false, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
+@RpgStationPickerTabCostStyle = (FontSize: 10, TextColor: #9fb0c4, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
 @RpgStationPickerTabLockStyle = (FontSize: 10, TextColor: #d98f8f, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
 
 @RpgStationPickerIconGridStyle = ItemGridStyle(
@@ -37,12 +47,12 @@ $C = "../Common.ui";
 );
 
 Group #RpgStationPickerTab {
-  Anchor: (Width: 140, Right: 8, Bottom: 8);
+  Anchor: (Width: 170, Right: 8, Bottom: 8);
   LayoutMode: Top;
 
   Button #TabBtn {
     Style: @RpgStationPickerTabBtnStyle;
-    Anchor: (Height: 48, Width: 140);
+    Anchor: (Height: 48, Width: 170);
     LayoutMode: Left;
     Padding: (Horizontal: 8);
 
@@ -64,9 +74,19 @@ Group #RpgStationPickerTab {
     }
   }
 
+  // The representative conversion's cost shape ("1x Trunk -> 4x Planks"), always populated
+  // alongside an unlocked tab's name (RpgStationPickerPage#build); hidden when the caller has no
+  // resolvable cost line.
+  Label #Cost {
+    Text: "";
+    Anchor: (Top: 3, Width: 170);
+    Style: @RpgStationPickerTabCostStyle;
+    Visible: false;
+  }
+
   Label #LockReason {
     Text: "";
-    Anchor: (Top: 3, Width: 140);
+    Anchor: (Top: 3, Width: 170);
     Style: @RpgStationPickerTabLockStyle;
     Visible: false;
   }

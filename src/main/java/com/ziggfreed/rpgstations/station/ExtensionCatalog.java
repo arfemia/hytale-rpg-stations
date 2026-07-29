@@ -4,17 +4,22 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.ziggfreed.rpgstations.asset.ActionDef;
+import com.ziggfreed.rpgstations.asset.ActionInput;
+import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.LootRef;
+import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StatRollEntry;
 import com.ziggfreed.rpgstations.asset.StationAsset;
@@ -40,6 +45,20 @@ import com.ziggfreed.rpgstations.util.Log;
  * extension's insertions in {@code APPLY_ORDER} against a live working list (later extensions can
  * anchor on earlier-inserted step ids), a dangling {@code After}/{@code Before} anchor degrading to
  * {@code AtEnd}.
+ *
+ * <p><b>The presentation overlays ({@code Puppet}/{@code Custody}, {@link ExtensionAsset}'s rule
+ * 5)</b> are the one NON-collection payload shape, so they merge PER LEAF instead of appending:
+ * {@link #overlayPuppet}/{@link #overlayCustody} walk the group recursively and, at every nesting
+ * depth, take the OVERLAY's leaf when it is authored and the BASE's when it is not
+ * ({@link #firstNonNull} is the ONE rule, applied everywhere). Consequences worth stating because
+ * they are the whole point: a {@code Custody} overlay carrying only {@code Display} leaves
+ * {@code States}/{@code MaxQuantity}/{@code Input} untouched; a {@code Display} carrying only
+ * {@code Scale} leaves {@code Offset}/{@code Rotation} untouched; a {@code Puppet} carrying only
+ * {@code Offset.Z} leaves {@code Hide}/{@code Look}/{@code Prop} and even {@code Offset.X}/
+ * {@code .Y} untouched. Extensions overlay in {@link ExtensionAsset#APPLY_ORDER}, so the LATER
+ * (higher-priority) extension wins a same-leaf contest, and the whole fold is still deterministic
+ * for a given input set. A null overlay group returns the base UNCHANGED (identity), so an
+ * extension that authors neither key costs nothing.
  */
 public final class ExtensionCatalog {
 
@@ -141,6 +160,42 @@ public final class ExtensionCatalog {
         return exts.isEmpty() ? base : mergeXp(base, exts);
     }
 
+    /**
+     * The station's effective {@code Puppet} group: {@code base} with every {@code Station}-targeted
+     * extension's {@code Puppet} overlaid PER LEAF, in {@link ExtensionAsset#APPLY_ORDER}. Returns
+     * {@code base} unchanged when no extension authors one.
+     */
+    @Nullable
+    public Puppet applyToStationPuppet(@Nonnull String stationId, @Nullable Puppet base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.STATION, stationId);
+        return exts.isEmpty() ? base : mergePuppet(base, exts);
+    }
+
+    /** An action's effective {@code Puppet} group: {@code base} with every {@code Action}-targeted extension's {@code Puppet} overlaid PER LEAF. */
+    @Nullable
+    public Puppet applyToActionPuppet(@Nonnull String actionId, @Nullable Puppet base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId);
+        return exts.isEmpty() ? base : mergePuppet(base, exts);
+    }
+
+    /**
+     * The station's effective {@code Custody} group: {@code base} with every {@code Station}-targeted
+     * extension's {@code Custody} overlaid PER LEAF, in {@link ExtensionAsset#APPLY_ORDER}. An overlay
+     * carrying only {@code Display} never clobbers {@code States}/{@code MaxQuantity}/{@code Input}.
+     */
+    @Nullable
+    public Custody applyToStationCustody(@Nonnull String stationId, @Nullable Custody base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.STATION, stationId);
+        return exts.isEmpty() ? base : mergeCustody(base, exts);
+    }
+
+    /** An action's effective {@code Custody} group: {@code base} with every {@code Action}-targeted extension's {@code Custody} overlaid PER LEAF. */
+    @Nullable
+    public Custody applyToActionCustody(@Nonnull String actionId, @Nullable Custody base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId);
+        return exts.isEmpty() ? base : mergeCustody(base, exts);
+    }
+
     /** A lootable's effective rolls: {@code base} plus every {@code Lootable}-targeted extension's {@code Rolls}. */
     @Nullable
     public Roll[] applyToLootableRolls(@Nonnull String lootableId, @Nullable Roll[] base) {
@@ -224,6 +279,256 @@ public final class ExtensionCatalog {
             appendAll(out, ext.getEntries());
         }
         return out.isEmpty() ? base : out.toArray(new StatRollEntry[0]);
+    }
+
+    // ---------- Puppet / Custody: the PER-LEAF presentation overlays (ExtensionAsset rule 5) ----------
+
+    /**
+     * Overlay every extension's {@code Puppet} onto {@code base}, in {@code exts} order (already
+     * APPLY_ORDER-sorted, so the later/higher-priority extension wins a same-leaf contest).
+     */
+    @Nullable
+    static Puppet mergePuppet(@Nullable Puppet base, @Nonnull List<ExtensionAsset> exts) {
+        Puppet out = base;
+        for (ExtensionAsset ext : exts) {
+            out = overlayPuppet(out, ext.getPuppet());
+        }
+        return out;
+    }
+
+    /**
+     * ONE per-leaf {@code Puppet} overlay (PURE): every leaf of {@code overlay} that is authored
+     * wins; every leaf it omits keeps {@code base}'s value, recursively through
+     * {@code Hide}/{@code Look}/{@code Look.Model}/{@code Look.Role}/{@code Offset}/{@code Prop}. A
+     * null {@code overlay} is the identity; a null {@code base} yields {@code overlay} as-is.
+     */
+    @Nullable
+    static Puppet overlayPuppet(@Nullable Puppet base, @Nullable Puppet overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Puppet.of(
+                firstNonNull(overlay.getEnabled(), base.getEnabled()),
+                overlayHide(base.getHide(), overlay.getHide()),
+                overlayLook(base.getLook(), overlay.getLook()),
+                overlayPuppetOffset(base.getOffset(), overlay.getOffset()),
+                firstNonNull(overlay.getYaw(), base.getYaw()),
+                overlayProp(base.getProp(), overlay.getProp()));
+    }
+
+    @Nullable
+    private static Puppet.Hide overlayHide(@Nullable Puppet.Hide base, @Nullable Puppet.Hide overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Puppet.Hide.of(
+                firstNonNull(overlay.getRoute(), base.getRoute()),
+                firstNonNull(overlay.getEffectId(), base.getEffectId()));
+    }
+
+    @Nullable
+    private static Puppet.Look overlayLook(@Nullable Puppet.Look base, @Nullable Puppet.Look overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Puppet.Look.of(
+                firstNonNull(overlay.getSource(), base.getSource()),
+                overlayLookModel(base.getModel(), overlay.getModel()),
+                overlayLookRole(base.getRole(), overlay.getRole()));
+    }
+
+    @Nullable
+    private static Puppet.Model overlayLookModel(@Nullable Puppet.Model base, @Nullable Puppet.Model overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Puppet.Model.of(
+                firstNonNull(overlay.getModelId(), base.getModelId()),
+                firstNonNull(overlay.getFallbackModelId(), base.getFallbackModelId()));
+    }
+
+    @Nullable
+    private static Puppet.Role overlayLookRole(@Nullable Puppet.Role base, @Nullable Puppet.Role overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Puppet.Role.of(
+                firstNonNull(overlay.getRoleId(), base.getRoleId()),
+                firstNonNull(overlay.getSkinSource(), base.getSkinSource()),
+                firstNonNull(overlay.getPersist(), base.getPersist()),
+                firstNonNull(overlay.getSpeedMps(), base.getSpeedMps()));
+    }
+
+    @Nullable
+    private static Puppet.Offset overlayPuppetOffset(@Nullable Puppet.Offset base, @Nullable Puppet.Offset overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Puppet.Offset.of(
+                firstNonNull(overlay.getX(), base.getX()),
+                firstNonNull(overlay.getY(), base.getY()),
+                firstNonNull(overlay.getZ(), base.getZ()));
+    }
+
+    @Nullable
+    private static Puppet.Prop overlayProp(@Nullable Puppet.Prop base, @Nullable Puppet.Prop overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Puppet.Prop.of(
+                firstNonNull(overlay.getSource(), base.getSource()),
+                firstNonNull(overlay.getItemId(), base.getItemId()),
+                firstNonNull(overlay.getSlot(), base.getSlot()));
+    }
+
+    /**
+     * Overlay every extension's {@code Custody} onto {@code base}, in {@code exts} order (already
+     * APPLY_ORDER-sorted, so the later/higher-priority extension wins a same-leaf contest).
+     */
+    @Nullable
+    static Custody mergeCustody(@Nullable Custody base, @Nonnull List<ExtensionAsset> exts) {
+        Custody out = base;
+        for (ExtensionAsset ext : exts) {
+            out = overlayCustody(out, ext.getCustody());
+        }
+        return out;
+    }
+
+    /**
+     * ONE per-leaf {@code Custody} overlay (PURE). THE load-bearing property: an overlay authoring
+     * only {@code Display} carries null {@code MaxQuantity}/{@code Input}/{@code States}, and a null
+     * leaf keeps the base's value - so re-skinning a station's placed-input visual can never silently
+     * disable its custody mechanics. A null {@code overlay} is the identity.
+     */
+    @Nullable
+    static Custody overlayCustody(@Nullable Custody base, @Nullable Custody overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Custody.of(
+                firstNonNull(overlay.getMaxQuantity(), base.getMaxQuantity()),
+                overlayInput(base.getInput(), overlay.getInput()),
+                overlayStates(base.getStates(), overlay.getStates()),
+                overlayDisplay(base.getDisplay(), overlay.getDisplay()));
+    }
+
+    /**
+     * Per-leaf {@code Custody.Input} overlay. Every {@link ActionInput} route is independently
+     * orthogonal ("match = ANY route satisfied"), so overlaying route by route WIDENS acceptance
+     * predictably rather than silently swapping one matcher for another.
+     */
+    @Nullable
+    private static ActionInput overlayInput(@Nullable ActionInput base, @Nullable ActionInput overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return ActionInput.of(
+                firstNonNull(overlay.getItemId(), base.getItemId()),
+                firstNonNull(overlay.getResourceTypeId(), base.getResourceTypeId()),
+                firstNonNull(overlay.getTags(), base.getTags()),
+                firstNonNull(overlay.getFunction(), base.getFunction()));
+    }
+
+    /**
+     * Per-leaf {@code Custody.States} overlay. Every state name is an independent nullable knob, so
+     * each overlays on its own. NOTE for whoever adds the FOURTH state name: add it here in the same
+     * change, or an overlay silently drops it (a leaf missing from this factory call reads as
+     * "neither side authored one" and the merged group loses it).
+     */
+    @Nullable
+    private static Custody.States overlayStates(@Nullable Custody.States base, @Nullable Custody.States overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Custody.States.of(
+                firstNonNull(overlay.getEmpty(), base.getEmpty()),
+                firstNonNull(overlay.getLoaded(), base.getLoaded()),
+                firstNonNull(overlay.getWorking(), base.getWorking()));
+    }
+
+    @Nullable
+    private static Custody.Display overlayDisplay(@Nullable Custody.Display base, @Nullable Custody.Display overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Custody.Display.of(
+                overlayDisplayOffset(base.getOffset(), overlay.getOffset()),
+                firstNonNull(overlay.getScale(), base.getScale()),
+                overlayRotation(base.getRotation(), overlay.getRotation()));
+    }
+
+    @Nullable
+    private static Custody.Display.Offset overlayDisplayOffset(@Nullable Custody.Display.Offset base,
+            @Nullable Custody.Display.Offset overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Custody.Display.Offset.of(
+                firstNonNull(overlay.getX(), base.getX()),
+                firstNonNull(overlay.getY(), base.getY()),
+                firstNonNull(overlay.getZ(), base.getZ()));
+    }
+
+    @Nullable
+    private static Custody.Display.Rotation overlayRotation(@Nullable Custody.Display.Rotation base,
+            @Nullable Custody.Display.Rotation overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Custody.Display.Rotation.of(
+                firstNonNull(overlay.getX(), base.getX()),
+                firstNonNull(overlay.getY(), base.getY()),
+                firstNonNull(overlay.getZ(), base.getZ()));
+    }
+
+    /**
+     * THE per-leaf rule, applied at every nesting depth of both presentation overlays: the overlay's
+     * own value when it authored one, else the base's. Nothing else decides a leaf. Leaf
+     * granularity note (adversarial-verify F9): a MAP-valued leaf ({@code Custody.Input.Tags})
+     * replaces WHOLESALE as one leaf, never merged per tag family - the map is the leaf.
+     */
+    @Nullable
+    private static <T> T firstNonNull(@Nullable T overlay, @Nullable T base) {
+        return overlay != null ? overlay : base;
     }
 
     /**
@@ -356,8 +661,50 @@ public final class ExtensionCatalog {
         }
     }
 
+    /**
+     * The payload keys {@code ext} actually authors, in a FIXED declared order (PURE, unit-tested):
+     * what the {@code EXTENSION_APPLIED} boot summary enumerates so a server owner can see WHICH
+     * kinds of contribution composed onto a target, not just how many extensions did.
+     */
+    @Nonnull
+    static List<String> authoredPayloadKinds(@Nonnull ExtensionAsset ext) {
+        List<String> out = new ArrayList<>();
+        if (ext.getXp() != null && ext.getXp().length > 0) {
+            out.add(ExtensionAsset.PAYLOAD_XP);
+        }
+        if (ext.getLoot() != null) {
+            out.add(ExtensionAsset.PAYLOAD_LOOT);
+        }
+        if (ext.getActions() != null && !ext.getActions().isEmpty()) {
+            out.add(ExtensionAsset.PAYLOAD_ACTIONS);
+        }
+        if (ext.getConversions() != null && ext.getConversions().length > 0) {
+            out.add(ExtensionAsset.PAYLOAD_CONVERSIONS);
+        }
+        if (ext.getSteps() != null && ext.getSteps().length > 0) {
+            out.add(ExtensionAsset.PAYLOAD_STEPS);
+        }
+        if (ext.getAnchors() != null && !ext.getAnchors().isEmpty()) {
+            out.add(ExtensionAsset.PAYLOAD_ANCHORS);
+        }
+        if (ext.getPuppet() != null) {
+            out.add(ExtensionAsset.PAYLOAD_PUPPET);
+        }
+        if (ext.getCustody() != null) {
+            out.add(ExtensionAsset.PAYLOAD_CUSTODY);
+        }
+        if (ext.getRolls() != null && ext.getRolls().length > 0) {
+            out.add(ExtensionAsset.PAYLOAD_ROLLS);
+        }
+        if (ext.getEntries() != null && ext.getEntries().length > 0) {
+            out.add(ExtensionAsset.PAYLOAD_ENTRIES);
+        }
+        return out;
+    }
+
     private void logAppliedSummary() {
         Map<String, Integer> counts = new LinkedHashMap<>();
+        Map<String, Set<String>> kinds = new LinkedHashMap<>();
         for (ExtensionAsset ext : extensions.values()) {
             ExtensionAsset.Target t = ext != null ? ext.getTarget() : null;
             String type = t != null ? t.resolvedType() : null;
@@ -365,10 +712,15 @@ public final class ExtensionCatalog {
             if (type == null || id == null) {
                 continue;
             }
-            counts.merge(type + " " + id, 1, Integer::sum);
+            String key = type + " " + id;
+            counts.merge(key, 1, Integer::sum);
+            kinds.computeIfAbsent(key, k -> new LinkedHashSet<>()).addAll(authoredPayloadKinds(ext));
         }
         for (Map.Entry<String, Integer> e : counts.entrySet()) {
-            Log.info("EXTENSION_APPLIED: " + e.getKey() + " <- " + e.getValue() + " extension(s)");
+            Set<String> contributed = kinds.get(e.getKey());
+            String detail = contributed == null || contributed.isEmpty()
+                    ? "" : " [" + String.join(", ", contributed) + "]";
+            Log.info("EXTENSION_APPLIED: " + e.getKey() + " <- " + e.getValue() + " extension(s)" + detail);
         }
     }
 }

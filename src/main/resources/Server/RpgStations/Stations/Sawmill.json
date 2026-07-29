@@ -1,11 +1,11 @@
 {
-  "$Comment": "Icon intentionally omitted (aligned with the skill-stations-pack tuning leg, 2026-07-22): StationService#blockItemIdAt already falls back to the anchor block's own BlockType id at engage time when Identity.Icon is absent/blank, and this jar's own default Sawmill block shares the SAME id (RPG_Station_Sawmill, filename = item id) - so the summary-HUD crest already shows the station's own block icon with zero duplicated id to drift, the same reasoning the pack's own Sawmill.json/Anvil.json now use. Scope-2 shape migration (2026-07-24, leg A5, jar content re-author to the A-schema): 'Loot.Tables' is renamed 'Loot.Lootables' (the unified LootRef group, asset.LootRef); no other group in this file changed shape (Recipe here authors only FromCrafting, never Conversions, so the Ingredient migration touches nothing here). Every value below is byte-identical to the pre-scope-2 file; only the one key name changed. SELECTION WAVE (decision 56, multi-category picker exemplar): FromCrafting.Categories widened from ['WoodPlanks'] to also include 'DecorativePlanks'/'OrnatePlanks' - genuine native categories confirmed by reading every Wood_<Species>_{Planks,Decorative,Ornate}.json in the shared source (all 11 species share the SAME Wood_<Species>_Trunk ResourceTypeId input and the SAME 'Builders'/StructuralCrafting bench, only the recipe Category differs), so this is zero-hardcoding native-recipe composition, not invented content. The deriver now surfaces 3 output categories per log species (33 total conversions); StationRecipeDeriver stamps each derived Conversion with its source category (decision 56) so the sneak+F picker can offer 'Planks'/'Decorative'/'Ornate' as the three choices for whatever log the player is holding - a single-log input, multiple valid outputs, exactly the picker's reason to exist. Balance-neutral: OutputPerInput stays the reader default (1), matching every derived category's own native OutputQuantity:1. SELECTION WAVE SEAL (decision 57, 2026-07-24): a plain-F press with NO picker selection now defaults to the FIRST AUTHORED FromCrafting.Categories entry - so the array order below (WoodPlanks first) IS the default priority, and plain-F = Planks exactly as it shipped before the multi-category widening (the deriver's alphabetical output-id sort would otherwise have made Decorative the first runnable). Reorder Categories to change the plain-F default; sneak+F still offers all three. This is resolved engine-side at the effective-category point (StationService#effectiveCategory), NOT by touching the sealed deriver sort, so the balance-neutral claim above stays true.",
+  "$Comment": "Icon intentionally omitted (aligned with the skill-stations-pack tuning leg, 2026-07-22): StationService#blockItemIdAt already falls back to the anchor block's own BlockType id at engage time when Identity.Icon is absent/blank, and this jar's own default Sawmill block shares the SAME id (RPG_Station_Sawmill, filename = item id) - so the summary-HUD crest already shows the station's own block icon with zero duplicated id to drift, the same reasoning the pack's own Sawmill.json/Anvil.json now use. Scope-2 shape migration (2026-07-24, leg A5, jar content re-author to the A-schema): 'Loot.Tables' is renamed 'Loot.Lootables' (the unified LootRef group, asset.LootRef); no other group in this file changed shape (Recipe here authors only FromCrafting, never Conversions, so the Ingredient migration touches nothing here). Every value below is byte-identical to the pre-scope-2 file; only the one key name changed. SELECTION WAVE (decision 56, multi-category picker exemplar): FromCrafting.Categories widened from ['WoodPlanks'] to also include 'DecorativePlanks'/'OrnatePlanks' - genuine native categories confirmed by reading every Wood_<Species>_{Planks,Decorative,Ornate}.json in the shared source (all 11 species share the SAME Wood_<Species>_Trunk ResourceTypeId input and the SAME 'Builders'/StructuralCrafting bench, only the recipe Category differs), so this is zero-hardcoding native-recipe composition, not invented content. The deriver now surfaces 3 output categories per log species (33 total conversions); StationRecipeDeriver stamps each derived Conversion with its source category (decision 56) so the sneak+F picker can offer 'Planks'/'Decorative'/'Ornate' as the three choices for whatever log the player is holding - a single-log input, multiple valid outputs, exactly the picker's reason to exist. Balance-neutral: OutputPerInput stays the reader default (1), matching every derived category's own native OutputQuantity:1. SELECTION WAVE SEAL (decision 57, 2026-07-24): a plain-F press with NO picker selection now defaults to the FIRST AUTHORED FromCrafting.Categories entry - so the array order below (WoodPlanks first) IS the default priority, and plain-F = Planks exactly as it shipped before the multi-category widening (the deriver's alphabetical output-id sort would otherwise have made Decorative the first runnable). Reorder Categories to change the plain-F default; sneak+F still offers all three. This is resolved engine-side at the effective-category point (StationService#effectiveCategory), NOT by touching the sealed deriver sort, so the balance-neutral claim above stays true. PRESENTATION-DEFAULTS RECOVERY (2026-07-28): the Puppet group, Custody.Display and Work.CycleMs 4805 below are RECOVERED VERBATIM from the pack's own Server/RpgStations/Stations/Sawmill.json as it stood at skill-stations-pack commit c1018a9^ (git show c1018a9^:Server/RpgStations/Stations/Sawmill.json). That pack file was the SOLE author of both groups, and c1018a9 deleted it in favour of the additive Extensions/SawmillProgression.json, which physically could not carry them (ExtensionAsset's codec had no Puppet or Custody key), so the live sawmill regressed to a visible seat-mounted player working over invisible placed logs. Per maintainer ruling the tuned pack values become THIS jar's shipped standalone defaults, so the standalone sawmill looks right with no pack installed and a pack no longer has to own a full-file override just to keep them alive. Every value is the maintainer's own in-game-tuned number carried across unchanged: Puppet.Offset.Z 1.0 and Yaw 0.0 are the round-2 positioning re-tune (the puppet stood too close and faced the wrong way at 0.4/180.0), Custody.Display.Offset.Y -0.1 is the round-4 re-tune off R5's 0.05 so the placed log embeds slightly into the bench top, and Work.CycleMs 4805 is the played round-8c cadence (this file had drifted to 4665). Ruling 1 of the same pass gave ExtensionAsset real Puppet/Custody keys with PER-LEAF overlay semantics, so a pack re-skinning this station now authors only the leaves it re-tunes and inherits the rest of these defaults - see asset/ExtensionAsset.java rule 5 and station/ExtensionCatalog.java's overlayPuppet/overlayCustody.",
   "Identity": {
     "NameKey": "rpgstations.station.sawmill.name",
     "DescKey": "rpgstations.station.sawmill.desc"
   },
   "Work": {
-    "CycleMs": 4665,
+    "CycleMs": 4805,
     "MaxDurationMs": 600000,
     "MaxMoveMeters": 1.5,
     "Exclusive": true,
@@ -19,7 +19,11 @@
   },
   "Custody": {
     "MaxQuantity": 100,
-    "States": { "Empty": "Default", "Loaded": "Loaded" }
+    "States": { "Empty": "Default", "Loaded": "Loaded" },
+    "Display": {
+      "Offset": { "Y": -0.1 },
+      "Scale": 0.4
+    }
   },
   "Loot": {
     "Lootables": ["sawmillfinds"]
@@ -29,6 +33,14 @@
     "EffectId": "RPG_Station_Hold",
     "InterruptOnDamage": true,
     "Mount": { "Surface": "Block" }
+  },
+  "Puppet": {
+    "Enabled": true,
+    "Hide": { "Route": "Scale" },
+    "Look": { "Source": "PlayerClone" },
+    "Offset": { "X": 0.0, "Y": -0.4, "Z": 1.0 },
+    "Yaw": 0.0,
+    "Prop": { "Source": "MirrorHeld", "Slot": "Hotbar" }
   },
   "Tool": {
     "Gather": { "GatherType": "Woods", "MinPower": 0.1 },

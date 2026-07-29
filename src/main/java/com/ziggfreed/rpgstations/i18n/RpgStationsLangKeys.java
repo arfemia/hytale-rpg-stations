@@ -36,6 +36,9 @@ import javax.annotation.Nonnull;
  * {@code .locked}/{@code .locked_generic} backing {@code pages.RpgStationPickerPage}, plus
  * {@code ui.station.picker.selected} (the selection-confirm toast fired from
  * {@code StationService#onPickerSelect}, added in the selection-wave verify-fix).
+ * The maintainer picker-smoke fix (2026-07-28) adds {@code ui.station.picker.cost} (the per-tab
+ * cost line, "{0}x {1} -&gt; {2}x {3}", {@code StationService#pickerCostLine}) - present in ALL
+ * NINE locale {@code rpgstations.lang} files (a wordless format string, identical in each).
  * The seam-wave validator/content leg (R4) LOCKSTEP CLEANUP folds in the wave-3 gap this set had
  * drifted from its own {@code rpgstations.lang}: {@code ui.station.no_action} (the multi-action
  * "nothing this station can work with" toast), the wave-3 {@code ui.station.stop.complete}/
@@ -138,6 +141,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.picker.locked",
             "rpgstations.ui.station.picker.locked_generic",
             "rpgstations.ui.station.picker.selected",
+            "rpgstations.ui.station.picker.cost",
             // SCOPE-3 standing-mount verify PREP (throwaway dev spike, /rpgstations - the block's
             // own Use interaction, no new command). Delete alongside MountSpike.json.
             "rpgstations.station.mountspike.name",

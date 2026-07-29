@@ -40,12 +40,17 @@ the WHOLE set executes:
   folds into [`StationCatalog`](StationCatalog.java). Ids are lowercase (canonicalized at
   decode). This jar ships its OWN default Sawmill (`Server/RpgStations/Stations/Sawmill.json`,
   standalone-playable with the built-in `rpgstations:` factors + `SawmillFinds` lootable); the
-  `skill-stations-pack` adds its own luck-tier lootable as an ADDITIVE `Extensions/
-  SawmillProgression.json` (below) rather than a full-file override (it does NOT re-author the
-  jar's Woodcutting/Crafting Xp - the jar base is the single Xp authority; an extension appends a
-  genuinely-new skill, never re-adds one the base already grants, A8 review M1) - see
-  `../../../../../../CONTENT_PACKS.md`'s Station authoring section for the authoring guide (brief
-  reference only; do not duplicate it here).
+  `skill-stations-pack` adds its own luck-tier lootable plus an MMO-luck-scaled bonus-copy roll as
+  an ADDITIVE `Extensions/SawmillProgression.json` (below) rather than a full-file override (it does
+  NOT re-author the jar's Woodcutting/Crafting Xp - the jar base is the single Xp authority; an
+  extension appends a genuinely-new skill, never re-adds one the base already grants, A8 review M1)
+  - see `../../../../../../CONTENT_PACKS.md`'s Station authoring section for the authoring guide
+  (brief reference only; do not duplicate it here). **The jar Sawmill owns the PRESENTATION defaults
+  too** (`Puppet` + `Custody.Display`, the maintainer's in-game-tuned values, plus `Work.CycleMs`
+  4805): they used to live only in the pack's full-file station override, so retiring that override
+  dropped them and the sawmill regressed to a visible seat-mounted player working invisible placed
+  logs. They ship here now, and a pack re-skins them through an `ExtensionAsset` `Puppet`/`Custody`
+  per-leaf overlay instead of re-owning the whole file.
 - **Standalone actions**: `asset.ActionAsset` (`Server/RpgStations/Actions/*.json`) folds into
   `ActionCatalog` (same `AssetStoreRegistrar` + `LoadedAssetsEvent` pattern as every other type).
   An inline `Actions` map entry's `Ref` leaf resolves against this catalog - see the ActionAsset
@@ -132,8 +137,29 @@ arrays, anchored insertion for `Steps`). Cached per fold generation alongside `S
 (m7): extensions apply to the `Parent`-resolved target at READ time and do NOT flow down `Parent`
 chains; a `Target:{Action}` extension reaches every `Ref` user of that action, a
 `Target:{Station}` step-insert applies post-`Ref` to that one station only. Boot log carries one
-INFO `EXTENSION_APPLIED` summary line per target ("station sawmill: +1 lootable from
-sawmillprogression") so a server owner can see the composed result.
+INFO `EXTENSION_APPLIED` summary line per target, enumerating the CONTRIBUTION KINDS that composed
+onto it and not just how many extensions did (`EXTENSION_APPLIED: Station sawmill <- 1 extension(s)
+[Loot]`); the enumeration comes from the pure `authoredPayloadKinds`.
+
+**The two PER-LEAF presentation overlays (`Puppet`, `Custody`)** are the one non-collection payload
+shape, so they merge leaf-wise instead of appending: `applyToStationPuppet`/`applyToActionPuppet`/
+`applyToStationCustody`/`applyToActionCustody` are the read-side entry points over the pure
+`overlayPuppet`/`overlayCustody` cores, which walk the group recursively and take the OVERLAY's leaf
+where it is authored, the BASE's where it is not (`firstNonNull` is the ONE rule at every depth). A
+`Custody` overlay carrying only `Display` therefore never clobbers `States`/`MaxQuantity`/`Input` -
+that is the whole reason the capability exists, so a pack can re-skin a station's placed-input visual
+without silently disabling its placement mechanics. Overlays apply in `APPLY_ORDER`, so the later
+(higher-priority) extension wins a same-leaf contest and the fold stays deterministic; a null overlay
+group returns the base object unchanged. Covered by `ExtensionOverlayTest` (`src/test/java/com/
+ziggfreed/rpgstations/station/`, fixture JSON authored by the test and decoded through the real
+shipped codecs). **Call-site status: WIRED** - the 2-arg live `ActionResolver.resolve` applies both
+overlays after the pure resolution (`applyExtensionOverlays`: the `Ref` `ActionAsset` id first, then
+the inline map key when it differs, then the station id - most-specific-wins per leaf;
+identity-preserving, so the zero-extension path returns the pure result untouched). The 3-arg pure
+core stays extension-free for unit tests. Unlike `Loot`/`Xp` (applied at `StationService`'s own read
+sites), `Puppet`/`Custody` overlay INSIDE the resolver choke point, so every reader
+(`StationService`, `StationStepHandlers`, `selectActionForBlockState`'s restart recovery) sees the
+same effective groups with no per-site wiring.
 
 ## Held-tool gate (unchanged by scope-2)
 
@@ -251,7 +277,15 @@ what those three first-party sources establish.**
   hold effect effect-mode uses plus a per-heartbeat `snapBack`; `DismountOnMove` (default true)
   runs the same origin-delta walk-off check effect-mode uses. Anchor lifecycle: session-scoped,
   despawned in the ONE idempotent `stop()` funnel via `CommandBuffer` (tick-safe from an
-  interaction handler or the heartbeat frame drain).
+  interaction handler or the heartbeat frame drain). **A WORKING Entity mount renders NOTHING by
+  design** (decision 62, source-traced: no model on the anchor, no pose packet -
+  `MountedUpdate.Block == null` is what makes the client render default STANDING): the mount is a
+  positioning/input-lock primitive; real station visuals come from `Camera`/`Animation`/`Puppet`
+  authoring. `Entity.VisibleAnchorItemId` (nullable codec leaf) is the confirm-kit/diagnostic
+  knob - the anchor wears a dropped-item-style marker body (prop-hygiene trio carried); the
+  native `/mount check` command reads the attach live, and a client that silently REJECTS a
+  server-attached mount has its whole movement packet dropped (`GamePacketHandler`'s mountedTo
+  filter), observable as the worker's head-look freezing for other viewers.
 
 ## Seat/swing routing, the seated-worker fix (Block route only)
 
@@ -308,6 +342,58 @@ m5)**: a block busy with its OWN session OR a non-empty `custodyByBlock` claim R
 incoming anchor claim; restart self-heal consults `custodyByBlock`, not just the session map -
 load-bearing for `[wave 3]`'s multi-station claiming, already true today for the single-station
 case.
+
+## The ACTIVELY-WORKING block state (`Custody.States.Working`, AV wave)
+
+The maintainer ruling is **"Lit = actively cooking"**: a station block's working look (the cooking
+fire's flames) must be on ONLY while work is genuinely running there, never merely because input
+was placed. That is `asset.Custody.States`' third nullable leaf (`../asset/CLAUDE.md`), driven by
+two package-private seams on `StationService`:
+
+- **`enterWorkingState(session, anchorId)`** resolves the anchor through the SAME
+  `anchorBlockKeyFor` the step phases use, so ONE call covers both altitudes: the PRIMARY block
+  (absent/`"self"`) and a CLAIMED REMOTE ANCHOR. It is IDEMPOTENT per block (re-entering the same
+  block never re-writes the state, so a repeating single-step convert program holds a steady look
+  instead of flickering once per cycle) and exits any previously-working block first, so at most
+  one block per player is ever left working (`workingByPlayer`, a transient `UUID -> WorkingFlip`
+  map, never persisted).
+- **`exitWorkingState(session)`** returns the block to `Loaded` (a claim still stands there) or
+  `Empty` (it does not). Idempotent, so every "work is no longer running" moment can call it
+  freely.
+
+**Which steps count as work** is `StationStep.isWorkingStep()` (derived default: a
+`Consume`+`Produce` atomic-transform CONVERT is work, everything else is not; an authored
+`"Working"` boolean overrides either way). **Flip sites, the complete set:**
+
+1. `toggle`'s engage, for a CLASSIC (non-`Steps`, non-idle) session - the implicit program has no
+   authored step to light on entry and its first conversion only commits a full `CycleMs` later,
+   but that whole `CycleMs` IS the work, so it lights from engage rather than a cycle late.
+2. `StationStepHandlers.runIterations`, per iteration, POST-walk: a working step enters at its
+   `At` anchor, any other step exits.
+3. `runIterations` again, at a `Walk` phase's departure (dark while travelling, per the ruling).
+4. `stop()`, unconditionally, AFTER `releaseAnchorClaims` + `returnCustody` so the Loaded-vs-Empty
+   read sees the post-return truth. This ONE call is what covers every stop reason with no
+   per-reason hook - `RITUAL_COMPLETE`, `INPUTS_EXHAUSTED`, `ANCHOR_LOST`, `PATH_BLOCKED`,
+   `STEP_FAILED`, `TOOL_CHANGED`, damage, death, disconnect, world change, shutdown - because a
+   failing step program reaches `stop()` through `dispatchProgram`'s `Failed` branch.
+
+`releaseAnchorClaims` also now resets each released anchor's block state to Empty (mirroring
+`returnCustody`'s long-standing flip for the primary block, and skipped when a FOREIGN claim still
+stands there): a program can hand an anchor its Loaded look and harvest it empty several steps
+later, which without this would strand a "has input" hint over nothing.
+
+The raw write is the extracted `setBlockState` (one guard set, returns whether the write landed);
+`flipCustodyState` is now a thin Empty/Loaded wrapper over it. A disconnect/shutdown stop has no
+world to write through, so the block can be left wearing its Working look - EXACTLY the
+pre-existing restart-orphan story for Loaded, self-healed by `toggle`'s not-loaded reset.
+
+**Crackle + embers are NATIVE, zero engine work.** `BlockType` carries a per-state
+`AmbientSoundEventId` (LOOPING+MONO validated, "a looping ambient sound event that emits from this
+block when placed") and per-state `Particles`; both start and STOP automatically with the
+`setBlockInteractionState` flip, which matters because nothing in the protocol can stop a playing
+sound or particle system. The jar's `RPG_Station_CookingFire` block's `Lit` state copies vanilla
+`Furniture_Crude_Brazier` verbatim for this. Corollary for step `Presentation.Sound`: only ever
+author a ONE-SHOT SoundEvent there - a looping id fired as a one-shot never ends.
 
 ## The placed-input PLACED-AS-ENTITY visual (unchanged)
 

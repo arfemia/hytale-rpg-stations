@@ -17,8 +17,15 @@ import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Rotation3f;
 import com.hypixel.hytale.protocol.MountController;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
+import com.hypixel.hytale.server.core.modules.entity.component.EntityScaleComponent;
+import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
 import com.hypixel.hytale.server.core.modules.entity.component.Interactable;
+import com.hypixel.hytale.server.core.modules.entity.component.PropComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
+import com.hypixel.hytale.server.core.modules.entity.item.ItemComponent;
+import com.hypixel.hytale.server.core.modules.entity.item.PreventItemMerging;
+import com.hypixel.hytale.server.core.modules.entity.item.PreventPickup;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
 import com.hypixel.hytale.server.core.modules.interaction.Interactions;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
@@ -136,11 +143,14 @@ final class StationEntityMountController {
     /**
      * Spawn the minimal anchor entity at the station block's center. Returns {@code null} (never
      * throws) on any failure - the caller denies the engage with a toast, matching
-     * {@link StationMountController#mount}'s contract.
+     * {@link StationMountController#mount}'s contract. When {@code entityGroup} authors
+     * {@code VisibleAnchorItemId} (the decision-62 confirm-kit knob), the anchor also wears a
+     * dropped-item-style body so its position is visible in-game - a WORKING entity mount
+     * otherwise renders nothing at all.
      */
     @Nullable
     static Ref<EntityStore> spawnAnchor(@Nonnull CommandBuffer<EntityStore> commandBuffer,
-            int blockX, int blockY, int blockZ) {
+            int blockX, int blockY, int blockZ, @Nullable StationAsset.Hold.Mount.Entity entityGroup) {
         try {
             Vector3d position = new Vector3d(blockX + 0.5, blockY + 0.5, blockZ + 0.5);
             Rotation3f rotation = new Rotation3f(0f, 0f, 0f);
@@ -154,6 +164,23 @@ final class StationEntityMountController {
             // native mount broadcast/self-view systems silently no-op against it.
             holder.addComponent(NetworkId.getComponentType(),
                     new NetworkId(commandBuffer.getExternalData().takeNextNetworkId()));
+            String markerItemId = entityGroup != null ? entityGroup.getVisibleAnchorItemId() : null;
+            if (markerItemId != null && !markerItemId.isBlank()) {
+                // Confirm-kit knob (decision 62): a WORKING entity mount renders nothing (no
+                // model on the anchor, no pose packet - "standing" is the absence of a signal),
+                // so a confirm run authors VisibleAnchorItemId to give the anchor a
+                // dropped-item-style body. The FULL item-route component set
+                // ItemPropEntityService#buildItemEntityHolder carries (pickup-immune,
+                // merge-immune, prop-marked, oriented).
+                ItemStack marker = new ItemStack(markerItemId, 1);
+                marker.setOverrideDroppedItemAnimation(true);
+                holder.addComponent(ItemComponent.getComponentType(), new ItemComponent(marker));
+                holder.addComponent(EntityScaleComponent.getComponentType(), new EntityScaleComponent(1.0f));
+                holder.addComponent(HeadRotation.getComponentType(), new HeadRotation(rotation));
+                holder.addComponent(PreventPickup.getComponentType(), PreventPickup.INSTANCE);
+                holder.addComponent(PreventItemMerging.getComponentType(), PreventItemMerging.INSTANCE);
+                holder.addComponent(PropComponent.getComponentType(), PropComponent.get());
+            }
             holder.ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType());
             return commandBuffer.addEntity(holder, AddReason.SPAWN);
         } catch (Throwable t) {

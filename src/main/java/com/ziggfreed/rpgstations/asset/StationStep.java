@@ -62,6 +62,7 @@ public final class StationStep {
     @Nullable protected LootRef roll;
     @Nullable protected String[] commands;
     @Nullable protected Stamp stamp;
+    @Nullable protected Boolean working;
 
     public static final BuilderCodec<StationStep> CODEC = BuilderCodec.builder(StationStep.class, StationStep::new)
             .appendInherited(new KeyedCodec<>("Id", Codec.STRING, false),
@@ -107,6 +108,9 @@ public final class StationStep {
             .appendInherited(new KeyedCodec<>("Stamp", Stamp.CODEC, false),
                     (o, v) -> o.stamp = v, o -> o.stamp, (o, p) -> o.stamp = p.stamp)
             .documentation("The enhance-commit phase (reagents + durability + stat rolls) - see Stamp.").add()
+            .appendInherited(new KeyedCodec<>("Working", Codec.BOOLEAN, false),
+                    (o, v) -> o.working = v, o -> o.working, (o, p) -> o.working = p.working)
+            .documentation("Does this step count as WORK at its At-anchor block (driving that block's Custody.States.Working look)? Default: true for a Consume+Produce convert step, false otherwise. Author true on a pure beat that IS the work (a cook hold), false to suppress.").add()
             .build();
 
     public StationStep() {
@@ -145,6 +149,40 @@ public final class StationStep {
     @Nullable
     public String getAt() {
         return at;
+    }
+
+    /** The raw authored {@code Working} opt-in/opt-out; {@code null} = use the derived default ({@link #isWorkingStep}). */
+    @Nullable
+    public Boolean getWorking() {
+        return working;
+    }
+
+    /** Java-side setter for a procedurally-built program (mirrors the {@code with*} phase setters). */
+    @Nonnull
+    public StationStep withWorking(@Nullable Boolean v) {
+        this.working = v;
+        return this;
+    }
+
+    /**
+     * Does this step count as WORK at its {@link #getAt()} anchor - i.e. should that block wear its
+     * {@code Custody.States.Working} look while this step runs?
+     *
+     * <p>The reader-default is DERIVED, never a mode flag: a step that both {@code Consume}s and
+     * {@code Produce}s is the engine's own atomic-transform CONVERT (the phase model's documented
+     * "no consumed-without-produced window" rule), and a convert IS work - so the classic implicit
+     * single-step program and any authored convert step light their block for free with zero extra
+     * authoring. Every other shape (a pure beat, a lone Consume, a lone Produce, a walk, a stamp)
+     * defaults to NOT work, because those are the load/carry/unload beats around the work. An
+     * explicit {@code "Working": true} promotes a pure beat that genuinely IS the work (the fish
+     * exemplar's 2.5s cook hold at the fire anchor); an explicit {@code false} demotes a convert
+     * that should not light its block.
+     *
+     * <p>Zero effect unless the block's resolved {@code Custody.States.Working} is authored - every
+     * pre-knob station stays byte-identical.
+     */
+    public boolean isWorkingStep() {
+        return working != null ? working : (consume != null && produce != null);
     }
 
     @Nonnull

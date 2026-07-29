@@ -23,23 +23,27 @@ public final class PickerCategories {
     }
 
     /**
-     * One selectable output category: a representative item icon (+ optional display label) and,
-     * when {@link #locked()}, the display name of the tool required to unlock it. Pure value type -
-     * the caller (the engine leg resolving native recipe categories) is the schema authority for
-     * what an "id" means; this page treats it as an opaque selection key.
+     * One selectable output category: a representative item icon, a display NAME (the maintainer
+     * smoke-fix wave: the representative output item's own native item name, so a tab is never
+     * icon-only), an optional COST LINE (that same representative conversion's input-to-output
+     * shape, e.g. "1x Trunk -&gt; 4x Planks"), and, when {@link #locked()}, the display name of the
+     * tool required to unlock it. Pure value type - the caller (the engine leg resolving native
+     * recipe categories) is the schema authority for what an "id" means; this page treats it as an
+     * opaque selection key.
      */
     public record Category(@Nonnull String id, @Nonnull String iconItemId, @Nullable Message label,
-            boolean locked, @Nullable String requiredToolLabel) {
+            @Nullable Message costLine, boolean locked, @Nullable String requiredToolLabel) {
 
         @Nonnull
-        public static Category unlocked(@Nonnull String id, @Nonnull String iconItemId, @Nullable Message label) {
-            return new Category(id, iconItemId, label, false, null);
+        public static Category unlocked(@Nonnull String id, @Nonnull String iconItemId, @Nullable Message label,
+                @Nullable Message costLine) {
+            return new Category(id, iconItemId, label, costLine, false, null);
         }
 
         @Nonnull
         public static Category locked(@Nonnull String id, @Nonnull String iconItemId, @Nullable Message label,
-                @Nullable String requiredToolLabel) {
-            return new Category(id, iconItemId, label, true, requiredToolLabel);
+                @Nullable Message costLine, @Nullable String requiredToolLabel) {
+            return new Category(id, iconItemId, label, costLine, true, requiredToolLabel);
         }
     }
 

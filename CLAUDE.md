@@ -140,7 +140,7 @@ src/main/resources/
   Server/Item/{Items,RootInteractions}/                 the jar's OWN default Sawmill block + its RootInteraction
   Server/Drops/, Server/Emote/                           the standalone Sawmill's native-namespace drop tables + work emote
   Server/Entity/Effects/RPG/                             RPG_Station_Hold.json (the effect-mode movement-lock effect)
-  Server/Languages/<bcp47>/                             rpgstations.lang (en-US only so far) + native items.lang/avatarCustomization.lang
+  Server/Languages/<bcp47>/                             rpgstations.lang (all 9 locales) + native items.lang/avatarCustomization.lang
   Common/UI/Custom/Pages/RpgStationSummary.ui           the session-summary panel
 src/main/java/com/ziggfreed/rpgstations/
   RpgStationsPlugin.java     JavaPlugin entry: injects the api singleton, registers the built-in

@@ -47,6 +47,7 @@ ui.station.picker.hint = Эта станция может изготовить �
 ui.station.picker.locked = Требует {0}
 ui.station.picker.locked_generic = Заблокировано
 ui.station.picker.selected = Выбор сделан. Взаимодействуйте снова, чтобы начать работу.
+ui.station.picker.cost = {0}x {1} -> {2}x {3}
 station.sawmill.name = Лесопилка
 station.sawmill.desc = Распилите брёвна из вашего инвентаря на доски, по одному циклу за раз.
 station.cuttingboard.name = Разделочная доска

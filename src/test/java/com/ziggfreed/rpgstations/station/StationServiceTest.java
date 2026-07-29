@@ -12,6 +12,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import com.hypixel.hytale.server.core.Message;
+
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
@@ -373,6 +375,44 @@ public class StationServiceTest {
         assertEquals("Iron", StationService.representativeOutputFor(all, "metal"));
         assertNull(StationService.representativeOutputFor(all, "Unknown"));
         assertNull(StationService.representativeOutputFor(null, "WoodPlanks"));
+    }
+
+    // ============ Picker cost/name wave (maintainer smoke fix): representative conversion + cost line ============
+
+    @Test
+    void representativeConversionFor_firstMatchingConversion_sameOneOutputForDerivesFrom() {
+        StationAsset.Conversion[] all = {conv("Oak", "WoodPlanks"), conv("Birch", "WoodPlanks"),
+                conv("Iron", "Metal")};
+        StationAsset.Conversion rep = StationService.representativeConversionFor(all, "WoodPlanks");
+        assertEquals("Oak", rep.getOutput().getItemId());
+        // representativeOutputFor is a thin wrapper over the SAME scan: must agree with it.
+        assertEquals(StationService.representativeOutputFor(all, "WoodPlanks"), rep.getOutput().getItemId());
+        assertNull(StationService.representativeConversionFor(all, "Unknown"));
+        assertNull(StationService.representativeConversionFor(null, "WoodPlanks"));
+    }
+
+    @Test
+    void pickerCostLine_resourceTypeInput_resolvesBothSidesAsNestedItemNameMessages() {
+        // conv()'s fixture Input is Ingredient.resource("Wood_Trunk", 1) - the sawmill's real
+        // "any Trunk of this species" shape (asset.Ingredient's ResourceTypeId route, no exact
+        // item id) - so this exercises the exact case the maintainer's own "1x Trunk -> 4x Planks"
+        // example describes.
+        StationAsset.Conversion c = conv("Wood_Oak_Planks", "WoodPlanks");
+        Message cost = StationService.pickerCostLine(c);
+        assertEquals("rpgstations.ui.station.picker.cost", cost.getMessageId());
+    }
+
+    @Test
+    void pickerCostLine_missingInputOrOutput_returnsNull() {
+        StationAsset.Conversion noInput = StationAsset.Conversion.of(null, Ingredient.item("Planks", 4));
+        assertNull(StationService.pickerCostLine(noInput));
+
+        StationAsset.Conversion noOutput = StationAsset.Conversion.of(Ingredient.resource("Wood_Trunk", 1), null);
+        assertNull(StationService.pickerCostLine(noOutput));
+
+        StationAsset.Conversion blankInputIds = StationAsset.Conversion.of(
+                Ingredient.of(null, null, 1), Ingredient.item("Planks", 4));
+        assertNull(StationService.pickerCostLine(blankInputIds));
     }
 
     // ============ Selection-wave SEAL (decision 57): first-authored-category default ============

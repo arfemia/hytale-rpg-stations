@@ -128,11 +128,23 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
   the nested `{X,Y,Z}` degrees group now). `MaxQuantity` defaults to **100**. `Input` (reusing
   [`ActionInput`](ActionInput.java)'s ItemId/ResourceTypeId/Tags/Function routes) is the explicit
   placement-acceptance matcher; absent derives acceptance from the resolved action's own `Recipe
-  .Conversions` inputs instead. `States` (`{Empty?, Loaded?}`) names the block's own
-  `State.Definitions` entries the engine flips between; null = no visual/hint flip. `Display`
+  .Conversions` inputs instead. `States` (`{Empty?, Loaded?, Working?}`) names the block's own
+  `State.Definitions` entries the engine flips between; null = no visual/hint flip. **`Working`
+  (AV wave) is the third, independently-nullable leaf and means "actively being worked", NOT "has
+  input in it"**: the engine holds the block in it only while a work step is genuinely executing
+  there, reverting to `Loaded`/`Empty` at the next NON-working step's entry, at a walk phase's
+  departure, at the runtime idle transition, and at every session stop path (a working step's own
+  SUCCESS deliberately does NOT darken, so a repeating program whose LAST step is the work holds a
+  steady lit look across the inter-cycle gap instead of flickering) - so the cooking fire's
+  burning look belongs here and raw fish on a cold fire leaves it dark until the cook beat begins. It applies to whichever block a step runs AT, so the
+  primary station AND a claimed remote anchor both get it; which steps count is
+  `StationStep.Working` (below). Omitting it is byte-identical to pre-knob behavior. `Display`
   (`{Offset{X,Y,Z}, Scale, Rotation{X,Y,Z}}`, FACING-RELATIVE to the placed block's own yaw, every
   leaf `appendInherited`) opts the placed input into a PLACED-AS-ENTITY visual - see
-  `../station/CLAUDE.md`'s dedicated bullet for the full engine-side mechanism.
+  `../station/CLAUDE.md`'s dedicated bullet for the full engine-side mechanism. The jar's own
+  `Stations/Sawmill.json` authors `Display {Offset{Y:-0.1}, Scale:0.4}` as the shipped standalone
+  default; a pack re-tunes it through an `ExtensionAsset`'s `Custody` per-leaf overlay (rule 5)
+  rather than a full-file station override.
 - **[`ActionInput`](ActionInput.java)** - the diegetic action-selection matcher: `{ItemId?,
   ResourceTypeId?, Tags?, Function?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, resolved against
   the held item's live shape). UNCHANGED shape by scope-2 (docs-only diff). `isCatchAll()` = no
@@ -151,7 +163,17 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
     ranged, resolved once at step entry via the pure `resolveCount(factorContribution)`),
     `Duration` (`{Ms}`, a post-phase hold; prop/presentation persist across it), `Puppet`
     (per-step `{Clip?, Prop?}` override, reusing `Puppet.Prop`'s exact codec), `Presentation`
-    (fires once at step ITERATION entry, round-8 rule unchanged).
+    (fires once at step ITERATION entry, round-8 rule unchanged - so a `Repeat`ed step cues once
+    PER BEAT, which is how the fish exemplar's 3 scale beats each get their own chop SFX + chips
+    with zero engine work), and (AV wave) **`Working`** (a nullable Boolean: does this step drive
+    its `At`-anchor block's `Custody.States.Working` look?). `Working`'s reader-default is DERIVED,
+    never a mode flag - `isWorkingStep()` returns true for a step that both `Consume`s AND
+    `Produce`s, i.e. the phase model's own atomic-transform CONVERT, so the implicit program and
+    any authored convert light their block for free; every other shape (pure beat, lone Consume,
+    lone Produce, walk, stamp) is the load/carry/unload scaffolding around the work and defaults
+    false. Author `true` to promote a pure beat that IS the work (the fish exemplar's 2.5s `cook`
+    hold), `false` to demote a convert that should not light. Zero effect unless the resolved
+    `Custody.States.Working` is authored.
   - **Phase groups** (all nullable): `Walk` (`{To, SpeedMps}`, `[wave 3]`), `Consume`
     (`{ItemId|ResourceTypeId, Quantity, From:Inventory|Custody}` - BOTH routes executable),
     `Stamp` (the enhance-commit phase, below), `Produce` (`{ItemId, Quantity, To:Inventory|
@@ -216,8 +238,11 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
   fallback), and the NpcRole performer arm's config is the parallel `Look.Role {RoleId, SkinSource
   (PlayerClone|RoleDefault), Persist, SpeedMps}` group (read for `Source:"NpcRole"`; `Model`/`Role`
   are inner classes of `Puppet`, siblings of `Hide`/`Prop`). See `../station/CLAUDE.md`'s
-  puppet-engine bullet (`StationPuppetController`); both shipped stations author `Puppet` in
-  `content-packs/skill-stations-pack`.
+  puppet-engine bullet (`StationPuppetController`). The jar's own `Stations/Sawmill.json` authors the
+  shipped standalone default (`Enabled true`, `Hide.Route "Scale"`, `Look.Source "PlayerClone"`,
+  `Offset {0.0, -0.4, 1.0}`, `Yaw 0.0`, `Prop {MirrorHeld, Hotbar}`, the maintainer's in-game-tuned
+  values); the `skill-stations-pack` Anvil authors its own. A pack re-skins either one through an
+  `ExtensionAsset`'s `Puppet` per-leaf overlay (rule 5), never a full-file station override.
 - **[`Roll`](Roll.java)** (REWRITTEN for weighted-factor unification, design 4.2) - the
   conditional-lootable roll: `Trigger` (`Cycle`/`Completion`), `Conditions[]`, `Chance{BasePercent,
   AddFactors[], CapPercent}`, `Ladder{Values[], Floors[]}`, `Grants{BonusOutputCopies, DropList,
@@ -260,8 +285,8 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
 
     | Target    | Extensible payload keys                                                 |
     |-----------|--------------------------------------------------------------------------|
-    | Station   | `Xp[]`, `Loot` (LootRef append), `Actions{}` (new keys only), `Conversions[]`, `Steps[]`, `Anchors{}` (new keys only) |
-    | Action    | `Steps[]`, `Anchors{}` (new keys), `Loot`, `Conversions[]`, `Xp[]`        |
+    | Station   | `Xp[]`, `Loot` (LootRef append), `Actions{}` (new keys only), `Conversions[]`, `Steps[]`, `Anchors{}` (new keys only), `Puppet` (per-leaf overlay), `Custody` (per-leaf overlay) |
+    | Action    | `Steps[]`, `Anchors{}` (new keys), `Loot`, `Conversions[]`, `Xp[]`, `Puppet`, `Custody` |
     | Lootable  | `Rolls[]` (append)                                                       |
     | RollPool  | `Entries[]` (append)                                                     |
 
@@ -277,6 +302,18 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
        (`effectivePlacement()` degrades to `AtEnd` + `EXTENSION_ANCHOR_MISSING` warn on a
        missing/dangling step id); inserted steps need `Id`s so LATER extensions can anchor on
        them. Co-anchored insertions from different extensions apply in `APPLY_ORDER` (m2).
+    5. NESTED PER-LEAF OVERLAY (`Puppet`, `Custody`) - the two NON-collection payloads, so they
+       merge leaf-wise instead of appending: recursively, at EVERY nesting depth, an AUTHORED
+       extension leaf wins and a NULL one leaves the base's value intact (the
+       `appendInherited`/nullable-nested-leaves convention applied ACROSS assets instead of down a
+       `Parent` chain). A `Custody` overlay carrying only `Display` never touches the base's
+       `States`/`MaxQuantity`/`Input`; a `Display` carrying only `Scale` never clears its `Offset`;
+       a `Puppet` carrying only `Offset.Z` keeps `Offset.X`/`.Y` plus `Hide`/`Look`/`Prop`/`Yaw`.
+       (Leaf-granularity note: a MAP-valued leaf - `Custody.Input.Tags` - replaces wholesale as
+       ONE leaf, never per tag family.)
+       Overlays apply in `APPLY_ORDER`, so the LATER (higher-priority) extension wins a same-leaf
+       contest. Engine-side cores + the load-bearing test: `station.ExtensionCatalog`'s
+       `overlayPuppet`/`overlayCustody`, `station.ExtensionOverlayTest`.
   - **`APPLY_ORDER`** - the ONE apply-order tuple (`Priority` ascending so a HIGHER priority
     applies LATER and wins a tie, then extension id lexicographic) - a total order over distinct
     assets, so a stable sort fully determines the result on every server. `sortedForApply(...)`
@@ -284,12 +321,26 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
   - **Composition order (m7):** extensions apply to the Parent-resolved target at READ time;
     extension additions do NOT flow down `Parent` chains. A `Target:{Action}` extension flows to
     every `Ref` user of that action; a `Target:{Station}` step-insert applies post-`Ref` to that
-    station only.
+    station only. **The ONE Action-target identity** (adversarial-verify F4,
+    `ActionResolver.actionTargetId`, shared by Loot/Xp appends AND the Puppet/Custody overlays):
+    the `Ref`'d `ActionAsset` id when the inline entry Refs one, else the inline entry's own map
+    key; the IMPLICIT action of a no-`Actions` station is deliberately unreachable by an Action
+    target (no accidental global `Action:"work"` broadcast) - address it via `Station`. Overlay
+    order is Action first, Station on top (the station-scoped statement wins a same-leaf
+    contest).
   - **Deliberately NON-extensible** (docs state each): `Requires` (an extension must never
-    tighten/loosen another author's gate), `Settings` (owner-only singleton), `Custody.States`
-    (one visual pair per action), scalar groups (`Work`/`Hold`/`Camera`/`Animation`/`Puppet` -
-    override is load-order's job, not extension), the INTERNALS of an existing `Roll` (extenders
-    add their OWN Rolls beside it), and `FlairAsset.Moments`.
+    tighten/loosen another author's gate), `Settings` (owner-only singleton), scalar groups
+    (`Work`/`Hold`/`Camera`/`Animation` - override is load-order's job, not extension), the
+    INTERNALS of an existing `Roll` (extenders add their OWN Rolls beside it), and
+    `FlairAsset.Moments`.
+  - **The presentation-overlay exception (`Puppet`, `Custody` incl. `Custody.States`)**: both were
+    on the non-extensible list above through wave 2, on the same "override is load-order's job"
+    argument. That forced a pack that only wanted to RE-SKIN a base station's presentation to ship a
+    full-file station override, and deleting such an override silently dropped every group it was
+    the sole author of (exactly what happened to the sawmill's `Puppet`/`Custody.Display` when the
+    pack's full-file `Stations/Sawmill.json` was retired for an additive extension the codec could
+    not carry them in). Rule 5's per-leaf overlay is the non-destructive replacement: a re-skinning
+    pack authors only the leaves it re-tunes and inherits every other one from the base.
   - See `../station/CLAUDE.md`'s ExtensionCatalog bullet for the engine-side fold + the
     cross-pack-aware validator's `EXTENSION_APPLIED` boot summary.
 - **[`RpgStationsSettingsAsset`](RpgStationsSettingsAsset.java)** - `Server/RpgStations/Settings/

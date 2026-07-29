@@ -131,6 +131,13 @@ public final class RpgStationPickerPage extends InteractiveCustomUIPage<RpgStati
                 cmd.set(btn + " #Label.Visible", false);
             }
 
+            if (c.costLine() != null) {
+                cmd.set(sel + " #Cost.TextSpans", c.costLine());
+                cmd.set(sel + " #Cost.Visible", true);
+            } else {
+                cmd.set(sel + " #Cost.Visible", false);
+            }
+
             if (c.locked()) {
                 cmd.set(btn + ".Enabled", false);
                 Message lockText = c.requiredToolLabel() != null

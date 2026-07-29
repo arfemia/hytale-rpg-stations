@@ -118,6 +118,14 @@ final class StationStepHandlers {
      * {@code Consume -> Stamp -> Produce -> Roll -> Commands -> entry cues -> Duration}. On a
      * post-walk-arrival re-entry {@code walkAlreadyDone} skips the Walk phase for the CURRENT
      * iteration only (its walk already completed); every later iteration runs its own walk again.
+     *
+     * <p>Each iteration also drives the ACTIVELY-WORKING block state
+     * ({@code asset.Custody.States.Working}): a {@link StationStep#isWorkingStep()} step lights its
+     * {@code At} anchor once its walk (if any) has landed, anything else darkens whatever was lit.
+     * A step's own SUCCESS deliberately does NOT darken - the next step's entry, or {@code stop()},
+     * owns that - so a repeating single-step convert program never flickers between cycles. A
+     * phase FAIL return needs no explicit darken either: it propagates to a session stop, whose one
+     * exit funnel calls {@code exitWorkingState} unconditionally.
      */
     private static StationStepResult runIterations(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
             long now, boolean walkAlreadyDone, int repeatCount) {
@@ -128,12 +136,29 @@ final class StationStepHandlers {
             // WALK phase (first). A fresh iteration begins the walk (suspends to drive it); a
             // post-arrival re-entry skips it for THIS iteration.
             if (!walkAlreadyDone && step.getWalk() != null) {
+                // Nothing is being WORKED while the puppet travels (design ruling: the fire goes
+                // dark during walk phases between cycles) - darken before departing.
+                StationService.getInstance().exitWorkingState(s);
                 StationStepResult wr = beginWalk(ctx, step, now, repeatCount);
                 if (wr != null) {
                     return wr; // suspend (walk driving) or fail (unreachable at walk-step entry)
                 }
             }
             walkAlreadyDone = false;
+
+            // Actively-working block state, resolved POST-walk so a working step that travels first
+            // only lights its anchor once the puppet has arrived. A working step puts its At-anchor
+            // block into Custody.States.Working; anything else takes whatever block was working out
+            // of it. Both calls are idempotent + no-ops for an unauthored Working name, so a station
+            // that never authors one (sawmill, anvil, cutting board) is byte-identical to pre-knob.
+            // NOT cleared when the step SUCCEEDS: the next step (or stop()) owns the exit, so the
+            // implicit convert program - one working step re-dispatched every cycle at the same
+            // block - holds a steady look instead of flickering once per cycle.
+            if (step.isWorkingStep()) {
+                StationService.getInstance().enterWorkingState(s, step.getAt());
+            } else {
+                StationService.getInstance().exitWorkingState(s);
+            }
 
             StationStepResult phase;
             if ((phase = consumePhase(ctx, step)) != null) {

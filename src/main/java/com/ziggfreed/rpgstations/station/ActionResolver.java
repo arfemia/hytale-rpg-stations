@@ -72,10 +72,73 @@ public final class ActionResolver {
         return new ArrayList<>(actions.keySet());
     }
 
-    /** The whole-group-override-resolved view of {@code actionId} on {@code asset}, using the live {@link ActionCatalog} for {@code Ref}. */
+    /**
+     * The whole-group-override-resolved view of {@code actionId} on {@code asset}, using the live
+     * {@link ActionCatalog} for {@code Ref} AND the live {@link ExtensionCatalog} for the two
+     * per-leaf presentation overlays ({@code Puppet}/{@code Custody}, design 1.8): the
+     * {@code Action}-targeted overlay applies first (by the ONE {@link #actionTargetId} identity),
+     * then a {@code Station}-targeted one on top - the station-scoped statement is the more
+     * locally-scoped one for that block, so it wins a same-leaf contest. Every live engine read
+     * goes through here, so the overlays cover every {@code Puppet}/{@code Custody} reader at
+     * once.
+     */
     @Nonnull
     public static ResolvedAction resolve(@Nonnull StationAsset asset, @Nonnull String actionId) {
-        return resolve(asset, actionId, CATALOG_REF_LOOKUP);
+        return applyExtensionOverlays(asset, actionId, resolve(asset, actionId, CATALOG_REF_LOOKUP));
+    }
+
+    /**
+     * The ONE {@code Target:{Action}} identity every Action-targeted extension payload resolves
+     * by (adversarial-verify F4: one rule for Loot/Xp appends AND the Puppet/Custody overlays,
+     * never two different widths): the {@code Ref}'d {@link ActionAsset} id when the inline entry
+     * Refs one (an Action target "reaches every Ref user of that action" - the documented
+     * semantic, and what the validator checks the id against), else the inline map key for an
+     * authored inline-only entry, and {@code NULL} for the implicit action of a station with no
+     * {@code Actions} map - the implicit action is addressed via its STATION target, never an
+     * accidental global {@code Action:"work"} broadcast.
+     */
+    @Nullable
+    public static String actionTargetId(@Nonnull StationAsset asset, @Nonnull String actionId) {
+        Map<String, ActionDef> actions = asset.getActions();
+        ActionDef def = actions != null ? actions.get(actionId) : null;
+        if (def == null) {
+            return null;
+        }
+        String refId = def.hasRef() ? def.getRef() : null;
+        return refId != null && !refId.isBlank() ? refId : actionId;
+    }
+
+    /**
+     * The live {@link ExtensionCatalog} {@code Puppet}/{@code Custody} per-leaf overlay pass over
+     * a pure-resolved action. Identity-preserving: with no extension targeting this
+     * station/action, the merge cores hand back the SAME group objects and the original
+     * {@code resolved} is returned untouched (allocation-light, not allocation-free: up to four
+     * short-lived cache-key strings per pass on the zero-extension path).
+     */
+    @Nonnull
+    private static ResolvedAction applyExtensionOverlays(@Nonnull StationAsset asset,
+            @Nonnull String actionId, @Nonnull ResolvedAction resolved) {
+        ExtensionCatalog exts = ExtensionCatalog.getInstance();
+        String targetId = actionTargetId(asset, actionId);
+        Puppet puppet = resolved.getPuppet();
+        Custody custody = resolved.getCustody();
+        if (targetId != null) {
+            puppet = exts.applyToActionPuppet(targetId, puppet);
+            custody = exts.applyToActionCustody(targetId, custody);
+        }
+        String stationId = asset.getId();
+        if (stationId != null && !stationId.isBlank()) {
+            puppet = exts.applyToStationPuppet(stationId, puppet);
+            custody = exts.applyToStationCustody(stationId, custody);
+        }
+        if (puppet == resolved.getPuppet() && custody == resolved.getCustody()) {
+            return resolved;
+        }
+        return new ResolvedAction(resolved.getActionId(), resolved.getInput(), custody, puppet,
+                resolved.getWork(), resolved.getRecipe(), resolved.getTool(), resolved.getHold(),
+                resolved.getCamera(), resolved.getAnimation(), resolved.getPresentation(),
+                resolved.getCompletion(), resolved.getLoot(), resolved.getRequires(),
+                resolved.getSteps(), resolved.getAnchors());
     }
 
     /**
@@ -83,7 +146,9 @@ public final class ActionResolver {
      * {@link ActionAsset} id to its {@link ActionDef} body (or {@code null}). Precedence per group:
      * inline entry override -&gt; {@code Ref} base override -&gt; station-level default (input/steps/
      * anchors have no station default). An unknown {@code actionId} against an asset that DOES
-     * author an {@code Actions} map resolves as if no override existed for it.
+     * author an {@code Actions} map resolves as if no override existed for it. Extension overlays
+     * are NOT applied here - this core stays catalog-free for unit tests; the 2-arg live entry
+     * above is what layers {@link ExtensionCatalog}'s {@code Puppet}/{@code Custody} overlays.
      */
     @Nonnull
     public static ResolvedAction resolve(@Nonnull StationAsset asset, @Nonnull String actionId,

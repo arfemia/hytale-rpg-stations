@@ -1004,6 +1004,7 @@ public final class StationAsset
                 @Nullable protected Offset offset;
                 @Nullable protected Boolean dismountOnMove;
                 @Nullable protected Boolean steerable;
+                @Nullable protected String visibleAnchorItemId;
 
                 public static final BuilderCodec<Entity> CODEC = BuilderCodec.builder(Entity.class, Entity::new)
                         .appendInherited(new KeyedCodec<>("Offset", Offset.CODEC, false),
@@ -1014,15 +1015,25 @@ public final class StationAsset
                         .appendInherited(new KeyedCodec<>("Steerable", Codec.BOOLEAN, false),
                                 (o, v) -> o.steerable = v, o -> o.steerable,
                                 (o, p) -> o.steerable = p.steerable).add()
+                        .appendInherited(new KeyedCodec<>("VisibleAnchorItemId", Codec.STRING, false),
+                                (o, v) -> o.visibleAnchorItemId = v, o -> o.visibleAnchorItemId,
+                                (o, p) -> o.visibleAnchorItemId = p.visibleAnchorItemId).add()
                         .build();
 
                 @Nonnull
                 public static Entity of(@Nullable Offset offset, @Nullable Boolean dismountOnMove,
                         @Nullable Boolean steerable) {
+                    return of(offset, dismountOnMove, steerable, null);
+                }
+
+                @Nonnull
+                public static Entity of(@Nullable Offset offset, @Nullable Boolean dismountOnMove,
+                        @Nullable Boolean steerable, @Nullable String visibleAnchorItemId) {
                     Entity e = new Entity();
                     e.offset = offset;
                     e.dismountOnMove = dismountOnMove;
                     e.steerable = steerable;
+                    e.visibleAnchorItemId = visibleAnchorItemId;
                     return e;
                 }
 
@@ -1039,6 +1050,19 @@ public final class StationAsset
                 @Nullable
                 public Boolean getSteerable() {
                     return steerable;
+                }
+
+                /**
+                 * DIAGNOSTIC/authoring aid (decision 62's confirm kit): when set, the invisible
+                 * mount anchor entity also renders this item id as a dropped-item-style prop, so
+                 * the anchor's position is visible in-game. A WORKING Entity mount is otherwise
+                 * deliberately invisible (the mount is a positioning/input-lock primitive; real
+                 * station visuals come from Camera/Animation/Puppet authoring). Null = no visual,
+                 * the shipped default.
+                 */
+                @Nullable
+                public String getVisibleAnchorItemId() {
+                    return visibleAnchorItemId;
                 }
 
                 /**

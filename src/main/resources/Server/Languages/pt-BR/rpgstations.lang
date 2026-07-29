@@ -34,6 +34,7 @@ ui.station.picker.hint = Esta estação pode fazer mais de uma coisa com o que v
 ui.station.picker.locked = Requer {0}
 ui.station.picker.locked_generic = Bloqueado
 ui.station.picker.selected = Seleção feita. Interaja novamente para começar a trabalhar.
+ui.station.picker.cost = {0}x {1} -> {2}x {3}
 ui.station.no_action = Você não tem nada com o qual esta estação possa trabalhar.
 ui.station.custody.placed = Você coloca seus materiais na estação.
 ui.station.custody.topped_up = Você adiciona mais materiais à estação.

@@ -47,6 +47,7 @@ ui.station.picker.hint = Ez az állomás több dolgot is képes elkészíteni ab
 ui.station.picker.locked = Szükséges: {0}
 ui.station.picker.locked_generic = Zárolt
 ui.station.picker.selected = Kiválasztva. Használd újra a munka megkezdéséhez.
+ui.station.picker.cost = {0}x {1} -> {2}x {3}
 station.sawmill.name = Fűrészmalom
 station.sawmill.desc = Fűrészeld meg a leltárbeli rönköket deszkává, egy ciklus alatt.
 station.cuttingboard.name = Vágódeszka

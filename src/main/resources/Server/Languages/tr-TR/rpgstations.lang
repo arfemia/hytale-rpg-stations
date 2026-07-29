@@ -47,6 +47,7 @@ ui.station.picker.hint = Bu istasyon elinize tuttuğunuz şeyden birden fazla ş
 ui.station.picker.locked = {0} Gerekli
 ui.station.picker.locked_generic = Kilitli
 ui.station.picker.selected = Seçim yapıldı. Çalışmaya başlamak için tekrar etkileşime geçin.
+ui.station.picker.cost = {0}x {1} -> {2}x {3}
 station.sawmill.name = Bıçkıhane
 station.sawmill.desc = Envanterinizden kütükleri tahtaya bıçkıla, her döngüde birer tane.
 station.cuttingboard.name = Kesme Tahtası
