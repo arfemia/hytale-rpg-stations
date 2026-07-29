@@ -162,6 +162,16 @@ public class RpgStationsPlugin extends JavaPlugin {
         getEventRegistry().registerGlobal(PlayerReadyEvent.class, event -> {
             if (postLoadAuditLogged.compareAndSet(false, true)) {
                 try {
+                    // Re-derive the anchor-discovery index FIRST: by now every native asset layer
+                    // (Items/BlockTypes/RootInteractions from this jar AND every installed pack) has
+                    // settled, whereas the per-fold seed can run while a later layer is still
+                    // loading. The seed is idempotent, and the validator's discoverability check
+                    // reads exactly this index.
+                    StationService.getInstance().seedStationBlockIndexFromAssets();
+                } catch (Throwable t) {
+                    Log.warn("Deferred station discovery seeding failed: " + t.getMessage());
+                }
+                try {
                     StationValidator.runAndLog();
                 } catch (Throwable t) {
                     Log.warn("Deferred post-load station validation failed: " + t.getMessage());
@@ -250,6 +260,12 @@ public class RpgStationsPlugin extends JavaPlugin {
         StationCatalog.getInstance().fold(layer, false);
         Log.info("Station asset layer: folded " + layer.size()
                 + " station asset(s) into StationCatalog: " + layer.keySet());
+        // Derive the anchor-discovery index (blockItemId -> stationId) from the native
+        // RootInteraction/BlockType assets, so a COLD server discovers station blocks nobody has
+        // pressed F on yet. Idempotent, try-guarded end to end (never throws into the fold), and
+        // re-run post-load from registerPostLoadAudit() because a native Item/BlockType layer can
+        // settle AFTER this station fold fires.
+        StationService.getInstance().seedStationBlockIndexFromAssets();
         // Structural-only at fold time (D4 fix) - the FULL pass (incl. cross-layer reference
         // checks) runs once, post-load, from registerPostLoadAudit().
         StationValidator.runStructuralAndLog();

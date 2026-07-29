@@ -44,6 +44,7 @@ ui.station.retrieve.hint = Pressione [{key}] para retirar materiais
 ui.station.bench.hint = Agache + [{key}] para abrir crafting
 ui.station.mount_unavailable = Você não consegue trabalhar aqui agora.
 ui.station.anchor_missing = Nenhum {0} encontrado em {1} blocos.
+ui.station.anchor_unreachable = Não é possível chegar ao {0} próximo.
 ui.station.anchor_busy = Outro jogador já está usando o {0} próximo.
 ui.station.stop.inputs_exhausted = Você ficou sem materiais.
 ui.station.stop.anchor_lost = A outra estação foi destruída e você para de trabalhar.

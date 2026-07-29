@@ -92,6 +92,13 @@ import com.ziggfreed.rpgstations.validation.Report;
  * too (against {@code ActionCatalog}), alongside {@code stationKnown} for
  * {@code ANCHOR_STATION_UNKNOWN} (against {@link StationCatalog}).
  *
+ * <p><b>AV wave:</b> {@code ANCHOR_STATION_NOT_DISCOVERABLE} (warn-only) rides beside
+ * {@code ANCHOR_STATION_UNKNOWN} - a declared anchor naming a station that EXISTS but that no block
+ * item resolves to (nothing's {@code BlockType.Interactions.Use} runs an {@code rpg_station_use}
+ * naming it) can never be found by anchor discovery until a player interacts with such a block. It
+ * reads the derived discovery index and fails OPEN on an unseeded one ({@link
+ * #stationDiscoverableLive}).
+ *
  * <p>Pure and side-effect-free (apart from {@link #runAndLog}); never throws.
  */
 public final class StationValidator {
@@ -256,6 +263,24 @@ public final class StationValidator {
     private static boolean interactionKnownLive(@Nonnull String interactionId) {
         try {
             return RootInteraction.getAssetMap().getAsset(interactionId) != null;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /**
+     * Live "does any placed-able BLOCK map to this station" check (AV wave): reads the derived
+     * anchor-discovery index ({@code StationService#seedStationBlockIndexFromAssets}, the
+     * {@code blockItemId -> stationId} seed walked out of the native RootInteraction/BlockType
+     * assets). Called DIRECTLY from both passes like the other native-asset checks above; fails OPEN
+     * on an EMPTY index exactly as {@link #benchIdKnownLive} does - an index that has not been seeded
+     * yet (a per-fold structural pass before the native layers settled, or a cold unit JVM) must
+     * never manufacture a false "undiscoverable" finding.
+     */
+    private static boolean stationDiscoverableLive(@Nonnull String stationId) {
+        try {
+            Set<String> discoverable = StationService.getInstance().discoverableStationIds();
+            return discoverable.isEmpty() || discoverable.contains(stationId.toLowerCase(Locale.ROOT));
         } catch (Throwable t) {
             return true;
         }
@@ -2045,8 +2070,10 @@ public final class StationValidator {
      * An action's own {@code Anchors} map coverage (scope-2 design 2.2): every declared anchor's
      * {@code Station} must be blank-free and resolve against {@code stationKnown} ({@code
      * ANCHOR_STATION_UNKNOWN} covers both a blank and an unresolved station id - the reserved
-     * anchor id {@code "self"} is never declared here, it is implicit). Discovery/claiming
-     * themselves are [wave 3] - this is decode/validate coverage only.
+     * anchor id {@code "self"} is never declared here, it is implicit). A station that resolves but
+     * that NO block item maps to gets the separate warn-only {@code ANCHOR_STATION_NOT_DISCOVERABLE}
+     * (AV wave, see {@link #stationDiscoverableLive}) - it decodes fine and simply can never be found
+     * in the world.
      */
     private static void checkAnchorsMap(@Nullable Map<String, ActionDef.Anchor> anchors, @Nonnull String label,
             @Nonnull String id, @Nonnull Predicate<String> stationKnown, @Nonnull List<Finding> out) {
@@ -2063,6 +2090,11 @@ public final class StationValidator {
             if (station == null || station.isBlank() || !stationKnown.test(station.toLowerCase(Locale.ROOT))) {
                 out.add(Finding.warning(DOMAIN, "ANCHOR_STATION_UNKNOWN",
                         label + " Anchors['" + anchorId + "'] references unknown station '" + station + "'", id));
+            } else if (!stationDiscoverableLive(station)) {
+                out.add(Finding.warning(DOMAIN, "ANCHOR_STATION_NOT_DISCOVERABLE",
+                        label + " Anchors['" + anchorId + "'] targets station '" + station + "', but no block item"
+                                + " maps to it (no BlockType's Interactions.Use runs an rpg_station_use naming it) -"
+                                + " the anchor is undiscoverable until a player interacts with such a block", id));
             }
         }
     }

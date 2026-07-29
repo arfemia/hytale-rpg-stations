@@ -1,7 +1,7 @@
-// The multi-output PICKER page (decision 50, demoted by decision 51's native-composition
-// amendment to the fallback route for a flow the native bench window cannot express). A compact
-// icon+name TAB STRIP: one card per available output category, appended from
-// RpgStationPickerPage.build via RpgStationPickerTab.ui. Never auto-opened; opened only on
+// The multi-output PICKER page (decision 50; decision 51 once demoted it behind a native bench
+// window, and decision 65 retired that route entirely - this is now the ONLY sneak+F selection
+// surface). A vertical RECIPE LIST: one full-width card per available output category, appended
+// from RpgStationPickerPage.build via RpgStationPickerTab.ui. Never auto-opened; opened only on
 // sneak+F when a station's input matches recipes across multiple native categories.
 //
 // COMPACT PANEL (maintainer smoke fix): the panel previously rendered full-screen-tall because
@@ -21,37 +21,41 @@
 $C = "../Common.ui";
 $F = "../Common/ZigFrames.ui";
 
-@RpgStationPickerTitleStyle = (FontSize: 18, RenderBold: true, TextColor: #eef3fa, HorizontalAlignment: Center, VerticalAlignment: Center);
-@RpgStationPickerHintStyle = (FontSize: 12, TextColor: #9fb0c4, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
+@RpgStationPickerTitleStyle = (FontSize: 22, RenderBold: true, TextColor: #eef3fa, HorizontalAlignment: Center, VerticalAlignment: Center);
+@RpgStationPickerHintStyle = (FontSize: 14, TextColor: #9fb0c4, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
 
 $C.@PageOverlay {
   LayoutMode: Middle;
 
   Group #RpgStationPickerRoot {
-    Anchor: (Width: 480);
+    Anchor: (Width: 640);
 
     $F.@ZigDecoratedFrame {
       @CloseButton = true;
-      Anchor: (Width: 480);
+      Anchor: (Width: 640);
 
       #Content {
         Label #RpgStationPickerTitle {
           Text: "";
-          Anchor: (Height: 24, Width: 444);
+          Anchor: (Height: 30, Width: 604);
           Style: @RpgStationPickerTitleStyle;
         }
 
         Label #RpgStationPickerHint {
           Text: "";
-          Anchor: (Top: 4, Width: 444);
+          Anchor: (Top: 4, Width: 604);
           Style: @RpgStationPickerHintStyle;
         }
 
-        // Icon+name tab strip - card templates append here (RpgStationPickerPage#build); wraps to
-        // a second row automatically once the cards exceed one line (LeftCenterWrap).
+        // The recipe list - one full-width card per output category, appended here from
+        // RpgStationPickerPage#build via RpgStationPickerTab.ui. LayoutMode: Top stacks them
+        // vertically (each card carries its own Anchor.Bottom gap), the same shape the first-party
+        // recipe list uses (Pages/Inventory/RecipeCatalogueRecipeButton.ui). This was a wrapping
+        // two-up strip of 170px cards before the 2026-07-29 smoke fix; full-width rows give a long
+        // client-resolved item name and its cost line room to render on one line each.
         Group #RpgStationPickerTabs {
-          Anchor: (Top: 14, Width: 444);
-          LayoutMode: LeftCenterWrap;
+          Anchor: (Top: 16, Width: 604);
+          LayoutMode: Top;
         }
       }
     }

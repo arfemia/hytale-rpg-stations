@@ -296,27 +296,20 @@ public class StationServiceTest {
 
     @Test
     void decideRoute_plainPress_alwaysToggles() {
-        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, true, 5));
-        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, false, 5));
-        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, false, 0));
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, 5));
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, 0));
     }
 
     @Test
-    void decideRoute_sneakWithBench_opensBench() {
-        assertEquals(StationService.Route.BENCH, StationService.decideRoute(true, true, 0));
-        assertEquals(StationService.Route.BENCH, StationService.decideRoute(true, true, 3));
+    void decideRoute_sneakMultiCategory_opensPicker() {
+        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, 2));
+        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, 9));
     }
 
     @Test
-    void decideRoute_sneakMultiCategoryNoBench_opensPicker() {
-        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, false, 2));
-        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, false, 9));
-    }
-
-    @Test
-    void decideRoute_sneakSingleOrZeroCategoryNoBench_toggles() {
-        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(true, false, 1));
-        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(true, false, 0));
+    void decideRoute_sneakSingleOrZeroCategory_toggles() {
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(true, 1));
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(true, 0));
     }
 
     @Test
@@ -389,6 +382,96 @@ public class StationServiceTest {
         assertEquals(StationService.representativeOutputFor(all, "WoodPlanks"), rep.getOutput().getItemId());
         assertNull(StationService.representativeConversionFor(all, "Unknown"));
         assertNull(StationService.representativeConversionFor(null, "WoodPlanks"));
+    }
+
+    // ==== Decision 66 (2026-07-29 smoke fix): the picker previews the PLACED species, not blackwood ====
+
+    /** One derived conversion: {@code <species>_Trunk} family in, {@code outItem} out, tagged {@code category}. */
+    private static StationAsset.Conversion convFrom(String inResourceTypeId, String outItem, String category) {
+        return StationAsset.Conversion.of(Ingredient.resource(inResourceTypeId, 1),
+                Ingredient.item(outItem, 1), null, category);
+    }
+
+    /**
+     * The real shipped shape this decision fixes: one conversion per SPECIES per category, sorted by
+     * output item id (the deriver's own order), so Blackwood always sorts first within a category.
+     */
+    private static StationAsset.Conversion[] multiSpeciesConversions() {
+        return new StationAsset.Conversion[]{
+                convFrom("Wood_Blackwood_Trunk", "Wood_Blackwood_Decorative", "DecorativePlanks"),
+                convFrom("Wood_Hardwood_Trunk", "Wood_Hardwood_Decorative", "DecorativePlanks"),
+                convFrom("Wood_Blackwood_Trunk", "Wood_Blackwood_Planks", "WoodPlanks"),
+                convFrom("Wood_Hardwood_Trunk", "Wood_Hardwood_Planks", "WoodPlanks")};
+    }
+
+    @Test
+    void representativeConversionFor_noPreference_keepsFirstMatch_byteIdenticalToPreDecision65() {
+        StationAsset.Conversion[] all = multiSpeciesConversions();
+        // Both the 2-arg overload and an explicitly-null preference must answer the old first-match.
+        assertEquals("Wood_Blackwood_Planks",
+                StationService.representativeConversionFor(all, "WoodPlanks").getOutput().getItemId());
+        assertEquals("Wood_Blackwood_Planks",
+                StationService.representativeConversionFor(all, "WoodPlanks", null, null).getOutput().getItemId());
+        assertEquals("Wood_Blackwood_Planks",
+                StationService.representativeConversionFor(all, "WoodPlanks", "  ", null).getOutput().getItemId());
+    }
+
+    @Test
+    void representativeConversionFor_preferredResourceFamily_winsOverTheAlphabeticalFirst() {
+        StationAsset.Conversion[] all = multiSpeciesConversions();
+        String[] hardwood = {"Wood_Hardwood_Trunk"};
+        // THE BUG: a sawmill loaded with hardwood used to preview Blackwood in every tab.
+        assertEquals("Wood_Hardwood_Planks", StationService.representativeConversionFor(
+                all, "WoodPlanks", "Wood_Hardwood_Log", hardwood).getOutput().getItemId());
+        // ... and the bias applies per category, so the whole strip stays on one species.
+        assertEquals("Wood_Hardwood_Decorative", StationService.representativeConversionFor(
+                all, "DecorativePlanks", "Wood_Hardwood_Log", hardwood).getOutput().getItemId());
+    }
+
+    @Test
+    void representativeConversionFor_preferredExactItemId_matchesAnItemIdInput() {
+        StationAsset.Conversion[] all = {
+                StationAsset.Conversion.of(Ingredient.item("Food_Fish_Raw", 1),
+                        Ingredient.item("Food_Fish_Grilled", 1), null, "Cook"),
+                StationAsset.Conversion.of(Ingredient.item("Food_Meat_Raw", 1),
+                        Ingredient.item("Food_Meat_Grilled", 1), null, "Cook")};
+        assertEquals("Food_Meat_Grilled", StationService.representativeConversionFor(
+                all, "Cook", "Food_Meat_Raw", null).getOutput().getItemId());
+    }
+
+    @Test
+    void representativeConversionFor_preferredMatchesNothingInCategory_fallsBackToFirstUsable() {
+        StationAsset.Conversion[] all = multiSpeciesConversions();
+        // A category the loaded material cannot produce must still render a tab (never vanish),
+        // so an unmatched preference degrades to the plain first-match.
+        assertEquals("Wood_Blackwood_Planks", StationService.representativeConversionFor(
+                all, "WoodPlanks", "Metal_Iron_Ore", new String[]{"Metal_Iron"}).getOutput().getItemId());
+        assertNull(StationService.representativeConversionFor(all, "Unknown", "Wood_Hardwood_Log",
+                new String[]{"Wood_Hardwood_Trunk"}));
+        assertNull(StationService.representativeConversionFor(null, "WoodPlanks", "Wood_Hardwood_Log",
+                new String[]{"Wood_Hardwood_Trunk"}));
+    }
+
+    @Test
+    void matchesConversionInput_familyAndExactRoutes_agreeWithMatchesAnyConversionInput() {
+        StationAsset.Conversion family = convFrom("Wood_Hardwood_Trunk", "Wood_Hardwood_Planks", "WoodPlanks");
+        StationAsset.Conversion exact = StationAsset.Conversion.of(Ingredient.item("Food_Fish_Raw", 1),
+                Ingredient.item("Food_Fish_Grilled", 1), null, "Cook");
+        String[] hardwood = {"Wood_Hardwood_Trunk"};
+
+        assertTrue(StationCustody.matchesConversionInput(family, "Wood_Hardwood_Log", hardwood));
+        assertFalse(StationCustody.matchesConversionInput(family, "Wood_Hardwood_Log", new String[]{"Wood_Softwood_Trunk"}));
+        assertFalse(StationCustody.matchesConversionInput(family, "Wood_Hardwood_Log", null));
+        assertTrue(StationCustody.matchesConversionInput(exact, "Food_Fish_Raw", null));
+        assertTrue(StationCustody.matchesConversionInput(exact, "food_fish_raw", null));
+        assertFalse(StationCustody.matchesConversionInput(exact, "Food_Meat_Raw", null));
+        assertFalse(StationCustody.matchesConversionInput(null, "Food_Fish_Raw", null));
+
+        // The extracted single-conversion core must agree with the any-of loop it was pulled out of.
+        StationAsset.Conversion[] both = {family, exact};
+        assertTrue(StationCustody.matchesAnyConversionInput(both, "Food_Fish_Raw", null));
+        assertTrue(StationCustody.matchesAnyConversionInput(both, "Wood_Hardwood_Log", hardwood));
+        assertFalse(StationCustody.matchesAnyConversionInput(both, "Metal_Iron_Ore", new String[]{"Metal_Iron"}));
     }
 
     @Test

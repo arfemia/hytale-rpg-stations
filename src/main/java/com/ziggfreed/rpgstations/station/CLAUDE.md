@@ -22,7 +22,8 @@ the WHOLE set executes:
   suspend/resume per frame through `StationWalkState`), `StationStep.At` (a step's `Consume`/
   `Produce` custody resolves the anchor's blockKey, not the primary), `Produce.To:"Custody"`
   (cross-station output into the anchor's claim + display), and `ActionDef.Anchors`
-  DISCOVERY/CLAIMING (lazy `knownStationBlocks` index fed by interaction warming + `PlaceBlockEvent`,
+  DISCOVERY/CLAIMING (the DERIVED block-item seed below, plus the lazy `knownStationBlocks` index fed
+  by interaction warming + `PlaceBlockEvent`,
   bounded ring scan last resort; atomic first-wins claim into the generalized `byBlock` map with the
   gate-m5 own-session/custody precedence). New stop reasons `INPUTS_EXHAUSTED` (repeat-while-inputs,
   design 2.4), `ANCHOR_LOST` (a remote anchor broken mid-program, design 2.6), `PATH_BLOCKED` (a
@@ -343,6 +344,44 @@ incoming anchor claim; restart self-heal consults `custodyByBlock`, not just the
 load-bearing for `[wave 3]`'s multi-station claiming, already true today for the single-station
 case.
 
+## Anchor discovery: the DERIVED block-item seed (AV wave) + the two denial toasts
+
+Anchor discovery resolves "is there a `cookingfire` near me" through the `blockItemId -> stationId`
+index `stationBlockItemToId`. That index used to be LEARNED ONLY - `registerKnownStationBlock`
+filled it from an actual F press, and nothing persists it - so on a COLD server (any restart, or a
+world nobody has pressed F in yet) the ring scan resolved every scanned block to `null` and the
+`PlaceBlockEvent` feed no-oped, and a `Walk` action denied "No Cooking Fire found within 12 blocks"
+for old AND freshly placed fires alike. It is now DERIVED from the native assets, zero new
+authoring (maintainer ruling):
+
+- **`StationService#seedStationBlockIndexFromAssets()`** inverts how a station block is authored.
+  Pass 1 walks the `RootInteraction` asset map, and for each root interaction resolves its
+  `getInteractionIds()` through the `Interaction` asset map, collecting `rootInteractionId ->
+  stationId` for every entry the engine decoded into this mod's own `StationUseInteraction` (its
+  `Station` leaf is a real codec field, so this is an `instanceof` read, never a JSON re-parse - the
+  new `StationUseInteraction#getStationId()` is the accessor). Pass 2 walks the `BlockType` asset map
+  once, pairing each block's `getItem()` id (the SAME accessor `blockItemIdAt` reads back in the
+  world, so state variants fold onto their base item by construction) with the RootInteraction its
+  `Interactions.Use` names. `StationAnchors#deriveBlockItemIndex` is the PURE join (case-insensitive
+  both sides, lowercased output, first-wins, blanks skipped; unit-tested).
+- **Two call sites, both idempotent**: the `StationAsset` `LoadedAssetsEvent` fold, and once more at
+  the first `PlayerReadyEvent` immediately before `StationValidator.runAndLog()` (a native
+  Item/BlockType layer from a later pack can settle AFTER the station fold fires - the same timing
+  reason the FULL validator pass is deferred there). Try-guarded at both altitudes: a malformed
+  entry skips with one warn, a total failure logs, nothing ever throws into the fold.
+- The F-press learning and the `PlaceBlockEvent` feed STAY as harmless redundancy (they re-write an
+  identical entry once the derivation already covered a block).
+- **Validator**: `ANCHOR_STATION_NOT_DISCOVERABLE` (warn-only) rides beside
+  `ANCHOR_STATION_UNKNOWN` - an `Anchors[].Station` naming a station that EXISTS but that no block
+  item maps to is undiscoverable until a player interacts with such a block.
+  `StationValidator#stationDiscoverableLive` fails OPEN on an EMPTY index (unseeded fold /
+  unit JVM), exactly as `benchIdKnownLive` does for a cold Item map.
+
+**Two failures, two toasts** (they shared one before): `ui.station.anchor_missing` ("No {0} found
+within {1} blocks") is the DISCOVERY miss; `ui.station.anchor_unreachable` ("The {0} nearby cannot
+be reached") is the walk-targeted anchor whose engage-time `PuppetNav.solve` fails - the block was
+found, it just cannot be pathed to. Both denials roll back every partial claim.
+
 ## The ACTIVELY-WORKING block state (`Custody.States.Working`, AV wave)
 
 The maintainer ruling is **"Lit = actively cooking"**: a station block's working look (the cooking
@@ -514,7 +553,8 @@ The lang-key check (`langKeyKnownLive`) is a MERGED-view check: a miss against t
 additive `rpgstations.lang` overlay resolves correctly. **New scope-2 checks**:
 `ACTION_REF_UNKNOWN`, `EXTENSION_TARGET_UNKNOWN`, `EXTENSION_PAYLOAD_MISMATCH`,
 `EXTENSION_KEY_COLLISION`, `EXTENSION_ANCHOR_MISSING`, `EXTENSION_STEP_MISSING_ID`,
-`ANCHOR_STATION_UNKNOWN`, `WALK_REQUIRES_PUPPET`, and the `[wave 3]` boundary marker
+`ANCHOR_STATION_UNKNOWN`, `ANCHOR_STATION_NOT_DISCOVERABLE` (AV wave - see the discovery-seed
+section above), `WALK_REQUIRES_PUPPET`, and the `[wave 3]` boundary marker
 (`WAVE3_PENDING`-style, one finding per step authoring `Walk`/`At`/`Produce.To:Custody`).
 **Dropped checks** (their reserved fields no longer exist): `UNIMPLEMENTED_STEP_TYPE`,
 `UNIMPLEMENTED_CONSUME_SOURCE`, `UNIMPLEMENTED_PRODUCE_DEST`, `WAIT_BOTH_ROUTES`,
@@ -543,6 +583,20 @@ the load-bearing lessons that still apply going forward:
   through the containment chain regardless of which state the block is currently in.
   `StationService#blockItemIdAt` falls back to `getId()` only when the block has no containing
   Item at all.
+- **The same rule binds the BLOCK-GONE check: compare by ITEM id, never by raw block id.**
+  `setBlockInteractionState` does not annotate a block, it REPLACES it - `BlockAccessor
+  #setBlockInteractionState` resolves `blockType.getBlockForState(state)` and calls `setBlock(...,
+  BlockType.getAssetMap().getIndex(newState.getId()), ...)`, so the int `World#getBlock` returns
+  changes on EVERY `Custody.States` flip this engine performs. A raw-int compare against the
+  engage-time snapshot therefore reads the engine's own `Empty`/`Loaded`/`Working` flip as "the
+  station is gone" (the round-2 smoke regression: the cooking fire's own session died at its first
+  1s heartbeat the moment engage lit it). The heartbeat now runs the pure
+  `StationAnchors#blockGone(startBlockItemId, currentBlockItemId, startBlockId, currentBlockId)`:
+  item-id compare (case-insensitive, null current = gone) when the session captured one at engage
+  (`StationSession#startBlockItemId`, resolved ONCE and shared with the summary crest), raw-int
+  fallback only for a block with no containing Item. This covers the latent twin by construction -
+  a `StationStepHandlers` working-step flip at `At: "self"` writes the SAME primary block through
+  the SAME check.
 - **A restart-orphaned `Loaded` block state with no live claim behind it must recover, not
   dead-end.** `ActionResolver#selectActionForBlockState(asset, currentStateName)` is the THIRD
   action-selection fallback (after the live claim and the held item) - it matches the block's

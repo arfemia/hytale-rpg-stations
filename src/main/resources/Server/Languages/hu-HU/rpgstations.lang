@@ -33,6 +33,7 @@ ui.station.stop.inputs_exhausted = Elfogyott az anyagod.
 ui.station.stop.anchor_lost = A másik állomás eltűnt és abbahagytad a munkát.
 ui.station.stop.path_blocked = Az út oda el van zárva és abbahagytad a munkát.
 ui.station.anchor_missing = Nem található {0} {1} blokkon belül.
+ui.station.anchor_unreachable = A közeli {0} nem érhető el.
 ui.station.anchor_busy = Valaki más már használja a közeli {0}-t.
 ui.station.summary.title = Munka Befejezve
 ui.station.summary.cycles = {0} ciklus végrehajtva

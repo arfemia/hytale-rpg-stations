@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -118,5 +120,94 @@ class StationAnchorsTest {
     void horizontalDistSq_ignoresY() {
         assertEquals(0L, StationAnchors.horizontalDistSq(5, 5, 5, 5));
         assertEquals(25L, StationAnchors.horizontalDistSq(0, 0, 3, 4));
+    }
+
+    // ==================== blockGone (AV wave: a state flip must not read as "station gone") ====================
+
+    @Test
+    void blockGone_stateFlipKeepsTheSameItemId() {
+        // The regression this rule exists for: setBlockInteractionState REPLACES the block with its
+        // generated state variant, so the raw id changes on every Empty/Loaded/Working flip while the
+        // containing Item id stays put. The session must survive that.
+        assertFalse(StationAnchors.blockGone("RPG_Station_CookingFire", "RPG_Station_CookingFire", 1001, 1002));
+    }
+
+    @Test
+    void blockGone_itemIdMatchIsCaseInsensitive() {
+        assertFalse(StationAnchors.blockGone("RPG_Station_Sawmill", "rpg_station_sawmill", 7, 7));
+    }
+
+    @Test
+    void blockGone_brokenBlockHasNoItemId() {
+        assertTrue(StationAnchors.blockGone("RPG_Station_CookingFire", null, 1001, 0));
+    }
+
+    @Test
+    void blockGone_replacedWithADifferentBlock() {
+        assertTrue(StationAnchors.blockGone("RPG_Station_CookingFire", "RPG_Station_Sawmill", 1001, 2002));
+    }
+
+    @Test
+    void blockGone_fallsBackToRawIdWhenTheBlockHasNoItem() {
+        // No containing Item at engage: the raw-int compare is all we have (pre-fix behavior).
+        assertFalse(StationAnchors.blockGone(null, null, 42, 42));
+        assertTrue(StationAnchors.blockGone(null, null, 42, 43));
+        assertFalse(StationAnchors.blockGone(null, "SomethingElse", 42, 42),
+                "a null start item id ignores the item side entirely");
+    }
+
+    // ==================== deriveBlockItemIndex (AV wave: cold-server discovery seeding) ====================
+
+    @Test
+    void deriveBlockItemIndex_joinsBlocksToStationsThroughTheirUseInteraction() {
+        Map<String, String> interactions = new LinkedHashMap<>();
+        interactions.put("RPG_Station_Sawmill_Use", "sawmill");
+        interactions.put("RPG_Station_CookingFire_Use", "cookingfire");
+        List<StationAnchors.BlockUse> blocks = List.of(
+                new StationAnchors.BlockUse("RPG_Station_Sawmill", "RPG_Station_Sawmill_Use"),
+                new StationAnchors.BlockUse("RPG_Station_CookingFire", "RPG_Station_CookingFire_Use"),
+                new StationAnchors.BlockUse("Furniture_Crude_Brazier", "SomeVanillaUse"));
+
+        Map<String, String> index = StationAnchors.deriveBlockItemIndex(interactions, blocks);
+
+        assertEquals(2, index.size(), "a non-station block contributes nothing");
+        assertEquals("sawmill", index.get("rpg_station_sawmill"));
+        assertEquals("cookingfire", index.get("rpg_station_cookingfire"));
+    }
+
+    @Test
+    void deriveBlockItemIndex_normalizesBothSidesAndSkipsBlanks() {
+        Map<String, String> interactions = new LinkedHashMap<>();
+        interactions.put("RPG_Station_Sawmill_Use", "SAWMILL");
+        interactions.put("Blank_Use", "  ");
+        List<StationAnchors.BlockUse> blocks = List.of(
+                new StationAnchors.BlockUse("RPG_STATION_SAWMILL", "rpg_station_sawmill_use"),
+                new StationAnchors.BlockUse("  ", "RPG_Station_Sawmill_Use"),
+                new StationAnchors.BlockUse("Blank_Station_Block", "Blank_Use"),
+                new StationAnchors.BlockUse(null, null));
+
+        Map<String, String> index = StationAnchors.deriveBlockItemIndex(interactions, blocks);
+
+        assertEquals(1, index.size());
+        assertEquals("sawmill", index.get("rpg_station_sawmill"), "key AND value lowercased");
+    }
+
+    @Test
+    void deriveBlockItemIndex_firstWinsOnARepeatedItemId() {
+        Map<String, String> interactions = new LinkedHashMap<>();
+        interactions.put("First_Use", "sawmill");
+        interactions.put("Second_Use", "cookingfire");
+        List<StationAnchors.BlockUse> blocks = List.of(
+                new StationAnchors.BlockUse("RPG_Station_Sawmill", "First_Use"),
+                new StationAnchors.BlockUse("RPG_Station_Sawmill", "Second_Use"));
+
+        Map<String, String> index = StationAnchors.deriveBlockItemIndex(interactions, blocks);
+
+        assertEquals("sawmill", index.get("rpg_station_sawmill"));
+    }
+
+    @Test
+    void deriveBlockItemIndex_emptyInputsAreEmpty() {
+        assertTrue(StationAnchors.deriveBlockItemIndex(Map.of(), List.of()).isEmpty());
     }
 }

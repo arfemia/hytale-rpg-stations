@@ -33,6 +33,7 @@ ui.station.stop.inputs_exhausted = У вас закончились матери
 ui.station.stop.anchor_lost = Другая станция была уничтожена, и вы перестали работать.
 ui.station.stop.path_blocked = Путь туда заблокирован, и вы перестали работать.
 ui.station.anchor_missing = Не найдено {0} в радиусе {1} блоков.
+ui.station.anchor_unreachable = До ближайшего {0} не добраться.
 ui.station.anchor_busy = Кто-то уже использует ближайший {0}.
 ui.station.summary.title = Работа завершена
 ui.station.summary.cycles = Проработано {0} циклов

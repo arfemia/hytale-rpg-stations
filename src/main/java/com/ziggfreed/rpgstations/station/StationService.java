@@ -45,6 +45,8 @@ import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransact
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
+import com.hypixel.hytale.server.core.modules.interaction.interaction.config.Interaction;
+import com.hypixel.hytale.server.core.modules.interaction.interaction.config.RootInteraction;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
@@ -89,6 +91,7 @@ import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
+import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.FactorSnapshot;
 import com.ziggfreed.rpgstations.loot.LootEngine;
 import com.ziggfreed.rpgstations.ui.StationSummaryHud;
@@ -255,12 +258,17 @@ public final class StationService {
     private final ConcurrentHashMap<String, String> knownStationBlocks = new ConcurrentHashMap<>();
 
     /**
-     * The learned {@code blockItemId(lowercased) -> stationId} map (scope-2 wave 3): filled the
-     * first time ANY block of a given station-block item id is interacted with (we know both the
-     * block's item id AND its station id at that moment). Lets a {@link PlaceBlockEvent} index a
-     * placed station block by item id, and the bounded ring scan resolve an unseen block's item id
-     * back to a station id. Fail-open: an unlearned item id simply is not discoverable until its
-     * first interaction (the documented contract).
+     * The {@code blockItemId(lowercased) -> stationId} map anchor discovery resolves an unseen block
+     * against (the {@code PlaceBlockEvent} feed and the bounded ring scan both read it).
+     *
+     * <p>Filled from TWO sources. The AUTHORITATIVE one is {@link #seedStationBlockIndexFromAssets()},
+     * which DERIVES the whole index from the native assets at every fold and once more post-load, so
+     * a cold server (nobody has pressed F on anything yet) already knows every station block that
+     * ships in any installed pack. The second is opportunistic LEARNING - the first interaction with
+     * a given station block re-registers the same pair through
+     * {@link #registerKnownStationBlock} - kept as harmless redundancy for a block whose
+     * {@code Interactions.Use} the derivation could not walk (it re-writes an identical entry when
+     * the derivation already covered it).
      */
     private final ConcurrentHashMap<String, String> stationBlockItemToId = new ConcurrentHashMap<>();
 
@@ -393,13 +401,13 @@ public final class StationService {
             return;
         }
 
-        // 2.6) Sneak+F selection surface (selection wave, decision 50/51/56): an EXPLICIT
-        // multi-output request that PRE-EMPTS the classic engage (never places into custody, never
-        // starts work). Only fires on sneak; only opens a surface when there IS one (a native bench
-        // window, or the picker for 2+ derived output categories). Otherwise (plain F, or a
-        // single-category / no-bench station) it returns false and the engage below runs unchanged.
-        if (sneaking && routeSneakSelection(world, store, ref, playerRef, player, playerUuid, asset, action,
-                blockX, blockY, blockZ)) {
+        // 2.6) Sneak+F selection surface (selection wave, decision 50/56, re-scoped by 64): an
+        // EXPLICIT multi-output request that PRE-EMPTS the classic engage (never places into
+        // custody, never starts work). Only fires on sneak, and only when the station derives 2+
+        // output categories; otherwise (plain F, or a single-category station) it returns false and
+        // the engage below runs unchanged. `preClaim` feeds decision 66's placed-material preview.
+        if (sneaking && routeSneakSelection(store, ref, playerRef, player, playerUuid, asset, action,
+                preClaim, blockX, blockY, blockZ)) {
             return;
         }
 
@@ -553,10 +561,14 @@ public final class StationService {
             s.anchorBlocks.putAll(claimedAnchorBlocks);
         }
         s.startBlockId = blockIdAt(world, blockX, blockY, blockZ);
+        // The block-gone comparand (see StationAnchors#blockGone): the block's ITEM id, resolved
+        // ONCE here and reused for the summary crest below - the raw id above is only the fallback
+        // for a block with no containing Item at all.
+        s.startBlockItemId = blockItemIdAt(world, blockX, blockY, blockZ);
         StationAsset.Identity identity = asset.getIdentity();
         String authoredIcon = identity != null ? identity.getIcon() : null;
         s.stationIconItemId = authoredIcon != null && !authoredIcon.isBlank()
-                ? authoredIcon : blockItemIdAt(world, blockX, blockY, blockZ);
+                ? authoredIcon : s.startBlockItemId;
         s.originX = pos.x;
         s.originY = pos.y;
         s.originZ = pos.z;
@@ -818,7 +830,12 @@ public final class StationService {
             stop(s, StopReason.WORLD_CHANGED, null, null);
             return false;
         }
-        if (blockIdAt(world, s.blockX, s.blockY, s.blockZ) != s.startBlockId) {
+        // Block-gone by ITEM id, not by raw block id: this engine flips the primary block's own
+        // interaction state mid-session (Custody.States Empty/Loaded/Working), and a state flip
+        // REPLACES the block with its generated state variant, so a raw-int compare would read the
+        // engine's own flip as "the station is gone". See StationAnchors#blockGone.
+        if (StationAnchors.blockGone(s.startBlockItemId, blockItemIdAt(world, s.blockX, s.blockY, s.blockZ),
+                s.startBlockId, blockIdAt(world, s.blockX, s.blockY, s.blockZ))) {
             stop(s, StopReason.STATION_GONE, store, commandBuffer);
             return false;
         }
@@ -2205,33 +2222,33 @@ public final class StationService {
 
     /** The sneak+F routing outcome (pure decision core, {@link #decideRoute}). */
     enum Route {
-        /** No selection surface applies: run the classic engage (plain F, or single-category / no bench). */
+        /** No selection surface applies: run the classic engage (plain F, or a single-category station). */
         TOGGLE,
-        /** Open the native crafting/processing bench window (the block authors a {@code Bench} identity). */
-        BENCH,
-        /** Open the multi-output picker page (2+ derived output categories, no bench). */
+        /** Open the multi-output picker page (2+ derived output categories). */
         PICKER
     }
 
     /**
-     * PURE (decision 50/51/56): the sneak+F routing decision. A non-sneak press always
-     * {@link Route#TOGGLE}s (plain F engages work). A sneak press opens the native
-     * {@link Route#BENCH} window when the block has a bench identity; else the {@link Route#PICKER}
-     * when the station derives 2+ distinct output categories; else {@link Route#TOGGLE} (a
-     * single-category station never shows a picker). Unit-tested across every combination.
+     * PURE (decision 50/56, re-scoped by decision 65): the sneak+F routing decision. A non-sneak
+     * press always {@link Route#TOGGLE}s (plain F engages work). A sneak press opens the
+     * {@link Route#PICKER} when the station derives 2+ distinct output categories, else
+     * {@link Route#TOGGLE} (a single-category station never shows a picker). Unit-tested across
+     * every combination.
+     *
+     * <p><b>Decision 65 (maintainer ruling, 2026-07-29) retired the native-bench route</b> that
+     * decision 51a had put ahead of the picker here: a station block authoring a native
+     * {@code BlockType.Bench} identity used to open the vanilla crafting/processing WINDOW on
+     * sneak+F instead of anything of ours. The cooking fire was its only user and the maintainer
+     * ruled the native window off it, so the whole branch (this enum's {@code BENCH} constant, the
+     * {@code StationBenchWindow} opener, and the block's own {@code Bench}/{@code BlockEntity}
+     * authoring) is gone rather than left dormant. Sneak+F is picker-or-toggle everywhere now.
      */
     @Nonnull
-    static Route decideRoute(boolean sneaking, boolean hasBench, int distinctCategoryCount) {
+    static Route decideRoute(boolean sneaking, int distinctCategoryCount) {
         if (!sneaking) {
             return Route.TOGGLE;
         }
-        if (hasBench) {
-            return Route.BENCH;
-        }
-        if (distinctCategoryCount > 1) {
-            return Route.PICKER;
-        }
-        return Route.TOGGLE;
+        return distinctCategoryCount > 1 ? Route.PICKER : Route.TOGGLE;
     }
 
     /**
@@ -2337,23 +2354,63 @@ public final class StationService {
      * item id. {@link #representativeOutputFor} and {@link #pickerCostLine} both derive from this
      * SAME scan so a picker tab's icon/name and its cost line always describe ONE conversion, never
      * two independently-chosen ones.
+     *
+     * <p>The no-preference overload - equivalent to passing a null preferred input below, i.e. the
+     * plain first-match every caller had before decision 66.
      */
     @Nullable
     static StationAsset.Conversion representativeConversionFor(@Nullable StationAsset.Conversion[] conversions,
             @Nonnull String category) {
+        return representativeConversionFor(conversions, category, null, null);
+    }
+
+    /**
+     * PURE (decision 66, maintainer smoke fix 2026-07-29): the representative CONVERSION for a
+     * category, BIASED to the material the station actually has in front of it.
+     *
+     * <p>The sawmill derives one conversion per log SPECIES per category (33 in all - 11 species x
+     * Planks/Decorative/Ornate), and {@code StationRecipeDeriver} sorts them by output item id, so
+     * the plain first-match above always answered {@code Wood_Blackwood_*} no matter what was
+     * loaded: a sawmill packed with oak logs previewed three Blackwood tabs. This overload scans
+     * the same category in the same order but RETURNS the first conversion whose INPUT matches
+     * {@code preferredInputItemId} (exactly, or through its {@code ResourceTypeId} family via
+     * {@code preferredInputResourceTypeIds}), falling back to the first usable conversion when the
+     * preferred item matches nothing in this category - so a category the loaded material cannot
+     * actually produce still renders a meaningful tab instead of vanishing.
+     *
+     * <p>A null/blank preferred item is the byte-identical pre-decision-66 behavior. The engine's
+     * own output is unaffected either way: which conversion actually RUNS is
+     * {@link #firstRunnableConversionFromCustody}'s job against the live claim, and it already
+     * picked the loaded species correctly - this bias only fixes what the picker DISPLAYS.
+     */
+    @Nullable
+    static StationAsset.Conversion representativeConversionFor(@Nullable StationAsset.Conversion[] conversions,
+            @Nonnull String category, @Nullable String preferredInputItemId,
+            @Nullable String[] preferredInputResourceTypeIds) {
         if (conversions == null) {
             return null;
         }
+        boolean wantPreferred = preferredInputItemId != null && !preferredInputItemId.isBlank();
+        StationAsset.Conversion firstUsable = null;
         for (StationAsset.Conversion c : conversions) {
             if (c == null || c.getCategory() == null || !category.equalsIgnoreCase(c.getCategory())) {
                 continue;
             }
             String outItem = c.getOutput() != null ? c.getOutput().getItemId() : null;
-            if (outItem != null && !outItem.isBlank()) {
+            if (outItem == null || outItem.isBlank()) {
+                continue;
+            }
+            if (!wantPreferred) {
+                return c;
+            }
+            if (firstUsable == null) {
+                firstUsable = c;
+            }
+            if (StationCustody.matchesConversionInput(c, preferredInputItemId, preferredInputResourceTypeIds)) {
                 return c;
             }
         }
-        return null;
+        return firstUsable;
     }
 
     /**
@@ -2398,40 +2455,62 @@ public final class StationService {
     }
 
     /**
-     * The sneak+F selection router (decision 50/51/56): opens a native bench window or the
-     * multi-output picker, returning {@code true} iff a surface was opened (the caller then skips
-     * the classic engage). Impure (it opens pages + reads the block/catalog); the DECISION is the
-     * pure {@link #decideRoute}, the FILTER math the pure {@link #distinctConversionCategories}.
+     * The sneak+F selection router (decision 50/56, re-scoped by decision 65): opens the
+     * multi-output picker, returning {@code true} iff it was opened (the caller then skips the
+     * classic engage). Impure (it opens a page + reads the claim/catalog); the DECISION is the pure
+     * {@link #decideRoute}, the FILTER math the pure {@link #distinctConversionCategories}.
+     *
+     * <p>Decision 65 removed the native-bench branch that used to pre-empt the picker here, so this
+     * is now a straight picker-or-fall-through. {@code claim} is the block's live custody claim (may
+     * be null/foreign) and feeds decision 66's placed-material preview bias below.
      */
-    private boolean routeSneakSelection(@Nonnull World world, @Nonnull Store<EntityStore> store,
+    private boolean routeSneakSelection(@Nonnull Store<EntityStore> store,
             @Nonnull Ref<EntityStore> ref, @Nonnull PlayerRef playerRef, @Nonnull Player player,
             @Nonnull UUID playerUuid, @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action,
-            int blockX, int blockY, int blockZ) {
-        boolean hasBench = benchPresentAt(world, blockX, blockY, blockZ);
-        StationAsset.Conversion[] conversions = hasBench ? null
-                : StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
-        List<String> categories = hasBench ? List.of() : distinctConversionCategories(conversions);
-        Route route = decideRoute(true, hasBench, categories.size());
-        switch (route) {
-            case BENCH:
-                return StationBenchWindow.open(world, store, ref, player, playerUuid, blockX, blockY, blockZ);
-            case PICKER: {
-                String blockKey = playerRef.getWorldUuid() + ":" + blockX + ":" + blockY + ":" + blockZ;
-                boolean showLocked = pickerShowLocked(asset);
-                List<PickerCategories.Category> tabs = buildPickerCategories(conversions, categories);
-                if (tabs.size() < 2) {
-                    // Every representative output resolved empty (defensive) - nothing meaningful to
-                    // show; fall through to the plain engage rather than opening an empty picker.
-                    return false;
-                }
-                return RpgStationPickerPage.open(ref, store, playerRef, tabs, showLocked,
-                        (selRef, selStore, categoryId) -> onPickerSelect(selRef, selStore, playerUuid, blockKey,
-                                categoryId));
-            }
-            case TOGGLE:
-            default:
-                return false;
+            @Nullable StationCustodyClaim claim, int blockX, int blockY, int blockZ) {
+        StationAsset.Conversion[] conversions =
+                StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
+        List<String> categories = distinctConversionCategories(conversions);
+        if (decideRoute(true, categories.size()) != Route.PICKER) {
+            return false;
         }
+        String blockKey = playerRef.getWorldUuid() + ":" + blockX + ":" + blockY + ":" + blockZ;
+        boolean showLocked = pickerShowLocked(asset);
+        String previewInputItemId = pickerPreviewInputItemId(claim, player);
+        List<PickerCategories.Category> tabs = buildPickerCategories(conversions, categories, previewInputItemId,
+                liveResourceTypeIdsOf(previewInputItemId));
+        if (tabs.size() < 2) {
+            // Every representative output resolved empty (defensive) - nothing meaningful to show;
+            // fall through to the plain engage rather than opening an empty picker.
+            return false;
+        }
+        return RpgStationPickerPage.open(ref, store, playerRef, tabs, showLocked,
+                (selRef, selStore, categoryId) -> onPickerSelect(selRef, selStore, playerUuid, blockKey, categoryId));
+    }
+
+    /**
+     * The material the picker should PREVIEW recipes for (decision 66): whatever is PLACED IN THE
+     * BLOCK (the custody claim's oldest-placed entry - its {@code items()} map is insertion-ordered),
+     * else the player's currently HELD stack, else null (the first-derived fallback, i.e. the
+     * pre-decision-66 behavior).
+     *
+     * <p>Deliberately NOT gated on claim ownership: the ask is "show the recipes for the block
+     * placed in it", and what is physically loaded is the honest preview even when someone else
+     * loaded it (a non-owner's engage is denied later by {@code toggle}'s own occupied check, which
+     * this preview does not and must not pre-empt).
+     */
+    @Nullable
+    private static String pickerPreviewInputItemId(@Nullable StationCustodyClaim claim, @Nonnull Player player) {
+        if (claim != null && !claim.isEmpty()) {
+            for (String itemId : claim.items().keySet()) {
+                if (itemId != null && !itemId.isBlank()) {
+                    return itemId;
+                }
+            }
+        }
+        ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+        String heldItemId = held != null ? held.getItemId() : null;
+        return heldItemId != null && !heldItemId.isBlank() ? heldItemId : null;
     }
 
     /**
@@ -2441,13 +2520,21 @@ public final class StationService {
      * NativeNames#itemNameMsg}, client-resolved in the viewer's own locale - no hand-authored
      * per-category lang key needed), and its COST LINE is that same representative conversion's
      * input-to-output shape ({@link #pickerCostLine}).
+     *
+     * <p>Decision 66: {@code previewInputItemId} (+ its resource-type family) biases EVERY tab onto
+     * the conversion that consumes the material actually loaded/held, so a sawmill full of oak
+     * previews Oak Planks / Oak Decorative / Oak Ornate instead of three Blackwood tabs. One
+     * preferred item drives all tabs, so the strip stays internally consistent (never oak in one
+     * tab and blackwood in the next).
      */
     @Nonnull
     private static List<PickerCategories.Category> buildPickerCategories(
-            @Nullable StationAsset.Conversion[] conversions, @Nonnull List<String> categories) {
+            @Nullable StationAsset.Conversion[] conversions, @Nonnull List<String> categories,
+            @Nullable String previewInputItemId, @Nullable String[] previewInputResourceTypeIds) {
         List<PickerCategories.Category> tabs = new ArrayList<>(categories.size());
         for (String cat : categories) {
-            StationAsset.Conversion rep = representativeConversionFor(conversions, cat);
+            StationAsset.Conversion rep = representativeConversionFor(conversions, cat, previewInputItemId,
+                    previewInputResourceTypeIds);
             if (rep == null || rep.getOutput() == null) {
                 continue; // no representative item to render as the tab icon; skip this category
             }
@@ -2487,16 +2574,6 @@ public final class StationService {
         }
         pendingByPlayer.remove(playerUuid, pending);
         return pending.category();
-    }
-
-    /** True when the block at {@code (x,y,z)} authors a native {@code BlockType.Bench} identity. */
-    private static boolean benchPresentAt(@Nonnull World world, int x, int y, int z) {
-        try {
-            BlockType bt = world.getBlockType(x, y, z);
-            return bt != null && bt.getBench() != null;
-        } catch (Throwable t) {
-            return false;
-        }
     }
 
     /**
@@ -2687,6 +2764,117 @@ public final class StationService {
     }
 
     /**
+     * DERIVES the {@code blockItemId -> stationId} discovery index straight out of the native
+     * assets, with ZERO extra authoring (maintainer ruling, AV wave). Before this existed the index
+     * was LEARNED only - a press of F on a station block was the sole way an item id ever entered it
+     * - so on a cold server (a restart, or a world where nobody has interacted yet) the ring scan and
+     * the {@code PlaceBlockEvent} feed both missed every block and anchor discovery denied
+     * {@code ui.station.anchor_missing} for old AND freshly placed station blocks alike.
+     *
+     * <p>The derivation is the inverse of how a station block is authored: a station block's
+     * {@code BlockType.Interactions.Use} names a {@code RootInteraction} whose entries include this
+     * mod's own {@code {"Type":"rpg_station_use","Station":"<id>"}}. So pass 1 walks the
+     * {@link RootInteraction} asset map and collects {@code rootInteractionId -> stationId} for every
+     * root interaction carrying a decoded {@link StationUseInteraction} (a small set - one per
+     * station block type in every installed pack); pass 2 walks the {@link BlockType} asset map once
+     * and pairs each block's own item id ({@link BlockType#getItem()}, the SAME accessor
+     * {@link #blockItemIdAt} reads back in the world, so state variants fold onto their base item by
+     * construction) with the root interaction its {@code Use} names. {@link StationAnchors
+     * #deriveBlockItemIndex} is the pure join.
+     *
+     * <p>IDEMPOTENT: safe to re-run at every asset fold and once more post-load (a later pack layer
+     * can add both halves). Fully try-guarded at BOTH altitudes - a malformed entry skips with one
+     * warn and a total failure logs and returns, never throwing into the asset fold.
+     */
+    public void seedStationBlockIndexFromAssets() {
+        try {
+            Map<String, String> interactionToStation = new HashMap<>();
+            for (Map.Entry<String, RootInteraction> e : RootInteraction.getAssetMap().getAssetMap().entrySet()) {
+                try {
+                    String stationId = stationIdOfRootInteraction(e.getValue());
+                    if (stationId != null) {
+                        interactionToStation.put(e.getKey(), stationId);
+                    }
+                } catch (Throwable t) {
+                    Log.warn("STATION discovery seed skipped RootInteraction '" + e.getKey() + "': " + t.getMessage());
+                }
+            }
+            if (interactionToStation.isEmpty()) {
+                return;
+            }
+            List<StationAnchors.BlockUse> blockUses = new ArrayList<>();
+            for (Map.Entry<String, BlockType> e : BlockType.getAssetMap().getAssetMap().entrySet()) {
+                try {
+                    BlockType blockType = e.getValue();
+                    if (blockType == null) {
+                        continue;
+                    }
+                    String useId = blockType.getInteractions().get(InteractionType.Use);
+                    if (useId == null || useId.isBlank()) {
+                        continue;
+                    }
+                    Item item = blockType.getItem();
+                    if (item != null) {
+                        blockUses.add(new StationAnchors.BlockUse(item.getId(), useId));
+                    }
+                } catch (Throwable t) {
+                    Log.warn("STATION discovery seed skipped BlockType '" + e.getKey() + "': " + t.getMessage());
+                }
+            }
+            Map<String, String> derived = StationAnchors.deriveBlockItemIndex(interactionToStation, blockUses);
+            if (derived.isEmpty()) {
+                return;
+            }
+            stationBlockItemToId.putAll(derived);
+            Log.info("STATION discovery index: derived " + derived.size()
+                    + " station block item id(s) from native assets: " + derived);
+        } catch (Throwable t) {
+            Log.warn("STATION discovery index derivation failed: " + t.getMessage(), t);
+        }
+    }
+
+    /**
+     * The station id a {@code RootInteraction} runs, or {@code null} when none of its interaction
+     * entries is one of this mod's own {@code rpg_station_use} handlers. The engine has already
+     * decoded the object form into a live {@link StationUseInteraction} (its {@code Station} leaf is
+     * a real codec field), so this is an {@code instanceof} read, never a JSON re-parse.
+     */
+    @Nullable
+    private static String stationIdOfRootInteraction(@Nullable RootInteraction root) {
+        if (root == null) {
+            return null;
+        }
+        String[] interactionIds = root.getInteractionIds();
+        if (interactionIds == null) {
+            return null;
+        }
+        for (String interactionId : interactionIds) {
+            if (interactionId == null || interactionId.isBlank()) {
+                continue;
+            }
+            Interaction interaction = Interaction.getAssetMap().getAsset(interactionId);
+            if (interaction instanceof StationUseInteraction stationUse) {
+                String stationId = stationUse.getStationId();
+                if (stationId != null && !stationId.isBlank()) {
+                    return stationId;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Every station id at least one KNOWN station block resolves to (the derived seed plus anything
+     * learned since). The validator reads this to flag an anchor naming a station no block maps to;
+     * an EMPTY set means "not seeded yet" (a cold unit JVM, or a fold before the native asset maps
+     * settled), never "nothing is discoverable" - callers must fail open on it.
+     */
+    @Nonnull
+    java.util.Set<String> discoverableStationIds() {
+        return java.util.Set.copyOf(stationBlockItemToId.values());
+    }
+
+    /**
      * Discovers the NEAREST placed block resolving to station {@code wantStationId} within
      * {@code radius} horizontal blocks of the primary block, SAME world (design 2.2): the lazy
      * index first (a cheap {@link #knownStationBlocks} scan), then ONE bounded ring scan
@@ -2769,9 +2957,10 @@ public final class StationService {
 
     /**
      * Resolves + CLAIMS every declared anchor for {@code action} atomically on the world thread
-     * (design 2.2/2.6, gate m5): each anchor discovers its nearest matching placed block, which must
-     * be reachable by a {@link PuppetNav} solve for any anchor a {@code Walk} step targets (else
-     * {@code ui.station.anchor_missing}), and must not be busy with its OWN session or hold a
+     * (design 2.2/2.6, gate m5): each anchor discovers its nearest matching placed block (else
+     * {@code ui.station.anchor_missing}), which must be reachable by a {@link PuppetNav} solve for
+     * any anchor a {@code Walk} step targets (else {@code ui.station.anchor_unreachable} - a
+     * DISTINCT toast from the not-found one, AV wave), and must not be busy with its OWN session or hold a
      * non-empty custody claim (else {@code ui.station.anchor_busy}, gate m5). On success every
      * resolved anchor's blockKey is claimed into {@link #byBlock} (first-wins) and returned; the
      * reserved {@code "self"} anchor maps to the primary block. A single-station action (no
@@ -2829,8 +3018,11 @@ public final class StationService {
                         : new Vector3d(px + 0.5, py + 1.0, pz + 0.5);
                 if (PuppetNav.solve(world, store, from, to, radius) == null) {
                     releaseClaimed(claimed, playerUuid);
-                    return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_missing",
-                            anchorStationNameMsg(anchor.getStation()), radius));
+                    // Its OWN toast, not anchor_missing: the block WAS found, it just cannot be
+                    // walked to. Telling the player "no cooking fire found within 12 blocks" while
+                    // one sits in plain sight sends them looking for a station they already have.
+                    return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_unreachable",
+                            anchorStationNameMsg(anchor.getStation())));
                 }
             }
             // Atomic first-wins claim into byBlock (the generalized occupancy map).

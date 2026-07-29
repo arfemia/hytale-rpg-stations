@@ -33,6 +33,7 @@ ui.station.stop.inputs_exhausted = Vous avez épuisé vos matériaux.
 ui.station.stop.anchor_lost = L'autre station a été détruite et vous avez arrêté de travailler.
 ui.station.stop.path_blocked = Le chemin est bloqué et vous avez arrêté de travailler.
 ui.station.anchor_missing = Aucun {0} trouvé dans {1} blocs.
+ui.station.anchor_unreachable = Le {0} à proximité est inaccessible.
 ui.station.anchor_busy = Quelqu'un d'autre utilise déjà le {0} à proximité.
 ui.station.summary.title = Travail Terminé
 ui.station.summary.cycles = {0} cycles effectués

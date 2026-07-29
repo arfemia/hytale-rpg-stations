@@ -51,6 +51,10 @@ import javax.annotation.Nonnull;
  * The scope-3 standing-mount verify PREP adds {@code station.mountspike.name}/{@code .desc} (the
  * throwaway {@code MountSpike.json} dev station, {@code Hold.Mount.Surface: "Entity"}); remove
  * alongside the station/item/interaction files once the maintainer's in-game smoke is done.
+ * The AV-wave anchor-toast split (2026-07-29) adds {@code ui.station.anchor_unreachable}: an anchor
+ * that WAS found but that the puppet cannot path to used to reuse {@code ui.station.anchor_missing}
+ * ("No {0} found within {1} blocks"), which told the player the exact wrong thing - two distinct
+ * failures now carry two distinct toasts.
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -90,6 +94,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.stop.anchor_lost",
             "rpgstations.ui.station.stop.path_blocked",
             "rpgstations.ui.station.anchor_missing",
+            "rpgstations.ui.station.anchor_unreachable",
             "rpgstations.ui.station.anchor_busy",
             "rpgstations.ui.station.bench.hint",
             "rpgstations.ui.station.summary.title",

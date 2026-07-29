@@ -65,8 +65,23 @@ final class StationSession {
     int blockX;
     int blockY;
     int blockZ;
-    /** The engine block id at the anchor position when the session started (block-gone check). */
+    /**
+     * The raw engine block id at the primary block when the session started - the block-gone
+     * check's FALLBACK comparand, used only for a block that resolves to no containing Item at
+     * all (see {@link #startBlockItemId}).
+     */
     int startBlockId;
+    /**
+     * The primary block's own ITEM id at engage ({@code StationService#blockItemIdAt}) - the
+     * PRIMARY block-gone comparand. A state flip ({@code Empty}/{@code Loaded}/{@code Working})
+     * rewrites the raw block id to a distinct generated state-variant key, so the raw-int compare
+     * alone reads an in-session flip as "the station is gone"; every state variant of one block
+     * resolves to the SAME {@code BlockType#getItem()} id, so comparing by item id survives a flip
+     * while a real break/replace still ends the session. {@code null} for a block with no
+     * containing Item (the raw-int fallback then applies).
+     */
+    @Nullable
+    String startBlockItemId;
 
     // Start transform (walk-off delta).
     double originX;

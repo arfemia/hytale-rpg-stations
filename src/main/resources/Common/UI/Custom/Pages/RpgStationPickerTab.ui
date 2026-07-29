@@ -1,42 +1,66 @@
-// One picker category card (appended into #RpgStationPickerTabs; see RpgStationPickerPage).
+// One picker recipe card (appended into #RpgStationPickerTabs; see RpgStationPickerPage).
 // #TabBtn is a plain Button (never TextButton) wrapping an item-icon ItemGrid + a #Label pushed
 // via ZigRichButton.text onto .TextSpans (this mod's labeled-clickable-button hard rule) - so a
 // parameterized lock-reason message ("Requires {0}") actually substitutes instead of printing
 // the literal template. A locked category sets #TabBtn.Enabled = false (renders via the style's
 // Disabled state, native-greyed) and carries no click binding; #LockReason shows underneath.
 //
-// Maintainer smoke fix (icon-only tabs): #Label now carries the representative output item's own
-// native name (RpgStationPickerPage sets it whenever Category.label() is non-null - effectively
-// always now) and #Cost, a NEW plain Label below the button, shows that same representative
-// conversion's cost shape ("1x Trunk -> 4x Planks"), set directly via .TextSpans (a plain Label,
-// not inside the Button, so no ZigRichButton wrapper needed - same direct-set pattern as
-// #LockReason). Card widened 140->170 so both extra lines have room to wrap without excessive
-// line-wrapping; the outer #RpgStationPickerTab Group keeps LayoutMode: Top with no explicit
-// Height so the card hugs its own content (button + cost line + optional lock reason).
+// #Cost and #LockReason are DIRECT children of this card group, NOT nested inside #TabBtn:
+// RpgStationPickerPage addresses them as "<card> #Cost" / "<card> #LockReason", one selector step
+// from the card, and moving them under the button would add a step to a path the page does not
+// write. Leave them here.
+//
+// MAINTAINER SMOKE FIX, 2026-07-29 ("recipes greyed out / larger icons / larger menu panel").
+// Three evidence-grounded changes, all measured against the client's own modding texture set
+// (Assets.zip Common/UI/Custom/Common/**, which is what "../Common/..." resolves to from here):
+//
+//   1. NOT GREYED OUT. The card was Buttons/Secondary.png tinted #41506a. That texture is already
+//      dark navy (its centre pixel is rgba(33,52,75,255)) and the tint MULTIPLIES it darker still,
+//      which is exactly why an enabled, clickable recipe read as disabled. It now uses
+//      Buttons/Primary_Square.png - the bright blue square patch the game's own @DefaultButtonStyle
+//      uses, centre pixel rgba(68,112,164,255) - at a NEUTRAL #ffffff tint, so the texture renders
+//      at full brightness. The tint leaf is kept (rather than dropped) so UiRetint can still
+//      recolour these cards per theme; #ffffff is simply the identity tint.
+//   2. LARGER ICONS. SlotSize 32 -> 64 and SlotIconSize 28 -> 60, matching the scale of the
+//      first-party recipe list (Pages/Inventory/RecipeCatalogueRecipeButton.ui runs a 74px slot in
+//      an 80px-tall button). The grey square that sat behind each icon was ContainerPanelPatch.png
+//      - a 20%-alpha BLACK patch - used here only as filler for ItemGridStyle's required texture
+//      leaves. SlotBackground now uses BlockSelectorSlotBackground.png (the modding set's actual
+//      item-slot texture, near-transparent at rgba(136,136,136,20)) so the icon reads as sitting on
+//      the card, not on a grey tile, and DefaultItemIcon uses the real UnknownItemIcon.png fallback
+//      instead of a panel patch. The remaining filler leaves (broken/durability/cursed overlays) are
+//      inert here - this grid is non-draggable, quantity-less and shows fresh single items - so they
+//      stay pointed at the harmless patch.
+//   3. LARGER PANEL. The card is now FULL CONTENT WIDTH (604px inside the widened 640px panel, see
+//      RpgStationPicker.ui) and stacks one-per-row instead of a 170px two-up strip, so a long
+//      client-resolved item name ("Blackwood Decorative Planks") and its cost line both fit on one
+//      line. Fonts scale with it: name 12 -> 16 bold, cost/lock 10 -> 13. The cost line is indented
+//      to clear the icon column (Left: 84 = 10 padding + 64 icon + 10 gap) and left-aligned so it
+//      reads as a caption under the name rather than a centred orphan.
 
 $C = "../Common.ui";
 
 @RpgStationPickerTabBtnStyle = ButtonStyle(
-  Default: (Background: PatchStyle(TexturePath: "../Common/Buttons/Secondary.png", Border: 12, Color: #41506a)),
-  Hovered: (Background: PatchStyle(TexturePath: "../Common/Buttons/Secondary_Hovered.png", Border: 12, Color: #5b6f8c)),
-  Pressed: (Background: PatchStyle(TexturePath: "../Common/Buttons/Secondary_Pressed.png", Border: 12, Color: #344156)),
+  Default: (Background: PatchStyle(TexturePath: "../Common/Buttons/Primary_Square.png", Border: 12, Color: #ffffff)),
+  Hovered: (Background: PatchStyle(TexturePath: "../Common/Buttons/Primary_Square_Hovered.png", Border: 12, Color: #ffffff)),
+  Pressed: (Background: PatchStyle(TexturePath: "../Common/Buttons/Primary_Square_Pressed.png", Border: 12, Color: #ffffff)),
   Disabled: (Background: PatchStyle(TexturePath: "../Common/Buttons/Disabled.png", Border: 12)),
   Sounds: $C.@ButtonSounds
 );
 
-@RpgStationPickerTabLabelStyle = (FontSize: 12, TextColor: #eef3fa, RenderBold: false, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
-@RpgStationPickerTabCostStyle = (FontSize: 10, TextColor: #9fb0c4, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
-@RpgStationPickerTabLockStyle = (FontSize: 10, TextColor: #d98f8f, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
+@RpgStationPickerTabLabelStyle = (FontSize: 16, TextColor: #f4f8fc, RenderBold: true, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
+@RpgStationPickerTabCostStyle = (FontSize: 13, TextColor: #b9c9db, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
+@RpgStationPickerTabLockStyle = (FontSize: 13, TextColor: #d98f8f, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
 
 @RpgStationPickerIconGridStyle = ItemGridStyle(
-  SlotSize: 32,
-  SlotIconSize: 28,
+  SlotSize: 64,
+  SlotIconSize: 60,
   SlotSpacing: 0,
-  SlotBackground: "../Common/ContainerPanelPatch.png",
+  SlotBackground: "../Common/BlockSelectorSlotBackground.png",
   QuantityPopupSlotOverlay: "../Common/ContainerPanelPatch.png",
   BrokenSlotBackgroundOverlay: "../Common/ContainerPanelPatch.png",
   BrokenSlotIconOverlay: "../Common/ContainerPanelPatch.png",
-  DefaultItemIcon: "../Common/ContainerPanelPatch.png",
+  DefaultItemIcon: "../Common/UnknownItemIcon.png",
   DurabilityBar: "../Common/ContainerPanelPatch.png",
   DurabilityBarBackground: "../Common/ContainerPanelPatch.png",
   DurabilityBarAnchor: (Bottom: 0, Left: 0, Width: 0, Height: 0),
@@ -47,46 +71,46 @@ $C = "../Common.ui";
 );
 
 Group #RpgStationPickerTab {
-  Anchor: (Width: 170, Right: 8, Bottom: 8);
+  Anchor: (Width: 604, Bottom: 10);
   LayoutMode: Top;
 
   Button #TabBtn {
     Style: @RpgStationPickerTabBtnStyle;
-    Anchor: (Height: 48, Width: 170);
+    Anchor: (Height: 76, Width: 604);
     LayoutMode: Left;
-    Padding: (Horizontal: 8);
+    Padding: (Horizontal: 10);
 
     ItemGrid #Icon {
-      Anchor: (Width: 32, Height: 32);
+      Anchor: (Width: 64, Height: 64);
       SlotsPerRow: 1;
       AreItemsDraggable: false;
       DisplayItemQuantity: false;
       Style: @RpgStationPickerIconGridStyle;
     }
 
-    Group { Anchor: (Width: 6); }
+    Group { Anchor: (Width: 10); }
 
     Label #Label {
       Text: "";
       FlexWeight: 1;
-      Anchor: (Height: 48);
+      Anchor: (Height: 76);
       Style: @RpgStationPickerTabLabelStyle;
     }
   }
 
   // The representative conversion's cost shape ("1x Trunk -> 4x Planks"), always populated
   // alongside an unlocked tab's name (RpgStationPickerPage#build); hidden when the caller has no
-  // resolvable cost line.
+  // resolvable cost line. Indented to clear the icon column above it.
   Label #Cost {
     Text: "";
-    Anchor: (Top: 3, Width: 170);
+    Anchor: (Top: 4, Left: 84, Width: 520);
     Style: @RpgStationPickerTabCostStyle;
     Visible: false;
   }
 
   Label #LockReason {
     Text: "";
-    Anchor: (Top: 3, Width: 170);
+    Anchor: (Top: 4, Left: 84, Width: 520);
     Style: @RpgStationPickerTabLockStyle;
     Visible: false;
   }

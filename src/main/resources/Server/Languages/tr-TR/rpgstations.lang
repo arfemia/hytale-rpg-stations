@@ -33,6 +33,7 @@ ui.station.stop.inputs_exhausted = Malzemeniz tükendi.
 ui.station.stop.anchor_lost = Diğer istasyon yok edildi ve çalışmayı bıraktınız.
 ui.station.stop.path_blocked = Oraya giden yol tıkalı ve çalışmayı bıraktınız.
 ui.station.anchor_missing = {0} bulunamadı, {1} blok içinde.
+ui.station.anchor_unreachable = Yakındaki {0} istasyonuna ulaşılamıyor.
 ui.station.anchor_busy = Başka biri zaten yakındaki {0} istasyonunu kullanıyor.
 ui.station.summary.title = Çalışma Tamamlandı
 ui.station.summary.cycles = {0} döngü çalışıldı

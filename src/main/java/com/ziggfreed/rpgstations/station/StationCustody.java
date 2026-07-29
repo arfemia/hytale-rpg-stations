@@ -167,26 +167,40 @@ final class StationCustody {
     static boolean matchesAnyConversionInput(@Nonnull StationAsset.Conversion[] conversions,
             @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds) {
         for (StationAsset.Conversion c : conversions) {
-            if (c == null || c.getInput() == null) {
-                continue;
-            }
-            Ingredient in = c.getInput();
-            String resourceId = in.getResourceTypeId();
-            if (resourceId != null && !resourceId.isBlank()) {
-                if (heldResourceTypeIds != null) {
-                    for (String t : heldResourceTypeIds) {
-                        if (resourceId.equalsIgnoreCase(t)) {
-                            return true;
-                        }
-                    }
-                }
-                continue;
-            }
-            String itemId = in.getItemId();
-            if (itemId != null && !itemId.isBlank() && itemId.equalsIgnoreCase(heldItemId)) {
+            if (matchesConversionInput(c, heldItemId, heldResourceTypeIds)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * The SINGLE-conversion half of {@link #matchesAnyConversionInput} (extracted for decision 66's
+     * picker preview, which needs to know WHICH conversion a material satisfies rather than merely
+     * whether any does): does {@code heldItemId}/{@code heldResourceTypeIds} satisfy this one
+     * conversion's input? An {@code Ingredient} authors exactly one of {@code ResourceTypeId} (a
+     * native family - the sawmill's "any Trunk of this species") or {@code ItemId} (exact), and the
+     * family route wins when both are somehow present, matching the pre-extraction loop byte for
+     * byte. A null conversion or a conversion with no input never matches.
+     */
+    static boolean matchesConversionInput(@Nullable StationAsset.Conversion conversion,
+            @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds) {
+        if (conversion == null || conversion.getInput() == null) {
+            return false;
+        }
+        Ingredient in = conversion.getInput();
+        String resourceId = in.getResourceTypeId();
+        if (resourceId != null && !resourceId.isBlank()) {
+            if (heldResourceTypeIds != null) {
+                for (String t : heldResourceTypeIds) {
+                    if (resourceId.equalsIgnoreCase(t)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        String itemId = in.getItemId();
+        return itemId != null && !itemId.isBlank() && itemId.equalsIgnoreCase(heldItemId);
     }
 }

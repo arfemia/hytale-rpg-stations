@@ -1,7 +1,11 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -95,6 +99,86 @@ final class StationAnchors {
             return Integer.compare(Math.abs(a[1]), Math.abs(b[1]));
         });
         return offsets;
+    }
+
+    /**
+     * The block-gone rule for a running session's PRIMARY block (AV-wave fix): compare by the
+     * block's ITEM id whenever the session captured one at engage, and fall back to the raw engine
+     * block id only for a block that resolves to no containing Item at all.
+     *
+     * <p>Why: {@code World#setBlockInteractionState} does not annotate a block in place, it REPLACES
+     * it - {@code BlockAccessor#setBlockInteractionState} resolves {@code blockType.getBlockForState
+     * (state)} and calls {@code setBlock(..., BlockType.getAssetMap().getIndex(newState.getId()),
+     * ...)}, and a state variant is a DISTINCT generated {@code BlockType} key. So every custody
+     * state flip this engine performs ({@code Empty}/{@code Loaded}/{@code Working}) changes the raw
+     * int {@code World#getBlock} returns, and a raw-int compare against the engage-time snapshot
+     * reads the engine's OWN flip as "the station is gone". Every state variant of one block shares
+     * the same containing Item ({@code BlockType#getItem()} walks the container-key chain, the R7
+     * lesson), so the item-id compare is stable across a flip while a real break (no item-backed
+     * block left) or a replace (a different item id) still ends the session.
+     *
+     * @param startBlockItemId the item id captured at engage, or {@code null} when the block had none
+     * @param currentBlockItemId the item id read live this heartbeat
+     * @param startBlockId the raw engine block id captured at engage (fallback comparand)
+     * @param currentBlockId the raw engine block id read live this heartbeat (fallback comparand)
+     * @return {@code true} when the session must stop with {@code STATION_GONE}
+     */
+    static boolean blockGone(@Nullable String startBlockItemId, @Nullable String currentBlockItemId,
+            int startBlockId, int currentBlockId) {
+        if (startBlockItemId == null) {
+            return currentBlockId != startBlockId;
+        }
+        return currentBlockItemId == null || !startBlockItemId.equalsIgnoreCase(currentBlockItemId);
+    }
+
+    /**
+     * The PURE core of the derived station-block discovery seed (AV-wave fix for "discovery is dead
+     * on a cold server"): joins {@code rootInteractionId -> stationId} (collected from every
+     * RootInteraction whose entries include this mod's own {@code rpg_station_use} interaction) with
+     * every {@code (blockItemId, Interactions.Use rootInteractionId)} pair walked off the live block
+     * assets, producing the {@code blockItemId -> stationId} index anchor discovery reads.
+     *
+     * <p>Both sides are matched case-insensitively and both the returned keys and values are
+     * lowercased (the same normalization {@code StationService#registerKnownStationBlock} applies to
+     * its learned entries, so the derived and learned halves of the index are interchangeable). A
+     * pair with a blank item id, a blank interaction id, or an interaction that names no station is
+     * skipped. FIRST-wins on a repeated item id, so a stable input order gives a stable index (a
+     * block's own state variants all resolve to the same item id and the same interaction, so they
+     * agree by construction).
+     */
+    @Nonnull
+    static Map<String, String> deriveBlockItemIndex(@Nonnull Map<String, String> interactionToStation,
+            @Nonnull List<BlockUse> blockUses) {
+        Map<String, String> normalizedInteractions = new HashMap<>();
+        for (Map.Entry<String, String> e : interactionToStation.entrySet()) {
+            String interactionId = e.getKey();
+            String stationId = e.getValue();
+            if (interactionId == null || interactionId.isBlank() || stationId == null || stationId.isBlank()) {
+                continue;
+            }
+            normalizedInteractions.putIfAbsent(interactionId.toLowerCase(Locale.ROOT),
+                    stationId.toLowerCase(Locale.ROOT));
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        for (BlockUse use : blockUses) {
+            if (use == null || use.blockItemId() == null || use.blockItemId().isBlank()
+                    || use.useRootInteractionId() == null || use.useRootInteractionId().isBlank()) {
+                continue;
+            }
+            String stationId = normalizedInteractions.get(use.useRootInteractionId().toLowerCase(Locale.ROOT));
+            if (stationId != null) {
+                out.putIfAbsent(use.blockItemId().toLowerCase(Locale.ROOT), stationId);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * One block asset's contribution to {@link #deriveBlockItemIndex}: the item id a placed block of
+     * this type resolves to (what {@code StationService#blockItemIdAt} reads back in the world) and
+     * the RootInteraction id its {@code BlockType.Interactions.Use} names.
+     */
+    record BlockUse(@Nullable String blockItemId, @Nullable String useRootInteractionId) {
     }
 
     /** The occupancy block key encoding {@code StationService} uses (world uuid + block coords). */

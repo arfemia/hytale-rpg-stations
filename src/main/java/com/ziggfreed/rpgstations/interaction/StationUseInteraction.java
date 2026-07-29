@@ -1,6 +1,7 @@
 package com.ziggfreed.rpgstations.interaction;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
@@ -60,6 +61,18 @@ public final class StationUseInteraction extends SimpleInstantInteraction {
 
     public static BuilderCodec<StationUseInteraction> getCODEC() {
         return CODEC;
+    }
+
+    /**
+     * The station id this decoded interaction runs. Read by
+     * {@code station.StationService#seedStationBlockIndexFromAssets}, which DERIVES the anchor
+     * discovery index by walking the live {@code RootInteraction}/{@code Interaction} asset maps for
+     * entries of this type - the engine has already decoded the object form, so the seed reads this
+     * field instead of re-parsing any JSON.
+     */
+    @Nullable
+    public String getStationId() {
+        return stationId;
     }
 
     @Override
