@@ -15,6 +15,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.hypixel.hytale.protocol.BenchRequirement;
+import com.hypixel.hytale.protocol.ItemResourceType;
 import com.hypixel.hytale.server.core.asset.type.entityeffect.config.EntityEffect;
 import com.hypixel.hytale.server.core.asset.type.item.config.CraftingRecipe;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
@@ -154,6 +155,7 @@ public final class StationValidator {
                     StationValidator::modelKnownLive, stationKnown));
             out.addAll(validateExtensions(extensions, stations, actionAssets,
                     StationValidator::dropListKnownLive, factorKnown, lootableKnown, rollPoolKnown));
+            out.addAll(checkCustodyInputsResolveLive(stations, actionAssets));
             return out;
         } catch (Throwable t) {
             Log.warn("Station validation aborted: " + t.getMessage());
@@ -852,6 +854,89 @@ public final class StationValidator {
                                 + " entry wins, this one is skipped", loserId));
             }
         }
+    }
+
+    /**
+     * LIVE check (full pass only, decision 66): a {@code Custody.Input.ResourceTypeId} naming a
+     * resource-type FAMILY no live item carries can never accept a placement. The round-3
+     * smoke's "Fish vs Foods" gap shipped invisibly because nothing verified the family against
+     * the live item map (the cutting board wanted {@code Fish}; the intuitively-named
+     * {@code Food_Fish_Raw} carries only {@code Foods}). NOTE this check is deliberately
+     * one-sided: it proves the family is CARRIED by some live item, not that the item a player
+     * would intuitively bring carries it. Fail-open on a cold/failed item-map walk (the
+     * {@code benchIdKnownLive} precedent); warn-only, never blocks.
+     */
+    @Nonnull
+    static List<Finding> checkCustodyInputsResolveLive(@Nonnull Collection<StationAsset> stations,
+            @Nonnull Collection<ActionAsset> actionAssets) {
+        List<Finding> out = new ArrayList<>();
+        Set<String> live = liveItemResourceTypeIds();
+        if (live.isEmpty()) {
+            return out;
+        }
+        for (StationAsset asset : stations) {
+            if (asset == null) {
+                continue;
+            }
+            String id = asset.getId() != null ? asset.getId() : "?";
+            warnUnmatchedCustodyInput(asset.getCustody(), live, "Station '" + id + "'", id, out);
+            Map<String, ActionDef> actions = asset.getActions();
+            if (actions != null) {
+                for (Map.Entry<String, ActionDef> e : actions.entrySet()) {
+                    ActionDef def = e.getValue();
+                    if (def != null) {
+                        warnUnmatchedCustodyInput(def.getCustody(), live,
+                                "Station '" + id + "' action '" + e.getKey() + "'", id, out);
+                    }
+                }
+            }
+        }
+        for (ActionAsset a : actionAssets) {
+            if (a == null || a.getBody() == null) {
+                continue;
+            }
+            String id = a.getId() != null ? a.getId() : "?";
+            warnUnmatchedCustodyInput(a.getBody().getCustody(), live, "Action '" + id + "'", id, out);
+        }
+        return out;
+    }
+
+    private static void warnUnmatchedCustodyInput(@Nullable Custody custody, @Nonnull Set<String> live,
+            @Nonnull String label, @Nonnull String id, @Nonnull List<Finding> out) {
+        ActionInput input = custody != null ? custody.getInput() : null;
+        String family = input != null ? input.getResourceTypeId() : null;
+        if (family == null || family.isBlank() || live.contains(family.toLowerCase(Locale.ROOT))) {
+            return;
+        }
+        out.add(Finding.warning(DOMAIN, "CUSTODY_INPUT_RESOURCE_TYPE_UNMATCHED",
+                label + " Custody.Input.ResourceTypeId '" + family + "' matches NO live item's"
+                        + " ResourceTypes family - nothing can ever be placed there (check the"
+                        + " family id against the items meant to load it)", id));
+    }
+
+    /** Every ResourceTypes family id carried by any LIVE item, lowercased; empty on a cold/failed map. */
+    @Nonnull
+    private static Set<String> liveItemResourceTypeIds() {
+        Set<String> out = new HashSet<>();
+        try {
+            for (Item item : Item.getAssetMap().getAssetMap().values()) {
+                if (item == null) {
+                    continue;
+                }
+                ItemResourceType[] types = item.getResourceTypes();
+                if (types == null) {
+                    continue;
+                }
+                for (ItemResourceType t : types) {
+                    if (t != null && t.id != null && !t.id.isBlank()) {
+                        out.add(t.id.toLowerCase(Locale.ROOT));
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            return new HashSet<>();
+        }
+        return out;
     }
 
     /**

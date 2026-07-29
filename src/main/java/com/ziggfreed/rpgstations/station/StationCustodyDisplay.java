@@ -12,13 +12,10 @@ import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.math.vector.Rotation3f;
 import com.hypixel.hytale.protocol.InteractionType;
-import com.hypixel.hytale.server.core.asset.type.blocktype.config.RotationTuple;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.entity.component.Interactable;
 import com.hypixel.hytale.server.core.modules.interaction.Interactions;
-import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
-import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.entity.ItemPropEntityService;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.util.Log;
@@ -54,8 +51,9 @@ import com.ziggfreed.rpgstations.util.Log;
  * doubles/floats - the placed block's facing enters as a plain {@code blockYawRadians} scalar, never
  * a live block/world type - so it stays unit-testable without a running Hytale server, the same
  * discipline {@code StationEntityMountController#resolveAttachmentOffset} established. The ONE impure
- * read (the placed block's facing yaw from the world) is {@link #blockYawRadians}, isolated so the
- * composition cores stay pure.
+ * read (the placed block's facing yaw from the world) is {@link StationBlockFacing#yawRadians}, the
+ * shared one-reader helper this class and {@link StationPuppetController} both compose against, so
+ * the composition cores stay pure.
  *
  * <p><b>Press-F RETRIEVAL (new feature, the R6 fix round)</b>: the spawned display entity is
  * marked press-F interactable ({@link Interactable} + a {@link Interactions} entry on
@@ -132,8 +130,9 @@ final class StationCustodyDisplay {
             // FACING-RELATIVE composition (round-8): read the placed block's own facing yaw so the
             // authored Offset/Rotation are relative to the block's front, not absolute world axes -
             // a rotated station carries its display prop's position AND facing around with it. The
-            // read is the ONE impure step; the composition itself stays in the pure cores below.
-            double blockYawRadians = blockYawRadians(commandBuffer, blockX, blockY, blockZ);
+            // read is the ONE impure step (StationBlockFacing, shared with the puppet engine); the
+            // composition itself stays in the pure cores below.
+            double blockYawRadians = StationBlockFacing.yawRadians(commandBuffer, blockX, blockY, blockZ);
             double[] pos = resolvePosition(display, blockX, blockY, blockZ, blockYawRadians);
             Vector3d position = new Vector3d(pos[0], pos[1], pos[2]);
             float[] rot = resolveRotationRadians(display, blockYawRadians);
@@ -173,45 +172,17 @@ final class StationCustodyDisplay {
     }
 
     /**
-     * Impure: the placed station block's own facing yaw at {@code (blockX, blockY, blockZ)}, in
-     * radians, for the facing-relative composition (round-8). Resolves the {@link World} off the
-     * {@code commandBuffer}'s store (the engine-stable {@code store -> externalData -> world} chain,
-     * via {@link WorldEvictors#worldOf(com.hypixel.hytale.component.Store)}), reads the block's
-     * non-deprecated {@code getBlockRotationIndex} (a placed block's rotation is a discrete
-     * {@link RotationTuple} of 0/90/180/270 yaw/pitch/roll enums), and returns just the yaw's radians.
-     *
-     * <p>Try-guarded to {@code 0.0} (an unloaded chunk, a null-facing read, any throw) - a failed read
-     * degrades gracefully to the pre-round-8 WORLD-SPACE behavior (yaw 0 = no rotation of the authored
-     * offset, no yaw added to the authored rotation), never aborts the spawn. World-thread by
-     * construction (the sole caller, {@link #spawn}, runs inside {@code toggle()}'s interaction-handler
-     * processing on the world thread), matching the {@code getBlockRotationIndex} chunk-read contract.
-     */
-    private static double blockYawRadians(@Nonnull CommandBuffer<EntityStore> commandBuffer,
-            int blockX, int blockY, int blockZ) {
-        try {
-            World world = WorldEvictors.worldOf(commandBuffer.getStore());
-            int index = world.getBlockRotationIndex(blockX, blockY, blockZ);
-            return RotationTuple.get(index).yaw().getRadians();
-        } catch (Throwable t) {
-            Log.fine("STATION custody display could not read block facing at " + blockX + "," + blockY
-                    + "," + blockZ + " - falling back to world-space offset: " + t.getMessage());
-            return 0.0;
-        }
-    }
-
-    /**
      * Pure: {@code display}'s authored horizontal {@code Offset} (X/Z) ROTATED into world space by
      * {@code blockYawRadians} (the placed block's own facing), with {@code Offset.Y} left VERTICAL
      * (never rotated). Returns {@code [worldOffsetX, offsetY, worldOffsetZ]} - kept primitive so it
      * needs no live Hytale type.
      *
      * <p><b>Facing-relative convention (round-8):</b> the authored {@code Offset.X}/{@code .Z} are in
-     * the block's OWN horizontal frame, rotated by the block's yaw using the engine's own block-vector
-     * yaw convention ({@code Rotation.rotateY}: {@code x' = x*cos(yaw) + z*sin(yaw)},
-     * {@code z' = -x*sin(yaw) + z*cos(yaw)}), so the display prop's shift tracks the block's front for
-     * any placement orientation. At a DEFAULT-orientation placement ({@code blockYawRadians == 0}) this
-     * is the identity ({@code cos 0 = 1}, {@code sin 0 = 0}), so every pre-round-8 authored value
-     * renders BYTE-IDENTICALLY - existing packs need no re-tune.
+     * the block's OWN horizontal frame, rotated by the block's yaw through the ONE shared core
+     * {@link StationBlockFacing#rotateOffset} (the engine's own block-vector yaw convention), so the
+     * display prop's shift tracks the block's front for any placement orientation. At a
+     * DEFAULT-orientation placement ({@code blockYawRadians == 0}) this is the identity, so every
+     * pre-round-8 authored value renders BYTE-IDENTICALLY - existing packs need no re-tune.
      */
     @Nonnull
     static double[] resolveWorldOffset(@Nullable Custody.Display display, double blockYawRadians) {
@@ -219,11 +190,7 @@ final class StationCustodyDisplay {
         double ox = offset != null && offset.getX() != null ? offset.getX() : 0.0;
         double oy = offset != null && offset.getY() != null ? offset.getY() : 0.0;
         double oz = offset != null && offset.getZ() != null ? offset.getZ() : 0.0;
-        double cos = Math.cos(blockYawRadians);
-        double sin = Math.sin(blockYawRadians);
-        double worldX = ox * cos + oz * sin;
-        double worldZ = -ox * sin + oz * cos;
-        return new double[] {worldX, oy, worldZ};
+        return StationBlockFacing.rotateOffset(ox, oy, oz, blockYawRadians);
     }
 
     /**

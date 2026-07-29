@@ -154,7 +154,12 @@ public final class Puppet {
         return yaw;
     }
 
-    /** {@link #yaw} (degrees, world-space), reader-defaulted to {@code 0.0} when null. */
+    /**
+     * {@link #yaw} (degrees, FACING-RELATIVE to the placed station block's own yaw - the engine adds
+     * the block facing on top, see {@code station.StationPuppetController#resolveYawRadians}),
+     * reader-defaulted to {@code 0.0} when null. {@code 0} therefore means "faces the same way the
+     * block does" at every placement orientation.
+     */
     public double effectiveYawDegrees() {
         return yaw != null ? yaw : 0.0;
     }
@@ -437,7 +442,15 @@ public final class Puppet {
         }
     }
 
-    /** A relative {@code X}/{@code Y}/{@code Z} shift off the station's block-top anchor, each leaf independently nullable (default 0). */
+    /**
+     * A relative {@code X}/{@code Y}/{@code Z} shift off the station's block-top anchor, each leaf
+     * independently nullable (default 0). {@code X}/{@code Z} are FACING-RELATIVE to the placed
+     * station block's own yaw - authored {@code +Z} is the block's FRONT, {@code +X} its right - so
+     * a rotated station carries its puppet's side around with it ({@code station
+     * .StationPuppetController#resolveWorldOffset}, the same convention {@code Custody.Display
+     * .Offset} follows). {@code Y} is vertical and never rotated. Identity at a default-orientation
+     * placement, so pre-existing tuned values are unchanged.
+     */
     public static final class Offset {
         @Nullable protected Double x;
         @Nullable protected Double y;

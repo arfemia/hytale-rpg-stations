@@ -38,7 +38,9 @@ import com.ziggfreed.rpgstations.util.Log;
  * the player, hide their player model, and spawn/display a visual of their character model
  * performing the steps"). Sibling to {@link StationEntityMountController}/{@link
  * StationHoldController}: this class owns ONLY the puppet's spawn/hide/reveal/despawn/animation
- * MECHANISM (the offset/yaw/prop resolution against the station's own block-top anchor, which
+ * MECHANISM (the offset/yaw/prop resolution against the station's own block-top anchor - FACING-
+ * RELATIVE to the placed block's own yaw since the round-3 smoke, see {@link #resolveWorldOffset}/
+ * {@link #resolveYawRadians} and the shared {@link StationBlockFacing} reader - which
  * hide route an author picked, and the swing-beat cadence caller policy) - the generic
  * "clone-a-skin-onto-a-networked-entity" + "scale self-hide" primitives themselves live in common
  * ({@code entity.PlayerPuppetService}/{@code entity.PlayerModelService}), per the root
@@ -145,12 +147,18 @@ final class StationPuppetController {
             double anchorX = s.blockX + 0.5;
             double anchorY = s.blockY + 0.5;
             double anchorZ = s.blockZ + 0.5;
-            Puppet.Offset offset = puppet.getOffset();
+            // FACING-RELATIVE composition (round-3 smoke): read the placed station block's own facing
+            // yaw so the authored Puppet.Offset/Yaw are relative to the block's FRONT, not absolute
+            // world axes - a rotated sawmill carries its worker's side around with it. The read is the
+            // ONE impure step (StationBlockFacing, shared with StationCustodyDisplay's round-8
+            // Custody.Display composition); the composition itself stays in the pure cores below.
+            double blockYawRadians = world != null
+                    ? StationBlockFacing.yawRadians(world, s.blockX, s.blockY, s.blockZ)
+                    : StationBlockFacing.yawRadians(commandBuffer, s.blockX, s.blockY, s.blockZ);
+            double[] worldOffset = resolveWorldOffset(puppet.getOffset(), blockYawRadians);
             double[] pos = PlayerPuppetService.offsetPosition(anchorX, anchorY, anchorZ,
-                    offset != null && offset.getX() != null ? offset.getX() : 0.0,
-                    offset != null && offset.getY() != null ? offset.getY() : 0.0,
-                    offset != null && offset.getZ() != null ? offset.getZ() : 0.0);
-            float yawRadians = PlayerPuppetService.yawRadiansFromDegrees(puppet.effectiveYawDegrees());
+                    worldOffset[0], worldOffset[1], worldOffset[2]);
+            float yawRadians = resolveYawRadians(puppet.effectiveYawDegrees(), blockYawRadians);
 
             Puppet.Prop prop = puppet.getProp();
             String propItemId = resolveEffectivePropItemId(heldItemIdOf(player), prop);
@@ -496,6 +504,42 @@ final class StationPuppetController {
     }
 
     // ==================== pure cores (unit-tested without a live server) ====================
+
+    /**
+     * PURE: {@code offset}'s authored horizontal X/Z ROTATED into world space by the placed station
+     * block's own {@code blockYawRadians} facing, with {@code Offset.Y} left VERTICAL (never
+     * rotated). Returns {@code [worldOffsetX, offsetY, worldOffsetZ]}, ready to feed
+     * {@link PlayerPuppetService#offsetPosition}'s block-top anchor - kept primitive so it needs no
+     * live Hytale type.
+     *
+     * <p><b>Facing-relative convention (round-3 smoke), the round-8 {@code Custody.Display}
+     * precedent applied to the puppet:</b> the authored {@code Offset.X}/{@code .Z} are in the
+     * BLOCK'S OWN horizontal frame ({@code +Z} = the block's FRONT, {@code +X} = its right), rotated
+     * through the ONE shared core {@link StationBlockFacing#rotateOffset}. Before this, they were
+     * WORLD-SPACE (a documented phase-4 simplification), so which side of a sawmill the puppet stood
+     * on depended entirely on how that particular block happened to be placed. At a
+     * DEFAULT-orientation placement ({@code blockYawRadians == 0}) the rotation is the IDENTITY, so
+     * every in-game-tuned value shipped before this change renders BYTE-IDENTICALLY.
+     */
+    @Nonnull
+    static double[] resolveWorldOffset(@Nullable Puppet.Offset offset, double blockYawRadians) {
+        double ox = offset != null && offset.getX() != null ? offset.getX() : 0.0;
+        double oy = offset != null && offset.getY() != null ? offset.getY() : 0.0;
+        double oz = offset != null && offset.getZ() != null ? offset.getZ() : 0.0;
+        return StationBlockFacing.rotateOffset(ox, oy, oz, blockYawRadians);
+    }
+
+    /**
+     * PURE: the puppet's spawn yaw in radians - the authored {@code Puppet.Yaw} (degrees) with the
+     * placed block's own {@code blockYawRadians} facing ADDED in, so the puppet turns WITH the block
+     * (the exact composition {@code StationCustodyDisplay#resolveRotationRadians} applies to a
+     * display prop's Y axis). At a default-orientation placement ({@code blockYawRadians == 0}) this
+     * is the authored degrees verbatim, byte-identical to the pre-change
+     * {@link PlayerPuppetService#yawRadiansFromDegrees} call it supersedes.
+     */
+    static float resolveYawRadians(double authoredYawDegrees, double blockYawRadians) {
+        return (float) (Math.toRadians(authoredYawDegrees) + blockYawRadians);
+    }
 
     /**
      * PURE: {@code stepClipOverride} wins when authored, else {@code defaultClip} - design 3.1's

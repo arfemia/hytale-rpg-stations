@@ -444,13 +444,25 @@ logs) spawn a real `BlockEntity`; everything else (the anvil's placed weapon) sp
 .getNonSerializedComponentType())` - never survives a restart, matching the custody claim's own
 lifecycle. Ref lives ON the claim (`StationCustodyClaim#displayRef`); spawned once at first
 placement, despawned at whichever of `#returnCustody`/`#onCustodyBlockBroken` fires first.
-`Offset`/`Rotation` are FACING-RELATIVE to the placed block's own yaw (`#blockYawRadians` reads
-`World#getBlockRotationIndex`, try-guarded to yaw 0 on any failure) - see `../asset/CLAUDE.md`'s
-`Custody.Display` bullet for the full authoring convention. Press-F RETRIEVAL
+`Offset`/`Rotation` are FACING-RELATIVE to the placed block's own yaw (via the shared
+[`StationBlockFacing`](StationBlockFacing.java)`.yawRadians`, which reads
+`World#getBlockRotationIndex` try-guarded to yaw 0 on any failure, plus its `rotateOffset` core -
+the SAME one-reader helper the puppet engine composes against since the round-3 smoke) - see
+`../asset/CLAUDE.md`'s `Custody.Display` bullet for the full authoring convention. Press-F RETRIEVAL
 ([`StationCustodyRetrieval`](StationCustodyRetrieval.java)) resolves the clicked display entity's
 `NetworkId` back to its owning block key and routes eligibility through the pure `decide`
 (precedence: `UNKNOWN_TARGET` -> `BUSY` -> `NOT_OWNER` -> `NOTHING_TO_RETRIEVE` -> `RETRIEVE` -
-a session actively working the block always wins over ownership checks).
+a session actively working the block always wins over ownership checks). **A successful `RETRIEVE`
+plays the presser's own COLLECT gesture** (`StationService#playCollectAnimation`, round-3 smoke):
+the native `"Interact"` clip on the `Action` slot against the held item's own
+`ItemPlayerAnimations` set (falling back to the engine's item-agnostic `Default` set), fired with
+`sendToSelf=true` so the presser sees their own reach - the engine ships no clip literally named
+Collect/Gather/Pickup (checked across all 38 `HytaleAssets/Server/Item/Animations/*.json`
+catalogs), and `"Interact"` is what native interactions themselves use for this moment shape (22
+vanilla `Effects.ItemAnimationId: "Interact"` sites, e.g. `Crops/Seed_Place.json`). The clip id is
+the engine constant `StationService.COLLECT_ANIMATION_CLIP`, deliberately NOT authored content (one
+fixed gesture, not a per-station knob) - retune or disable it (null/blank) in one line. Fully
+try-guarded and fired only inside the `RETRIEVE` branch, so every denial/no-op path is untouched.
 
 ## The anvil arc - the Stamp step + roll/cap engine (mechanism unchanged; Caps reshaped)
 
@@ -504,7 +516,19 @@ sweep (`reconcileStalePerformersAtEngage`, via `world.execute` so the native swe
 processing lock). **Legacy mechanics carry over below.** **Spawn + hide, at engage**
 (`spawnAndHide`, called from `toggle` AFTER the mount-attach block): resolves `Puppet.Offset`/
 `Yaw` off the block-top anchor + the initial `Puppet.Prop`, spawns via `PlayerPuppetService
-.spawn`; a null spawn is non-fatal (session continues in-body). Only `Hide.Route:"Scale"`
+.spawn`; a null spawn is non-fatal (session continues in-body). **`Offset`/`Yaw` are
+FACING-RELATIVE to the placed block's own yaw (round-3 smoke, 2026-07-29)** - authored `+Z` = the
+block's FRONT, `+X` = its right, `Offset.Y` vertical, block yaw folded additively into the authored
+`Yaw` - the round-8 `Custody.Display` precedent applied to the puppet, because world-space `Offset`
+meant which SIDE of the sawmill the worker stood on depended on how that block happened to be
+placed. The block-yaw read and its trig are the ONE shared helper
+[`StationBlockFacing`](StationBlockFacing.java) (`yawRadians` over `World#getBlockRotationIndex`,
+try-guarded to yaw 0; `rotateOffset` the pure horizontal-rotation core), which
+`StationCustodyDisplay` now calls too - one reader, never a copy-pasted trig block. The
+per-consumer composition is the PURE, unit-tested `resolveWorldOffset`/`resolveYawRadians`
+(`StationPuppetControllerTest`), IDENTITY at yaw 0 so every in-game-tuned value is byte-identical
+on a default-facing placement. Only the engage-time spawn resolves position/yaw; a per-step
+`Puppet` override carries `Clip`/`Prop` only and never re-places the puppet. Only `Hide.Route:"Scale"`
 actually hides (`hideByScale`/`revealByScale`); `"Effect"`/`"None"` apply no hide. **Reveal +
 despawn** happens in the ONE idempotent `stop()` funnel (`revealAndDespawn`, right after
 `returnCustody`), resolving its own store so a disconnect/shutdown stop still reveals + despawns.

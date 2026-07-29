@@ -23,6 +23,7 @@ import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.protocol.AnimationSlot;
 import com.hypixel.hytale.protocol.InteractionType;
 import com.hypixel.hytale.protocol.ItemResourceType;
 import com.hypixel.hytale.server.core.Message;
@@ -33,6 +34,8 @@ import com.hypixel.hytale.server.core.asset.type.item.config.ItemArmor;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemTool;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemToolSpec;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemWeapon;
+import com.hypixel.hytale.server.core.asset.type.itemanimation.config.ItemPlayerAnimations;
+import com.hypixel.hytale.server.core.entity.AnimationUtils;
 import com.hypixel.hytale.server.core.entity.ItemUtils;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent;
@@ -459,9 +462,27 @@ public final class StationService {
                             ? "ui.station.custody.topped_up" : "ui.station.custody.placed"));
                     return;
                 }
+                if (!loadedBefore) {
+                    // Decision 66 (round-3 smoke): the station is EMPTY and neither the held
+                    // stack nor the rest of the inventory carries anything this custody
+                    // accepts - deny with the honest reason NOW instead of falling through to
+                    // the tool gate, whose "wrong tool" toast misled the smoke (a held
+                    // Food_Fish_Raw at the cutting board read as a dagger problem when the
+                    // real issue was an unacceptable material). A LOADED station still falls
+                    // through (a denial further down really is about the tool), and an
+                    // idle-capable classic station falls through too - empty-handed practice
+                    // is a legitimate engage there.
+                    boolean stepsAuthored = action.getSteps() != null && action.getSteps().length > 0;
+                    StationAsset.Work workForIdle = action.getWork();
+                    boolean idleCapable = !stepsAuthored && workForIdle != null && workForIdle.getIdle() != null;
+                    if (!idleCapable) {
+                        toast(playerRef, RpgMsg.tr("ui.station.no_materials"));
+                        return;
+                    }
+                }
             }
-            // Nothing placed anywhere (not held, not elsewhere in the inventory, or already
-            // full): fall through to engage below.
+            // Loaded but nothing more placed (topped out, or the held item does not match), or
+            // an empty idle-capable station: fall through to engage below.
         }
 
         // 3) Exclusive occupancy - the RESOLVED action's own Work override when authored.
@@ -3703,6 +3724,10 @@ public final class StationService {
             StationCustodyRetrieval.Outcome outcome =
                     StationCustodyRetrieval.decide(claim != null, hasActiveSession, isOwner, claimNonEmpty);
             if (outcome == StationCustodyRetrieval.Outcome.RETRIEVE) {
+                // The presser's own collect/gather gesture (maintainer directive, round-3 smoke):
+                // fired BEFORE the give-back so the animation set still reflects what they were
+                // holding when they reached for it, not whatever the retrieved stack just became.
+                playCollectAnimation(store, ref);
                 custodyByBlock.remove(blockKey, claim);
                 StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
                 List<ItemStack> landed = giveClaimToOwner(store, ref, claim, claim.blockX, claim.blockY, claim.blockZ);
@@ -3738,6 +3763,60 @@ public final class StationService {
             }
         } catch (Throwable t) {
             Log.warn("STATION custody retrieve failed: " + t.getMessage(), t);
+        }
+    }
+
+    /**
+     * The native player COLLECT/gather gesture clip fired on a successful custody retrieval - the
+     * engine's own reach-out pose, {@code Characters/Animations/Default/Interact.blockyanim}
+     * (third person) / {@code Interact_FPS.blockyanim} (first person).
+     *
+     * <p><b>Why {@code "Interact"}:</b> the engine ships NO clip literally named Collect/Gather/
+     * Pickup - enumerating every animation key across all 38 {@code ItemPlayerAnimations} catalogs
+     * ({@code HytaleAssets/Server/Item/Animations/*.json}) turns up none, and the {@code Collector}
+     * types in the interaction package are codec collection helpers, not animations.
+     * {@code "Interact"} is the reach-out gesture native interactions themselves use for exactly
+     * this shape of moment (22 {@code Effects.ItemAnimationId: "Interact"} sites across the vanilla
+     * interaction assets, e.g. {@code Item/Interactions/Crops/Seed_Place.json} and the door set),
+     * and it is present in the item-agnostic {@code Default}/{@code Item}/{@code Block} catalogs, so
+     * it resolves whatever the presser happens to be holding.
+     *
+     * <p>An ENGINE constant, deliberately not authored content (this is one fixed engine gesture,
+     * not a per-station knob): retune by editing this one line, or set it {@code null}/blank to
+     * disable the gesture entirely.
+     */
+    @Nullable
+    private static final String COLLECT_ANIMATION_CLIP = "Interact";
+
+    /**
+     * Plays {@link #COLLECT_ANIMATION_CLIP} on the RETRIEVING player's own {@code Action} slot -
+     * the same mechanism {@code StationHoldController#playActionSwing} rides (the currently HELD
+     * item's own {@code ItemPlayerAnimations} clip set, falling back to the engine's item-agnostic
+     * {@code Default} set for an empty hand or an item with no set), with {@code sendToSelf=true}
+     * so the presser sees their OWN gesture and not just the bystanders.
+     *
+     * <p>Fully try-guarded and fire-and-forget: a missing player component, an unreadable hotbar,
+     * or any throw degrades to no gesture at all, never to a failed retrieval. Called ONLY from
+     * {@link #retrieveCustody}'s {@code RETRIEVE} branch, so every denial/no-op path is untouched.
+     * The animation is a network packet (not a component mutation), so it correctly routes through
+     * the live {@code store}, exactly as {@code StationHoldController}'s two animation calls do.
+     */
+    private static void playCollectAnimation(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref) {
+        String clip = COLLECT_ANIMATION_CLIP;
+        if (clip == null || clip.isBlank()) {
+            return;
+        }
+        try {
+            Player player = store.getComponent(ref, Player.getComponentType());
+            ItemStack held = player != null ? InventoryAccess.activeHotbarItemOf(player) : null;
+            Item item = held != null ? held.getItem() : null;
+            String itemAnimationsId = item != null ? item.getPlayerAnimationsId() : null;
+            if (itemAnimationsId == null || itemAnimationsId.isBlank()) {
+                itemAnimationsId = ItemPlayerAnimations.DEFAULT_ID;
+            }
+            AnimationUtils.playAnimation(ref, AnimationSlot.Action, itemAnimationsId, clip, true, store);
+        } catch (Throwable t) {
+            Log.fine("STATION retrieve collect animation failed: " + t.getMessage());
         }
     }
 

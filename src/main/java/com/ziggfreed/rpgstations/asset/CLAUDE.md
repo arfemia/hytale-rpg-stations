@@ -227,8 +227,20 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
   in-game-crowned default (hides the puppeteer's own body via `ziggfreed-common`'s
   `entity.PlayerPuppetService`); `"Effect"` is schema-reserved future work; `"None"` is the
   deliberate degraded fallback. `Look.Source` defaults `"PlayerClone"`, with `"Model"` an open
-  performer seam. `Offset`/`Yaw` place the puppet relative to the station's block-top anchor in
-  WORLD SPACE (unlike `Custody.Display`, which is facing-relative). `Prop.Source` defaults
+  performer seam. `Offset`/`Yaw` place the puppet relative to the station's block-top anchor and are
+  **FACING-RELATIVE to the placed block's own yaw** (round-3 smoke, 2026-07-29): authored `+Z` is
+  the block's FRONT, `+X` its right, `Offset.Y` stays vertical, and the block yaw folds additively
+  into the authored `Yaw` (so `Yaw: 0` means "faces the same way the block does"). This is exactly
+  the round-8 `Custody.Display` precedent applied to `Puppet` - the two now share ONE reader,
+  `station.StationBlockFacing` (`yawRadians` reads `World#getBlockRotationIndex`, try-guarded to yaw
+  0; `rotateOffset` is the one horizontal-rotation core), with the per-consumer composition in
+  `StationPuppetController#resolveWorldOffset`/`#resolveYawRadians` and
+  `StationCustodyDisplay#resolveWorldOffset`/`#resolveRotationRadians`. It supersedes the earlier
+  WORLD-SPACE simplification, under which which SIDE of the station a puppet stood on depended
+  entirely on how that particular block happened to be placed (the round-3 smoke defect: the
+  maintainer's sawmill faced differently than the block the values were tuned on). **IDENTITY at
+  yaw 0**, so every pre-existing in-game-tuned value is byte-identical on a default-facing
+  placement - no re-tune, no migration. `Prop.Source` defaults
   `"MirrorHeld"`; `"ItemId"` forces a specific prop, `"None"` empties the puppet's hands. A
   `StationStep` carries its own small `{Clip, Prop}` override (`StationStep.PuppetOverride`)
   reusing this exact `Prop` codec for moment-to-moment swaps. **Seam wave (decision 47/48) - FULL
@@ -241,8 +253,13 @@ own `[wave 3]` marker and `../station/CLAUDE.md`'s boundary section.
   puppet-engine bullet (`StationPuppetController`). The jar's own `Stations/Sawmill.json` authors the
   shipped standalone default (`Enabled true`, `Hide.Route "Scale"`, `Look.Source "PlayerClone"`,
   `Offset {0.0, -0.4, 1.0}`, `Yaw 0.0`, `Prop {MirrorHeld, Hotbar}`, the maintainer's in-game-tuned
-  values); the `skill-stations-pack` Anvil authors its own. A pack re-skins either one through an
-  `ExtensionAsset`'s `Puppet` per-leaf overlay (rule 5), never a full-file station override.
+  values); the `skill-stations-pack` Anvil authors its own. `Stations/CuttingBoard.json` authors one
+  too (`Offset {0.0, -0.4, 0.6}`, station-level so the `Ref`'d `prepfish` action inherits it
+  wholesale - `Actions/PrepFish.json` deliberately authors NO `Puppet`, which is what
+  `WALK_REQUIRES_PUPPET` needs), and `Stations/CookingFire.json` gained one in the round-3 smoke for
+  its own direct cook loop (`Offset {0.0, -0.45, 0.9}`, `Yaw 0.0` - PROVISIONAL, a low-campfire
+  first pass, in-game tuning expected). A pack re-skins any of them through an `ExtensionAsset`'s
+  `Puppet` per-leaf overlay (rule 5), never a full-file station override.
 - **[`Roll`](Roll.java)** (REWRITTEN for weighted-factor unification, design 4.2) - the
   conditional-lootable roll: `Trigger` (`Cycle`/`Completion`), `Conditions[]`, `Chance{BasePercent,
   AddFactors[], CapPercent}`, `Ladder{Values[], Floors[]}`, `Grants{BonusOutputCopies, DropList,
