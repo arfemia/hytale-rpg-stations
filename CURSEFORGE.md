@@ -1,5 +1,8 @@
 # RPG Stations
 
+_DRAFT: first-public-release notes, pending final maintainer sign-off before the 1.6.0 release
+train ships._
+
 **Diegetic work stations - place, press F, watch your character work.**
 
 RPG Stations adds interactive work stations to your Hytale server: a Sawmill that saws logs into
@@ -86,8 +89,8 @@ initial press, then press again to start the work loop - your camera pulls in, y
 its stand-in) starts the cycle, and results accumulate as it runs. Press `F` again, or step away, to
 stop and collect a summary of what you made, what dropped, and what you earned. Some stations offer
 more than one job - just hold what you want worked and the station figures out which action to run.
-Sneaking and pressing `F` opens a selection menu on a station that offers more than one output
-category, or the familiar crafting-bench window on a station built around one.
+Sneaking and pressing `F` opens a recipe picker on a station that offers more than one output
+category, previewing whatever material is currently placed in the block.
 
 ## For Server Owners
 

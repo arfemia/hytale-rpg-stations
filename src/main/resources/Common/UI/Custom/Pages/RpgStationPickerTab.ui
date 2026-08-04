@@ -10,33 +10,30 @@
 // from the card, and moving them under the button would add a step to a path the page does not
 // write. Leave them here.
 //
-// MAINTAINER SMOKE FIX, 2026-07-29 ("recipes greyed out / larger icons / larger menu panel").
-// Three evidence-grounded changes, all measured against the client's own modding texture set
-// (Assets.zip Common/UI/Custom/Common/**, which is what "../Common/..." resolves to from here):
+// Texture/measurement notes, checked against the client's own modding texture set (Assets.zip
+// Common/UI/Custom/Common/**, which is what "../Common/..." resolves to from here):
 //
-//   1. NOT GREYED OUT. The card was Buttons/Secondary.png tinted #41506a. That texture is already
-//      dark navy (its centre pixel is rgba(33,52,75,255)) and the tint MULTIPLIES it darker still,
-//      which is exactly why an enabled, clickable recipe read as disabled. It now uses
-//      Buttons/Primary_Square.png - the bright blue square patch the game's own @DefaultButtonStyle
-//      uses, centre pixel rgba(68,112,164,255) - at a NEUTRAL #ffffff tint, so the texture renders
-//      at full brightness. The tint leaf is kept (rather than dropped) so UiRetint can still
-//      recolour these cards per theme; #ffffff is simply the identity tint.
-//   2. LARGER ICONS. SlotSize 32 -> 64 and SlotIconSize 28 -> 60, matching the scale of the
-//      first-party recipe list (Pages/Inventory/RecipeCatalogueRecipeButton.ui runs a 74px slot in
-//      an 80px-tall button). The grey square that sat behind each icon was ContainerPanelPatch.png
-//      - a 20%-alpha BLACK patch - used here only as filler for ItemGridStyle's required texture
-//      leaves. SlotBackground now uses BlockSelectorSlotBackground.png (the modding set's actual
-//      item-slot texture, near-transparent at rgba(136,136,136,20)) so the icon reads as sitting on
-//      the card, not on a grey tile, and DefaultItemIcon uses the real UnknownItemIcon.png fallback
-//      instead of a panel patch. The remaining filler leaves (broken/durability/cursed overlays) are
-//      inert here - this grid is non-draggable, quantity-less and shows fresh single items - so they
-//      stay pointed at the harmless patch.
-//   3. LARGER PANEL. The card is now FULL CONTENT WIDTH (604px inside the widened 640px panel, see
-//      RpgStationPicker.ui) and stacks one-per-row instead of a 170px two-up strip, so a long
-//      client-resolved item name ("Blackwood Decorative Planks") and its cost line both fit on one
-//      line. Fonts scale with it: name 12 -> 16 bold, cost/lock 10 -> 13. The cost line is indented
-//      to clear the icon column (Left: 84 = 10 padding + 64 icon + 10 gap) and left-aligned so it
-//      reads as a caption under the name rather than a centred orphan.
+//   1. FULL BRIGHTNESS, NOT GREYED. Buttons/Secondary.png tinted #41506a is already dark navy
+//      (its centre pixel is rgba(33,52,75,255)) and a MULTIPLY tint darkens it further, which
+//      reads as disabled even for an enabled, clickable recipe. This card instead uses
+//      Buttons/Primary_Square.png - the bright blue square patch the game's own
+//      @DefaultButtonStyle uses, centre pixel rgba(68,112,164,255) - at a NEUTRAL #ffffff tint,
+//      so the texture renders at full brightness. The tint leaf is kept (rather than dropped) so
+//      UiRetint can still recolour these cards per theme; #ffffff is simply the identity tint.
+//   2. ICON SIZE. SlotSize 64 and SlotIconSize 60 match the scale of the vanilla recipe list
+//      (Pages/Inventory/RecipeCatalogueRecipeButton.ui runs a 74px slot in an 80px-tall button).
+//      SlotBackground uses BlockSelectorSlotBackground.png (the modding set's actual item-slot
+//      texture, near-transparent at rgba(136,136,136,20)) so the icon reads as sitting on the
+//      card, not on a grey tile, and DefaultItemIcon uses the real UnknownItemIcon.png fallback
+//      instead of a panel patch. The remaining filler leaves (broken/durability/cursed overlays)
+//      are inert here - this grid is non-draggable, quantity-less and shows fresh single items -
+//      so they stay pointed at the harmless ContainerPanelPatch.png filler.
+//   3. PANEL WIDTH. The card is FULL CONTENT WIDTH (604px inside the widened 640px panel, see
+//      RpgStationPicker.ui) and stacks one-per-row, so a long client-resolved item name
+//      ("Blackwood Decorative Planks") and its cost line both fit on one line. Fonts scale with
+//      it: name 12 -> 16 bold, cost/lock 10 -> 13. The cost line is indented to clear the icon
+//      column (Left: 84 = 10 padding + 64 icon + 10 gap) and left-aligned so it reads as a
+//      caption under the name rather than a centred orphan.
 
 $C = "../Common.ui";
 

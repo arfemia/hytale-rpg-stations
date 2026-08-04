@@ -1,5 +1,5 @@
 {
-  "Comment": "SCOPE-3 NPC-performer spike role (throwaway). Minimal empty-brain Role after Empty_Role.json + HyCitizens Citizen_Role: one Walk controller + one marked-target Seek instruction. Invulnerable, zero knockback, NO DisplayNames (no nameplate), no InteractionInstruction (no F-prompt). The player-skin model is a spawn PARAM (not authored here), applied Java-side via NPCPlugin.spawnEntity's spawnModel + a postSpawn PlayerSkinComponent clone.",
+  "Comment": "Station-performer NPC role: a minimal empty-brain Role modeled on the vanilla Empty_Role, carrying one Walk controller and one marked-target Seek instruction. Invulnerable, zero knockback, no DisplayNames (no nameplate), no InteractionInstruction (no F-prompt). The performer's model is a spawn parameter (not authored here), applied Java-side via NPCPlugin.spawnEntity's spawnModel plus a post-spawn PlayerSkinComponent clone.",
   "Type": "Generic",
   "Appearance": "Mannequin",
   "Invulnerable": true,

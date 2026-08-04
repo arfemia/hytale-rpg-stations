@@ -1,5 +1,5 @@
 {
-  "$Comment": "Scope-2 shape migration (2026-07-24, leg A5, jar content re-author to the A-schema): the roll-1 'Chance.AddFactors' entries already carried the {Factor, Param?} shape FactorRef reuses, so that array is byte-identical here - only its underlying Java type changed (Condition[] -> FactorRef[]). The roll-2 ladder's singular 'Ladder.Value' object is renamed 'Ladder.Values' (a FactorRef[] summed before the floor lookup, asset.Roll.Ladder); a single-factor ladder authors a one-element array, so the one authored factor moves in unchanged. Every authored balance number (percents, floors, factor ids) is unchanged - shape-only migration.",
+  "$Comment": "The roll-1 'Chance.AddFactors' entries use the {Factor, Param?} shape FactorRef reuses. The roll-2 ladder's 'Ladder.Values' is a FactorRef[] summed before the floor lookup (asset.Roll.Ladder); a single-factor ladder authors a one-element array.",
   "Rolls": [
     {
       "Trigger": "Cycle",

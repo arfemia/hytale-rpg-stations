@@ -1,9 +1,13 @@
 # Changelog
 
-Developer changelog for RPG Stations. Version stays `1.0.0` until first release (the repo-wide
-no-churn rule); everything below shipped into that same unreleased 1.0.0. No em-dashes.
+Developer changelog for RPG Stations. No em-dashes.
 
-## 1.0.0 (unreleased)
+**DRAFT: 1.0.0 is RPG Stations' first public release.** Everything below shipped into this one
+version; there is no prior public release to diff against, so every entry is additive by
+definition. This file (and `CURSEFORGE.md`) are drafts pending final maintainer sign-off before
+the version train ships.
+
+## 1.0.0 (first public release)
 
 The diegetic interactive work-station engine, extracted out of the MMO Skill Tree jar into a
 standalone, richly self-sufficient mod: with RPG Stations alone installed, a station runs its full
@@ -239,3 +243,66 @@ outcome; the sibling CustomSkill migration and XP-toast-stacking defects land MM
   shared pure `StationService.mergeConsumedSlots` fold backs both the `ResourceTypeId` family route
   (`tallyConsumedResource`, with its raw-type fallback) and the new Stamp reagent route
   (`tallyConsumedStacks`). Produce was already tallied by `ProduceHandler`; no gap there.
+
+### Scope 2: from-scratch authoring surface, unified factor vocabulary, multi-station seam (2026-07-24)
+
+- Adds the orthogonal-phase `StationStep` reshape: the old `Type`-discriminated union (`Consume`/
+  `Produce`/`Wait`/`Roll`/`Command`/`Stamp`) is replaced by a step record that composes any
+  combination of nullable `Walk`/`Consume`/`Stamp`/`Produce`/`Roll`/`Commands` phases in one fixed
+  order, so a single step can carry several effects at once instead of needing one step per effect
+  (a phase-free step is a pure timed beat).
+- Adds a unified `LootRef` (`{Lootables[], Rolls[]}`) that `StationAsset.Loot`, `ActionDef.Loot`,
+  and a step's `Roll` phase all share, and reshapes the Stamp step's stat-roll caps onto a weighted
+  `FactorRef` budget vocabulary (`Budgets[]`) that also drives loot chances and roll magnitudes -
+  one factor vocabulary composes everywhere a number needs to scale off tool power, skill level, or
+  any other session-derived signal.
+- Adds `ActionAsset` (`Server/RpgStations/Actions/*.json`): a station's `Actions` map entry can
+  `Ref` a reusable, independently authored action instead of always inlining one, so several
+  stations can share one job definition.
+- Adds `ExtensionAsset` (`Server/RpgStations/Extensions/*.json`): the one additive extension
+  mechanism a fourth-party pack uses to append a loot reference, an extra ritual step, or a new
+  skill's XP ask onto another pack's station, action, lootable, or roll pool, without owning or
+  replacing that pack's original file (base always wins a key collision).
+- Adds the multi-station seam: a step program can author `Walk`/`At` to reach out to a second,
+  separately-placed station nearby and `Produce.To: "Custody"` to deposit its output straight into
+  that station's placed-input slot instead of a player's backpack. `ActionDef.Anchors` discovers and
+  claims the nearby station, a refund ledger returns any in-flight materials if the walk is
+  interrupted, and a walk timeout clears a stuck walking state. Ships a fish-preparation exemplar: a
+  station that walks a character to a nearby fire and back to finish the job, all from one `F` press
+  on the primary block.
+
+### Scope 3: native composition, performer contract, and the sneak+F recipe picker (2026-07-24 to 2026-07-29)
+
+- Adds native composition throughout the engine: steps and actions reference native Hytale
+  interactions, effects, and drop lists by id instead of re-describing their behavior, recipes
+  derive from native crafting recipes with an authorable `{Scale, OffsetMs}` pacing transform, and
+  tool gates read native `Tags.Family`. Recipe pacing resolves with explicit precedence, and an
+  effect chain tears down cleanly on an interrupted stop.
+- Adds the `StationPerformer` contract: the clone-puppet route is one implementation of
+  a common performer abstraction, alongside a bare-Holder performer and a full NPC-role performer
+  (`Look.Source: PlayerClone|Model|NpcRole`). Swapping performer backends lands byte-parity with the
+  original puppet route, including a walking NPC-role performer routed through the same contract as
+  the multi-station walk.
+- Adds the sneak+F recipe picker: sneaking and pressing `F` at a station that offers more than one
+  output category opens a picker previewing whatever material is currently placed in the block,
+  defaulting to the first-authored category. This supersedes the earlier native-bench-window
+  prototype for multi-category selection (retired), and ships a picker restyle plus a species/output
+  preview.
+- Adds honest custody denial: a station correctly refuses (rather than silently no-opping) a
+  press-F custody load when the held item does not match what that station's current action
+  accepts, and a station-wide collect gesture returns every placed input across every claimed
+  station in one interaction.
+- Adds a fire performer variant and station-side idle/working animation states for the puppet at a
+  fire-backed station (the fish exemplar's remote leg).
+- Fixes facing-relative puppet placement and prop syncing, an extension pack's `Puppet`/`Custody`
+  overlays layering correctly onto a base station, and sawmill presentation parity after the step
+  reshape (three maintainer smoke-fix rounds, decisions 57 through 67 in the design log).
+
+### Docs: the RPG Stations documentation site
+
+- Adds a static-export documentation site (`docs-site/`) shipping alongside this mod's release: a
+  getting-started guide, authored guides for every feature above (your first station, actions and
+  steps, custody and placed displays, enhancement and stamping, extending other packs, flairs,
+  localization, loot and factors, multi-station programs, native composition, puppet presentation,
+  selection, settings), a codec-autogenerated schema reference for every content type, and synced
+  changelog/patch-notes pages.
