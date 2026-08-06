@@ -14,17 +14,16 @@ import com.ziggfreed.rpgstations.api.EnhanceLine;
 
 /**
  * Fired synchronously on the shared Hytale event bus after an enhancement Stamp step commits
- * successfully (design section 9.5, phase 2 round-7 D-6), on the world thread from
- * {@code StationService}'s Stamp path - AFTER the mutated stack is written back to the custody
+ * successfully, on the world thread from {@code StationService}'s Stamp path - AFTER the mutated stack is written back to the custody
  * claim (so this reports ONLY a committed enhancement, never a cancelled/denied ritual).
  *
- * <p><b>Both maintainer-named reporting shapes are expressible, MMO-agnostically:</b> {@link
- * #lines()} is the "enhancements-metadata method" (the provider's own opaque-stat report), while
- * {@link #before()}/{@link #after()} are the "copy-of-item method" - the ENGINE snapshots the
- * stack around the apply call ({@code ItemStack} is immutable-with-copy, so the pre-mutation
- * reference IS the before copy), so a future consumer (achievements, an item-diff page, a
- * third-party progression mod) can diff or inspect them WITHOUT RpgStations ever learning any
- * stat vocabulary. Nothing listens MMO-side this round; the seam is future-proof.
+ * <p><b>Both reporting shapes are expressible without this engine learning any stat
+ * vocabulary:</b> {@link #lines()} is the enhancements-metadata report (the registered stamper's
+ * own opaque-stat lines), while {@link #before()}/{@link #after()} are the copy-of-item shape -
+ * the ENGINE snapshots the stack around the apply call ({@code ItemStack} is immutable-with-copy,
+ * so the pre-mutation reference IS the before copy), so a consumer (achievements, an item-diff
+ * page, a progression mod) can diff or inspect them itself. The seam is deliberately ahead of its
+ * first listener.
  *
  * <p><b>Plain data</b> ({@link #playerId()}, {@link #sessionId()}, {@link #stationId()}, {@link
  * #actionId()}, {@link #itemId()}, {@link #before()}, {@link #after()}, {@link #lines()}, {@link

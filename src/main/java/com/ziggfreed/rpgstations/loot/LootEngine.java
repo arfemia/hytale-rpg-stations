@@ -16,6 +16,7 @@ import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.item.ItemModule;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
@@ -57,6 +58,7 @@ public final class LootEngine {
         private final Map<String, Integer> dropListItems = new LinkedHashMap<>();
         private final List<Presentation> floorPresentations = new ArrayList<>();
         private final List<EffectRef> effectGrants = new ArrayList<>();
+        private final List<Contribution> contributions = new ArrayList<>();
         private int commandsRun;
 
         /** Bonus-output-copy items granted this pass (item id -> total quantity). */
@@ -90,13 +92,28 @@ public final class LootEngine {
             return effectGrants;
         }
 
+        /**
+         * Every granted {@code Roll.Grants.Contributions[]} entry (top-level AND per-floor), in
+         * roll-evaluation order. Collected ONLY for a {@code Cycle}-trigger pass - a Completion roll
+         * has no cycle event to ride on, so its contributions are dropped here rather than silently
+         * queued for a cycle that never comes (the validator warns at author time). Reported rather
+         * than applied, the same "reports what, caller acts" split {@link #getEffectGrants} uses:
+         * {@code StationService.applyGrantResult} buffers them onto the session and
+         * {@code onCycleCompleted} forwards them UNSCALED on the cycle event.
+         */
+        @Nonnull
+        public List<Contribution> getContributions() {
+            return contributions;
+        }
+
         public int getCommandsRun() {
             return commandsRun;
         }
 
         public boolean anyGranted() {
             return !bonusCopyItems.isEmpty() || !dropListItems.isEmpty()
-                    || !floorPresentations.isEmpty() || !effectGrants.isEmpty() || commandsRun > 0;
+                    || !floorPresentations.isEmpty() || !effectGrants.isEmpty()
+                    || !contributions.isEmpty() || commandsRun > 0;
         }
     }
 
@@ -153,6 +170,8 @@ public final class LootEngine {
             @Nullable PlayerRef playerRef, @Nonnull String stationId, @Nonnull String actionId, int cycleIndex,
             @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
         GrantResult result = new GrantResult();
+        // One-shot contributions ride the cycle-completed event, which only a Cycle-trigger pass has.
+        boolean collectContributions = Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger);
         CommandRewardExecutor.Placeholders placeholders = playerRef != null
                 ? CommandRewardExecutor.Placeholders.of(playerRef, stationId, actionId, cycleIndex)
                 : null;
@@ -165,8 +184,10 @@ public final class LootEngine {
             if (!outcome.isHit()) {
                 continue;
             }
-            applyGrants(outcome.getTopGrants(), player, cycleOutput, placeholders, result, store, blockX, blockY, blockZ);
-            applyGrants(outcome.getFloorGrants(), player, cycleOutput, placeholders, result, store, blockX, blockY, blockZ);
+            applyGrants(outcome.getTopGrants(), player, cycleOutput, placeholders, result, store, blockX, blockY,
+                    blockZ, collectContributions);
+            applyGrants(outcome.getFloorGrants(), player, cycleOutput, placeholders, result, store, blockX, blockY,
+                    blockZ, collectContributions);
             // A floor's Presentation plays whenever the floor is REACHED (design 4.5.1), regardless
             // of whether that floor also authored Grants (the validator separately flags a
             // Grants-less floor as a content mistake - it does not silence the moment).
@@ -181,7 +202,8 @@ public final class LootEngine {
     // player/store, so the test drives it with null engine handles - see LootEngineEffectGrantTest).
     static void applyGrants(@Nullable Roll.Grants grants, @Nonnull Player player,
             @Nullable ItemStack cycleOutput, @Nullable CommandRewardExecutor.Placeholders placeholders,
-            @Nonnull GrantResult result, @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
+            @Nonnull GrantResult result, @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ,
+            boolean collectContributions) {
         if (grants == null) {
             return;
         }
@@ -211,6 +233,16 @@ public final class LootEngine {
             for (EffectRef effect : effects) {
                 if (effect != null && effect.hasId()) {
                     result.effectGrants.add(effect);
+                }
+            }
+        }
+        // Grants.Contributions[]: COLLECT every postable one-shot entry for the caller to forward
+        // UNSCALED on the cycle event. Skipped entirely outside a Cycle trigger.
+        Contribution[] posts = grants.getContributions();
+        if (collectContributions && posts != null) {
+            for (Contribution post : posts) {
+                if (post != null && post.isPostable()) {
+                    result.contributions.add(post);
                 }
             }
         }

@@ -16,10 +16,12 @@ import com.hypixel.hytale.assetstore.codec.AssetBuilderCodec;
 import com.hypixel.hytale.assetstore.map.DefaultAssetMap;
 import com.hypixel.hytale.assetstore.map.JsonAssetWithMap;
 import com.hypixel.hytale.codec.Codec;
+import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
+import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 
 /**
  * The ONE additive-extension asset (scope-2 design 1.8, decision 27): a fourth party extends a
@@ -33,8 +35,8 @@ import com.hypixel.hytale.codec.codecs.map.MapCodec;
  * groups (all nullable; authoring a group the target type cannot carry is validator
  * {@code EXTENSION_PAYLOAD_MISMATCH} - see {@link #payloadAllowedFor}):
  * <table><tr><th>Target</th><th>Payload keys</th></tr>
- * <tr><td>Station</td><td>Xp, Loot, Actions, Conversions, Steps, Anchors, Puppet, Custody</td></tr>
- * <tr><td>Action</td><td>Steps, Anchors, Loot, Conversions, Xp, Puppet, Custody</td></tr>
+ * <tr><td>Station</td><td>PerCycleContributions, Loot, Actions, Conversions, Steps, Anchors, Puppet, Custody</td></tr>
+ * <tr><td>Action</td><td>Steps, Anchors, Loot, Conversions, PerCycleContributions, Puppet, Custody</td></tr>
  * <tr><td>Lootable</td><td>Rolls</td></tr>
  * <tr><td>RollPool</td><td>Entries</td></tr></table>
  *
@@ -49,7 +51,8 @@ import com.hypixel.hytale.codec.codecs.map.MapCodec;
  *   ({@code EXTENSION_KEY_COLLISION}, entry skipped); among extensions the {@link #APPLY_ORDER}
  *   tuple ({@code Priority} asc so higher applies LATER, then extension id lex) decides, with the
  *   later (higher-priority) extension winning a new key.
- *   <li>Unkeyed arrays ({@code Xp}, {@code Conversions}, {@code Rolls}, {@code Entries}): pure
+ *   <li>Unkeyed arrays ({@code PerCycleContributions}, {@code Conversions}, {@code Rolls},
+ *   {@code Entries}): pure
  *   append, ordered by {@link #APPLY_ORDER} ({@code Priority}, extension id, in-file order).
  *   <li>Ordered insertion ({@code Steps}): each {@link StepInsertion} carries an
  *   {@link StepInsertion.Anchor} exactly-one-of {@code {After|Before|AtStart|AtEnd}}; a missing
@@ -85,7 +88,7 @@ import com.hypixel.hytale.codec.codecs.map.MapCodec;
 public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAssetMap<String, ExtensionAsset>> {
 
     /** Payload-group keys, used by {@link #payloadAllowedFor} and the validator. */
-    public static final String PAYLOAD_XP = "Xp";
+    public static final String PAYLOAD_PER_CYCLE_CONTRIBUTIONS = "PerCycleContributions";
     public static final String PAYLOAD_LOOT = "Loot";
     public static final String PAYLOAD_ACTIONS = "Actions";
     public static final String PAYLOAD_CONVERSIONS = "Conversions";
@@ -111,7 +114,7 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
 
     @Nullable private Target target;
     @Nullable private Integer priority;
-    @Nullable private StationAsset.WorkXp[] xp;
+    @Nullable private Contribution[] perCycleContributions;
     @Nullable private LootRef loot;
     @Nullable private Map<String, ActionDef> actions;
     @Nullable private StationAsset.Conversion[] conversions;
@@ -133,16 +136,18 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
             .append(new KeyedCodec<>("Name", Codec.STRING, false),
                     (a, name) -> { /* no-op - id already comes from the filename */ },
                     a -> a.id)
-            .add()
+            .documentation("Ignored - the extension id comes from the asset filename, not this key. Kept as a schema field for editor display only.").add()
             .appendInherited(new KeyedCodec<>("Target", Target.CODEC, false),
                     (a, v) -> a.target = v, a -> a.target, (a, p) -> a.target = p.target)
             .documentation("Exactly one of Station | Action | Lootable | RollPool - what this extension adds to.").add()
             .appendInherited(new KeyedCodec<>("Priority", Codec.INTEGER, false),
                     (a, v) -> a.priority = v, a -> a.priority, (a, p) -> a.priority = p.priority)
             .documentation("Apply-order priority (default 0); a higher priority applies LATER and wins a key collision among extensions.").add()
-            .appendInherited(new KeyedCodec<>("Xp", new ArrayCodec<>(StationAsset.WorkXp.CODEC, StationAsset.WorkXp[]::new), false),
-                    (a, v) -> a.xp = v, a -> a.xp, (a, p) -> a.xp = p.xp)
-            .documentation("Appended Work.Xp declarations (Station/Action target).").add()
+            .appendInherited(new KeyedCodec<>("PerCycleContributions",
+                            new ArrayCodec<>(Contribution.CODEC, Contribution[]::new), false),
+                    (a, v) -> a.perCycleContributions = v, a -> a.perCycleContributions,
+                    (a, p) -> a.perCycleContributions = p.perCycleContributions)
+            .documentation("Appended Work.PerCycleContributions entries (Station/Action target).").add()
             .appendInherited(new KeyedCodec<>("Loot", LootRef.CODEC, false),
                     (a, v) -> a.loot = v, a -> a.loot, (a, p) -> a.loot = p.loot)
             .documentation("Appended loot references and inline Rolls (Station/Action target).").add()
@@ -204,10 +209,10 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         return priority != null ? priority : 0;
     }
 
-    /** Appended {@code Work.Xp} declarations (Station/Action target); null = none. */
+    /** Appended {@code Work.PerCycleContributions} entries (Station/Action target); null = none. */
     @Nullable
-    public StationAsset.WorkXp[] getXp() {
-        return xp;
+    public Contribution[] getPerCycleContributions() {
+        return perCycleContributions;
     }
 
     /** Appended loot references (Station/Action target); null = none. */
@@ -296,14 +301,14 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         }
         switch (targetType) {
             case Target.STATION:
-                return PAYLOAD_XP.equals(payloadKey) || PAYLOAD_LOOT.equals(payloadKey)
+                return PAYLOAD_PER_CYCLE_CONTRIBUTIONS.equals(payloadKey) || PAYLOAD_LOOT.equals(payloadKey)
                         || PAYLOAD_ACTIONS.equals(payloadKey) || PAYLOAD_CONVERSIONS.equals(payloadKey)
                         || PAYLOAD_STEPS.equals(payloadKey) || PAYLOAD_ANCHORS.equals(payloadKey)
                         || PAYLOAD_PUPPET.equals(payloadKey) || PAYLOAD_CUSTODY.equals(payloadKey);
             case Target.ACTION:
                 return PAYLOAD_STEPS.equals(payloadKey) || PAYLOAD_ANCHORS.equals(payloadKey)
                         || PAYLOAD_LOOT.equals(payloadKey) || PAYLOAD_CONVERSIONS.equals(payloadKey)
-                        || PAYLOAD_XP.equals(payloadKey)
+                        || PAYLOAD_PER_CYCLE_CONTRIBUTIONS.equals(payloadKey)
                         || PAYLOAD_PUPPET.equals(payloadKey) || PAYLOAD_CUSTODY.equals(payloadKey);
             case Target.LOOTABLE:
                 return PAYLOAD_ROLLS.equals(payloadKey);
@@ -333,16 +338,26 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         public static final BuilderCodec<Target> CODEC = BuilderCodec.builder(Target.class, Target::new)
                 .appendInherited(new KeyedCodec<>("Station", Codec.STRING, false),
                         (o, v) -> o.station = v, o -> o.station, (o, p) -> o.station = p.station)
-                .documentation("A station id to extend (exactly one of Station | Action | Lootable | RollPool).").add()
+                .documentation("A station id to extend (exactly one of Station | Action | Lootable | RollPool).")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:stations"))).add()
                 .appendInherited(new KeyedCodec<>("Action", Codec.STRING, false),
                         (o, v) -> o.action = v, o -> o.action, (o, p) -> o.action = p.action)
-                .documentation("An ActionAsset id to extend (exactly one of Station | Action | Lootable | RollPool).").add()
+                .documentation("An ActionAsset id to extend (exactly one of Station | Action | Lootable | RollPool).")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:actions"))).add()
                 .appendInherited(new KeyedCodec<>("Lootable", Codec.STRING, false),
                         (o, v) -> o.lootable = v, o -> o.lootable, (o, p) -> o.lootable = p.lootable)
-                .documentation("A LootableAsset id to extend (exactly one of Station | Action | Lootable | RollPool).").add()
+                .documentation("A LootableAsset id to extend (exactly one of Station | Action | Lootable | RollPool).")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:lootables"))).add()
                 .appendInherited(new KeyedCodec<>("RollPool", Codec.STRING, false),
                         (o, v) -> o.rollPool = v, o -> o.rollPool, (o, p) -> o.rollPool = p.rollPool)
-                .documentation("A RollPool id to extend (exactly one of Station | Action | Lootable | RollPool).").add()
+                .documentation("A RollPool id to extend (exactly one of Station | Action | Lootable | RollPool).")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:rollpools"))).add()
+                .afterDecode((Target target, ExtraInfo extraInfo) -> {
+                    if (!target.hasExactlyOneTarget()) {
+                        extraInfo.getValidationResults().warn(
+                                "ExtensionAsset.Target should author exactly one of Station | Action | Lootable | RollPool, not zero or several.");
+                    }
+                })
                 .build();
 
         @Nonnull
@@ -530,6 +545,14 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
                     .appendInherited(new KeyedCodec<>("AtEnd", Codec.BOOLEAN, false),
                             (o, v) -> o.atEnd = v, o -> o.atEnd, (o, p) -> o.atEnd = p.atEnd)
                     .documentation("Insert at the END of the program (exactly one of After | Before | AtStart | AtEnd; the degrade default).").add()
+                    .afterDecode((Anchor anchor, ExtraInfo extraInfo) -> {
+                        int authored = (set(anchor.after) ? 1 : 0) + (set(anchor.before) ? 1 : 0)
+                                + (set(anchor.atStart) ? 1 : 0) + (set(anchor.atEnd) ? 1 : 0);
+                        if (authored > 1) {
+                            extraInfo.getValidationResults().warn(
+                                    "ExtensionAsset.StepInsertion.Anchor should author exactly one of After | Before | AtStart | AtEnd; several were authored, degrading to AtEnd.");
+                        }
+                    })
                     .build();
 
             @Nonnull

@@ -4,7 +4,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 /**
- * The Stamp step's {@code Stats}-leaf delegate registry (design section 9.5): unlike
+ * The Stamp step's {@code Stats}-leaf delegate registry: unlike
  * {@link FlairUnlockRegistry}/{@link SummaryEnricherRegistry} (which UNION every registrant),
  * this is a single ACTIVE slot - there is exactly one "how does this server encode enhancement
  * points onto an item" answer at a time, last-registration-wins (mirrors {@link FactorRegistry}'s

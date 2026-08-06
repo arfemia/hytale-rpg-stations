@@ -35,7 +35,8 @@ public final class StatRollEntry {
             BuilderCodec.builder(StatRollEntry.class, StatRollEntry::new)
                     .appendInherited(new KeyedCodec<>("Stat", Codec.STRING, false),
                             (o, v) -> o.stat = v, o -> o.stat, (o, p) -> o.stat = p.stat)
-                    .documentation("The stat id this entry rolls points into (opaque to this engine; the registered EnhanceStamper interprets it).").add()
+                    .documentation("The stat id this entry rolls points into (opaque to this engine; the registered EnhanceStamper interprets it).")
+                    .addValidator(CodecWarnValidators.nonBlank("StatRollEntry.Stat should not be blank.")).add()
                     .appendInherited(new KeyedCodec<>("Points", Points.CODEC, false),
                             (o, v) -> o.points = v, o -> o.points, (o, p) -> o.points = p.points)
                     .documentation("The point value range (with optional weighted factor scaling) a hit on this entry rolls within.").add()

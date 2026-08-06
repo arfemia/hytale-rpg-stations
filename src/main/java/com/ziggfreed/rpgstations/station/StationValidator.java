@@ -25,11 +25,17 @@ import com.hypixel.hytale.server.core.asset.type.soundevent.config.SoundEvent;
 import com.hypixel.hytale.server.core.cosmetics.EmoteAsset;
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.RootInteraction;
 import com.hypixel.hytale.server.npc.NPCPlugin;
+import com.ziggfreed.rpgstations.api.FindingSink;
+import com.ziggfreed.rpgstations.api.ValidationHook;
+import com.ziggfreed.rpgstations.api.ValidationScope;
+import com.ziggfreed.rpgstations.api.impl.ContributionChannelRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
+import com.ziggfreed.rpgstations.api.impl.ValidationHookRegistryImpl;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
@@ -51,18 +57,18 @@ import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
 import com.ziggfreed.rpgstations.util.Log;
 import com.ziggfreed.rpgstations.validation.Finding;
 import com.ziggfreed.rpgstations.validation.Report;
+import com.ziggfreed.rpgstations.validation.Severity;
 
 /**
- * Read-only content diagnostic for station assets. Ported + reshaped from the MMO's
- * {@code station.StationValidator} (RPG Stations extraction leg 2, design section 4.1):
- * moved onto the RpgStations-local {@code validation/} mini-core, {@code SafeLog} severed to
- * {@code util.Log}. Per the design's DROP list this reshape DROPS the MMO
- * {@code ContentAudit} registration (RpgStations has no cross-domain audit registry of its
- * own yet) and the {@code SkillRegistry} skill-existence checks (skill ids are no longer this
- * engine's business - the MMO bridge validates them, leg 5's {@code StationBridgeValidator}).
- * Per the critique's binding fix (m10), the lang-key presence check is KEPT, rewired against
- * RpgStations' own {@link RpgStationsLangKeys}. The MMO's {@code Requires}/feature-id check
- * is replaced by a factor-known check over RpgStations' own {@link Requires}/{@link Condition}.
+ * Read-only content diagnostic for station assets (design section 4.1), over the local
+ * {@code validation/} mini-core and {@code util.Log}.
+ *
+ * <p><b>What it does NOT check, by construction.</b> A {@code Contribution}'s {@code Param}
+ * semantics are the channel owner's business, and are validated by the owning mod - through a
+ * registered {@code api.ValidationHook} ({@link #runHooks}) when the rule needs to see content, or
+ * in that mod's own validator otherwise. Nothing in here branches on a foreign id. The lang-key
+ * presence check runs against this mod's own {@link RpgStationsLangKeys}, and the gate check is a
+ * factor-known check over this mod's own {@link Requires}/{@link Condition}.
  *
  * <p><b>Scope-2 rewrite (leg A4, design {@code raw/rpg-stations-scope2-unified-design-2026-07-23
  * .md} section 1.9, gate outcomes binding):</b> every check touching the reshaped
@@ -73,7 +79,7 @@ import com.ziggfreed.rpgstations.validation.Report;
  * {@code EXTENSION_KEY_COLLISION}, {@code EXTENSION_ANCHOR_MISSING},
  * {@code EXTENSION_STEP_MISSING_ID}, {@code ANCHOR_STATION_UNKNOWN},
  * {@code WALK_TARGET_UNKNOWN_ANCHOR}, {@code STEP_AT_UNKNOWN_ANCHOR}, {@code WALK_REQUIRES_PUPPET},
- * and {@code LOOT_DOUBLE_LUCK} (INFO). The multi-station seam ({@code Walk}/{@code At}/
+ * and {@code LOOT_DUPLICATE_FACTOR} (INFO). The multi-station seam ({@code Walk}/{@code At}/
  * {@code Produce.To:Custody}) EXECUTES as of scope-2 wave 3, so the temporary {@code WAVE3_PENDING}
  * warn was removed - these anchor/walk checks are the live discovery-time coverage. Dropped (their reserved fields no longer
  * exist): {@code UNIMPLEMENTED_STEP_TYPE}, {@code UNIMPLEMENTED_CONSUME_SOURCE},
@@ -100,7 +106,26 @@ import com.ziggfreed.rpgstations.validation.Report;
  * reads the derived discovery index and fails OPEN on an unseeded one ({@link
  * #stationDiscoverableLive}).
  *
- * <p>Pure and side-effect-free (apart from {@link #runAndLog}); never throws.
+ * <p><b>Schema/DX review round (2026-08-05):</b> {@code EXTENSION_CONTRIBUTION_DUPLICATE} closes
+ * the one real gap the review surfaced - {@link ExtensionAsset#getPerCycleContributions()} is
+ * append-only ({@code ExtensionCatalog#mergeContributions} appends every extension's entries onto
+ * the base array, never overrides by channel), so nothing previously stopped an extension from
+ * re-declaring a {@code (Channel, Param)} pair its target already declares and silently SUMMING
+ * the effective per-cycle amount (before this check, only a hand-written {@code $Comment} in a
+ * pack's own extension JSON warned against it). Both halves are warn-only, never block a load: an
+ * extension's own entries colliding with its target's BASE {@code Work.PerCycleContributions}
+ * ({@link #resolveBaseContributionKeys}), and two or more extensions declaring the same pair on
+ * the same target (both apply and stack, unlike the keyed {@code Actions}/{@code Anchors}
+ * collision checks above where the base or the higher-apply-order entry wins - see
+ * {@link #reportContributionDuplicates}'s javadoc for why that helper is deliberately separate
+ * from {@link #reportCrossExtensionCollisions}).
+ *
+ * <p><b>Third-party checks</b> ({@link #runHooks}): every registered {@code api.ValidationHook}
+ * runs inside the FULL pass over one shared {@code api.ValidationScope}, each inside its own
+ * try/catch, its findings folded into the same aggregate report. That is where a rule that needs
+ * to know what a specific factor or channel MEANS lives - with the mod that owns the vocabulary.
+ *
+ * <p>Pure and side-effect-free (apart from {@link #runAndLog} and {@link #runHooks}); never throws.
  */
 public final class StationValidator {
 
@@ -156,6 +181,9 @@ public final class StationValidator {
             out.addAll(validateExtensions(extensions, stations, actionAssets,
                     StationValidator::dropListKnownLive, factorKnown, lootableKnown, rollPoolKnown));
             out.addAll(checkCustodyInputsResolveLive(stations, actionAssets));
+            // Third-party checks run LAST, over the same folded content the engine just walked, so
+            // a hook's note sits beside the engine's own in one report. FULL pass only.
+            out.addAll(runHooks(stations, actionAssets, LootableCatalog.getInstance().all().values(), extensions));
             return out;
         } catch (Throwable t) {
             Log.warn("Station validation aborted: " + t.getMessage());
@@ -172,8 +200,8 @@ public final class StationValidator {
      * fires. Safe to run at EVERY per-fold event (never a false positive from an incomplete later
      * layer); {@link #validate()} (still the full set) now only runs from
      * {@code /rpgstations validate} (already post-load) and the ONE deferred post-load audit
-     * ({@code RpgStationsPlugin}'s first-{@code PlayerReadyEvent} hook, mirroring the MMO's own
-     * {@code ContentAudit} startup-audit timing).
+     * ({@code RpgStationsPlugin}'s first-{@code PlayerReadyEvent} hook - late enough that every
+     * pack layer has settled).
      */
     @Nonnull
     public static List<Finding> validateStructural() {
@@ -193,6 +221,87 @@ public final class StationValidator {
 
     /** A cross-layer reference check deferred out of the per-fold structural pass - always passes. */
     private static final Predicate<String> ALWAYS_KNOWN = id -> true;
+
+    /**
+     * Runs every registered {@code api.ValidationHook} over ONE shared {@code api.ValidationScope}
+     * built from the folded content, folding each hook's findings into the aggregate report.
+     *
+     * <p>This is the seam that lets a rule which depends on what a specific factor or channel
+     * MEANS live with the mod that owns that vocabulary, instead of as a branch in here naming a
+     * foreign id. Guard discipline, all three layers deliberate:
+     * <ul>
+     *   <li>building the scope is try-guarded as a whole - a malformed asset costs the hooks, never
+     *   the engine's own findings, which are already in {@code out} by the time this runs;
+     *   <li>each hook runs inside its OWN try/catch, so a throwing third-party hook costs only its
+     *   own findings and every later hook still runs;
+     *   <li>a hook can only report {@code info}/{@code warn} - the never-block posture is absolute,
+     *   and there is deliberately no {@code error} on the sink.
+     * </ul>
+     * With no hook registered this is a cheap no-op: the scope is not even built.
+     */
+    @Nonnull
+    private static List<Finding> runHooks(@Nonnull Collection<StationAsset> stations,
+            @Nonnull Collection<ActionAsset> actionAssets, @Nonnull Collection<LootableAsset> lootables,
+            @Nonnull Collection<ExtensionAsset> extensions) {
+        List<ValidationHook> hooks = ValidationHookRegistryImpl.getInstance().hooks();
+        if (hooks.isEmpty()) {
+            return List.of();
+        }
+        ValidationScope scope;
+        try {
+            scope = StationValidationScope.build(stations, actionAssets, lootables, extensions);
+        } catch (Throwable t) {
+            Log.warn("Station validation hooks skipped - scope build failed: " + t.getMessage());
+            return List.of();
+        }
+        List<Finding> out = new ArrayList<>();
+        for (ValidationHook hook : hooks) {
+            if (hook == null) {
+                continue;
+            }
+            try {
+                hook.validate(scope, new HookFindingSink(out, hook));
+            } catch (Throwable t) {
+                Log.warn("Station validation hook " + hook.getClass().getName() + " threw and was skipped: "
+                        + t.getMessage());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The {@code api.FindingSink} adapter: appends a hook's advisory findings to the pass's own
+     * list. The reporting mod owns its {@code code} vocabulary, so the code is recorded verbatim
+     * and the finding's DOMAIN names the hook's class instead of {@code "station"} - a server owner
+     * reading the log can tell at a glance which mod is talking. Blank codes/messages are dropped
+     * rather than logged as empty lines.
+     */
+    private record HookFindingSink(@Nonnull List<Finding> out, @Nonnull ValidationHook hook) implements FindingSink {
+
+        @Override
+        public void info(@Nonnull String code, @Nonnull String message, @Nullable String subjectId) {
+            add(Severity.INFO, code, message, subjectId);
+        }
+
+        @Override
+        public void warn(@Nonnull String code, @Nonnull String message, @Nullable String subjectId) {
+            add(Severity.WARNING, code, message, subjectId);
+        }
+
+        private void add(@Nonnull Severity severity, @Nonnull String code, @Nonnull String message,
+                @Nullable String subjectId) {
+            if (code.isBlank() || message.isBlank()) {
+                return;
+            }
+            out.add(new Finding(severity, hookDomain(), code, message, subjectId));
+        }
+
+        @Nonnull
+        private String hookDomain() {
+            String name = hook.getClass().getSimpleName();
+            return name.isBlank() ? DOMAIN : DOMAIN + ":" + name;
+        }
+    }
 
     /** Live {@code ItemDropList} existence check (asset-map lookup - never throws). */
     private static boolean dropListKnownLive(@Nonnull String dropListId) {
@@ -357,9 +466,23 @@ public final class StationValidator {
             out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_SOUND",
                     label + " Sound '" + p.getSound() + "' is not a known SoundEvent id - check for a typo", id));
         }
-        if (notBlank(p.getParticles()) && !particleKnownLive(p.getParticles())) {
-            out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_PARTICLES",
-                    label + " Particles '" + p.getParticles() + "' is not a known ParticleSystem id - check for a typo", id));
+        Presentation.ModelParticle[] particles = p.getParticles();
+        if (particles != null) {
+            for (Presentation.ModelParticle burst : particles) {
+                if (burst == null) {
+                    continue;
+                }
+                if (!burst.hasSystemId()) {
+                    out.add(Finding.warning(DOMAIN, "PRESENTATION_PARTICLE_MISSING_SYSTEM_ID",
+                            label + " Particles has an entry with no SystemId - the burst is skipped at play time", id));
+                    continue;
+                }
+                if (!particleKnownLive(burst.getSystemId())) {
+                    out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_PARTICLES",
+                            label + " Particles SystemId '" + burst.getSystemId()
+                                    + "' is not a known ParticleSystem id - check for a typo", id));
+                }
+            }
         }
         Presentation.Interaction interaction = p.getInteraction();
         if (interaction != null && interaction.hasId() && !interactionKnownLive(interaction.getId())) {
@@ -581,6 +704,12 @@ public final class StationValidator {
         // Cross-extension key-collision tracking, in APPLY_ORDER (last claimant wins).
         Map<String, List<ExtensionAsset>> actionKeyClaims = new LinkedHashMap<>();
         Map<String, List<ExtensionAsset>> anchorKeyClaims = new LinkedHashMap<>();
+        // Cross-extension (Channel, Param) tracking (P8 ruling 75's added check): unlike
+        // Actions/Anchors above, PerCycleContributions is an UNKEYED array
+        // ExtensionCatalog#mergeContributions APPENDS, so two claimants of the same
+        // (target, channel, param) both apply and their amounts genuinely sum - see
+        // reportContributionDuplicates for the deliberately different wording.
+        Map<String, List<ExtensionAsset>> channelParamClaims = new LinkedHashMap<>();
 
         for (ExtensionAsset ext : ExtensionAsset.sortedForApply(extensions)) {
             if (ext == null) {
@@ -615,8 +744,9 @@ public final class StationValidator {
                                 + " '" + targetId + "'", extId));
             }
 
-            checkExtensionPayload(ext.getXp() != null && ext.getXp().length > 0, ExtensionAsset.PAYLOAD_XP,
-                    targetType, label, extId, out);
+            checkExtensionPayload(ext.getPerCycleContributions() != null
+                            && ext.getPerCycleContributions().length > 0,
+                    ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS, targetType, label, extId, out);
             checkExtensionPayload(ext.getLoot() != null && !ext.getLoot().isEmpty(), ExtensionAsset.PAYLOAD_LOOT,
                     targetType, label, extId, out);
             checkExtensionPayload(ext.getActions() != null && !ext.getActions().isEmpty(),
@@ -708,6 +838,35 @@ public final class StationValidator {
                 }
             }
 
+            if (ext.getPerCycleContributions() != null && ext.getPerCycleContributions().length > 0) {
+                checkContributionChannels(ext.getPerCycleContributions(),
+                        label + " PerCycleContributions", extId, out);
+                Set<String> basePairs = resolveBaseContributionKeys(targetType, targetId, stationsById,
+                        actionAssetsById);
+                Set<String> seenInThisExtension = new HashSet<>();
+                for (Contribution post : ext.getPerCycleContributions()) {
+                    if (post == null || post.getChannel() == null || post.getChannel().isBlank()) {
+                        continue;
+                    }
+                    String pair = contributionPairKey(post);
+                    if (!seenInThisExtension.add(pair)) {
+                        continue;
+                    }
+                    String describe = describeContribution(post);
+                    if (basePairs.contains(pair)) {
+                        out.add(Finding.warning(DOMAIN, "EXTENSION_CONTRIBUTION_DUPLICATE",
+                                label + " appends a Contributions entry for " + describe + " the base "
+                                        + targetType + " '" + targetId + "' already declares -"
+                                        + " PerCycleContributions arrays are additive (mergeContributions appends,"
+                                        + " never overrides by channel), so the amounts SUM unless deliberate",
+                                extId));
+                    } else {
+                        channelParamClaims.computeIfAbsent(targetType + ":" + targetId + ":" + pair,
+                                k -> new ArrayList<>()).add(ext);
+                    }
+                }
+            }
+
             if (ext.getSteps() != null) {
                 Set<String> targetStepIds = resolveTargetStepIds(targetType, targetId, stationsById, actionAssetsById);
                 ExtensionAsset.StepInsertion[] insertions = ext.getSteps();
@@ -748,6 +907,7 @@ public final class StationValidator {
 
         reportCrossExtensionCollisions(actionKeyClaims, "Actions", out);
         reportCrossExtensionCollisions(anchorKeyClaims, "Anchors", out);
+        reportContributionDuplicates(channelParamClaims, out);
         return out;
     }
 
@@ -833,6 +993,104 @@ public final class StationValidator {
             }
         }
         return ids;
+    }
+
+    /**
+     * The base target's own {@code Work.PerCycleContributions} {@code (Channel, Param)} key set
+     * (case-folded, param-null-normalized, never null), for {@code EXTENSION_CONTRIBUTION_DUPLICATE}
+     * (P8 ruling 75's added check - the gap the review verdict flagged as worse than described:
+     * nothing but a hand-written {@code $Comment} in a pack's own extension stood between an author
+     * and a silently doubled amount): for a {@code Target:{Action}} extension, the referenced
+     * {@link ActionAsset}'s OWN body {@code Work} contributions (an action's {@code Work} group is a
+     * WHOLE-GROUP override over the station's, per {@code ActionResolver} - it does not inherit the
+     * station's list); for a {@code Target:{Station}} extension, that station's own. An empty result
+     * (unresolved target, or a target that posts nothing at all) degrades to "nothing to collide
+     * with" rather than skipping the cross-extension half of the check below.
+     */
+    @Nonnull
+    private static Set<String> resolveBaseContributionKeys(@Nullable String targetType, @Nullable String targetId,
+            @Nonnull Map<String, StationAsset> stationsById, @Nonnull Map<String, ActionAsset> actionAssetsById) {
+        if (targetId == null) {
+            return Set.of();
+        }
+        String lower = targetId.toLowerCase(Locale.ROOT);
+        Contribution[] posts = null;
+        if (ExtensionAsset.Target.ACTION.equals(targetType)) {
+            ActionAsset a = actionAssetsById.get(lower);
+            StationAsset.Work work = a != null ? a.getBody().getWork() : null;
+            posts = work != null ? work.getPerCycleContributions() : null;
+        } else if (ExtensionAsset.Target.STATION.equals(targetType)) {
+            StationAsset s = stationsById.get(lower);
+            StationAsset.Work work = s != null ? s.getWork() : null;
+            posts = work != null ? work.getPerCycleContributions() : null;
+        }
+        if (posts == null) {
+            return Set.of();
+        }
+        Set<String> out = new HashSet<>();
+        for (Contribution post : posts) {
+            if (post != null && post.getChannel() != null && !post.getChannel().isBlank()) {
+                out.add(contributionPairKey(post));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The identity a duplicate contribution is keyed on: the {@code (Channel, Param)} PAIR, both
+     * case-folded, with an absent/blank {@code Param} normalized to the empty string. Keying on the
+     * pair rather than the channel alone is what keeps two entries on the SAME channel crediting
+     * DIFFERENT subjects (the normal shape - one channel plus a param, never one channel per
+     * subject) from reading as a duplicate of each other.
+     */
+    @Nonnull
+    private static String contributionPairKey(@Nonnull Contribution post) {
+        String channel = post.getChannel() == null ? "" : post.getChannel().toLowerCase(Locale.ROOT);
+        String param = post.getParam() == null ? "" : post.getParam().toLowerCase(Locale.ROOT);
+        return channel + "|" + param;
+    }
+
+    /** Author-facing rendering of a contribution's identity, e.g. {@code (Channel 'x:y', Param 'Z')}. */
+    @Nonnull
+    private static String describeContribution(@Nonnull Contribution post) {
+        String param = post.getParam();
+        return "(Channel '" + post.getChannel() + "'"
+                + (param == null || param.isBlank() ? ", no Param" : ", Param '" + param + "'") + ")";
+    }
+
+    /**
+     * Two or more extensions appending the SAME {@code (Channel, Param)} pair to the SAME target
+     * (the cross-extension half of {@code EXTENSION_CONTRIBUTION_DUPLICATE}). Deliberately NOT
+     * routed through {@link #reportCrossExtensionCollisions}: that helper's wording ("the higher
+     * apply-order entry wins, this one is skipped") is true for the KEYED maps it covers
+     * ({@code Actions}/{@code Anchors}, base-wins-collision semantics) but false here -
+     * {@code ExtensionCatalog#mergeContributions} APPENDS every extension's entries onto the base
+     * array, so every claimant listed below actually applies and their amounts sum.
+     */
+    private static void reportContributionDuplicates(@Nonnull Map<String, List<ExtensionAsset>> claims,
+            @Nonnull List<Finding> out) {
+        for (Map.Entry<String, List<ExtensionAsset>> entry : claims.entrySet()) {
+            List<ExtensionAsset> claimants = entry.getValue();
+            if (claimants.size() < 2) {
+                continue;
+            }
+            String key = entry.getKey();
+            String pair = key.substring(key.lastIndexOf(':') + 1);
+            StringBuilder ids = new StringBuilder();
+            for (int i = 0; i < claimants.size(); i++) {
+                ExtensionAsset ext = claimants.get(i);
+                String extId = ext.getId() == null ? "(unnamed)" : ext.getId();
+                if (i > 0) {
+                    ids.append(", ");
+                }
+                ids.append('\'').append(extId).append('\'');
+            }
+            String firstId = claimants.get(0).getId() == null ? "(unnamed)" : claimants.get(0).getId();
+            out.add(Finding.warning(DOMAIN, "EXTENSION_CONTRIBUTION_DUPLICATE",
+                    "Extensions " + ids + " all append a Contributions entry for (Channel|Param) '" + pair
+                            + "' to the same target - PerCycleContributions arrays are additive, so ALL of them"
+                            + " apply and the amounts SUM across every one of them", firstId));
+        }
     }
 
     private static void reportCrossExtensionCollisions(@Nonnull Map<String, List<ExtensionAsset>> claims,
@@ -971,6 +1229,16 @@ public final class StationValidator {
                     label + " Custody.Display.Scale is non-positive (" + display.getScale() + ") - falls back to "
                             + "the 1.0 default", id));
         }
+        // P11 knob (ruling 74): SingleFamily locks the claim to whichever family placed first,
+        // refusing a different one "until the claim empties" - but a claim that can only ever hold
+        // ONE item at a time (MaxQuantity <= 1) already refuses a second placement on CAPACITY
+        // alone before the family check is ever reached, so the knob is dead weight there.
+        if (custody.effectiveSingleFamily() && custody.effectiveMaxQuantity() <= 1) {
+            out.add(Finding.warning(DOMAIN, "CUSTODY_SINGLE_FAMILY_REDUNDANT",
+                    label + " authors Custody.SingleFamily true with an effective MaxQuantity of "
+                            + custody.effectiveMaxQuantity() + " - a claim that holds at most one item already"
+                            + " refuses a second family on capacity alone, so the family lock never fires", id));
+        }
     }
 
     /**
@@ -1001,9 +1269,9 @@ public final class StationValidator {
                                 + "' is not one of Scale/Effect/None - falls back to Scale at runtime", id));
             }
             if (Puppet.HIDE_ROUTE_EFFECT.equalsIgnoreCase(effectiveRoute)
-                    && (hide.getEffectId() == null || hide.getEffectId().isBlank())) {
+                    && (hide.getEffect() == null || !hide.getEffect().hasId())) {
                 out.add(Finding.warning(DOMAIN, "PUPPET_HIDE_EFFECT_MISSING_ID",
-                        label + " Puppet.Hide.Route is \"Effect\" but EffectId is blank - the route is inert"
+                        label + " Puppet.Hide.Route is \"Effect\" but Effect.Id is blank - the route is inert"
                                 + " (Effect is schema-reserved, unimplemented this leg)", id));
             }
         }
@@ -1210,8 +1478,27 @@ public final class StationValidator {
                 }
             }
         }
-        checkXpScale(tool, gatherTypeSet ? gather.getGatherType() : null, id, label, out);
+        checkPowerScale(tool, gatherTypeSet ? gather.getGatherType() : null, id, label, out);
         checkDurability(tool, id, label, out);
+        checkMinDurabilityPercent(tool, id, label, out);
+    }
+
+    /**
+     * {@code Tool.MinDurabilityPercent} (P11 knob, ruling 74): a value outside (0, 100] is almost
+     * always an authoring slip, not intent - the leaf documents itself as a PERCENT (0-100), so a
+     * fraction like {@code 0.5} silently becomes a near-impossible 0.5% floor rather than the
+     * intended 50%, and anything <= 0 is a no-op the reader already treats as "no gate" (author
+     * {@code null} instead of a zero/negative sentinel).
+     */
+    private static void checkMinDurabilityPercent(@Nonnull StationAsset.Tool tool, @Nonnull String id,
+                                                   @Nonnull String label, @Nonnull List<Finding> out) {
+        Double minDurability = tool.getMinDurabilityPercent();
+        if (minDurability != null && (minDurability <= 0 || minDurability > 100)) {
+            out.add(Finding.warning(DOMAIN, "TOOL_MIN_DURABILITY_OUT_OF_RANGE",
+                    label + " authors Tool.MinDurabilityPercent " + minDurability + " outside (0, 100] - the"
+                            + " gate expects a PERCENT (0-100), not a 0-1 fraction; a value <= 0 is already a"
+                            + " no-op (author null instead) and a value > 100 can never pass", id));
+        }
     }
 
     private static void checkDurability(@Nonnull StationAsset.Tool tool, @Nonnull String id,
@@ -1234,29 +1521,29 @@ public final class StationValidator {
         }
     }
 
-    private static void checkXpScale(@Nonnull StationAsset.Tool tool, @Nullable String gatherFallback,
-                                     @Nonnull String id, @Nonnull String label, @Nonnull List<Finding> out) {
-        StationAsset.Tool.XpScale scale = tool.getXpScale();
+    private static void checkPowerScale(@Nonnull StationAsset.Tool tool, @Nullable String gatherFallback,
+                                        @Nonnull String id, @Nonnull String label, @Nonnull List<Finding> out) {
+        StationAsset.Tool.PowerScale scale = tool.getPowerScale();
         if (scale == null) {
             return;
         }
         if (scale.getReferencePower() == null || scale.getReferencePower() <= 0) {
-            out.add(Finding.warning(DOMAIN, "DEAD_XP_SCALE",
-                    label + " authors a Tool.XpScale with a null or nonpositive ReferencePower; the multiplier stays 1.0 forever", id));
+            out.add(Finding.warning(DOMAIN, "DEAD_POWER_SCALE",
+                    label + " authors a Tool.PowerScale with a null or nonpositive ReferencePower; the multiplier stays 1.0 forever", id));
         }
         String scaleGather = scale.getGatherType();
         boolean scaleGatherSet = scaleGather != null && !scaleGather.isBlank();
         if (!scaleGatherSet && (gatherFallback == null || gatherFallback.isBlank())) {
-            out.add(Finding.warning(DOMAIN, "XP_SCALE_NO_GATHER_TYPE",
-                    label + " authors a Tool.XpScale but neither XpScale.GatherType nor Tool.Gather.GatherType resolves; the scale never applies", id));
+            out.add(Finding.warning(DOMAIN, "POWER_SCALE_NO_GATHER_TYPE",
+                    label + " authors a Tool.PowerScale but neither PowerScale.GatherType nor Tool.Gather.GatherType resolves; the scale never applies", id));
         }
         if (scale.getMinMult() != null && scale.getMaxMult() != null && scale.getMinMult() > scale.getMaxMult()) {
-            out.add(Finding.error(DOMAIN, "XP_SCALE_BAD_CLAMP",
-                    label + " Tool.XpScale has MinMult > MaxMult (the clamp is inverted)", id));
+            out.add(Finding.error(DOMAIN, "POWER_SCALE_BAD_CLAMP",
+                    label + " Tool.PowerScale has MinMult > MaxMult (the clamp is inverted)", id));
         }
         if (scale.getExponent() != null && scale.getExponent() <= 0) {
-            out.add(Finding.warning(DOMAIN, "XP_SCALE_BAD_EXPONENT",
-                    label + " Tool.XpScale authors a nonpositive Exponent", id));
+            out.add(Finding.warning(DOMAIN, "POWER_SCALE_BAD_EXPONENT",
+                    label + " Tool.PowerScale authors a nonpositive Exponent", id));
         }
     }
 
@@ -1312,9 +1599,9 @@ public final class StationValidator {
      * in this file uses, one code, one meaning; every {@code Grants.DropList} (top-level or
      * per-floor) runs through {@code dropListKnown}; a {@code Grants.BonusOutputCopies} authored
      * under a non-{@code Cycle} {@link Roll#effectiveTrigger()} is flagged
-     * {@code LOOT_BONUS_COPIES_WRONG_TRIGGER}; and (scope-2, design 4.4) a Roll mixing the
-     * {@code mmoskilltree:station_luck} aggregate with a {@code stat}/{@code MMO_Luck*} factor in
-     * the SAME roll is flagged INFO {@code LOOT_DOUBLE_LUCK} via {@link #checkDoubleLuck}.
+     * {@code LOOT_BONUS_COPIES_WRONG_TRIGGER}; and a roll naming the same
+     * {@code (Factor, Param)} pair twice across its own reference sites is flagged INFO
+     * {@code LOOT_DUPLICATE_FACTOR} via {@link #checkDuplicateFactors}.
      */
     static void checkRoll(@Nullable Roll roll, @Nonnull String label, @Nonnull String id,
                           @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
@@ -1324,7 +1611,7 @@ public final class StationValidator {
         }
         String trigger = roll.effectiveTrigger();
         checkConditionFactors(roll.getConditions(), label + ".Conditions", id, factorKnown, out);
-        checkDoubleLuck(roll, label, id, out);
+        checkDuplicateFactors(roll, label, id, out);
 
         Roll.Chance chance = roll.getChance();
         if (chance != null) {
@@ -1368,62 +1655,74 @@ public final class StationValidator {
     }
 
     /**
-     * The either-or luck guard (scope-2 design 4.4, INFO-only best-effort): a single {@link Roll}
-     * SHOULD compose {@code stat} channels ({@code MMO_Luck}/{@code MMO_Luck_<skill>}, weighted)
-     * OR reference the {@code mmoskilltree:station_luck} convenience aggregate - never both. Scans
-     * {@code Conditions}/{@code Chance.AddFactors}/{@code Ladder.Values} for both signals.
+     * The generic redundant-reference lint (INFO-only, best-effort): one {@link Roll} naming the
+     * SAME {@code (Factor, Param)} pair more than once across its own {@code Conditions} /
+     * {@code Chance.AddFactors} / {@code Ladder.Values}. The engine can state that in its own
+     * terms - reading one number twice in one formula is nearly always an editing slip - without
+     * knowing what any particular factor MEANS.
+     *
+     * <p><b>Keyed on the PAIR, deliberately, and that is load-bearing.</b> Keying on the factor id
+     * alone would fire on correct content by construction: every stat read carries the same
+     * {@code "stat"} factor id, so a ladder composing two different stat channels (the documented
+     * equal-weight composition shape) would emit a spurious note at every boot. Only a genuinely
+     * repeated pair fires, which in practice means a param-less zero-arg engine factor named twice
+     * (e.g. {@code rpgstations:cycle_count} in both a Condition and a Chance.AddFactors entry).
+     *
+     * <p>Composition rules that depend on what specific ids MEAN - "these two ids are two views of
+     * the same underlying number, never compose both" - belong to whichever mod owns that
+     * vocabulary, and reach content through a registered {@code api.ValidationHook} (see
+     * {@link #runHooks}), never a branch in here naming a foreign id.
      */
-    private static void checkDoubleLuck(@Nonnull Roll roll, @Nonnull String label, @Nonnull String id,
-                                        @Nonnull List<Finding> out) {
-        boolean[] found = new boolean[2]; // [0] = station_luck seen, [1] = stat/MMO_Luck* seen
+    private static void checkDuplicateFactors(@Nonnull Roll roll, @Nonnull String label, @Nonnull String id,
+                                              @Nonnull List<Finding> out) {
+        Set<String> seen = new HashSet<>();
+        Set<String> reported = new HashSet<>();
         if (roll.getConditions() != null) {
             for (Condition c : roll.getConditions()) {
-                if (c == null) {
-                    continue;
+                if (c != null) {
+                    noteFactorPair(c.getFactor(), c.getParam(), seen, reported, label, id, out);
                 }
-                scanLuckSignal(c.getFactor(), c.getParam(), found);
             }
         }
         if (roll.getChance() != null) {
-            scanLuckFactorRefs(roll.getChance().getAddFactors(), found);
+            noteFactorRefPairs(roll.getChance().getAddFactors(), seen, reported, label, id, out);
         }
         if (roll.getLadder() != null) {
-            scanLuckFactorRefs(roll.getLadder().getValues(), found);
-        }
-        if (found[0] && found[1]) {
-            out.add(Finding.info(DOMAIN, "LOOT_DOUBLE_LUCK",
-                    label + " mixes the mmoskilltree:station_luck convenience aggregate with a stat/MMO_Luck*"
-                            + " factor in the same Roll - compose one or the other, never both (design 4.4)", id));
+            noteFactorRefPairs(roll.getLadder().getValues(), seen, reported, label, id, out);
         }
     }
 
-    private static void scanLuckFactorRefs(@Nullable FactorRef[] refs, @Nonnull boolean[] found) {
+    private static void noteFactorRefPairs(@Nullable FactorRef[] refs, @Nonnull Set<String> seen,
+                                           @Nonnull Set<String> reported, @Nonnull String label,
+                                           @Nonnull String id, @Nonnull List<Finding> out) {
         if (refs == null) {
             return;
         }
         for (FactorRef f : refs) {
-            if (f == null) {
-                continue;
+            if (f != null) {
+                noteFactorPair(f.getFactor(), f.getParam(), seen, reported, label, id, out);
             }
-            scanLuckSignal(f.getFactor(), f.getParam(), found);
         }
     }
 
-    private static void scanLuckSignal(@Nullable String factor, @Nullable String param, @Nonnull boolean[] found) {
+    /** Records one {@code (Factor, Param)} reference, reporting the FIRST repeat of each pair only. */
+    private static void noteFactorPair(@Nullable String factor, @Nullable String param, @Nonnull Set<String> seen,
+                                       @Nonnull Set<String> reported, @Nonnull String label, @Nonnull String id,
+                                       @Nonnull List<Finding> out) {
         if (factor == null || factor.isBlank()) {
             return;
         }
-        String f = factor.trim();
-        if ("mmoskilltree:station_luck".equalsIgnoreCase(f)) {
-            found[0] = true;
+        String normalizedFactor = factor.trim().toLowerCase(Locale.ROOT);
+        String normalizedParam = param == null ? "" : param.trim().toLowerCase(Locale.ROOT);
+        String pair = normalizedFactor + "|" + normalizedParam;
+        if (seen.add(pair) || !reported.add(pair)) {
             return;
         }
-        boolean statLuck = "stat".equalsIgnoreCase(f) && param != null
-                && param.toUpperCase(Locale.ROOT).startsWith("MMO_LUCK");
-        boolean directLuck = f.toUpperCase(Locale.ROOT).startsWith("MMO_LUCK");
-        if (statLuck || directLuck) {
-            found[1] = true;
-        }
+        out.add(Finding.info(DOMAIN, "LOOT_DUPLICATE_FACTOR",
+                label + " references (Factor '" + factor.trim() + "'"
+                        + (normalizedParam.isEmpty() ? ", no Param" : ", Param '" + param.trim() + "'")
+                        + ") more than once across its Conditions / Chance.AddFactors / Ladder.Values -"
+                        + " the same number is read twice in one roll", id));
     }
 
     private static void checkFloors(@Nonnull Roll.Ladder.Floor[] floors, @Nonnull String rollLabel,
@@ -1522,6 +1821,67 @@ public final class StationValidator {
             for (int i = 0; i < effects.length; i++) {
                 checkEffectRef(effects[i], label + ".Effects[" + i + "]", id, out);
             }
+        }
+        // A one-shot contribution rides the cycle-completed event, which only a Cycle trigger has -
+        // the same wrong-trigger shape BonusOutputCopies already warns for.
+        Contribution[] posts = grants.getContributions();
+        if (posts != null && posts.length > 0) {
+            if (!Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
+                out.add(Finding.warning(DOMAIN, "LOOT_CONTRIBUTION_WRONG_TRIGGER",
+                        label + " authors Grants.Contributions under a non-Cycle Trigger ('" + trigger
+                                + "') - there is no cycle event to forward the post on", id));
+            }
+            checkContributionChannels(posts, label + ".Contributions", id, out);
+            for (int i = 0; i < posts.length; i++) {
+                Contribution post = posts[i];
+                String postLabel = label + ".Contributions[" + i + "]";
+                if (post == null || post.getChannel() == null || post.getChannel().isBlank()) {
+                    out.add(Finding.warning(DOMAIN, "LOOT_CONTRIBUTION_MISSING_CHANNEL",
+                            postLabel + " has no Channel - the post is skipped", id));
+                    continue;
+                }
+                if (post.getAmount() == null || post.getAmount() <= 0) {
+                    out.add(Finding.warning(DOMAIN, "LOOT_CONTRIBUTION_NONPOSITIVE_AMOUNT",
+                            postLabel + " has a null or nonpositive Amount - the post is skipped", id));
+                }
+            }
+        }
+    }
+
+    /**
+     * The channel-vocabulary backstop, the exact mirror of {@code UNKNOWN_FACTOR} on the read side:
+     * a {@code Channel} nobody declared through {@code api.ContributionChannelRegistry} is almost
+     * always a typo, and a typo'd channel posts into a void forever without saying so.
+     *
+     * <p><b>WARN, fail-open, absolutely.</b> An undeclared channel is still forwarded verbatim on
+     * the cycle event - this note never blocks an asset load or a grant. It also fails open on an
+     * EMPTY declared set (no progression mod installed, or a unit JVM), so a jar-only server never
+     * manufactures a wall of notes about content that is working exactly as intended. The message
+     * echoes the declared set so a near-miss is obvious at a glance.
+     */
+    private static void checkContributionChannels(@Nullable Contribution[] posts, @Nonnull String label,
+                                                  @Nonnull String id, @Nonnull List<Finding> out) {
+        if (posts == null || posts.length == 0) {
+            return;
+        }
+        List<String> declared = ContributionChannelRegistryImpl.getInstance().registeredIds();
+        if (declared.isEmpty()) {
+            return;
+        }
+        Set<String> reported = new HashSet<>();
+        for (Contribution post : posts) {
+            if (post == null || post.getChannel() == null || post.getChannel().isBlank()) {
+                continue;
+            }
+            String channel = post.getChannel().trim();
+            if (ContributionChannelRegistryImpl.getInstance().isDeclared(channel)
+                    || !reported.add(channel.toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+            out.add(Finding.warning(DOMAIN, "UNKNOWN_CHANNEL",
+                    label + " posts to undeclared channel '" + channel + "' - it is still forwarded, but"
+                            + " nothing is listening for it by that name; declared channels are "
+                            + String.join(", ", declared), id));
         }
     }
 
@@ -1651,46 +2011,77 @@ public final class StationValidator {
         }
     }
 
+    /**
+     * Per-conversion structure over the decision-73 {@code Ingredient[]} Input/Output arrays: EVERY
+     * input entry must carry exactly one route and a positive quantity, EVERY output entry must be an
+     * exact item id. The duplicate-input check keys on the conversion's PRIMARY (first) input, which
+     * is what the runnable scan's first-match-wins ordering actually turns on.
+     */
     private static void checkConversions(@Nonnull StationAsset.Conversion[] conversions, @Nonnull String id,
                                          @Nonnull String label, @Nonnull List<Finding> out) {
         Set<String> seenInputs = new HashSet<>();
         for (int i = 0; i < conversions.length; i++) {
             StationAsset.Conversion c = conversions[i];
             String cLabel = label + " conversion[" + i + "]";
-            if (c == null || c.getInput() == null) {
+            if (c == null || c.getInput() == null || c.getInput().length == 0) {
                 out.add(Finding.error(DOMAIN, "MISSING_CONVERSION_INPUT",
                         cLabel + " has no Input", id));
                 continue;
             }
-            Ingredient in = c.getInput();
-            boolean hasItemId = in.getItemId() != null && !in.getItemId().isBlank();
-            boolean hasResource = in.getResourceTypeId() != null && !in.getResourceTypeId().isBlank();
-            if (!hasItemId && !hasResource) {
-                out.add(Finding.error(DOMAIN, "MISSING_CONVERSION_INPUT",
-                        cLabel + " Input has neither ItemId nor ResourceTypeId", id));
+            boolean inputsOk = true;
+            for (Ingredient in : c.getInput()) {
+                boolean hasItemId = in != null && in.getItemId() != null && !in.getItemId().isBlank();
+                boolean hasResource = in != null && in.getResourceTypeId() != null
+                        && !in.getResourceTypeId().isBlank();
+                if (!hasItemId && !hasResource) {
+                    out.add(Finding.error(DOMAIN, "MISSING_CONVERSION_INPUT",
+                            cLabel + " has an Input entry with neither ItemId nor ResourceTypeId", id));
+                    inputsOk = false;
+                    break;
+                }
+                if (hasItemId && hasResource) {
+                    out.add(Finding.error(DOMAIN, "AMBIGUOUS_CONVERSION_INPUT",
+                            cLabel + " has an Input entry setting both ItemId and ResourceTypeId (exactly one is required)", id));
+                    inputsOk = false;
+                    break;
+                }
+                if (in.getQuantity() != null && in.getQuantity() <= 0) {
+                    out.add(Finding.error(DOMAIN, "NONPOSITIVE_CONVERSION_COUNT",
+                            cLabel + " has a nonpositive Input Quantity", id));
+                }
+            }
+            if (!inputsOk) {
                 continue;
             }
-            if (hasItemId && hasResource) {
-                out.add(Finding.error(DOMAIN, "AMBIGUOUS_CONVERSION_INPUT",
-                        cLabel + " Input sets both ItemId and ResourceTypeId (exactly one is required)", id));
-                continue;
-            }
-            Ingredient outIng = c.getOutput();
-            if (outIng == null || outIng.getItemId() == null || outIng.getItemId().isBlank()) {
+            Ingredient[] outputs = c.getOutput();
+            if (outputs == null || outputs.length == 0) {
                 out.add(Finding.error(DOMAIN, "MISSING_CONVERSION_OUTPUT",
-                        cLabel + " has no Output.ItemId", id));
+                        cLabel + " has no Output", id));
                 continue;
             }
-            if (outIng.getResourceTypeId() != null && !outIng.getResourceTypeId().isBlank()) {
-                out.add(Finding.warning(DOMAIN, "OUTPUT_RESOURCE_TYPE",
-                        cLabel + " Output sets ResourceTypeId; an output must be an exact ItemId (the ResourceTypeId is ignored)", id));
+            boolean outputsOk = true;
+            for (Ingredient outIng : outputs) {
+                if (outIng == null || outIng.getItemId() == null || outIng.getItemId().isBlank()) {
+                    out.add(Finding.error(DOMAIN, "MISSING_CONVERSION_OUTPUT",
+                            cLabel + " has an Output entry with no ItemId", id));
+                    outputsOk = false;
+                    break;
+                }
+                if (outIng.getResourceTypeId() != null && !outIng.getResourceTypeId().isBlank()) {
+                    out.add(Finding.warning(DOMAIN, "OUTPUT_RESOURCE_TYPE",
+                            cLabel + " has an Output entry setting ResourceTypeId; an output must be an exact ItemId (the ResourceTypeId is ignored)", id));
+                }
+                if (outIng.getQuantity() != null && outIng.getQuantity() <= 0) {
+                    out.add(Finding.error(DOMAIN, "NONPOSITIVE_CONVERSION_COUNT",
+                            cLabel + " has a nonpositive Output Quantity", id));
+                }
             }
-            if ((in.getQuantity() != null && in.getQuantity() <= 0)
-                    || (outIng.getQuantity() != null && outIng.getQuantity() <= 0)) {
-                out.add(Finding.error(DOMAIN, "NONPOSITIVE_CONVERSION_COUNT",
-                        cLabel + " has a nonpositive item Quantity", id));
+            if (!outputsOk) {
+                continue;
             }
-            String inputRef = hasResource ? in.getResourceTypeId() : in.getItemId();
+            Ingredient primary = c.primaryInput();
+            String inputRef = primary.getResourceTypeId() != null && !primary.getResourceTypeId().isBlank()
+                    ? primary.getResourceTypeId() : primary.getItemId();
             if (!seenInputs.add(inputRef.toLowerCase(Locale.ROOT))) {
                 out.add(Finding.warning(DOMAIN, "DUPLICATE_CONVERSION_INPUT",
                         cLabel + " repeats input '" + inputRef
@@ -1712,22 +2103,25 @@ public final class StationValidator {
         long effectiveCycleMs = work.getCycleMs() != null && work.getCycleMs() > 0
                 ? work.getCycleMs() : StationService.DEFAULT_CYCLE_MS;
         checkIdle(work.getIdle(), effectiveCycleMs, id, label, out);
-        if (work.getXp() == null) {
+        Contribution[] posts = work.getPerCycleContributions();
+        if (posts == null) {
             return;
         }
-        for (StationAsset.WorkXp xp : work.getXp()) {
-            if (xp == null) {
+        checkContributionChannels(posts, label + " Work.PerCycleContributions", id, out);
+        for (int i = 0; i < posts.length; i++) {
+            Contribution post = posts[i];
+            if (post == null) {
                 continue;
             }
-            if (xp.getSkill() == null || xp.getSkill().isBlank()) {
-                out.add(Finding.warning(DOMAIN, "MISSING_XP_SKILL",
-                        label + " has a Work.Xp entry with no Skill", id));
+            if (post.getChannel() == null || post.getChannel().isBlank()) {
+                out.add(Finding.warning(DOMAIN, "MISSING_CONTRIBUTION_CHANNEL",
+                        label + " has a Work.PerCycleContributions entry with no Channel", id));
                 continue;
             }
-            if (xp.getPerCycle() != null && xp.getPerCycle() <= 0) {
-                out.add(Finding.warning(DOMAIN, "NONPOSITIVE_XP_PER_CYCLE",
-                        label + " has a nonpositive Work.Xp PerCycle for '" + xp.getSkill()
-                                + "' (the entry grants nothing)", id));
+            if (post.getAmount() != null && post.getAmount() <= 0) {
+                out.add(Finding.warning(DOMAIN, "NONPOSITIVE_CONTRIBUTION_AMOUNT",
+                        label + " Work.PerCycleContributions[" + i + "].Amount should be positive for "
+                                + describeContribution(post) + " (the entry posts nothing)", id));
             }
         }
     }
@@ -1746,9 +2140,9 @@ public final class StationValidator {
             out.add(Finding.warning(DOMAIN, "IDLE_NOT_DELAYED",
                     label + " authors Work.Idle.CycleMs below 2x the effective Work.CycleMs; the reader floors it, but the author should raise it", id));
         }
-        if (idle.getXpFraction() != null && (idle.getXpFraction() > 0.25 || idle.getXpFraction() <= 0)) {
+        if (idle.getFraction() != null && (idle.getFraction() > 0.25 || idle.getFraction() <= 0)) {
             out.add(Finding.warning(DOMAIN, "IDLE_FRACTION_RANGE",
-                    label + " authors a Work.Idle.XpFraction outside the tiny-value contract (0, 0.25]", id));
+                    label + " authors a Work.Idle.Fraction outside the tiny-value contract (0, 0.25]", id));
         }
     }
 
@@ -2194,9 +2588,11 @@ public final class StationValidator {
      * {@link #checkLootRef}), a {@code Repeat.AddFactors}/{@code Walk} check, and (design 9.5) a
      * {@code Stamp} phase's own coverage. Also flags {@code WALK_TARGET_UNKNOWN_ANCHOR}/
      * {@code STEP_AT_UNKNOWN_ANCHOR} (a {@code Walk.To}/{@code At} not matching {@code
-     * knownAnchorIds} or the reserved {@code "self"}), {@code WALK_REQUIRES_PUPPET} (any step
-     * authoring {@code Walk} when the resolved Puppet is not active - flagged once per action), and
-     * {@code WAVE3_PENDING} (a step authoring {@link StationStep#authorsWave3OnlyPhase()}).
+     * knownAnchorIds} or the reserved {@code "self"}), and {@code WALK_REQUIRES_PUPPET} (any step
+     * authoring {@code Walk} when the resolved Puppet is not active - flagged once per action).
+     * The multi-station seam (Walk/At/Produce.To:Custody) EXECUTES as of wave 3, so there is no
+     * longer a {@code WAVE3_PENDING}-style warn gating those phases - {@link
+     * StationStep#authorsWave3OnlyPhase()} is unused here now.
      */
     private static void checkSteps(@Nonnull StationStep[] steps,
             @Nonnull String actionLabel, @Nonnull String id, @Nonnull Predicate<String> dropListKnown,
@@ -2277,20 +2673,48 @@ public final class StationValidator {
 
             StationStep.Consume consume = step.getConsume();
             if (consume != null) {
-                boolean hasItemId = consume.getItemId() != null && !consume.getItemId().isBlank();
-                boolean hasResourceTypeId = consume.getResourceTypeId() != null && !consume.getResourceTypeId().isBlank();
-                if (!hasItemId && !hasResourceTypeId) {
+                if (consume.isEmpty()) {
                     out.add(Finding.warning(DOMAIN, "CONSUME_STEP_EMPTY",
-                            stepLabel + " authors a Consume phase with neither ItemId nor ResourceTypeId", id));
-                } else if (hasItemId && hasResourceTypeId) {
-                    out.add(Finding.warning(DOMAIN, "AMBIGUOUS_CONVERSION_INPUT",
-                            stepLabel + " Consume sets both ItemId and ResourceTypeId (exactly one is expected)", id));
+                            stepLabel + " authors a Consume phase with no Items", id));
+                } else {
+                    Map<String, Integer> consumeRefCounts = new LinkedHashMap<>();
+                    for (Ingredient item : consume.getItems()) {
+                        boolean hasItemId = item != null && item.getItemId() != null && !item.getItemId().isBlank();
+                        boolean hasResourceTypeId = item != null && item.getResourceTypeId() != null
+                                && !item.getResourceTypeId().isBlank();
+                        if (!hasItemId && !hasResourceTypeId) {
+                            out.add(Finding.warning(DOMAIN, "CONSUME_STEP_EMPTY",
+                                    stepLabel + " Consume has an item with neither ItemId nor ResourceTypeId", id));
+                        } else if (hasItemId && hasResourceTypeId) {
+                            out.add(Finding.warning(DOMAIN, "AMBIGUOUS_CONVERSION_INPUT",
+                                    stepLabel + " Consume has an item setting both ItemId and ResourceTypeId (exactly one is expected)", id));
+                        } else {
+                            String ref = hasResourceTypeId ? item.getResourceTypeId() : item.getItemId();
+                            consumeRefCounts.merge(ref.toLowerCase(Locale.ROOT), 1, Integer::sum);
+                        }
+                    }
+                    for (Map.Entry<String, Integer> e : consumeRefCounts.entrySet()) {
+                        if (e.getValue() > 1) {
+                            out.add(Finding.warning(DOMAIN, "CONSUME_DUPLICATE_ITEM_REF",
+                                    stepLabel + " Consume authors '" + e.getKey() + "' across " + e.getValue()
+                                            + " Items entries; their quantities are summed - combine them into one entry", id));
+                        }
+                    }
                 }
             }
             StationStep.Produce produce = step.getProduce();
-            if (produce != null && (produce.getItemId() == null || produce.getItemId().isBlank())) {
-                out.add(Finding.warning(DOMAIN, "PRODUCE_STEP_EMPTY",
-                        stepLabel + " authors a Produce phase with no ItemId", id));
+            if (produce != null) {
+                if (produce.isEmpty()) {
+                    out.add(Finding.warning(DOMAIN, "PRODUCE_STEP_EMPTY",
+                            stepLabel + " authors a Produce phase with no Items", id));
+                } else {
+                    for (Ingredient item : produce.getItems()) {
+                        if (item == null || item.getItemId() == null || item.getItemId().isBlank()) {
+                            out.add(Finding.warning(DOMAIN, "PRODUCE_STEP_EMPTY",
+                                    stepLabel + " Produce has an item with no ItemId", id));
+                        }
+                    }
+                }
             }
             LootRef roll = step.getRoll();
             if (roll != null) {
@@ -2327,8 +2751,8 @@ public final class StationValidator {
      * {@code STAMP_BUDGET_STRAY_FACTORS} for a {@code Factors[]} authored on a flat {@code Points}
      * route (silently ignored - only {@code PointsPer} engages {@code Factors}), and a
      * {@code Factors[]} unknown-factor check via {@link #checkFactorRefs} (the SAME
-     * {@code UNKNOWN_FACTOR} code the retired {@code SkillScaledBudget.Factor} check used to route
-     * through {@code STAMP_UNKNOWN_FACTOR} for - unified onto one code, one meaning).
+     * {@code UNKNOWN_FACTOR} code every other factor reference reports through - one code, one
+     * meaning, never a per-site {@code STAMP_UNKNOWN_FACTOR} twin).
      */
     private static void checkStamp(@Nonnull StationStep.Stamp stamp, @Nonnull String stepLabel,
             @Nonnull String id, @Nonnull Predicate<String> factorKnown, @Nonnull Predicate<String> rollPoolKnown,
@@ -2403,9 +2827,9 @@ public final class StationValidator {
 
     /**
      * Shared leaf check: station-scale playback ({@code StationService.emitMoment}) renders
-     * {@code Sound} + {@code Particles} + (new this leg) {@code Shake} - see that method's
-     * javadoc - so an authored {@code Animation}/{@code AnimationItem}/{@code AnimationSlot}/
-     * {@code Camera} leaf is dead weight.
+     * {@code Sound} + {@code Particles} + {@code Shake} + the two native-composition groups - see
+     * that method's javadoc - so an authored {@code Animation}/{@code AnimationItem}/
+     * {@code AnimationSlot}/{@code CameraEffect} leaf is dead weight.
      */
     private static void warnUnplayedPresentationLeaves(@Nullable Presentation p, @Nonnull String label,
                                                         @Nonnull String id, @Nonnull String code,
@@ -2414,10 +2838,10 @@ public final class StationValidator {
             return;
         }
         boolean hasUnplayedLeaf = notBlank(p.getAnimation()) || notBlank(p.getAnimationItem())
-                || notBlank(p.getAnimationSlot()) || notBlank(p.getCamera());
+                || notBlank(p.getAnimationSlot()) || notBlank(p.getCameraEffect());
         if (hasUnplayedLeaf) {
             out.add(Finding.warning(DOMAIN, code,
-                    label + " authors an Animation/AnimationItem/AnimationSlot/Camera leaf;"
+                    label + " authors an Animation/AnimationItem/AnimationSlot/CameraEffect leaf;"
                             + " station-scale playback renders Sound + Particles + Shake only", id));
         }
     }
@@ -2443,6 +2867,18 @@ public final class StationValidator {
      * already post-load) and {@code RpgStationsPlugin}'s ONE deferred post-load audit (first
      * {@code PlayerReadyEvent}, D4 fix). Per-fold auto-logging uses {@link #runStructuralAndLog}
      * instead - see {@link #validateStructural}'s javadoc for why.
+     *
+     * <p><b>On moving this trigger later than first {@code PlayerReadyEvent}:</b> the ONLY other
+     * candidate timing is {@code AllWorldsLoadedEvent} (it fires strictly before the first player
+     * can connect, so it would let a pack author see the full findings without needing a client to
+     * connect at all). The move is NOT safe to make on code inspection alone - it is gated on
+     * empirically re-running this full pass under that earlier event and confirming none of this
+     * validator's cross-layer reference checks (the ones structural-pass defers for exactly this
+     * reason) false-positive there, since an asset layer that has not finished folding by that
+     * point would manufacture a spurious finding. That confirmation needs a live server boot with
+     * every installed pack layer present, which cannot be produced from a build/unit-test run -
+     * until it has been run and shown clean, this method's caller stays on first
+     * {@code PlayerReadyEvent}.
      */
     public static void runAndLog() {
         Report.logTo(DOMAIN, "Station validation", validate());

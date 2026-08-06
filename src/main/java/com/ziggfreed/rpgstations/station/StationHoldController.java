@@ -31,12 +31,9 @@ import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * Policy-thin glue over ziggfreed-common for a station session's hold + camera + work emote.
- * Ported verbatim from the MMO's {@code station.StationHoldController} (RPG Stations
- * extraction leg 2), {@code SafeLog} severed to RpgStations' own {@code util.Log} - every
- * other call is the SAME common primitive the MMO already used (no severance needed there:
- * {@code ServerCameraService}/{@code EntityEffectService} are already {@code ziggfreed-common}
- * classes).
+ * Policy-thin glue over ziggfreed-common for a station session's hold + camera + work emote:
+ * every call below is a shared common primitive ({@code ServerCameraService}/
+ * {@code EntityEffectService}), with only the station-specific policy living here.
  *
  * <p><b>Hold mechanics (decay-as-release):</b> the hold {@code EntityEffect} is applied with a
  * SHORT fixed TTL ({@link #HOLD_TTL_SECONDS}) and re-applied every heartbeat under

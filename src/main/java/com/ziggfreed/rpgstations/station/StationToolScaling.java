@@ -9,20 +9,19 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
  * PURE decision cores for two station knobs, kept out of {@link StationService} so both are
- * unit-testable without the store, the live item map, or a running session. Ported verbatim
- * from the MMO's {@code station.StationToolScaling} (RPG Stations extraction leg 2).
+ * unit-testable without the store, the live item map, or a running session.
  *
  * <ul>
- *   <li><b>Tool-power XP scaling:</b> {@link #multiplier} implements
+ *   <li><b>Tool-power contribution scaling:</b> {@link #multiplier} implements
  *       {@code clamp((heldPower / ReferencePower) ^ Exponent, MinMult, MaxMult)} over a
- *       station's {@link StationAsset.Tool.XpScale}; {@link #heldPowerFor} is the pure spec
+ *       station's {@link StationAsset.Tool.PowerScale}; {@link #heldPowerFor} is the pure spec
  *       scan that {@code StationService} feeds from the held item's live
  *       {@code ItemTool.getSpecs()}.</li>
  *   <li><b>Idle practice cadence/fraction:</b> {@link #resolvedIdleCycleMs} and
- *       {@link #resolvedXpFraction} apply {@code Work.Idle}'s reader defaults/floor/clamp.</li>
+ *       {@link #resolvedIdleFraction} apply {@code Work.Idle}'s reader defaults/floor/clamp.</li>
  * </ul>
  *
- * <p>Zero-authoring neutrality throughout: a null/inactive {@link StationAsset.Tool.XpScale}
+ * <p>Zero-authoring neutrality throughout: a null/inactive {@link StationAsset.Tool.PowerScale}
  * or a held tool with no matching spec both resolve to multiplier 1.0.
  */
 public final class StationToolScaling {
@@ -34,7 +33,7 @@ public final class StationToolScaling {
     static final double DEFAULT_MIN_MULT = 0.5;
     static final double DEFAULT_MAX_MULT = 2.0;
 
-    static final double DEFAULT_IDLE_XP_FRACTION = 0.1;
+    static final double DEFAULT_IDLE_FRACTION = 0.1;
 
     private StationToolScaling() {
     }
@@ -57,14 +56,14 @@ public final class StationToolScaling {
         }
     }
 
-    // ==================== Tool-power XP scaling ====================
+    // ==================== Tool-power contribution scaling ====================
 
     /**
      * {@code clamp((heldPower / ReferencePower) ^ Exponent, MinMult, MaxMult)}. Neutral (1.0)
      * for a null {@code scale}, a null/nonpositive {@code ReferencePower}, or a nonpositive
      * {@code heldPower} (the {@link #NO_MATCH} sentinel from {@link #heldPowerFor}).
      */
-    static double multiplier(double heldPower, @Nullable StationAsset.Tool.XpScale scale) {
+    static double multiplier(double heldPower, @Nullable StationAsset.Tool.PowerScale scale) {
         if (scale == null || heldPower <= 0.0) {
             return 1.0;
         }
@@ -115,11 +114,11 @@ public final class StationToolScaling {
     }
 
     /**
-     * {@code Work.Idle.XpFraction}'s reader resolution: a null authored value resolves to
-     * {@link #DEFAULT_IDLE_XP_FRACTION} (0.1); any authored value is CLAMPED to {@code [0, 1]}.
+     * {@code Work.Idle.Fraction}'s reader resolution: a null authored value resolves to
+     * {@link #DEFAULT_IDLE_FRACTION} (0.1); any authored value is CLAMPED to {@code [0, 1]}.
      */
-    static double resolvedXpFraction(@Nullable Double authoredFraction) {
-        double v = authoredFraction != null ? authoredFraction : DEFAULT_IDLE_XP_FRACTION;
+    static double resolvedIdleFraction(@Nullable Double authoredFraction) {
+        double v = authoredFraction != null ? authoredFraction : DEFAULT_IDLE_FRACTION;
         if (v < 0.0) {
             return 0.0;
         }

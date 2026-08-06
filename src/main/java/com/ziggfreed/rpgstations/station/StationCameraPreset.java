@@ -7,8 +7,7 @@ import javax.annotation.Nullable;
 
 /**
  * Admin-iterable camera-recipe presets for the free-mouse-camera + locked-body
- * {@code FaceBlock} hunt. Ported verbatim from the MMO's {@code station.StationCameraPreset}
- * (RPG Stations extraction leg 2). No first-party-proven {@code ServerCameraSettings}
+ * {@code FaceBlock} hunt. No first-party-proven {@code ServerCameraSettings}
  * combination delivers BOTH a free mouse-orbitable camera and a locked player body/head at
  * once; each preset below is a distinct, documented experiment over the confirmed
  * {@code ServerCameraSettings} field catalog.

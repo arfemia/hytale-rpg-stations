@@ -10,6 +10,7 @@ import javax.annotation.Nullable;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.common.codec.TagMatch;
 
 /**
  * PURE, unit-testable decision cores for placed-input custody (design section 9.4, phase-2 leg
@@ -112,6 +113,44 @@ final class StationCustody {
     }
 
     /**
+     * PURE (decision 74): does {@code Custody.SingleFamily} allow this material into the claim?
+     *
+     * <p>{@code singleFamily} false (the default) always allows - materials mix freely. When true,
+     * an EMPTY claim allows anything the ordinary acceptance matcher passed, and a non-empty claim
+     * locks to the FIRST-placed item ({@link StationCustodyClaim#items()} is insertion-ordered, so
+     * the first key IS the first placement): the candidate is allowed only when it shares a resource
+     * -type FAMILY with that item, or is literally the same item id. That is the exclusivity a
+     * per-family quantity map could not express - "50 oak OR 50 pine, never 100 mixed" - and it
+     * lifts by itself the moment the claim empties.
+     *
+     * <p>An item with NO resource types falls back to exact-id equality, so a family-less material
+     * still locks its claim to itself rather than accidentally admitting everything.
+     */
+    static boolean acceptsFamily(boolean singleFamily, @Nullable StationCustodyClaim claim,
+            @Nullable String candidateItemId, @Nullable String[] candidateResourceTypeIds,
+            @Nonnull Function<String, String[]> resourceTypesOf) {
+        if (!singleFamily || claim == null || claim.items().isEmpty()) {
+            return true;
+        }
+        String lockedItemId = claim.items().keySet().iterator().next();
+        if (lockedItemId.equalsIgnoreCase(candidateItemId)) {
+            return true;
+        }
+        String[] lockedFamilies = resourceTypesOf.apply(lockedItemId);
+        if (lockedFamilies == null || lockedFamilies.length == 0 || candidateResourceTypeIds == null) {
+            return false;
+        }
+        for (String locked : lockedFamilies) {
+            for (String candidate : candidateResourceTypeIds) {
+                if (locked != null && locked.equalsIgnoreCase(candidate)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * The explicit {@link Custody#getInput()} placement matcher: {@code ActionInput}'s
      * ItemId/ResourceTypeId/Tags/Function routes (match = ANY route satisfied, the {@code Tool}/
      * {@code ActionInput} convention). SMOKE-FIX S4: the {@code Function} route now matches
@@ -140,23 +179,7 @@ final class StationCustody {
         if (wantFunction != null && !wantFunction.isBlank() && wantFunction.equalsIgnoreCase(heldFunction)) {
             return true;
         }
-        Map<String, String[]> wantTags = matcher.getTags();
-        if (wantTags != null && !wantTags.isEmpty() && heldTags != null && !heldTags.isEmpty()) {
-            for (Map.Entry<String, String[]> req : wantTags.entrySet()) {
-                String[] have = heldTags.get(req.getKey());
-                if (have == null || req.getValue() == null) {
-                    continue;
-                }
-                for (String want : req.getValue()) {
-                    for (String h : have) {
-                        if (want != null && want.equalsIgnoreCase(h)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
+        return TagMatch.matches(matcher.getTags(), heldTags);
     }
 
     /**
@@ -177,18 +200,35 @@ final class StationCustody {
     /**
      * The SINGLE-conversion half of {@link #matchesAnyConversionInput} (extracted for decision 66's
      * picker preview, which needs to know WHICH conversion a material satisfies rather than merely
-     * whether any does): does {@code heldItemId}/{@code heldResourceTypeIds} satisfy this one
-     * conversion's input? An {@code Ingredient} authors exactly one of {@code ResourceTypeId} (a
-     * native family - the sawmill's "any Trunk of this species") or {@code ItemId} (exact), and the
-     * family route wins when both are somehow present, matching the pre-extraction loop byte for
-     * byte. A null conversion or a conversion with no input never matches.
+     * whether any does): does {@code heldItemId}/{@code heldResourceTypeIds} satisfy ANY of this
+     * conversion's inputs? A multi-input conversion accepts each of its materials into custody
+     * independently (a station holding "2 planks + 1 nail" is loaded one material at a time), so the
+     * match is ANY-of, never all-of. A null conversion or one with no input never matches.
      */
     static boolean matchesConversionInput(@Nullable StationAsset.Conversion conversion,
             @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds) {
         if (conversion == null || conversion.getInput() == null) {
             return false;
         }
-        Ingredient in = conversion.getInput();
+        for (Ingredient in : conversion.getInput()) {
+            if (matchesIngredient(in, heldItemId, heldResourceTypeIds)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * PURE: does {@code heldItemId}/{@code heldResourceTypeIds} satisfy ONE {@link Ingredient}? An
+     * ingredient authors exactly one of {@code ResourceTypeId} (a native family - the sawmill's "any
+     * Trunk of this species") or {@code ItemId} (exact); the family route wins when both are somehow
+     * present, matching the pre-array loop byte for byte.
+     */
+    static boolean matchesIngredient(@Nullable Ingredient in, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds) {
+        if (in == null) {
+            return false;
+        }
         String resourceId = in.getResourceTypeId();
         if (resourceId != null && !resourceId.isBlank()) {
             if (heldResourceTypeIds != null) {

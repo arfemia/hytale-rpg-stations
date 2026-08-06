@@ -42,14 +42,16 @@ export default function ActionsAndStepsPage() {
   "convert": {
     "Input": { "ResourceTypeId": "Metal_Bars" },
     "Custody": { "MaxQuantity": 100, "States": { "Empty": "Default", "Loaded": "BarsPlaced" } },
-    "Work": { "CycleMs": 3800, "Xp": [{ "Skill": "SMITHING", "PerCycle": 6.0 }] },
+    "Work": { "CycleMs": 3800,
+              "PerCycleContributions": [ { "Channel": "yourmod:craft_quality", "Param": "IRON", "Amount": 6.0 } ] },
     "Recipe": { "Conversions": [ /* ...one entry per metal... */ ] }
   },
   "enhance": {
     "Input": { "Function": "Weapon" },
     "Custody": { "MaxQuantity": 1, "Input": { "Function": "Weapon" },
                  "States": { "Empty": "Default", "Loaded": "WeaponPlaced" } },
-    "Work": { "CycleMs": 600, "Repeat": false, "Xp": [{ "Skill": "SMITHING", "PerCycle": 25.0 }] },
+    "Work": { "CycleMs": 600, "Repeat": false,
+              "PerCycleContributions": [ { "Channel": "yourmod:craft_quality", "Param": "IRON", "Amount": 25.0 } ] },
     "Steps": [ /* the ritual - see below */ ]
   }
 }`}</code></pre>
@@ -139,9 +141,9 @@ export default function ActionsAndStepsPage() {
         presentation cue. The Anvil&apos;s hammer-strike ritual is three beats followed by the stamp:
       </p>
       <pre><code>{`"Steps": [
-  { "Id": "strike1", "Duration": { "Ms": 650 }, "Puppet": { "Clip": "MMO_Emote_Hammer" },
+  { "Id": "strike1", "Duration": { "Ms": 650 }, "Puppet": { "Clip": "RPG_Emote_Saw" },
     "Presentation": { "Sound": "SFX_Metal_Hit", "Particles": "Block_Gem_Sparks" } },
-  { "Id": "strike2", "Duration": { "Ms": 650 }, "Puppet": { "Clip": "MMO_Emote_Hammer" },
+  { "Id": "strike2", "Duration": { "Ms": 650 }, "Puppet": { "Clip": "RPG_Emote_Saw" },
     "Presentation": { "Sound": "SFX_Metal_Hit", "Particles": "Block_Gem_Sparks" } },
   { "Id": "settle",  "Duration": { "Ms": 900 } },
   { "Id": "stamp",   "Duration": { "Ms": 800 }, "Puppet": { "Prop": { "Source": "None" } },

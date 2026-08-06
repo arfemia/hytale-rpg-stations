@@ -30,11 +30,11 @@ final class StationAnchors {
     }
 
     /**
-     * The effective discovery radius: an authored {@code MaxRadius} rounded up, floored at 0 and
-     * capped at {@link #MAX_SCAN_RADIUS} (design 2.2's "MaxRadius capped 16").
+     * The effective discovery radius: an authored {@code MaxRadiusMeters} rounded up, floored at 0 and
+     * capped at {@link #MAX_SCAN_RADIUS} (design 2.2's "MaxRadiusMeters capped 16").
      */
-    static int cappedRadius(double maxRadius) {
-        int r = (int) Math.ceil(maxRadius);
+    static int cappedRadius(double maxRadiusMeters) {
+        int r = (int) Math.ceil(maxRadiusMeters);
         if (r < 0) {
             return 0;
         }

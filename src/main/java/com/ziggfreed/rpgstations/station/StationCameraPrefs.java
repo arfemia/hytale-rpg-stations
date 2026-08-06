@@ -9,8 +9,7 @@ import javax.annotation.Nullable;
 
 /**
  * TEMPORARY transient per-player preference for {@link StationCameraPreset} (the admin-
- * iterable camera-recipe hunt). Ported verbatim from the MMO's
- * {@code station.StationCameraPrefs} (RPG Stations extraction leg 2). In-memory ONLY - never
+ * iterable camera-recipe hunt). In-memory ONLY - never
  * persisted, never wired into any player-data seam. A live tuning knob for cycling candidate
  * camera recipes within one session (a future {@code /rpgstations camera <preset>}), not
  * player-facing data that should survive a restart.

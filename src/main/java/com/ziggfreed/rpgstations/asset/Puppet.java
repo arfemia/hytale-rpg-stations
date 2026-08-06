@@ -6,6 +6,8 @@ import javax.annotation.Nullable;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.ziggfreed.common.codec.Vec3;
 
 /**
  * The puppet presentation route (round-4 design, "mount the player, hide their player model, and
@@ -24,7 +26,7 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
  *   #hideByScale}/{@code #revealByScale}). The design doc's {@code "ModelSwap"} and
  *   {@code "HiddenManager"} routes are RETIRED this round (buggy / unproven) - {@link Hide} is a
  *   THREE-arm union discriminator now: {@code "Scale"} (default), {@code "Effect"} (FUTURE,
- *   schema-reserved - see {@link Hide#getEffectId()}), {@code "None"} (the degraded fallback,
+ *   schema-reserved - see {@link Hide#getEffect()}), {@code "None"} (the degraded fallback,
  *   puppet spawns but the real player stays visible).
  *   <li><b>{@link Look#getSource()} defaults {@code "PlayerClone"}</b> (the puppet clones the
  *   live player skin - the maintainer's literal "their character model"), with the knob left as
@@ -82,23 +84,29 @@ public final class Puppet {
     @Nullable protected Boolean enabled;
     @Nullable protected Hide hide;
     @Nullable protected Look look;
-    @Nullable protected Offset offset;
+    @Nullable protected Vec3 offset;
     @Nullable protected Double yaw;
     @Nullable protected Prop prop;
 
     public static final BuilderCodec<Puppet> CODEC = BuilderCodec.builder(Puppet.class, Puppet::new)
             .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
-                    (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled).add()
+                    (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled)
+            .documentation("Activates the whole puppet route (spawn + hide together). Reader-defaults to true when the group is authored at all; false = the classic in-body worker.").add()
             .appendInherited(new KeyedCodec<>("Hide", Hide.CODEC, false),
-                    (o, v) -> o.hide = v, o -> o.hide, (o, p) -> o.hide = p.hide).add()
+                    (o, v) -> o.hide = v, o -> o.hide, (o, p) -> o.hide = p.hide)
+            .documentation("How the real player's own body is hidden while the puppet performs.").add()
             .appendInherited(new KeyedCodec<>("Look", Look.CODEC, false),
-                    (o, v) -> o.look = v, o -> o.look, (o, p) -> o.look = p.look).add()
-            .appendInherited(new KeyedCodec<>("Offset", Offset.CODEC, false),
-                    (o, v) -> o.offset = v, o -> o.offset, (o, p) -> o.offset = p.offset).add()
+                    (o, v) -> o.look = v, o -> o.look, (o, p) -> o.look = p.look)
+            .documentation("The puppet's appearance: whose model it wears and where that model comes from.").add()
+            .appendInherited(new KeyedCodec<>("Offset", Vec3.CODEC, false),
+                    (o, v) -> o.offset = v, o -> o.offset, (o, p) -> o.offset = p.offset)
+            .documentation("The puppet's stance shift off the station's block-top anchor, facing-relative: X/Z are in the block's own horizontal frame (+Z = its front), Y is vertical.").add()
             .appendInherited(new KeyedCodec<>("Yaw", Codec.DOUBLE, false),
-                    (o, v) -> o.yaw = v, o -> o.yaw, (o, p) -> o.yaw = p.yaw).add()
+                    (o, v) -> o.yaw = v, o -> o.yaw, (o, p) -> o.yaw = p.yaw)
+            .documentation("The puppet's facing in degrees, facing-relative to the placed block's own yaw (the block facing folds in additively). Reader-defaults to 0 (faces the same way the block does).").add()
             .appendInherited(new KeyedCodec<>("Prop", Prop.CODEC, false),
-                    (o, v) -> o.prop = v, o -> o.prop, (o, p) -> o.prop = p.prop).add()
+                    (o, v) -> o.prop = v, o -> o.prop, (o, p) -> o.prop = p.prop)
+            .documentation("The item the puppet holds while performing.").add()
             .build();
 
     public Puppet() {
@@ -107,7 +115,7 @@ public final class Puppet {
     /** Java-side factory; sets the same fields the codec fills. */
     @Nonnull
     public static Puppet of(@Nullable Boolean enabled, @Nullable Hide hide, @Nullable Look look,
-            @Nullable Offset offset, @Nullable Double yaw, @Nullable Prop prop) {
+            @Nullable Vec3 offset, @Nullable Double yaw, @Nullable Prop prop) {
         Puppet p = new Puppet();
         p.enabled = enabled;
         p.hide = hide;
@@ -144,8 +152,17 @@ public final class Puppet {
         return look;
     }
 
+    /**
+     * The puppet's stance shift off the station's block-top anchor, as the shared {@link Vec3}
+     * group (each leaf independently nullable, default 0). {@code X}/{@code Z} are FACING-RELATIVE
+     * to the placed station block's own yaw - authored {@code +Z} is the block's FRONT,
+     * {@code +X} its right - so a rotated station carries its puppet's side around with it
+     * ({@code station.StationPuppetController#resolveWorldOffset}, the same convention
+     * {@code Custody.Display.Offset} follows). {@code Y} is vertical and never rotated. Identity
+     * at a default-orientation placement, so pre-existing tuned values are unchanged.
+     */
     @Nullable
-    public Offset getOffset() {
+    public Vec3 getOffset() {
         return offset;
     }
 
@@ -173,28 +190,31 @@ public final class Puppet {
      * The hide-route knob (design 3.3): {@link #route} is a UNION DISCRIMINATOR (not a mode - the
      * three arms route to structurally different mechanisms, the same shape as {@code
      * StationAsset.Hold.Mount.Surface}), round-4-narrowed to the two IN-GAME-PROVEN/reserved arms
-     * plus the degraded fallback. {@link #effectId} is read ONLY by the future {@code "Effect"}
-     * route (schema-reserved, unimplemented this leg - the shadowstep pointer: the MMO's dash
-     * ability applies the native {@code Portal_Teleport} {@code EntityEffect} (1000ms
-     * {@code TargetCaster}), which visually hides a player; a future station could author an
-     * effect id shaped like it here instead of the {@code "Scale"} mechanism).
+     * plus the degraded fallback. {@link #effect} is read ONLY by the future {@code "Effect"}
+     * route (schema-reserved, unimplemented this leg - the pointer: the native
+     * {@code Portal_Teleport} {@code EntityEffect} (1000ms {@code TargetCaster}) visually hides a
+     * player, so a future station could author an effect id shaped like it here instead of the
+     * {@code "Scale"} mechanism).
      */
     public static final class Hide {
         @Nullable protected String route;
-        @Nullable protected String effectId;
+        @Nullable protected EffectRef effect;
 
         public static final BuilderCodec<Hide> CODEC = BuilderCodec.builder(Hide.class, Hide::new)
                 .appendInherited(new KeyedCodec<>("Route", Codec.STRING, false),
-                        (o, v) -> o.route = v, o -> o.route, (o, p) -> o.route = p.route).add()
-                .appendInherited(new KeyedCodec<>("EffectId", Codec.STRING, false),
-                        (o, v) -> o.effectId = v, o -> o.effectId, (o, p) -> o.effectId = p.effectId).add()
+                        (o, v) -> o.route = v, o -> o.route, (o, p) -> o.route = p.route)
+                .documentation("How the puppeteer's own body is hidden: 'Scale' (default), 'Effect' (Hide.Effect), or 'None'.")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:hide-route"))).add()
+                .appendInherited(new KeyedCodec<>("Effect", EffectRef.CODEC, false),
+                        (o, v) -> o.effect = v, o -> o.effect, (o, p) -> o.effect = p.effect)
+                .documentation("The native EntityEffect reference the 'Effect' route applies to hide the body (id-ref-only, optional DurationMs).").add()
                 .build();
 
         @Nonnull
-        public static Hide of(@Nullable String route, @Nullable String effectId) {
+        public static Hide of(@Nullable String route, @Nullable EffectRef effect) {
             Hide h = new Hide();
             h.route = route;
-            h.effectId = effectId;
+            h.effect = effect;
             return h;
         }
 
@@ -203,9 +223,15 @@ public final class Puppet {
             return route;
         }
 
+        /**
+         * The native {@code EntityEffect} the {@link #HIDE_ROUTE_EFFECT} route applies, as the
+         * shared {@link EffectRef} {@code {Id, DurationMs?}} group - the ONE effect-reference
+         * vocabulary every other effect site in this schema already uses, rather than a bare id
+         * string. Read ONLY by that route; {@code null} leaves it inert.
+         */
         @Nullable
-        public String getEffectId() {
-            return effectId;
+        public EffectRef getEffect() {
+            return effect;
         }
 
         /**
@@ -250,7 +276,8 @@ public final class Puppet {
         public static final BuilderCodec<Look> CODEC = BuilderCodec.builder(Look.class, Look::new)
                 .appendInherited(new KeyedCodec<>("Source", Codec.STRING, false),
                         (o, v) -> o.source = v, o -> o.source, (o, p) -> o.source = p.source)
-                .documentation("The puppet appearance discriminator: 'PlayerClone' (default), 'Model' (Look.Model), or 'NpcRole' (Look.Role).").add()
+                .documentation("The puppet appearance discriminator: 'PlayerClone' (default), 'Model' (Look.Model), or 'NpcRole' (Look.Role).")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:look-source"))).add()
                 .appendInherited(new KeyedCodec<>("Model", Model.CODEC, false),
                         (o, v) -> o.model = v, o -> o.model, (o, p) -> o.model = p.model)
                 .documentation("The fixed-model appearance group (read only when Source is 'Model'); also carries the any-source FallbackModelId.").add()
@@ -384,13 +411,15 @@ public final class Puppet {
                 .documentation("The native Role asset id backing this performer (id-ref-only; required when Source is 'NpcRole').").add()
                 .appendInherited(new KeyedCodec<>("SkinSource", Codec.STRING, false),
                         (o, v) -> o.skinSource = v, o -> o.skinSource, (o, p) -> o.skinSource = p.skinSource)
-                .documentation("Whose appearance the Role NPC wears: 'PlayerClone' (default, cloned live player skin) or 'RoleDefault' (the role's own model).").add()
+                .documentation("Whose appearance the Role NPC wears: 'PlayerClone' (default, cloned live player skin) or 'RoleDefault' (the role's own model).")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:skin-source"))).add()
                 .appendInherited(new KeyedCodec<>("Persist", Codec.BOOLEAN, false),
                         (o, v) -> o.persist = v, o -> o.persist, (o, p) -> o.persist = p.persist)
                 .documentation("false (default) spawns the performer NonSerialized (transient); true reserves the persistent-hireling posture.").add()
                 .appendInherited(new KeyedCodec<>("SpeedMps", Codec.DOUBLE, false),
                         (o, v) -> o.speedMps = v, o -> o.speedMps, (o, p) -> o.speedMps = p.speedMps)
-                .documentation("Performer walk-speed override (m/s); null defers to the role asset's own MotionControllerWalk speed.").add()
+                .documentation("Performer walk-speed override (m/s); null defers to the role asset's own MotionControllerWalk speed.")
+                .addValidator(CodecWarnValidators.positive("Puppet.Look.Role.SpeedMps should be positive.")).add()
                 .build();
 
         @Nonnull
@@ -443,54 +472,6 @@ public final class Puppet {
     }
 
     /**
-     * A relative {@code X}/{@code Y}/{@code Z} shift off the station's block-top anchor, each leaf
-     * independently nullable (default 0). {@code X}/{@code Z} are FACING-RELATIVE to the placed
-     * station block's own yaw - authored {@code +Z} is the block's FRONT, {@code +X} its right - so
-     * a rotated station carries its puppet's side around with it ({@code station
-     * .StationPuppetController#resolveWorldOffset}, the same convention {@code Custody.Display
-     * .Offset} follows). {@code Y} is vertical and never rotated. Identity at a default-orientation
-     * placement, so pre-existing tuned values are unchanged.
-     */
-    public static final class Offset {
-        @Nullable protected Double x;
-        @Nullable protected Double y;
-        @Nullable protected Double z;
-
-        public static final BuilderCodec<Offset> CODEC = BuilderCodec.builder(Offset.class, Offset::new)
-                .appendInherited(new KeyedCodec<>("X", Codec.DOUBLE, false),
-                        (o, v) -> o.x = v, o -> o.x, (o, p) -> o.x = p.x).add()
-                .appendInherited(new KeyedCodec<>("Y", Codec.DOUBLE, false),
-                        (o, v) -> o.y = v, o -> o.y, (o, p) -> o.y = p.y).add()
-                .appendInherited(new KeyedCodec<>("Z", Codec.DOUBLE, false),
-                        (o, v) -> o.z = v, o -> o.z, (o, p) -> o.z = p.z).add()
-                .build();
-
-        @Nonnull
-        public static Offset of(@Nullable Double x, @Nullable Double y, @Nullable Double z) {
-            Offset o = new Offset();
-            o.x = x;
-            o.y = y;
-            o.z = z;
-            return o;
-        }
-
-        @Nullable
-        public Double getX() {
-            return x;
-        }
-
-        @Nullable
-        public Double getY() {
-            return y;
-        }
-
-        @Nullable
-        public Double getZ() {
-            return z;
-        }
-    }
-
-    /**
      * The held-prop knob (design 3.6, DRY over {@code Animation} - the work CLIP is NOT
      * re-declared here, only the prop): {@link #source} is a UNION DISCRIMINATOR defaulting to
      * {@link #PROP_SOURCE_MIRROR_HELD} (the puppet holds a copy of the player's live hotbar item).
@@ -507,11 +488,16 @@ public final class Puppet {
 
         public static final BuilderCodec<Prop> CODEC = BuilderCodec.builder(Prop.class, Prop::new)
                 .appendInherited(new KeyedCodec<>("Source", Codec.STRING, false),
-                        (o, v) -> o.source = v, o -> o.source, (o, p) -> o.source = p.source).add()
+                        (o, v) -> o.source = v, o -> o.source, (o, p) -> o.source = p.source)
+                .documentation("The held-prop discriminator: 'MirrorHeld' (default, copies the player's live hotbar item), 'ItemId' (a forced prop), or 'None' (empty hands).")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:prop-source"))).add()
                 .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
-                        (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId).add()
+                        (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId)
+                .documentation("The forced item id the puppet holds when Source is 'ItemId'; ignored by the other arms.").add()
                 .appendInherited(new KeyedCodec<>("Slot", Codec.STRING, false),
-                        (o, v) -> o.slot = v, o -> o.slot, (o, p) -> o.slot = p.slot).add()
+                        (o, v) -> o.slot = v, o -> o.slot, (o, p) -> o.slot = p.slot)
+                .documentation("Which hand the prop occupies: 'Hotbar' (main, default) or 'Utility' (off-hand).")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:prop-slot"))).add()
                 .build();
 
         @Nonnull

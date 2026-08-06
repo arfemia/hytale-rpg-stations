@@ -28,6 +28,7 @@ import com.ziggfreed.common.entity.performer.PropSpec;
 import com.ziggfreed.common.entity.performer.StationPerformer;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationStep;
+import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -522,7 +523,7 @@ final class StationPuppetController {
      * every in-game-tuned value shipped before this change renders BYTE-IDENTICALLY.
      */
     @Nonnull
-    static double[] resolveWorldOffset(@Nullable Puppet.Offset offset, double blockYawRadians) {
+    static double[] resolveWorldOffset(@Nullable Vec3 offset, double blockYawRadians) {
         double ox = offset != null && offset.getX() != null ? offset.getX() : 0.0;
         double oy = offset != null && offset.getY() != null ? offset.getY() : 0.0;
         double oz = offset != null && offset.getZ() != null ? offset.getZ() : 0.0;

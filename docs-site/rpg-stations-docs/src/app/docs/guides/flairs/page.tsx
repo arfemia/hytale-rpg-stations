@@ -24,8 +24,8 @@ export default function FlairsPage() {
       <p>
         A <strong>flair</strong> is a cosmetic <code>Presentation</code> overlay - a fancier sound, extra
         particles, a camera shake - that applies at a specific moment of a station&apos;s work loop, gated
-        behind a player unlocking it (through whatever progression mod grants unlocks; RPG Stations itself
-        never decides who has unlocked what). Flairs are purely presentational: they never change what a
+        behind a player unlocking it (through whatever mod registers a <code>FlairUnlockProvider</code>; RPG
+        Stations itself never decides who has unlocked what). Flairs are purely presentational: they never change what a
         station produces, only how it looks and sounds while doing it.
       </p>
 

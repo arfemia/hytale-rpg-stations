@@ -5,7 +5,7 @@ import Link from 'next/link'
 
 export const metadata: Metadata = {
   title: 'Loot & Factors',
-  description: 'The weighted conditional-loot vocabulary, the stat factor provider, and the either-or luck rule.',
+  description: 'The weighted conditional-loot vocabulary, the stat factor provider, and the no-double-counting rule.',
   openGraph: {
     title: 'Loot & Factors | RPG Stations Docs',
     description: 'Roll, Chance, Ladder, Grants, FactorRef, and how loot reads any native stat.',
@@ -44,8 +44,8 @@ export default function LootAndFactorsPage() {
   "Trigger": "Cycle",
   "Conditions": [ { "Factor": "rpgstations:cycle_count", "Min": 3 } ],
   "Chance":    { "BasePercent": 2, "AddFactors": [ { "Factor": "rpgstations:tool_power" } ], "CapPercent": 25 },
-  "Ladder":    { "Values": [ { "Factor": "stat", "Param": "MMO_Luck" },
-                              { "Factor": "stat", "Param": "MMO_Luck_WOODCUTTING" } ],
+  "Ladder":    { "Values": [ { "Factor": "stat", "Param": "YourMod_Luck" },
+                              { "Factor": "stat", "Param": "YourMod_Luck_Woods" } ],
                  "Floors": [ { "Min": 50,  "Grants": { "DropList": "SawmillFinds_T1" } },
                              { "Min": 100, "Grants": { "DropList": "SawmillFinds_T2" },
                                "Presentation": { "Sound": "SFX_Coins_Land" } } ] },
@@ -76,12 +76,12 @@ export default function LootAndFactorsPage() {
         <code>Values</code>, a step&apos;s <code>Repeat.AddFactors</code>, an enhancement budget&apos;s{' '}
         <code>Factors</code> - takes an array of <code>FactorRef</code>:
       </p>
-      <pre><code>{`{ "Factor": "stat", "Param": "MMO_Luck", "Weight": 1.0 }`}</code></pre>
+      <pre><code>{`{ "Factor": "stat", "Param": "YourMod_Luck", "Weight": 1.0 }`}</code></pre>
       <p>
         Composition is ALWAYS a flat weighted sum, <code>sum(resolve(Factor, Param) * Weight)</code> - there
         is deliberately no expression-tree DSL. <code>Weight</code> defaults to 1.0. An unregistered factor id
         resolves to 0 (fail-closed) rather than throwing, so a Roll referencing a factor from an uninstalled
-        progression mod just quietly contributes nothing.
+        mod just quietly contributes nothing.
       </p>
       <p>
         <code>Condition</code> is the sibling GATE shape (<code>{'{Factor, Param?, Min?, Max?}'}</code>) used
@@ -95,39 +95,49 @@ export default function LootAndFactorsPage() {
         <code>Param</code> is any native stat channel id, read straight off the player&apos;s live entity stat
         map - the same modifier-target read the engine itself already performs:
       </p>
-      <pre><code>{`{ "Factor": "stat", "Param": "MMO_Luck" }`}</code></pre>
+      <pre><code>{`{ "Factor": "stat", "Param": "Mana" }`}</code></pre>
       <p>
-        Because this reads the NATIVE stat substrate directly, <strong>any mod that writes a native stat
-        participates in loot formulas with zero bridge code</strong> - RPG Stations never needs to know MMO
-        Skill Tree (or any other progression mod) exists. See{' '}
-        <Link href="/docs/stat-channels/">Stat Channels</Link> for the full MMO channel-id table this composes
-        with, and the generic <code>Zig_Entity_Stats</code> tag any item can carry.
+        <code>Param</code> names a registered native <code>EntityStatType</code> - a vanilla one such as{' '}
+        <code>Mana</code>, or any channel another mod registers. Because this reads the NATIVE stat substrate
+        directly, <strong>any mod that writes a native stat participates in loot formulas with zero bridge
+        code</strong> - RPG Stations never needs to know that mod exists, and the <code>stat</code> factor has
+        no allowlist. An id nothing registers resolves to 0 (fail-closed), so a formula written for a mod that
+        is not installed just contributes nothing.
+      </p>
+      <H3 id="zig-entity-stats">Item-carried stat bonuses</H3>
+      <p>
+        <code>Zig_Entity_Stats</code> is a generic, mod-agnostic native item TAG (not a channel id) any item
+        asset can author, in the form <code>&quot;&lt;StatId&gt;:&lt;amount&gt;&quot;</code> (additive only).
+        It applies an item&apos;s tagged stat bonus to the same native stat channels the <code>stat</code>{' '}
+        factor reads, while the item is held - so a tag-stat tool and a Stamp-enhanced tool compose additively
+        against one formula with no bespoke per-mod parser.
       </p>
 
-      <H2 id="either-or-rule">The either-or luck rule</H2>
+      <H2 id="no-double-counting">Do not sum the same source twice</H2>
       <p>
-        When the MMO Skill Tree bridge is installed, it exposes one convenience AGGREGATE factor,{' '}
-        <code>mmoskilltree:station_luck</code>, which is defined as the exact same weighted composition of the
-        MMO&apos;s own luck channels a hand-authored formula would build with <code>stat</code> references
-        directly (e.g. <code>MMO_Luck</code> + <code>MMO_Luck_&lt;skill&gt;</code>). The rule is a hard
-        either-or per formula: <strong>compose <code>stat</code> channels yourself, OR reference the
-        aggregate - never both in the same Roll.</strong> Referencing both double-counts the same luck twice.
-        A validator check flags a Roll that mixes the aggregate with any <code>stat</code>/<code>MMO_Luck*</code>{' '}
-        factor as a best-effort guard, but the contract is ultimately an authoring discipline these docs state
-        plainly.
+        A mod that owns a family of stat channels often ALSO registers a convenience AGGREGATE factor - one id
+        that resolves to a documented weighted composition of those same channels. The rule is a hard
+        either-or per formula: <strong>compose the underlying <code>stat</code> channels yourself, OR
+        reference the aggregate - never both in the same Roll.</strong> Referencing both counts the same
+        source twice, and because both spellings are legitimate factor ids there is no way for this engine to
+        tell them apart: the ids differ, so nothing here can detect the overlap for you. It is an authoring
+        discipline, and the factor family&apos;s owner documents which aggregate maps to which channels.
       </p>
       <p>
-        The pack-side Sawmill luck ladder is the composition exemplar - it sums two weighted <code>stat</code>{' '}
-        channels directly rather than using the aggregate:
+        A <code>LOOT_DUPLICATE_FACTOR</code> validator INFO catches the narrower, always-wrong case: the SAME{' '}
+        <code>(Factor, Param)</code> pair referenced more than once inside one Roll (across its{' '}
+        <code>Conditions</code>, <code>Chance.AddFactors</code>, and <code>Ladder.Values</code>). Two{' '}
+        <code>stat</code> references with DIFFERENT <code>Param</code>s are a legitimate composition and never
+        fire it:
       </p>
       <pre><code>{`"Ladder": { "Values": [
-  { "Factor": "stat", "Param": "MMO_Luck", "Weight": 1.0 },
-  { "Factor": "stat", "Param": "MMO_Luck_WOODCUTTING", "Weight": 1.0 }
+  { "Factor": "stat", "Param": "YourMod_Luck",       "Weight": 1.0 },
+  { "Factor": "stat", "Param": "YourMod_Luck_Woods", "Weight": 1.0 }
 ], "Floors": [ /* ... */ ] }`}</code></pre>
 
       <H2 id="rpgstations-built-ins">RPG Stations&apos; own built-in factors</H2>
       <p>
-        Independent of any progression mod, RPG Stations registers its own session-scoped factors so its
+        Independent of any other mod, RPG Stations registers its own session-scoped factors so its
         jar-shipped standalone content stays fully rewarding with nothing else installed:{' '}
         <code>rpgstations:tool_power</code> (the currently held tool&apos;s power) and{' '}
         <code>rpgstations:cycle_count</code> (cycles completed so far this session) are the two the shipped

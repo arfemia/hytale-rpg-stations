@@ -21,7 +21,7 @@
           {
             "Min": 25,
             "Grants": { "DropList": "RPG_Station_Sawmill_T2" },
-            "Presentation": { "Sound": "SFX_Coins_Land", "Particles": "Block_Gem_Sparks" }
+            "Presentation": { "Sound": "SFX_Coins_Land", "Particles": [ { "SystemId": "Block_Gem_Sparks" } ] }
           }
         ]
       }

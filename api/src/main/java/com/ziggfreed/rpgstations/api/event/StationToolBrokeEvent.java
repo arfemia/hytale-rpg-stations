@@ -12,7 +12,7 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 /**
  * Fired synchronously on the shared Hytale event bus when the heartbeat detects the player's
  * held tool broke ({@code ItemStack.isBroken()}) mid-session, alongside the engine's own {@code
- * TOOL_BROKEN} stop (design section 3.1). Fired BEFORE the resulting {@link
+ * TOOL_BROKEN} stop. Fired BEFORE the resulting {@link
  * StationSessionCompletedEvent}.
  *
  * <p><b>Plain data</b> is always safe to retain; {@link #store()}/{@link #playerRef()} are valid

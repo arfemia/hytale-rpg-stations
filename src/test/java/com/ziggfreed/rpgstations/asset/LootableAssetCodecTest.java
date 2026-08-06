@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
-import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 
 /**
@@ -17,7 +16,8 @@ import com.hypixel.hytale.codec.util.RawJsonReader;
 public class LootableAssetCodecTest {
 
     private static LootableAsset decodeAsset(String body) throws Exception {
-        return LootableAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body), new ExtraInfo());
+        return LootableAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body),
+                new AssetExtraInfo<>(new AssetExtraInfo.Data(LootableAsset.class, "fixture", null)));
     }
 
     private static LootableAsset decodeWithParent(String body, LootableAsset parent, String key, String parentKey)

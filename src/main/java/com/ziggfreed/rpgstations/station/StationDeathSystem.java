@@ -12,12 +12,10 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * Ends any live station session BEFORE the respawn screen (design section 4.2 - RpgStations owns
- * its own teardown hooks; the MMO's pre-extraction equivalent, {@code
- * event.PlayerDeathEventSystem}'s station-stop call, was deleted in the phase-1 leg-5 bridge leg).
- * Camera reset must beat the respawn screen (the stranded-camera window); a no-op when no session
- * is live for the victim. Mirrors the MMO's own {@code DeathSystems.OnDeathSystem} shape (a proven
- * pattern, not invented here).
+ * Ends any live station session BEFORE the respawn screen (design section 4.2 - this mod owns
+ * its own teardown hooks). Camera reset must beat the respawn screen (the stranded-camera
+ * window); a no-op when no session is live for the victim. Extends the engine's own
+ * {@code DeathSystems.OnDeathSystem}, the first-party shape for this moment.
  */
 public class StationDeathSystem extends DeathSystems.OnDeathSystem {
 

@@ -1,5 +1,5 @@
 {
-  "$Comment": "The standalone RpgStations Sawmill work station block. Model reuses the vanilla Lumbermill bench. BlockType.Seats is the seat hold mode's mount anchor (StationAsset.Hold.Seat.Enabled); Offset stands the player back at working distance rather than seated inside the bench. Yaw 180: the engine adds a hard +180deg to the authored seat yaw, so 180 lands the worker facing the work surface. Shared id with the pack's own block: a pack renames its own block and overrides this jar default via load order.",
+  "$Comment": "The standalone RpgStations Sawmill work station block. Model reuses the vanilla Lumbermill bench. BlockType.Seats is the seat hold mode's mount anchor (StationAsset.Hold.Mount, Surface Block); Offset stands the player back at working distance rather than seated inside the bench. Yaw 180: the engine adds a hard +180deg to the authored seat yaw, so 180 lands the worker facing the work surface. Shared id with the pack's own block: a pack renames its own block and overrides this jar default via load order.",
   "TranslationProperties": {
     "Name": "items.RPG_Station_Sawmill.name",
     "Description": "items.RPG_Station_Sawmill.description"

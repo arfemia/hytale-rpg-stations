@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
  */
 class StationAnchorsTest {
 
-    // ==================== cappedRadius (design 2.2: authored MaxRadius, capped 16) ====================
+    // ==================== cappedRadius (design 2.2: authored MaxRadiusMeters, capped 16) ====================
 
     @Test
     void cappedRadius_roundsUpAndClampsTo16() {

@@ -76,8 +76,8 @@ const features = [
   {
     icon: Coins,
     title: 'Progression-Agnostic',
-    description: 'No progression of its own; any progression mod hooks the api artifact',
-    href: '/docs/integrations/',
+    description: 'No progression vocabulary of its own; any mod hooks the api artifact',
+    href: '/docs/extension-channels/',
   },
 ]
 
@@ -136,10 +136,10 @@ export default function Home() {
       <div className="p-6 mb-12 bg-dark-800 border border-primary-500/30 rounded-xl">
         <h2 className="text-lg font-semibold text-white border-none mb-2">Required Dependency</h2>
         <p className="text-dark-400 text-sm">
-          RPG Stations depends on <code>ZiggfreedCommon</code> only, never any other mod. Neither
-          RPG Stations nor a progression mod hard-depends on the other; the optional MMO Skill
-          Tree pairing reaches back through a soft extension surface (native events plus a typed
-          <code> api</code> artifact).
+          RPG Stations depends on <code>ZiggfreedCommon</code> only, never any other mod. An add-on
+          reaches in through a soft extension surface instead (native events plus a typed
+          <code> api</code> artifact), so neither side hard-depends on the other and each runs
+          unaffected when the other is absent.
         </p>
       </div>
 
@@ -158,8 +158,8 @@ export default function Home() {
         <Link href="/docs/schema/" className="text-primary-400 hover:text-primary-300">
           Schema Reference
         </Link>
-        <Link href="/docs/stat-channels/" className="text-primary-400 hover:text-primary-300">
-          Stat Channels
+        <Link href="/docs/extension-channels/" className="text-primary-400 hover:text-primary-300">
+          Extension Channels
         </Link>
         <Link href="/docs/changelog/" className="text-primary-400 hover:text-primary-300">
           Changelog / Patch Notes

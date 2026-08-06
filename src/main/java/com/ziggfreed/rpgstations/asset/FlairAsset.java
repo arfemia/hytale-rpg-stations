@@ -63,7 +63,7 @@ public final class FlairAsset implements JsonAssetWithMap<String, DefaultAssetMa
             .append(new KeyedCodec<>("Name", Codec.STRING, false),
                     (a, name) -> { /* no-op - id already comes from the filename */ },
                     a -> a.id)
-            .add()
+            .documentation("Ignored - the flair id comes from the asset filename, not this key. Kept as a schema field for editor display only.").add()
             .appendInherited(new KeyedCodec<>("Stations", new ArrayCodec<>(Codec.STRING, String[]::new), false),
                     (a, v) -> a.stations = v, a -> a.stations, (a, p) -> a.stations = p.stations)
             .documentation("Station ids this flair applies to; null/empty = every station.").add()

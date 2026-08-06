@@ -54,11 +54,11 @@ export default function SettingsPage() {
       <p>
         The session-summary panel renders after a work session stops: a header naming the station (its own
         icon, resolved from <code>Identity.Icon</code> or the block&apos;s own item id when omitted), the
-        session totals, any enhancement outcome rows (durability gained, stats rolled - MMO-agnostic; a bare
-        Anvil with no progression mod installed still reports its durability gain), and whatever additional
-        ledger rows a progression mod&apos;s own bridge chooses to add. See{' '}
-        <Link href="/docs/integrations/">Add-ons &amp; Integrations</Link> for what the MMO Skill Tree bridge
-        contributes to this panel when it is installed alongside RPG Stations.
+        session totals, any enhancement outcome rows (durability gained, stats rolled - a bare Anvil with no
+        other mod installed still reports its durability gain), and whatever additional ledger rows a
+        listening mod adds through a registered <code>SummaryEnricher</code>. See{' '}
+        <Link href="/docs/integrations/">Add-ons &amp; Integrations</Link> for that registry and the mods
+        known to use it.
       </p>
 
       <H2 id="why-an-asset-not-a-config">Why an asset, not a config file</H2>

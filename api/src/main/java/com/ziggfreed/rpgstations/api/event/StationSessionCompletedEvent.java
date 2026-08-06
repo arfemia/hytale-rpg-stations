@@ -12,11 +12,11 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 /**
  * Fired synchronously on the shared Hytale event bus for EVERY station session teardown, silent
- * stops included (design section 3.1) - the ONE unconditional cleanup signal a listener uses to
+ * stops included - the ONE unconditional cleanup signal a listener uses to
  * drop any per-session state it accumulated off {@link StationCycleCompletedEvent#sessionId()}.
  * Fired at the very end of {@code StationService}'s one idempotent {@code stop()} funnel, AFTER
  * the non-silent summary path (registered {@code SummaryEnricher}s included) and the completion
- * moment - see that funnel's ordering contract (design section 7.3).
+ * moment - see that funnel's ordering contract.
  *
  * <p>{@link #store()} and {@link #playerRef()} are {@code @Nullable}: a disconnect or
  * server-stop teardown ({@code StationService.stopFor}/{@code stopAll}) has no live {@code

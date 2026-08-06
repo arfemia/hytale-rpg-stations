@@ -44,7 +44,9 @@ export default function YourFirstStationPage() {
     "CycleMs": 4665,
     "MaxDurationMs": 600000,
     "Exclusive": true,
-    "Xp": [ { "Skill": "WOODCUTTING", "PerCycle": 8.0 } ]
+    "PerCycleContributions": [
+      { "Channel": "yourmod:crop_quality", "Param": "OAK", "Amount": 8.0 }
+    ]
   },
   "Recipe": {
     "FromCrafting": { "Categories": ["WoodPlanks"] }
@@ -71,7 +73,7 @@ export default function YourFirstStationPage() {
         above:
       </p>
       <ul>
-        <li><code>Work.Xp</code> is a bare progression <em>declaration</em> - RPG Stations never interprets it itself, it just forwards the ask on the cycle-completed event for whatever progression mod (if any) is listening.</li>
+        <li><code>Work.PerCycleContributions</code> posts an amount to a namespaced channel on every completed cycle, scaled by the tool multiplier. The channel id is opaque here; whichever mod declared it decides what the number means, and the station works exactly the same with nobody listening. Omit the whole array for a station that posts nothing. See <Link href="/docs/extension-channels/">Extension Channels</Link>.</li>
         <li><code>Recipe.FromCrafting</code> derives conversions from every native crafting recipe in the <code>WoodPlanks</code> category, instead of hand-listing every wood species. See <Link href="/docs/guides/native-composition/">Native Composition</Link>.</li>
         <li><code>Custody</code> opts this station into placed-input material loading (press <code>F</code> holding logs to place them, then press again to start working the pile). See <Link href="/docs/guides/custody-and-placed-display/">Custody &amp; Placed Display</Link>.</li>
         <li><code>Tool</code> requires holding a hatchet-family/Woods-gathering tool to start or keep working.</li>

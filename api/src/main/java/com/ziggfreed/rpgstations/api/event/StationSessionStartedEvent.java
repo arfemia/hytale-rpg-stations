@@ -72,7 +72,7 @@ public final class StationSessionStartedEvent implements IEvent<Void> {
         return stationId;
     }
 
-    /** The one action id phase 1 ever forwards ({@code "work"}); phase 2 adds multi-action ids. */
+    /** The resolved action id ({@code "work"} for a station with no {@code Actions} map). */
     @Nonnull
     public String actionId() {
         return actionId;

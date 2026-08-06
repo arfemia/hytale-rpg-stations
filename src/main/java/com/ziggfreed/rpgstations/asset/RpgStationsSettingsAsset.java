@@ -12,6 +12,8 @@ import com.hypixel.hytale.assetstore.map.JsonAssetWithMap;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.hypixel.hytale.codec.schema.metadata.ui.UIEditorSectionStart;
 
 /**
  * RpgStations' single engine-settings asset - design section 4.6: {@code
@@ -51,13 +53,15 @@ public final class RpgStationsSettingsAsset
             .append(new KeyedCodec<>("Name", Codec.STRING, false),
                     (a, name) -> { /* no-op - id already comes from the filename */ },
                     a -> a.id)
-            .add()
+            .documentation("Ignored - the settings asset id is always the fixed 'settings' id, not this key. Kept as a schema field for editor display only.").add()
             .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
                     (a, v) -> a.enabled = v, a -> a.enabled, (a, parent) -> a.enabled = parent.enabled)
-            .add()
+            .documentation("The engine master switch; false disables the whole RpgStations engine at the SettingsCatalog check. Reader-defaults to true.")
+            .metadata(new UIEditorSectionStart("Engine")).add()
             .appendInherited(new KeyedCodec<>("SummaryHud", SummaryHud.CODEC, false),
                     (a, v) -> a.summaryHud = v, a -> a.summaryHud, (a, parent) -> a.summaryHud = parent.summaryHud)
-            .add()
+            .documentation("The end-of-session summary panel's layout and lifetime.")
+            .metadata(new UIEditorSectionStart("Summary HUD")).add()
             .build();
 
     public RpgStationsSettingsAsset() {
@@ -103,26 +107,43 @@ public final class RpgStationsSettingsAsset
     public static final class SummaryHud {
         @Nullable protected Boolean enabled;
         @Nullable protected String position;
+        @Nullable protected Integer offsetX;
         @Nullable protected Integer offsetY;
         @Nullable protected Long ttlMs;
 
         public static final BuilderCodec<SummaryHud> CODEC = BuilderCodec.builder(SummaryHud.class, SummaryHud::new)
                 .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
-                        (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled).add()
+                        (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled)
+                .documentation("Whether the end-of-session summary panel shows at all; defaults to true.").add()
                 .appendInherited(new KeyedCodec<>("Position", Codec.STRING, false),
-                        (o, v) -> o.position = v, o -> o.position, (o, p) -> o.position = p.position).add()
+                        (o, v) -> o.position = v, o -> o.position, (o, p) -> o.position = p.position)
+                .documentation("A HudPosition preset id (e.g. 'top_center'); null or unknown falls back to the HUD's own default.")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:hud-positions"))).add()
+                .appendInherited(new KeyedCodec<>("OffsetX", Codec.INTEGER, false),
+                        (o, v) -> o.offsetX = v, o -> o.offsetX, (o, p) -> o.offsetX = p.offsetX)
+                .documentation("Horizontal pixel offset from the chosen Position preset; defaults to 0.").add()
                 .appendInherited(new KeyedCodec<>("OffsetY", Codec.INTEGER, false),
-                        (o, v) -> o.offsetY = v, o -> o.offsetY, (o, p) -> o.offsetY = p.offsetY).add()
+                        (o, v) -> o.offsetY = v, o -> o.offsetY, (o, p) -> o.offsetY = p.offsetY)
+                .documentation("Vertical pixel offset from the chosen Position preset.").add()
                 .appendInherited(new KeyedCodec<>("TtlMs", Codec.LONG, false),
-                        (o, v) -> o.ttlMs = v, o -> o.ttlMs, (o, p) -> o.ttlMs = p.ttlMs).add()
+                        (o, v) -> o.ttlMs = v, o -> o.ttlMs, (o, p) -> o.ttlMs = p.ttlMs)
+                .documentation("How long the summary panel stays on screen, in milliseconds.")
+                .addValidator(CodecWarnValidators.positive("SummaryHud.TtlMs should be positive.")).add()
                 .build();
 
         @Nonnull
         public static SummaryHud of(@Nullable Boolean enabled, @Nullable String position,
                 @Nullable Integer offsetY, @Nullable Long ttlMs) {
+            return of(enabled, position, null, offsetY, ttlMs);
+        }
+
+        @Nonnull
+        public static SummaryHud of(@Nullable Boolean enabled, @Nullable String position,
+                @Nullable Integer offsetX, @Nullable Integer offsetY, @Nullable Long ttlMs) {
             SummaryHud h = new SummaryHud();
             h.enabled = enabled;
             h.position = position;
+            h.offsetX = offsetX;
             h.offsetY = offsetY;
             h.ttlMs = ttlMs;
             return h;
@@ -136,6 +157,12 @@ public final class RpgStationsSettingsAsset
         @Nullable
         public String getPosition() {
             return position;
+        }
+
+        /** Horizontal pixel offset from the chosen {@link #position} preset; null = the HUD's own default. */
+        @Nullable
+        public Integer getOffsetX() {
+            return offsetX;
         }
 
         @Nullable

@@ -17,11 +17,8 @@ import com.ziggfreed.rpgstations.asset.Presentation;
  * layers ({@code StationAsset#getFlairs}, plus any standalone {@code asset.FlairAsset} folded
  * onto it - see {@link FlairCatalog#effectiveFlairsFor}); a grantor (any run-a-command reward
  * system) unlocks a flair id for a player, and {@link #effective} overlays every unlocked
- * flair's non-null leaves onto the station's base moment presentation, per LEAF. Ported verbatim
- * from the MMO's {@code station.StationFlairs} (RPG Stations extraction leg 2); {@code
- * asset.type.Presentation} severed to RpgStations' own {@link Presentation} (which drops
- * {@code Feedback} and gains {@link Presentation.Shake} - the overlay now folds {@code Shake}
- * instead of {@code Feedback}).
+ * flair's non-null leaves onto the station's base moment presentation, per LEAF. The overlay
+ * folds this mod's own {@link Presentation} shape, {@link Presentation.Shake} included.
  *
  * <p><b>Leg 4:</b> the single-provider {@code UnlockProvider}/{@code setProvider} seam is
  * RETIRED (design section 3.2/9.6) in favor of the api's {@link FlairUnlockRegistryImpl} UNION -
@@ -115,11 +112,11 @@ public final class StationFlairs {
         }
 
         String sound = base != null ? base.getSound() : null;
-        String particles = base != null ? base.getParticles() : null;
+        Presentation.ModelParticle[] particles = base != null ? base.getParticles() : null;
         String animation = base != null ? base.getAnimation() : null;
         String animationItem = base != null ? base.getAnimationItem() : null;
         String animationSlot = base != null ? base.getAnimationSlot() : null;
-        String camera = base != null ? base.getCamera() : null;
+        String cameraEffect = base != null ? base.getCameraEffect() : null;
         Presentation.Shake shake = base != null ? base.getShake() : null;
         boolean overlaidAny = false;
 
@@ -151,8 +148,8 @@ public final class StationFlairs {
             if (momentPresentation.getAnimationSlot() != null) {
                 animationSlot = momentPresentation.getAnimationSlot();
             }
-            if (momentPresentation.getCamera() != null) {
-                camera = momentPresentation.getCamera();
+            if (momentPresentation.getCameraEffect() != null) {
+                cameraEffect = momentPresentation.getCameraEffect();
             }
             if (momentPresentation.getShake() != null) {
                 shake = momentPresentation.getShake();
@@ -162,6 +159,6 @@ public final class StationFlairs {
         if (!overlaidAny) {
             return base;
         }
-        return Presentation.of(sound, particles, animation, animationItem, animationSlot, camera, shake);
+        return Presentation.of(sound, particles, animation, animationItem, animationSlot, cameraEffect, shake);
     }
 }

@@ -33,7 +33,7 @@ export default function ConceptsPage() {
         A <strong>station</strong> is one <code>StationAsset</code> JSON, one in-world block, and one
         registered interaction handler tying them together - a Sawmill, a Cutting Board, an Anvil. The asset
         declares the station&apos;s groups: <code>Identity</code> (name/desc/icon), <code>Work</code> (cycle
-        cadence and XP declarations), <code>Recipe</code>, <code>Hold</code> (how the player is held in
+        cadence and contribution declarations), <code>Recipe</code>, <code>Hold</code> (how the player is held in
         place), <code>Tool</code> (the held-tool gate), <code>Custody</code>, <code>Loot</code>,{' '}
         <code>Camera</code>, <code>Animation</code>, <code>Presentation</code>, <code>Requires</code>,{' '}
         <code>Puppet</code>, <code>Flairs</code>, and <code>Actions</code>.

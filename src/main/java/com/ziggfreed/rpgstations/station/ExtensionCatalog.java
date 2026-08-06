@@ -16,14 +16,18 @@ import javax.annotation.Nullable;
 
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
+import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Roll;
+import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.rpgstations.asset.StatRollEntry;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
+import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -32,16 +36,17 @@ import com.ziggfreed.rpgstations.util.Log;
  * wiring (always additive, no {@code PackControlAsset} infra); generalizes the {@code FlairCatalog
  * .effectiveFlairsFor} "resolve at read against the folded set, cached per fold generation" pattern.
  *
- * <p>{@link #applyToStationLoot}/{@link #applyToStationXp}/... are the read-side entry points: they
- * consult the extensions targeting a given id (sorted into {@link ExtensionAsset#APPLY_ORDER}) and
- * merge their payloads onto a base per the deterministic rules. The PURE merge cores
- * ({@link #mergeXp}/{@link #mergeLoot}/{@link #mergeConversions}/{@link #mergeRolls}/
+ * <p>{@link #applyToStationLoot}/{@link #applyToStationContributions}/... are the read-side entry
+ * points: they consult the extensions targeting a given id (sorted into
+ * {@link ExtensionAsset#APPLY_ORDER}) and merge their payloads onto a base per the deterministic
+ * rules. The PURE merge cores
+ * ({@link #mergeContributions}/{@link #mergeLoot}/{@link #mergeConversions}/{@link #mergeRolls}/
  * {@link #mergeEntries}/{@link #mergeActions}/{@link #mergeSteps}) are unit-tested without a live
  * catalog: same input set, any fold order -&gt; identical merged result.
  *
  * <p><b>Merge rules (design 1.8, decision 37):</b> ADDITIVE only; keyed collections (Actions,
- * Anchors) the BASE always wins a collision; unkeyed arrays (Xp, Conversions, Rolls, Entries,
- * LootRef) pure append in {@link ExtensionAsset#APPLY_ORDER}; ordered step insertion applies each
+ * Anchors) the BASE always wins a collision; unkeyed arrays (PerCycleContributions, Conversions,
+ * Rolls, Entries, LootRef) pure append in {@link ExtensionAsset#APPLY_ORDER}; ordered step insertion applies each
  * extension's insertions in {@code APPLY_ORDER} against a live working list (later extensions can
  * anchor on earlier-inserted step ids), a dangling {@code After}/{@code Before} anchor degrading to
  * {@code AtEnd}.
@@ -146,18 +151,24 @@ public final class ExtensionCatalog {
         return exts.isEmpty() ? base : mergeLoot(base, exts);
     }
 
-    /** The station's effective work-Xp: {@code base} plus every {@code Station}-targeted extension's {@code Xp}. */
+    /**
+     * The station's effective per-cycle contributions: {@code base} plus every
+     * {@code Station}-targeted extension's own {@code PerCycleContributions}.
+     */
     @Nullable
-    public StationAsset.WorkXp[] applyToStationXp(@Nonnull String stationId, @Nullable StationAsset.WorkXp[] base) {
+    public Contribution[] applyToStationContributions(@Nonnull String stationId, @Nullable Contribution[] base) {
         List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.STATION, stationId);
-        return exts.isEmpty() ? base : mergeXp(base, exts);
+        return exts.isEmpty() ? base : mergeContributions(base, exts);
     }
 
-    /** An action's effective work-Xp: {@code base} plus every {@code Action}-targeted extension's {@code Xp}. */
+    /**
+     * An action's effective per-cycle contributions: {@code base} plus every
+     * {@code Action}-targeted extension's own {@code PerCycleContributions}.
+     */
     @Nullable
-    public StationAsset.WorkXp[] applyToActionXp(@Nonnull String actionId, @Nullable StationAsset.WorkXp[] base) {
+    public Contribution[] applyToActionContributions(@Nonnull String actionId, @Nullable Contribution[] base) {
         List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId);
-        return exts.isEmpty() ? base : mergeXp(base, exts);
+        return exts.isEmpty() ? base : mergeContributions(base, exts);
     }
 
     /**
@@ -212,16 +223,19 @@ public final class ExtensionCatalog {
 
     // ==================== PURE merge cores (deterministic; unit-tested without a live catalog) ====================
 
-    /** Append every extension's {@code Xp} onto {@code base}, in {@code exts} order (already APPLY_ORDER-sorted). */
+    /**
+     * Append every extension's {@code PerCycleContributions} onto {@code base}, in {@code exts}
+     * order (already APPLY_ORDER-sorted).
+     */
     @Nullable
-    static StationAsset.WorkXp[] mergeXp(@Nullable StationAsset.WorkXp[] base,
+    static Contribution[] mergeContributions(@Nullable Contribution[] base,
             @Nonnull List<ExtensionAsset> exts) {
-        List<StationAsset.WorkXp> out = new ArrayList<>();
+        List<Contribution> out = new ArrayList<>();
         appendAll(out, base);
         for (ExtensionAsset ext : exts) {
-            appendAll(out, ext.getXp());
+            appendAll(out, ext.getPerCycleContributions());
         }
-        return out.isEmpty() ? base : out.toArray(new StationAsset.WorkXp[0]);
+        return out.isEmpty() ? base : out.toArray(new Contribution[0]);
     }
 
     /** Union {@code base}'s lootable refs + inline rolls with every extension's {@code Loot} (append order = APPLY_ORDER). */
@@ -314,7 +328,7 @@ public final class ExtensionCatalog {
                 firstNonNull(overlay.getEnabled(), base.getEnabled()),
                 overlayHide(base.getHide(), overlay.getHide()),
                 overlayLook(base.getLook(), overlay.getLook()),
-                overlayPuppetOffset(base.getOffset(), overlay.getOffset()),
+                overlayVec3(base.getOffset(), overlay.getOffset()),
                 firstNonNull(overlay.getYaw(), base.getYaw()),
                 overlayProp(base.getProp(), overlay.getProp()));
     }
@@ -329,7 +343,21 @@ public final class ExtensionCatalog {
         }
         return Puppet.Hide.of(
                 firstNonNull(overlay.getRoute(), base.getRoute()),
-                firstNonNull(overlay.getEffectId(), base.getEffectId()));
+                overlayEffectRef(base.getEffect(), overlay.getEffect()));
+    }
+
+    /** Per-leaf overlay of the shared {@code EffectRef} group ({@code Id}/{@code DurationMs}). */
+    @Nullable
+    private static EffectRef overlayEffectRef(@Nullable EffectRef base, @Nullable EffectRef overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return EffectRef.of(
+                firstNonNull(overlay.getId(), base.getId()),
+                firstNonNull(overlay.getDurationMs(), base.getDurationMs()));
     }
 
     @Nullable
@@ -375,20 +403,6 @@ public final class ExtensionCatalog {
     }
 
     @Nullable
-    private static Puppet.Offset overlayPuppetOffset(@Nullable Puppet.Offset base, @Nullable Puppet.Offset overlay) {
-        if (overlay == null) {
-            return base;
-        }
-        if (base == null) {
-            return overlay;
-        }
-        return Puppet.Offset.of(
-                firstNonNull(overlay.getX(), base.getX()),
-                firstNonNull(overlay.getY(), base.getY()),
-                firstNonNull(overlay.getZ(), base.getZ()));
-    }
-
-    @Nullable
     private static Puppet.Prop overlayProp(@Nullable Puppet.Prop base, @Nullable Puppet.Prop overlay) {
         if (overlay == null) {
             return base;
@@ -417,9 +431,11 @@ public final class ExtensionCatalog {
 
     /**
      * ONE per-leaf {@code Custody} overlay (PURE). THE load-bearing property: an overlay authoring
-     * only {@code Display} carries null {@code MaxQuantity}/{@code Input}/{@code States}, and a null
-     * leaf keeps the base's value - so re-skinning a station's placed-input visual can never silently
-     * disable its custody mechanics. A null {@code overlay} is the identity.
+     * only {@code Display} carries null {@code MaxQuantity}/{@code SingleFamily}/{@code Input}/
+     * {@code States}, and a null leaf keeps the base's value - so re-skinning a station's
+     * placed-input visual can never silently disable its custody mechanics. A null {@code overlay}
+     * is the identity. NOTE for whoever adds the NEXT {@code Custody} leaf: add it to this factory
+     * call in the same change, or an overlay silently drops it.
      */
     @Nullable
     static Custody overlayCustody(@Nullable Custody base, @Nullable Custody overlay) {
@@ -431,6 +447,7 @@ public final class ExtensionCatalog {
         }
         return Custody.of(
                 firstNonNull(overlay.getMaxQuantity(), base.getMaxQuantity()),
+                firstNonNull(overlay.getSingleFamily(), base.getSingleFamily()),
                 overlayInput(base.getInput(), overlay.getInput()),
                 overlayStates(base.getStates(), overlay.getStates()),
                 overlayDisplay(base.getDisplay(), overlay.getDisplay()));
@@ -485,39 +502,39 @@ public final class ExtensionCatalog {
             return overlay;
         }
         return Custody.Display.of(
-                overlayDisplayOffset(base.getOffset(), overlay.getOffset()),
+                overlayVec3(base.getOffset(), overlay.getOffset()),
                 firstNonNull(overlay.getScale(), base.getScale()),
                 overlayRotation(base.getRotation(), overlay.getRotation()));
     }
 
+    /** Per-leaf overlay of the ONE shared {@code Vec3} group, used at every offset site. */
     @Nullable
-    private static Custody.Display.Offset overlayDisplayOffset(@Nullable Custody.Display.Offset base,
-            @Nullable Custody.Display.Offset overlay) {
+    private static Vec3 overlayVec3(@Nullable Vec3 base, @Nullable Vec3 overlay) {
         if (overlay == null) {
             return base;
         }
         if (base == null) {
             return overlay;
         }
-        return Custody.Display.Offset.of(
+        return Vec3.of(
                 firstNonNull(overlay.getX(), base.getX()),
                 firstNonNull(overlay.getY(), base.getY()),
                 firstNonNull(overlay.getZ(), base.getZ()));
     }
 
+    /** Per-leaf overlay of the ONE shared {@code Rotation} group. */
     @Nullable
-    private static Custody.Display.Rotation overlayRotation(@Nullable Custody.Display.Rotation base,
-            @Nullable Custody.Display.Rotation overlay) {
+    private static Rotation overlayRotation(@Nullable Rotation base, @Nullable Rotation overlay) {
         if (overlay == null) {
             return base;
         }
         if (base == null) {
             return overlay;
         }
-        return Custody.Display.Rotation.of(
-                firstNonNull(overlay.getX(), base.getX()),
-                firstNonNull(overlay.getY(), base.getY()),
-                firstNonNull(overlay.getZ(), base.getZ()));
+        return Rotation.of(
+                firstNonNull(overlay.getYaw(), base.getYaw()),
+                firstNonNull(overlay.getPitch(), base.getPitch()),
+                firstNonNull(overlay.getRoll(), base.getRoll()));
     }
 
     /**
@@ -669,8 +686,8 @@ public final class ExtensionCatalog {
     @Nonnull
     static List<String> authoredPayloadKinds(@Nonnull ExtensionAsset ext) {
         List<String> out = new ArrayList<>();
-        if (ext.getXp() != null && ext.getXp().length > 0) {
-            out.add(ExtensionAsset.PAYLOAD_XP);
+        if (ext.getPerCycleContributions() != null && ext.getPerCycleContributions().length > 0) {
+            out.add(ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS);
         }
         if (ext.getLoot() != null) {
             out.add(ExtensionAsset.PAYLOAD_LOOT);

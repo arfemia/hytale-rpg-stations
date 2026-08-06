@@ -1,5 +1,5 @@
 {
-  "$Comment": "Icon intentionally omitted: StationService#blockItemIdAt already falls back to the anchor block's own BlockType id at engage time when Identity.Icon is absent/blank, and this jar's own default Sawmill block shares the same id (RPG_Station_Sawmill, filename = item id) - so the summary-HUD crest already shows the station's own block icon with zero duplicated id to drift, the same reasoning the pack's own Sawmill.json/Anvil.json use. Loot.Lootables is the unified LootRef group (asset.LootRef); Recipe here authors only FromCrafting, never Conversions. FromCrafting.Categories includes 'WoodPlanks', 'DecorativePlanks', and 'OrnatePlanks' - genuine native categories (every Wood_<Species>_{Planks,Decorative,Ornate}.json shares the same Wood_<Species>_Trunk ResourceTypeId input and the same 'Builders'/StructuralCrafting bench, only the recipe Category differs), so this is native-recipe composition, not invented content. The deriver surfaces 3 output categories per log species (33 total conversions); StationRecipeDeriver stamps each derived Conversion with its source category so the sneak+F picker can offer 'Planks'/'Decorative'/'Ornate' as the three choices for whatever log the player is holding - a single-log input, multiple valid outputs, exactly the picker's reason to exist. Balance-neutral: OutputPerInput stays the reader default (1), matching every derived category's own native OutputQuantity:1. A plain-F press with no picker selection defaults to the first authored FromCrafting.Categories entry - so the array order below (WoodPlanks first) is the default priority (the deriver's alphabetical output-id sort would otherwise make Decorative the first runnable). Reorder Categories to change the plain-F default; sneak+F still offers all three. This is resolved engine-side at the effective-category point (StationService#effectiveCategory), not the deriver sort, so the balance-neutral claim above stays true. The Puppet group, Custody.Display, and Work.CycleMs 4805 below are this jar's own shipped standalone defaults, tuned in-game so the standalone sawmill looks right with no pack installed: Puppet.Offset.Z 1.0 and Yaw 0.0 position the working puppet at the bench; Custody.Display.Offset.Y -0.1 embeds the placed log slightly into the bench top; Work.CycleMs 4805 is the tuned cadence. ExtensionAsset carries real Puppet/Custody keys with per-leaf overlay semantics, so a pack re-skinning this station authors only the leaves it re-tunes and inherits the rest of these defaults - see asset/ExtensionAsset.java rule 5 and station/ExtensionCatalog.java's overlayPuppet/overlayCustody.",
+  "$Comment": "Icon intentionally omitted: StationService#blockItemIdAt already falls back to the anchor block's own BlockType id at engage time when Identity.Icon is absent/blank, and this jar's own default Sawmill block shares the same id (RPG_Station_Sawmill, filename = item id) - so the summary-HUD crest already shows the station's own block icon with zero duplicated id to drift, the same reasoning the pack's own Sawmill.json/Anvil.json use. Loot.Lootables is the unified LootRef group (asset.LootRef); Recipe here authors only FromCrafting, never Conversions. FromCrafting.Categories includes 'WoodPlanks', 'DecorativePlanks', and 'OrnatePlanks' - genuine native categories (every Wood_<Species>_{Planks,Decorative,Ornate}.json shares the same Wood_<Species>_Trunk ResourceTypeId input and the same 'Builders'/StructuralCrafting bench, only the recipe Category differs), so this is native-recipe composition, not invented content. The deriver surfaces 3 output categories per log species (33 total conversions); StationRecipeDeriver stamps each derived Conversion with its source category so the sneak+F picker can offer 'Planks'/'Decorative'/'Ornate' as the three choices for whatever log the player is holding - a single-log input, multiple valid outputs, exactly the picker's reason to exist. Balance-neutral: OutputPerInput stays the reader default (1), matching every derived category's own native OutputQuantity:1. A plain-F press with no picker selection defaults to the first authored FromCrafting.Categories entry - so the array order below (WoodPlanks first) is the default priority (the deriver's alphabetical output-id sort would otherwise make Decorative the first runnable). Reorder Categories to change the plain-F default; sneak+F still offers all three. This is resolved engine-side at the effective-category point (StationService#effectiveCategory), not the deriver sort, so the balance-neutral claim above stays true. The Puppet group, Custody.Display, and Work.CycleMs 4805 below are this jar's own shipped standalone defaults, tuned in-game so the standalone sawmill looks right with no pack installed: Puppet.Offset.Z 1.0 and Yaw 0.0 position the working puppet at the bench; Custody.Display.Offset.Y -0.1 embeds the placed log slightly into the bench top; Work.CycleMs 4805 is the tuned cadence. ExtensionAsset carries real Puppet/Custody keys with per-leaf overlay semantics, so a pack re-skinning this station authors only the leaves it re-tunes and inherits the rest of these defaults - see asset/ExtensionAsset.java rule 5 and station/ExtensionCatalog.java's overlayPuppet/overlayCustody. Work declares no PerCycleContributions: this jar's content is progression-free by design, and a pack layers its own on through an ExtensionAsset. Tool.PowerScale is deliberately KEPT even with nothing to scale - the tool ladder is pre-wired and tuned, so a pack that appends contributions inherits a working power curve for free rather than re-deriving one.",
   "Identity": {
     "NameKey": "rpgstations.station.sawmill.name",
     "DescKey": "rpgstations.station.sawmill.desc"
@@ -8,11 +8,7 @@
     "CycleMs": 4805,
     "MaxDurationMs": 600000,
     "MaxMoveMeters": 1.5,
-    "Exclusive": true,
-    "Xp": [
-      { "Skill": "WOODCUTTING", "PerCycle": 8.0 },
-      { "Skill": "CRAFTING", "PerCycle": 4.0 }
-    ]
+    "Exclusive": true
   },
   "Recipe": {
     "FromCrafting": { "Categories": ["WoodPlanks", "DecorativePlanks", "OrnatePlanks"] }
@@ -45,7 +41,7 @@
   "Tool": {
     "Gather": { "GatherType": "Woods", "MinPower": 0.1 },
     "Tags": { "Family": ["Hatchet"] },
-    "XpScale": { "ReferencePower": 0.2, "MinMult": 0.5, "MaxMult": 3.0 },
+    "PowerScale": { "ReferencePower": 0.2, "MinMult": 0.5, "MaxMult": 3.0 },
     "Durability": { "PerCycle": 1 }
   },
   "Animation": {
@@ -58,7 +54,7 @@
       "Impact": {
         "DelayMs": 140,
         "Presentation": {
-          "Particles": "Block_Hit_Wood"
+          "Particles": [ { "SystemId": "Block_Hit_Wood" } ]
         }
       }
     }
@@ -68,6 +64,6 @@
   },
   "Completion": {
     "Sound": "SFX_Chest_Wooden_Open_Player",
-    "Particles": "Block_Gem_Sparks"
+    "Particles": [ { "SystemId": "Block_Gem_Sparks" } ]
   }
 }

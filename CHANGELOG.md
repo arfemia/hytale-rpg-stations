@@ -9,13 +9,13 @@ the version train ships.
 
 ## 1.0.0 (first public release)
 
-The diegetic interactive work-station engine, extracted out of the MMO Skill Tree jar into a
-standalone, richly self-sufficient mod: with RPG Stations alone installed, a station runs its full
-work loop (camera/hold/mount, tool gating, recipe conversion, conditional-lootable rolls, command
-rewards) with zero progression. The MMO Skill Tree mod reaches back through a soft extension
-surface (native events + typed registries, `api/`) to turn a work session into skill XP, luck, and
-mastery bonuses; neither mod hard-depends on the other. See `CLAUDE.md` for the full package-by-
-package reference and the origin story.
+A standalone, richly self-sufficient diegetic interactive work-station engine: with RPG Stations
+alone installed, a station runs its full work loop (camera/hold/mount, tool gating, recipe
+conversion, conditional-lootable rolls, command rewards) and needs no other mod. An add-on reaches
+in through a soft extension surface (native events + typed registries, `api/`): it registers
+factors a station's formulas read, and receives the contributions a station posts on each completed
+cycle. Neither side hard-depends on the other. See `CLAUDE.md` for the full package-by-package
+reference.
 
 ### Phase 1: extraction + the engine
 
@@ -25,7 +25,8 @@ package reference and the origin story.
   vocabulary (`Camera.Recipe`, an admin-iterable preset switch for the free-camera-vs-locked-body
   hunt), an effect-mode movement lock, and native block-mount seating (`Hold.Seat`) as the crowned
   answer for a held/facing worker.
-- Adds tool gating (native `Tags`/`Gather`/`Ids` routes) with optional tool-power XP scaling, and
+- Adds tool gating (native `Tags`/`Gather`/`Ids` routes) with optional tool-power contribution
+  scaling (`Tool.PowerScale`), and
   recipe derivation either authored (`Recipe.Conversions`) or derived from native crafting recipes
   (`Recipe.FromCrafting`), zero hand-authored conversions for a station like the Sawmill.
   Ships the standalone default Sawmill (native ids, jar-shipped) alongside the standalone
@@ -34,13 +35,13 @@ package reference and the origin story.
   factors, via a `FactorRegistry` other mods can extend), plus command rewards, so any third party
   integrates with zero code.
 - Adds validation (`StationValidator`, warn-only, never blocks) and a session-summary panel
-  (`ui/StationSummaryHud`) showing cycles, items consumed/produced, and (when a progression mod is
-  present) per-skill XP rows via a `SummaryEnricher`.
+  (`ui/StationSummaryHud`) showing cycles and items consumed/produced, plus whatever extra rows a
+  listening mod adds via a registered `SummaryEnricher`.
 - Adds the `api` extension-surface artifact (frozen once 1.0.0 releases): native Hytale events for
   observe-only moments (session started/cycle completed/session completed/tool broke) and typed
-  registries for request/response points (`FactorRegistry`, `FlairUnlockRegistry`,
-  `SummaryEnricherRegistry`), the mechanism the MMO bridge (`integration/stations/` in the MMO jar)
-  consumes to reach back without either mod manifest-depending on the other.
+  registries for request/response points (`FactorRegistry`, `ContributionChannelRegistry`,
+  `FlairUnlockRegistry`, `SummaryEnricherRegistry`, `ValidationHookRegistry`), the mechanism an
+  add-on consumes to reach back without either mod manifest-depending on the other.
 - Adds `/rpgstations camera <preset>|list` (tune the camera-recipe preset) and `/rpgstations
   validate` (run the station content validator), admin-gated.
 - Ships 9-locale `rpgstations.lang` (all UI/command strings key-complete across every shipped
@@ -79,9 +80,9 @@ package reference and the origin story.
   or pack ship a cosmetic flair layer for a station without touching that station's own JSON.
 - Adds the anvil arc's `Stamp` step: a composable roll+cap engine for rolling stat entries onto a
   placed item (`RollPool` Pattern A store, a shared `StatRollEntry` codec, weighted-pick/unique
-  selection, and a composable cap model - per-item budget, per-stat caps, skill-scaled budget, all
-  independently authorable) plus a registered `EnhanceStamper` api contract (`inspect`/`apply`) a
-  progression mod implements to read/write its own item-enhancement format. Compute-then-commit:
+  selection, and a composable cap model - weighted `Budgets` entries, per-stat caps, and repeat-cost
+  economics, all independently authorable) plus a registered `EnhanceStamper` api contract
+  (`inspect`/`apply`) a mod implements to read/write its own item-enhancement format. Compute-then-commit:
   every roll/cap/availability check runs with zero mutation first, so a cancelled or failed ritual
   never partially consumes reagents or partially mutates the placed item.
 
@@ -108,15 +109,15 @@ defects, all fixed with no design change:
   had folded the very reference it was checking. `StationValidator` now runs two passes: a
   structural-only pass at every fold (`validateStructural`/`runStructuralAndLog`, safe regardless
   of load order), and the FULL pass (incl. every cross-layer reference-existence check) ONCE,
-  post-load, from a new first-`PlayerReadyEvent` hook (`RpgStationsPlugin.registerPostLoadAudit`,
-  mirroring the MMO's own `ContentAudit` startup-audit timing) - `/rpgstations validate` (already
+  post-load, from a new first-`PlayerReadyEvent` hook (`RpgStationsPlugin.registerPostLoadAudit`)
+  - `/rpgstations validate` (already
   post-load) is unaffected. The lang-key check itself is now a MERGED view: a miss against the
   jar's own hand-maintained key set falls through to a live `I18nModule.getMessage` query, so a
   pack's own additive `rpgstations.lang` overlay resolves correctly.
 
 See `station/CLAUDE.md`'s Validation bullet for the full detail; the sibling pack fixes (the
-anvil's redundant `Camera.FaceBlock`, the missing `MMO_Sharpened_Bar` `ResourceType` asset) and
-the MMO-side bridge presence-check hardening live in their own repos' history.
+anvil's redundant `Camera.FaceBlock`, a missing reagent `ResourceType` asset) and the consumer-side
+bridge presence-check hardening live in their own repos' history.
 
 Status: build-green throughout (Java + tests); the phase-1 parity gate and the phase-2 smoke round
 (design doc section 11; the mod-root `CLAUDE.md`'s Phase 2 section) are both maintainer in-game
@@ -137,8 +138,8 @@ smoke passes still batched/pending as of this entry.
   those call sites duplicated) replaces `LootEngine`'s own private `storageContainerOf` and backs
   every other site. Zero `@SuppressWarnings("deprecation")` anywhere; `ziggfreed-common`'s
   arc-touched files (`cast/CastKernel`/`StepSemantics`, `i18n/Msg`, `ui/hud/KeyedCustomHud`,
-  `ui/rows/SummaryRow*`) and the MMO's `integration/stations`/`station` packages were audited via
-  a `-Xlint:deprecation` compile and carried zero deprecated calls to begin with.
+  `ui/rows/SummaryRow*`) were audited via a `-Xlint:deprecation` compile and carried zero
+  deprecated calls to begin with.
 
 ### Round-5: item-grant UX refinements (maintainer in-game, 2026-07-22)
 
@@ -170,21 +171,21 @@ policy):
 
 Fixes and additions from the maintainer's round-7 in-game smoke, scoped to this mod (D-1 the
 placed-prop rotation, D-4 the item-gain toast copy, D-6 the enhancement session-summary + api
-outcome; the sibling CustomSkill migration and XP-toast-stacking defects land MMO-side).
+outcome; the sibling toast-stacking defects land in the consumer mod's own repo).
 
-- Adds a nested `Custody.Display.Rotation` `{X, Y, Z}` degrees group (D-1), replacing the single
-  scalar world-space yaw: the placed prop can now tip about all three axes (`X` pitch lays a placed
-  weapon flat on an anvil, `Y` yaw turns it, `Z` roll tips it sideways), applied to the prop's
+- Adds a nested `Custody.Display.Rotation` `{Yaw, Pitch, Roll}` degrees group (D-1), replacing the
+  single scalar world-space yaw: the placed prop can now tip about all three axes (`Pitch` lays a
+  placed weapon flat on an anvil, `Yaw` turns it, `Roll` tips it sideways), applied to the prop's
   `TransformComponent` on both spawn routes and mirrored onto `HeadRotation` for the item-entity
   route. The retired scalar form is tolerated on load - a stale bare-number `Rotation` decodes as
   the legacy Y-only yaw with a WARN naming the migration, never aborting the asset load.
-- Adds an MMO-agnostic enhancement outcome to the session summary and the `api` (D-6): a Stamp step
+- Adds a vocabulary-agnostic enhancement outcome to the session summary and the `api` (D-6): a Stamp step
   now records what it actually applied (the provider's own opaque per-stat report PLUS immutable
   before/after item snapshots) and reports it two ways - one `ENHANCE` summary row per stat
   (rendered verbatim, the provider owns the vocabulary/wording/color) plus one engine-owned
   `Durability +N` row (durability is RpgStations-native, so a bare anvil with no stamper still
   reports its enhancement) - and a new native `StationEnhanceCompletedEvent` carrying both reporting
-  shapes for any future consumer, with zero MMO stat vocabulary entering this mod. The
+  shapes for any future consumer, with zero foreign stat vocabulary entering this mod. The
   `EnhanceStamper.apply` contract now returns a `StampResult` (mutated stack + `EnhanceLine` report)
   instead of a bare stack (a pre-1.0.0 api reshape). New key `ui.station.summary.enhance_durability`.
 - Fixes the live item-gain toast to read exactly like a native pickup (D-4): the produced/lucky
@@ -199,7 +200,7 @@ outcome; the sibling CustomSkill migration and XP-toast-stacking defects land MM
   are now relative to the placed station block's own facing yaw instead of absolute world axes.
   `StationCustodyDisplay` reads the block's non-deprecated `getBlockRotationIndex` yaw at spawn,
   rotates the horizontal `Offset` (X/Z) by it (authored `+Z` = toward the block's FRONT, `+X` = its
-  right; `Y` stays vertical), and adds the block yaw into `Rotation.Y`, so a rotated station carries
+  right; `Y` stays vertical), and adds the block yaw into `Rotation.Yaw`, so a rotated station carries
   its display prop's position AND facing around with it. A default-orientation placement (yaw 0) is
   the identity, so every pre-round-8 authored value renders byte-identically (no pack re-tune
   needed); a failed block-facing read degrades gracefully to the prior world-space behavior and
@@ -216,13 +217,13 @@ outcome; the sibling CustomSkill migration and XP-toast-stacking defects land MM
   engage via `StationStepDecisions.programAuthorsAnyStepClip`) so the step-entry clips are the sole
   animation driver and never double-fire on top of a generic swing; a stepped program with NO step
   clips keeps its one generic engage swing, and the puppet prop-sync path is unaffected. The shipped
-  anvil's Enhance ritual authors `MMO_Emote_Hammer` on its `strike1`/`strike2` steps so the puppet
-  visibly hammers on both strike beats (content ships in `content-packs/skill-stations-pack`).
+  anvil's Enhance ritual authors a hammer clip on its `strike1`/`strike2` steps so the puppet
+  visibly hammers on both strike beats (that content ships in its own pack, not in this jar).
 - Removes the temporary `[D77DIAG]` enhance-timing instrumentation after it proved the stepped-
   ritual timing correct: every `[D77DIAG]` `Log.info`/`Log.warn` line across `StationService`/
   `StationStepHandlers` plus the per-player resume-log throttle map is gone (same one-sweep-removable
   pattern as the retired `[SMOKEDIAG]` lines). The functional changes that landed alongside it stay:
-  instant dispatch for a non-repeating authored Steps program (`Work.Repeat: false`, e.g. the anvil's
+  instant dispatch for a non-repeating authored Steps program (`Work.Looping: false`, e.g. the anvil's
   Enhance, fires its first and only cycle immediately at engage instead of waiting a full
   `Work.CycleMs` - a ritual runs once, so the pre-delay was pure latency; a repeating program is
   unaffected), the explicit `dispatchProgram` `resuming` flag with fresh-dispatch `stepDeadlineMs`
@@ -234,7 +235,7 @@ outcome; the sibling CustomSkill migration and XP-toast-stacking defects land MM
 - Fixes the anvil Enhance summary omitting a consumed row for the reagents the ritual ate: the
   `Stamp` step drains its reagents (the sharpened bars) directly through `consumeReagent`, which only
   built a restore-on-failure list and never recorded into the session's `consumedItems` ledger, so
-  the summary showed the Smithing XP, enhancement stat, and durability rows but NO consumed row. The
+  the summary showed the enhancement stat and durability rows but NO consumed row. The
   `StampHandler` now tallies its committed reagents into the SAME `s.consumedItems` ledger the
   implicit-program `Consume` step feeds (recorded only after `claim.setUniqueStack`, the commit's
   point of no return, so a restore-on-failure refund is never counted as consumed), and
@@ -254,15 +255,15 @@ outcome; the sibling CustomSkill migration and XP-toast-stacking defects land MM
 - Adds a unified `LootRef` (`{Lootables[], Rolls[]}`) that `StationAsset.Loot`, `ActionDef.Loot`,
   and a step's `Roll` phase all share, and reshapes the Stamp step's stat-roll caps onto a weighted
   `FactorRef` budget vocabulary (`Budgets[]`) that also drives loot chances and roll magnitudes -
-  one factor vocabulary composes everywhere a number needs to scale off tool power, skill level, or
-  any other session-derived signal.
+  one factor vocabulary composes everywhere a number needs to scale off tool power, a native stat,
+  or any other registered signal.
 - Adds `ActionAsset` (`Server/RpgStations/Actions/*.json`): a station's `Actions` map entry can
   `Ref` a reusable, independently authored action instead of always inlining one, so several
   stations can share one job definition.
 - Adds `ExtensionAsset` (`Server/RpgStations/Extensions/*.json`): the one additive extension
-  mechanism a fourth-party pack uses to append a loot reference, an extra ritual step, or a new
-  skill's XP ask onto another pack's station, action, lootable, or roll pool, without owning or
-  replacing that pack's original file (base always wins a key collision).
+  mechanism a fourth-party pack uses to append a loot reference, an extra ritual step, or a
+  contribution on a new channel onto another pack's station, action, lootable, or roll pool,
+  without owning or replacing that pack's original file (base always wins a key collision).
 - Adds the multi-station seam: a step program can author `Walk`/`At` to reach out to a second,
   separately-placed station nearby and `Produce.To: "Custody"` to deposit its output straight into
   that station's placed-input slot instead of a player's backpack. `ActionDef.Anchors` discovers and
@@ -298,11 +299,135 @@ outcome; the sibling CustomSkill migration and XP-toast-stacking defects land MM
   overlays layering correctly onto a base station, and sawmill presentation parity after the step
   reshape (three maintainer smoke-fix rounds, decisions 57 through 67 in the design log).
 
+### Pre-release schema + authoring pass (2026-08-05)
+
+Multi-item recipes, tunable particle bursts, ref-or-inline authoring, shared spatial leaves, a
+full field-documentation sweep, and in-game Asset Editor support across every content type. The
+schema is pre-release, so the renames below are hard breaks with no aliases.
+
+- Adds MULTI-ITEM recipes and step phases. `Recipe.Conversions[].Input`/`Output` and
+  `StationStep.Consume`/`Produce` all take an `Ingredient` ARRAY (`Consume`/`Produce` under an
+  `Items` key, keeping their `From`/`To` route at group level), mirroring native
+  `CraftingRecipe.Input`/`Output` - so "2 planks + 1 nail -> 1 crate" is one conversion and one
+  atomic step-phase pair rather than a step split, and a recipe yielding a main product plus a
+  byproduct authors directly. Both sides are all-or-nothing: a cycle needs every input available
+  and room for every output before it starts, and a step phase checks the whole list before
+  removing anything. `Recipe.FromCrafting` derives multi-input native recipes too, instead of
+  skipping any recipe without exactly one input.
+- Adds tunable particle bursts. A `Presentation.Particles` entry is a `ModelParticle`-shaped group
+  (`SystemId` plus optional `Scale`, `DurationSeconds`, `RotationOffset` in degrees, and a
+  facing-relative `PositionOffset`) and the leaf is an ARRAY, matching native
+  `InteractionEffects.Particles`, so a moment can layer bursts. Unauthored knobs reproduce the
+  previous playback exactly (scale 1, a 4-second client-playback cap, no rotation or offset); the
+  duration cap is authorable per burst but stays a leak guard against unbounded-spawner systems.
+  The sibling `Presentation.Camera` leaf is spelled `CameraEffect`, matching native
+  `InteractionEffects` and disambiguating it from the station-level `Camera` group.
+- Adds ref-or-inline authoring on the three leaves that reference one of this mod's own asset
+  types: `LootRef.Lootables[]`, `StationStep.Stamp.Stats.Pool`, and `ActionDef.Ref` each accept an
+  inline anonymous body (optionally with its own `Parent`) in place of an id, through the engine's
+  own contained-asset codec, and each emits a typed cross-reference into the generated schema
+  reference instead of an untyped string. References to NATIVE assets stay id-only.
+- Adds four authoring knobs: `Roll.Grants.Contributions[]` (one-shot amounts posted on a
+  conditional-lootable find, forwarded on their own unscaled list so a find is worth the same
+  whatever tool the worker holds, and restricted to a `Cycle` trigger), `Tool.MinDurabilityPercent`
+  (refuse to start work with a tool worn below a threshold; a session already running still ends at
+  breakage, not at the threshold), `Custody.SingleFamily` (lock a claim to the first-placed item's
+  resource family, so a station holds 50 oak or 50 pine but never 100 mixed), and
+  `SummaryHud.OffsetX` beside the existing `OffsetY`.
+- Renames the two keys that were spelled the same at two altitudes with two different types.
+  `Work.Repeat` (a boolean) becomes `Work.Looping`, freeing `Repeat` for the iteration COUNT it
+  means natively and one level down on `StationStep.Repeat`; `StationStep.Working` (a boolean)
+  becomes `IsWork`, matching the native `Is*` boolean idiom and separating it from the
+  `Custody.States.Working` block-state name. Pre-release renames with no alias: an authored file
+  using an old key loses that leaf silently, so re-spell both when upgrading a draft pack.
+- Collapses the duplicated spatial and tag leaves onto three shared types. One `Vec3` `{X, Y, Z}`
+  replaces the four separately-declared offset codecs (`Custody.Display.Offset`, `Puppet.Offset`,
+  `Hold.Mount.Entity.Offset`); one `Rotation` `{Yaw, Pitch, Roll}` in degrees carries every
+  rotation leaf, so both the puppet's scalar `Yaw` and a placed display's rotation spell the
+  vertical axis the same way and `{X, Y, Z}` means position everywhere; one `TagMatch` map backs
+  both `Tool.Tags` and `ActionInput.Tags` behind a single matcher. Every axis stays independently
+  nullable, so a partial `"Offset": {"Y": -0.1}` keeps overlaying as before. `Anchors.*.MaxRadius`
+  is spelled `MaxRadiusMeters`, naming its unit.
+- Moves `Puppet.Hide.EffectId` onto the shared `EffectRef` group as `Hide.Effect` (`{Id,
+  DurationMs?}`), finishing the effect-reference consolidation. Two effect leaves deliberately stay
+  bare ids and say so in their own docs: `Hold.EffectId` (the movement hold's lifetime is
+  engine-owned, re-applied per heartbeat, so an authored duration would be inert or would defeat
+  the release safety net) and `Presentation.Shake.EffectId` (a camera effect whose duration lives
+  inside the referenced asset with no per-use override on the engine's fire-and-forget path).
+- Documents every codec leaf. All 309 authorable leaves across the seven content types carry a
+  description of what they do and what they default to, and a coverage test fails the build on a
+  blank one, so the generated schema reference and the in-game Asset Editor both show real help
+  text on every field.
+- Adds in-game Asset Editor support to the content types: collapsible section headings over each
+  top-level group, pick lists on 19 value vocabularies (this mod's live station / action /
+  lootable / roll-pool / factor ids, plus every closed union discriminator such as mount surface,
+  camera preset, puppet hide route, and consume/produce route), localization-key fields on
+  `Identity.NameKey`/`DescKey` and an action `Label`, and an icon picker on `Identity.Icon`. The
+  content validator remains the authority: it backs every one of these for hand-written JSON, and
+  map-KEY vocabularies (flair moment ids, per-stat cap keys, tag families) are validator-only by
+  design.
+- Adds field-level warnings at decode time. Quantities, cycle times, budgets and required ids that
+  are authored out of range report a warning as the asset loads, and the exactly-one-of contracts
+  (an ingredient's item route, an extension's target, a stamp budget's route) report when more than
+  one arm is authored. Every one of these WARNS: an asset always loads, matching this mod's
+  never-block posture, and none of them can drop content. Three new validator checks land beside
+  them: a duplicate `(Channel, Param)` contribution between an extension and the station or action
+  it targets (or between two extensions targeting the same thing, which sum rather than override), a
+  `Tool.MinDurabilityPercent` authored outside `(0, 100]`, and a redundant `Custody.SingleFamily`
+  on a claim whose capacity already holds one item.
+- Adds `RpgStationsApi.apiVersion()` plus non-throwing `isAvailable()`/`find()` accessors, and
+  writes down the additive growth policy the surface follows after 1.0.0 (default-bodied interface
+  methods, new event classes, additive event getters; no signature changes). The two accessors
+  carry an explicit caveat in their own javadoc: they do NOT replace the `PluginManager` presence
+  check a consumer runs first, because these api types are classloader-unresolvable exactly when
+  RpgStations is absent. `api/CLAUDE.md` carries the copy-pasteable two-step consumer idiom.
+
+### The extension vocabulary: one shape, two directions (2026-08-05)
+
+- Adds `Contribution` (`{Channel, Param?, Amount}`), the ONE outbound numeric-post leaf, and its
+  api record `StationContribution`. A station authors amounts against a namespaced channel id this
+  engine never resolves: it forwards `{Channel, Param, Amount}` verbatim on
+  `StationCycleCompletedEvent` and leaves interpretation entirely to whichever mod owns the
+  channel. This is the exact mirror of the read side (`FactorRef`/`Condition` + `FactorRegistry`),
+  applied in reverse, so an author learns one convention and uses it in both directions.
+- Adds `ContributionChannelRegistry` (reached via `RpgStationsApi.channels()`) and its concrete
+  `declare(channelId)` implementation. Declaration only, because there is nothing to resolve. A
+  declared id feeds the LIVE `rpgstations:channels` Asset Editor dropdown and the fail-open
+  `UNKNOWN_CHANNEL` validator warning; an undeclared channel still forwards, so a warning never
+  blocks content. The engine ships zero built-in channels by design: it owns built-in FACTORS
+  because it can compute them, and owns no channels because it interprets none.
+- Adds `ValidationHookRegistry` (`ValidationHook`/`ValidationScope`/`RollView`/`FactorRefView`/
+  `FindingSink`): third-party content checks that run inside this engine's own full validate pass,
+  so a mod owning a factor family or a channel keeps its composition rules with the vocabulary
+  rather than hardcoding them here. Hooks see both the reference structure and the formula numbers,
+  report info/warn findings only, are try-guarded, and never block.
+- Adds `LOOT_DUPLICATE_FACTOR` (INFO): the same `(Factor, Param)` pair referenced more than once
+  inside one Roll, across its `Conditions`, `Chance.AddFactors`, and `Ladder.Values`. Two `stat`
+  references with different `Param`s are a legitimate composition and never fire it.
+- Names the authoring sites for what they mean, so the two scaling rules are visible in the JSON
+  rather than only in the engine: `Work.PerCycleContributions[]` is posted every completed cycle,
+  multiplied by the resolved tool multiplier and pre-scaled by `Work.Idle.Fraction` on an idle
+  cycle; `Roll.Grants.Contributions[]` is posted once and verbatim, inheriting neither. Same record
+  type, different documented semantics per owning group, no mode flag on the entry. The event
+  carries them as two lists, `contributions()` and `oneShotContributions()`, and `toolMultiplier()`
+  applies to the first only.
+- Names the remaining scaling knobs for the mechanism instead of a consumer's reward type:
+  `Tool.PowerScale` (tool power to the per-cycle multiplier, leaves unchanged) and
+  `Work.Idle.Fraction` (the fraction of a normal cycle's amounts an idle practice cycle posts).
+  The matching validator ids are `MISSING_CONTRIBUTION_CHANNEL`, `NONPOSITIVE_CONTRIBUTION_AMOUNT`,
+  `EXTENSION_CONTRIBUTION_DUPLICATE`, `LOOT_CONTRIBUTION_{WRONG_TRIGGER,MISSING_CHANNEL,
+  NONPOSITIVE_AMOUNT}`, `DEAD_POWER_SCALE`, and `POWER_SCALE_{NO_GATHER_TYPE,BAD_CLAMP,
+  BAD_EXPONENT}`.
+- Adds `MmoAgnosticismTest`, which scans `src/main/java`, `api/src/main/java`, and
+  `src/main/resources` for foreign progression vocabulary and fails the build on any hit, with an
+  empty allowlist. A convenient comment is exactly how a vocabulary creeps back in.
+
 ### Docs: the RPG Stations documentation site
 
 - Adds a static-export documentation site (`docs-site/`) shipping alongside this mod's release: a
   getting-started guide, authored guides for every feature above (your first station, actions and
   steps, custody and placed displays, enhancement and stamping, extending other packs, flairs,
   localization, loot and factors, multi-station programs, native composition, puppet presentation,
-  selection, settings), a codec-autogenerated schema reference for every content type, and synced
-  changelog/patch-notes pages.
+  selection, settings), an Extension Channels page teaching both directions of the extension
+  vocabulary in one place, a codec-autogenerated schema reference for every content type, and
+  synced changelog/patch-notes pages.

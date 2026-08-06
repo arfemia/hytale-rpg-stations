@@ -53,11 +53,11 @@ public class StationRecipeDeriverTest {
                 StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
         assertEquals(1, derived.size());
         StationAsset.Conversion c = derived.get(0);
-        assertEquals("Wood_Hardwood_Trunk", c.getInput().getResourceTypeId());
-        assertNull(c.getInput().getItemId());
-        assertEquals(1, c.getInput().getQuantity());
-        assertEquals("Wood_Hardwood_Planks", c.getOutput().getItemId());
-        assertEquals(1, c.getOutput().getQuantity());
+        assertEquals("Wood_Hardwood_Trunk", c.primaryInput().getResourceTypeId());
+        assertNull(c.primaryInput().getItemId());
+        assertEquals(1, c.primaryInput().getQuantity());
+        assertEquals("Wood_Hardwood_Planks", c.primaryOutput().getItemId());
+        assertEquals(1, c.primaryOutput().getQuantity());
     }
 
     @Test
@@ -67,8 +67,8 @@ public class StationRecipeDeriverTest {
         List<StationAsset.Conversion> derived =
                 StationRecipeDeriver.deriveFromCrafting(spec(3, "WoodPlanks"), candidates);
         assertEquals(1, derived.size());
-        assertEquals(1, derived.get(0).getInput().getQuantity());
-        assertEquals(3, derived.get(0).getOutput().getQuantity());
+        assertEquals(1, derived.get(0).primaryInput().getQuantity());
+        assertEquals(3, derived.get(0).primaryOutput().getQuantity());
     }
 
     @Test
@@ -78,15 +78,17 @@ public class StationRecipeDeriverTest {
         List<StationAsset.Conversion> derived =
                 StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), List.of(itemInput));
         assertEquals(1, derived.size());
-        assertEquals("Some_Modded_Log", derived.get(0).getInput().getItemId());
-        assertNull(derived.get(0).getInput().getResourceTypeId());
-        assertEquals(2, derived.get(0).getInput().getQuantity());
+        assertEquals("Some_Modded_Log", derived.get(0).primaryInput().getItemId());
+        assertNull(derived.get(0).primaryInput().getResourceTypeId());
+        assertEquals(2, derived.get(0).primaryInput().getQuantity());
     }
 
     // ==================== Skips ====================
 
     @Test
-    void skipsNonMatchingCategoryAndBadInputCounts() {
+    void skipsNonMatchingCategoryAndInputlessRecipes() {
+        // Decision 73: a MULTI-input native recipe now derives (it used to be skipped), so the only
+        // structural skips left are a non-matching category and a recipe with no inputs at all.
         List<CraftingCandidate> candidates = List.of(
                 resourceCandidate("Wood_Hardwood_Planks", "WoodPlanks", "Wood_Hardwood_Trunk", 1),
                 resourceCandidate("Stone_Bricks", "StoneBricks", "Rock", 1),
@@ -96,8 +98,27 @@ public class StationRecipeDeriverTest {
                 new CraftingCandidate("Empty_Recipe", List.of("WoodPlanks"), List.of()));
         List<StationAsset.Conversion> derived =
                 StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
+        assertEquals(List.of("Bench_Builders", "Wood_Hardwood_Planks"),
+                derived.stream().map(c -> c.primaryOutput().getItemId()).toList());
+    }
+
+    @Test
+    void multiInputNativeRecipe_derivesEveryInput() {
+        // Decision 73: Conversion.Input is an Ingredient[] mirroring native CraftingRecipe.Input,
+        // so a "6 trunks + 3 rock" recipe derives with BOTH inputs instead of being dropped.
+        List<CraftingCandidate> candidates = List.of(
+                new CraftingCandidate("Bench_Builders", List.of("WoodPlanks"), List.of(
+                        Ingredient.resource("Wood_Trunk", 6),
+                        Ingredient.item("Rock", 3))));
+        List<StationAsset.Conversion> derived =
+                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
         assertEquals(1, derived.size());
-        assertEquals("Wood_Hardwood_Planks", derived.get(0).getOutput().getItemId());
+        Ingredient[] inputs = derived.get(0).getInput();
+        assertEquals(2, inputs.length);
+        assertEquals("Wood_Trunk", inputs[0].getResourceTypeId());
+        assertEquals(6, inputs[0].effectiveQuantity());
+        assertEquals("Rock", inputs[1].getItemId());
+        assertEquals(3, inputs[1].effectiveQuantity());
     }
 
     @Test
@@ -120,7 +141,7 @@ public class StationRecipeDeriverTest {
         List<StationAsset.Conversion> derived =
                 StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
         assertEquals(List.of("Wood_Blackwood_Planks", "Wood_Hardwood_Planks", "Wood_Softwood_Planks"),
-                derived.stream().map(c -> c.getOutput().getItemId()).toList());
+                derived.stream().map(c -> c.primaryOutput().getItemId()).toList());
     }
 
     // ==================== resolve() precedence ====================
@@ -138,8 +159,8 @@ public class StationRecipeDeriverTest {
                 resourceCandidate("Wood_Softwood_Planks", "WoodPlanks", "Wood_Softwood_Trunk", 1));
         StationAsset.Conversion[] resolved = StationRecipeDeriver.resolve(recipe, candidates);
         assertEquals(2, resolved.length);
-        assertEquals("Custom_Beam", resolved[0].getOutput().getItemId());
-        assertEquals("Wood_Softwood_Planks", resolved[1].getOutput().getItemId());
+        assertEquals("Custom_Beam", resolved[0].primaryOutput().getItemId());
+        assertEquals("Wood_Softwood_Planks", resolved[1].primaryOutput().getItemId());
     }
 
     @Test
@@ -167,13 +188,13 @@ public class StationRecipeDeriverTest {
                 StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
         assertEquals(11, derived.size());
         for (StationAsset.Conversion c : derived) {
-            assertEquals(1, c.getInput().getQuantity());
-            assertEquals(1, c.getOutput().getQuantity());
+            assertEquals(1, c.primaryInput().getQuantity());
+            assertEquals(1, c.primaryOutput().getQuantity());
         }
         StationAsset.Conversion hardwood = derived.stream()
-                .filter(c -> "Wood_Hardwood_Planks".equals(c.getOutput().getItemId()))
+                .filter(c -> "Wood_Hardwood_Planks".equals(c.primaryOutput().getItemId()))
                 .findFirst().orElseThrow();
-        assertEquals("Wood_Hardwood_Trunk", hardwood.getInput().getResourceTypeId());
+        assertEquals("Wood_Hardwood_Trunk", hardwood.primaryInput().getResourceTypeId());
     }
 
     // ==================== Seam wave (decision 51c/52): Benches / Types / NativeTime ====================
@@ -198,7 +219,7 @@ public class StationRecipeDeriverTest {
         List<StationAsset.Conversion> derived = StationRecipeDeriver.deriveFromCrafting(
                 spec(null, new String[]{"WoodPlanks"}, new String[]{"Campfire"}, null, null), List.of(cand));
         assertEquals(1, derived.size());
-        assertEquals("Food_Fish_Grilled", derived.get(0).getOutput().getItemId());
+        assertEquals("Food_Fish_Grilled", derived.get(0).primaryOutput().getItemId());
     }
 
     @Test

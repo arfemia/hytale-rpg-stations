@@ -14,8 +14,7 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
  * The RUNTIME AUTHORITY for station content. {@code StationService} and the interaction
- * layer read every {@link StationAsset} from here. Ported verbatim from the MMO's
- * {@code station.StationCatalog} (RPG Stations extraction leg 2).
+ * layer read every {@link StationAsset} from here.
  *
  * <p>Folded by the plugin's own {@code LoadedAssetsEvent} wiring: the jar-bundled
  * {@code Server/RpgStations/Stations/*.json} defaults ARE part of the folded layer, with pack
@@ -108,8 +107,8 @@ public final class StationCatalog {
      * every registered standalone {@code asset.FlairAsset} id (design section 9.6, leg F - the
      * open vocabulary; a {@code FlairAsset} id counts here regardless of its own {@code Stations}
      * restriction, since this method answers "is this id valid to grant at all", not "does it
-     * apply to THIS station"). Used by the flair-grant command soft-warn (any consumer that
-     * grants a flair, e.g. the MMO bridge's {@code /mmostation flair grant}).
+     * apply to THIS station"). Used by the flair-grant command soft-warn (whatever mod registers
+     * a {@code FlairUnlockProvider} and grants ids into it).
      */
     @Nonnull
     public Set<String> allFlairIds() {

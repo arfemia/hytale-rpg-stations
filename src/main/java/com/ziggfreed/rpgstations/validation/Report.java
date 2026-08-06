@@ -7,10 +7,8 @@ import javax.annotation.Nonnull;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * The shared summarize/count/log shape every validator uses. Ported verbatim from the MMO's
- * {@code validation.ValidationReport} mini-core (RPG Stations extraction leg 2), renamed
- * {@code Report} (RpgStations owns only ONE domain today so a shorter name reads cleanly),
- * {@code SafeLog} severed to RpgStations' own {@code util.Log}. Summary lines and per-finding
+ * The shared summarize/count/log shape every validator uses. Named simply {@code Report} because
+ * this mod owns only ONE validation domain. Summary lines and per-finding
  * detail are raw English (admin/log surface).
  */
 public final class Report {

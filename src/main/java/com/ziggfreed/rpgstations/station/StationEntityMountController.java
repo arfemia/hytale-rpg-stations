@@ -30,6 +30,7 @@ import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
 import com.hypixel.hytale.server.core.modules.interaction.Interactions;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -199,7 +200,7 @@ final class StationEntityMountController {
             @Nonnull CommandBuffer<EntityStore> commandBuffer,
             @Nullable StationAsset.Hold.Mount.Entity entityGroup) {
         try {
-            StationAsset.Hold.Mount.Entity.Offset offset = entityGroup != null ? entityGroup.getOffset() : null;
+            Vec3 offset = entityGroup != null ? entityGroup.getOffset() : null;
             float[] xyz = resolveAttachmentOffset(
                     offset != null ? offset.getX() : null,
                     offset != null ? offset.getY() : null,
@@ -220,7 +221,7 @@ final class StationEntityMountController {
      * Pure conversion from the authored {@code Hold.Mount.Entity.Offset} {@code X}/{@code Y}/
      * {@code Z} (nullable, default 0 each) to the float triple {@link #attach} feeds the
      * {@code Rotation3f} constructor. Kept primitive-typed (no {@code Rotation3f} or
-     * {@code Offset} touch) so it is unit-testable without a running Hytale server.
+     * {@code Vec3} touch) so it is unit-testable without a running Hytale server.
      */
     @Nonnull
     static float[] resolveAttachmentOffset(@Nullable Double x, @Nullable Double y, @Nullable Double z) {

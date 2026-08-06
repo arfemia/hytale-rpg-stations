@@ -18,6 +18,8 @@ import com.hypixel.hytale.server.core.modules.interaction.Interactions;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.entity.ItemPropEntityService;
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.common.codec.Rotation;
+import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -186,7 +188,7 @@ final class StationCustodyDisplay {
      */
     @Nonnull
     static double[] resolveWorldOffset(@Nullable Custody.Display display, double blockYawRadians) {
-        Custody.Display.Offset offset = display != null ? display.getOffset() : null;
+        Vec3 offset = display != null ? display.getOffset() : null;
         double ox = offset != null && offset.getX() != null ? offset.getX() : 0.0;
         double oy = offset != null && offset.getY() != null ? offset.getY() : 0.0;
         double oz = offset != null && offset.getZ() != null ? offset.getZ() : 0.0;
@@ -207,23 +209,23 @@ final class StationCustodyDisplay {
     }
 
     /**
-     * Pure: {@code display}'s authored {@code Rotation} group ({@code {X,Y,Z}} degrees) as
+     * Pure: {@code display}'s authored {@code Rotation} group ({@code {Yaw,Pitch,Roll}} degrees) as
      * {@code [pitchRad, yawRad, rollRad]}, with the placed block's own {@code blockYawRadians} facing
-     * ADDED into the yaw (Y) axis so the prop turns WITH the block (round-8 facing-relative). X (pitch)
-     * and Z (roll) are the prop's own local tilt, unchanged by the block facing (they ride the yaw
-     * through the engine's Y-X-Z composition). Each authored axis is zero when absent; at a
-     * default-orientation placement ({@code blockYawRadians == 0}) the yaw is the authored Y verbatim,
+     * ADDED into the {@code Yaw} axis so the prop turns WITH the block (round-8 facing-relative).
+     * {@code Pitch} and {@code Roll} are the prop's own local tilt, unchanged by the block facing (they
+     * ride the yaw through the engine's Y-X-Z composition). Each authored axis is zero when absent; at a
+     * default-orientation placement ({@code blockYawRadians == 0}) the yaw is the authored Yaw verbatim,
      * so pre-round-8 values render identically. Kept primitive so it needs no live Hytale type - the
      * 3-axis successor to the pre-round-7 single-yaw {@code resolveYawRadians}.
      */
     @Nonnull
     static float[] resolveRotationRadians(@Nullable Custody.Display display, double blockYawRadians) {
-        Custody.Display.Rotation r = display != null ? display.getRotation() : null;
-        double x = r != null && r.getX() != null ? r.getX() : 0.0;
-        double y = r != null && r.getY() != null ? r.getY() : 0.0;
-        double z = r != null && r.getZ() != null ? r.getZ() : 0.0;
-        return new float[] {(float) Math.toRadians(x), (float) (Math.toRadians(y) + blockYawRadians),
-                (float) Math.toRadians(z)};
+        Rotation r = display != null ? display.getRotation() : null;
+        double pitch = r != null ? r.effectivePitchDegrees() : 0.0;
+        double yaw = r != null ? r.effectiveYawDegrees() : 0.0;
+        double roll = r != null ? r.effectiveRollDegrees() : 0.0;
+        return new float[] {(float) Math.toRadians(pitch), (float) (Math.toRadians(yaw) + blockYawRadians),
+                (float) Math.toRadians(roll)};
     }
 
     /** Pure: {@code display}'s authored {@code Scale}, defaulted to {@code 1.0} when absent/non-positive. */

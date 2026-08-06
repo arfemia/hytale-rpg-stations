@@ -23,7 +23,7 @@ export default function ExtendingOtherPacksPage() {
     >
       <p>
         A fourth-party pack often wants to ADD something to a station or action a different, third-party pack
-        ships - a new skill&apos;s XP grant, an extra loot table, a bonus ritual step - without owning that
+        ships - a contribution on a new channel, an extra loot table, a bonus ritual step - without owning that
         station&apos;s file (which would mean re-shipping the whole thing and risking drift) or replacing it
         wholesale (which would silently discard whatever the original author changes later).{' '}
         <strong>ExtensionAsset</strong> is the one mechanism for exactly this: additive-only composition onto
@@ -45,8 +45,8 @@ export default function ExtendingOtherPacksPage() {
       <table>
         <thead><tr><th>Target</th><th>Payload keys it may carry</th></tr></thead>
         <tbody>
-          <tr><td><code>{'{Station: "<id>"}'}</code></td><td><code>Xp</code>, <code>Loot</code>, <code>Actions</code> (new keys only), <code>Conversions</code>, <code>Steps</code>, <code>Anchors</code> (new keys only)</td></tr>
-          <tr><td><code>{'{Action: "<id>"}'}</code></td><td><code>Steps</code>, <code>Anchors</code> (new keys only), <code>Loot</code>, <code>Conversions</code>, <code>Xp</code></td></tr>
+          <tr><td><code>{'{Station: "<id>"}'}</code></td><td><code>PerCycleContributions</code>, <code>Loot</code>, <code>Actions</code> (new keys only), <code>Conversions</code>, <code>Steps</code>, <code>Anchors</code> (new keys only), <code>Puppet</code>, <code>Custody</code></td></tr>
+          <tr><td><code>{'{Action: "<id>"}'}</code></td><td><code>Steps</code>, <code>Anchors</code> (new keys only), <code>Loot</code>, <code>Conversions</code>, <code>PerCycleContributions</code>, <code>Puppet</code>, <code>Custody</code></td></tr>
           <tr><td><code>{'{Lootable: "<id>"}'}</code></td><td><code>Rolls</code> (appended)</td></tr>
           <tr><td><code>{'{RollPool: "<id>"}'}</code></td><td><code>Entries</code> (appended)</td></tr>
         </tbody>
@@ -57,7 +57,7 @@ export default function ExtendingOtherPacksPage() {
       <ol>
         <li><strong>Additive only.</strong> An extension never mutates, replaces, or removes anything the base already authored - replacing a whole file stays a load-order concern, not this mechanism&apos;s job.</li>
         <li><strong>Keyed collections</strong> (<code>Actions</code>, <code>Anchors</code>) - the BASE always wins a key collision; a new key is folded in, and among several extensions adding new keys, apply order (below) decides.</li>
-        <li><strong>Unkeyed arrays</strong> (<code>Xp</code>, <code>Conversions</code>, <code>Rolls</code>, <code>Entries</code>) - pure append, in apply order.</li>
+        <li><strong>Unkeyed arrays</strong> (<code>PerCycleContributions</code>, <code>Conversions</code>, <code>Rolls</code>, <code>Entries</code>) - pure append, in apply order.</li>
         <li>
           <strong>Ordered step insertion</strong> (<code>Steps</code>) - each insertion names an <code>Action</code> (which action&apos;s program to insert into) and an <code>Anchor</code>, exactly one of{' '}
           <code>{'{After: "<stepId>"} | {Before: "<stepId>"} | {AtStart: true} | {AtEnd: true}'}</code>. A missing or dangling <code>After</code>/<code>Before</code> target degrades to <code>AtEnd</code> plus a content-audit note. Inserted steps need their own <code>Id</code>s so a LATER extension can anchor on one of THEM.
@@ -65,13 +65,12 @@ export default function ExtendingOtherPacksPage() {
       </ol>
       <pre><code>{`{
   "Target": { "Action": "prepfish" },
-  "Xp": [ { "Skill": "COOKING", "PerCycle": 8.0 } ]
+  "PerCycleContributions": [ { "Channel": "yourmod:craft_quality", "Param": "COOKING", "Amount": 8.0 } ]
 }`}</code></pre>
       <p>
-        This is the fish exemplar&apos;s real pack-side extension: it is the ONLY thing that makes COOKING
-        skill XP flow from the jar&apos;s zero-progression <code>prepfish</code> action - the jar action
-        itself never mentions COOKING at all, and this one small file is entirely responsible for wiring the
-        two together.
+        This is the shape the fish exemplar&apos;s pack-side extension uses: it is the ONLY thing that makes
+        the jar&apos;s <code>prepfish</code> action post anything at all - the jar action declares no
+        contributions, and this one small file is entirely responsible for wiring the two together.
       </p>
 
       <H3 id="apply-order">Apply order</H3>
@@ -92,14 +91,19 @@ export default function ExtendingOtherPacksPage() {
         only, even if another station inherits from it via <code>Parent</code>.
       </p>
 
-      <H2 id="avoiding-double-counts">Avoiding double-counted XP (a real mistake, fixed once)</H2>
+      <H2 id="avoiding-double-counts">Avoiding double-counted contributions</H2>
       <p>
-        A genuinely-shipped bug is worth stating as a warning: <code>Xp</code> APPENDS, it never replaces. If
-        the base station already grants <code>{'{WOODCUTTING, PerCycle: 8.0}'}</code> and an extension
-        re-adds the SAME skill, the effective total doubles to 16.0/cycle instead of adding a new skill&apos;s
-        worth of XP. An extension should add a genuinely NEW skill&apos;s progression, never re-add one the
-        base already grants - to retune an existing skill&apos;s XP on content you do not own, that is a
-        request to the base author, not something this mechanism can safely do for you.
+        <code>PerCycleContributions</code> APPENDS, it never replaces. If the base already posts{' '}
+        <code>{'{Channel: "yourmod:craft_quality", Param: "OAK", Amount: 8.0}'}</code> and an extension adds
+        an entry for the SAME <code>(Channel, Param)</code> pair, the amounts SUM - the effective total
+        doubles to 16.0 per cycle rather than crediting something new. An extension should add a genuinely
+        NEW pair; to retune an existing one on content you do not own, that is a request to the base author,
+        not something this mechanism can safely do for you.
+      </p>
+      <p>
+        The content audit catches this for you: <code>EXTENSION_CONTRIBUTION_DUPLICATE</code> fires when an
+        extension appends a <code>(Channel, Param)</code> pair the base - or another extension on the same
+        target - already declares, and names the colliding extensions.
       </p>
 
       <H2 id="non-extensible">Deliberately non-extensible</H2>

@@ -23,8 +23,8 @@ export default function GettingStartedPage() {
       <p>
         RPG Stations is a standalone Hytale server mod that adds diegetic interactive work stations - place a
         block, press <code>F</code>, and watch your character (or a stand-in performer) do the work. It is a
-        server plugin, package root <code>com.ziggfreed.rpgstations</code>, and it ships as its own jar
-        separate from any progression mod.
+        server plugin, package root <code>com.ziggfreed.rpgstations</code>, and it ships as its own jar with
+        no other mod involved.
       </p>
 
       <H2 id="dependencies">Dependencies</H2>
@@ -32,15 +32,17 @@ export default function GettingStartedPage() {
         RPG Stations has exactly <strong>one hard dependency</strong>: <strong>ZiggfreedCommon</strong>{' '}
         (<code>&gt;=1.4.0</code>). ZiggfreedCommon is a shared, mod-agnostic Hytale primitive library
         (camera/sound/HUD primitives, the puppet/performer engine, the generic cast-step kernel) that RPG
-        Stations builds its work loop on top of. There is no dependency on any progression mod - RPG Stations
-        runs a complete, rewarding work loop (conditional loot, command rewards, enhancement) with{' '}
-        <strong>zero skill XP required</strong>.
+        Stations builds its work loop on top of. That is the whole list - RPG Stations runs a complete,
+        rewarding work loop (conditional loot, command rewards, enhancement) with{' '}
+        <strong>no other mod required</strong>.
       </p>
       <p>
-        <strong>MMO Skill Tree is optional.</strong> If it is installed alongside RPG Stations, a soft bridge
-        (native events and a typed extension registry - never a hard code dependency in either direction)
-        turns each completed work cycle into skill XP, and lets loot/enhancement formulas read the MMO&apos;s
-        stat channels. See <Link href="/docs/integrations/">Add-ons &amp; Integrations</Link> for the pairing.
+        <strong>Other mods are optional add-ons.</strong> When one is installed alongside RPG Stations, a soft
+        surface (native events and typed registries - never a hard code dependency in either direction) lets
+        it read numbers into a station&apos;s formulas and receive the amounts a station posts out on each
+        completed cycle. See <Link href="/docs/extension-channels/">Extension Channels</Link> for that
+        contract and <Link href="/docs/integrations/">Add-ons &amp; Integrations</Link> for the rest of the
+        api surface.
       </p>
 
       <H2 id="installing">Installing</H2>

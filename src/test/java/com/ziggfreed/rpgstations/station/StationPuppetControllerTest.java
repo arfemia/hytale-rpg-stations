@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.rpgstations.asset.Puppet;
+import com.ziggfreed.common.codec.Vec3;
 
 /**
  * Pure tests for {@link StationPuppetController}'s unit-JVM-safe decision cores (round-4
@@ -40,7 +41,7 @@ class StationPuppetControllerTest {
     void resolveWorldOffset_defaultFacing_isIdentity() {
         // yaw 0 (default placement): the maintainer's in-game-tuned sawmill values pass through
         // unchanged, exactly the pre-change WORLD-SPACE behavior - no re-tune needed.
-        Puppet.Offset offset = Puppet.Offset.of(0.0, -0.4, 1.0);
+        Vec3 offset = Vec3.of(0.0, -0.4, 1.0);
         assertArrayEquals(new double[] {0.0, -0.4, 1.0},
                 StationPuppetController.resolveWorldOffset(offset, 0.0), 1e-9);
     }
@@ -50,7 +51,7 @@ class StationPuppetControllerTest {
         // The shipped sawmill/cutting-board/cooking-fire shape: a pure +Z (block FRONT) shift.
         // Matches the engine's Rotation.rotateY on (0, y, 1): None (0,1), Ninety (1,0),
         // OneEighty (0,-1), TwoSeventy (-1,0).
-        Puppet.Offset offset = Puppet.Offset.of(0.0, -0.4, 1.0);
+        Vec3 offset = Vec3.of(0.0, -0.4, 1.0);
         assertArrayEquals(new double[] {0.0, -0.4, 1.0},
                 StationPuppetController.resolveWorldOffset(offset, 0.0), 1e-9);
         assertArrayEquals(new double[] {1.0, -0.4, 0.0},
@@ -64,14 +65,14 @@ class StationPuppetControllerTest {
     @Test
     void resolveWorldOffset_mixedOffset_rotatesBothAxes() {
         // Offset (X=1, Z=2) at yaw 90: worldX = 1*cos + 2*sin = 2, worldZ = -1*sin + 2*cos = -1.
-        Puppet.Offset offset = Puppet.Offset.of(1.0, 0.5, 2.0);
+        Vec3 offset = Vec3.of(1.0, 0.5, 2.0);
         assertArrayEquals(new double[] {2.0, 0.5, -1.0},
                 StationPuppetController.resolveWorldOffset(offset, YAW_90), 1e-9);
     }
 
     @Test
     void resolveWorldOffset_yStaysVertical_neverRotated() {
-        Puppet.Offset offset = Puppet.Offset.of(null, -0.45, null);
+        Vec3 offset = Vec3.of(null, -0.45, null);
         for (double yaw : new double[] {0.0, YAW_90, YAW_180, YAW_270}) {
             assertArrayEquals(new double[] {0.0, -0.45, 0.0},
                     StationPuppetController.resolveWorldOffset(offset, yaw), 1e-9);
@@ -80,7 +81,7 @@ class StationPuppetControllerTest {
 
     @Test
     void resolveWorldOffset_partiallyAuthored_missingLeavesDefaultToZero() {
-        Puppet.Offset offset = Puppet.Offset.of(1.0, null, null);
+        Vec3 offset = Vec3.of(1.0, null, null);
         assertArrayEquals(new double[] {1.0, 0.0, 0.0},
                 StationPuppetController.resolveWorldOffset(offset, 0.0), 1e-9);
     }

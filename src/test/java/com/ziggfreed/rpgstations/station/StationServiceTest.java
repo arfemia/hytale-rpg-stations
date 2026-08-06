@@ -14,7 +14,9 @@ import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.server.core.Message;
 
+import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
@@ -336,8 +338,8 @@ public class StationServiceTest {
                 conv("Birch", "woodplanks"), conv("Untagged", null)};
         StationAsset.Conversion[] filtered = StationService.conversionsForCategory(all, "WoodPlanks");
         assertEquals(2, filtered.length);
-        assertEquals("Oak", filtered[0].getOutput().getItemId());
-        assertEquals("Birch", filtered[1].getOutput().getItemId());
+        assertEquals("Oak", filtered[0].primaryOutput().getItemId());
+        assertEquals("Birch", filtered[1].primaryOutput().getItemId());
     }
 
     @Test
@@ -377,9 +379,9 @@ public class StationServiceTest {
         StationAsset.Conversion[] all = {conv("Oak", "WoodPlanks"), conv("Birch", "WoodPlanks"),
                 conv("Iron", "Metal")};
         StationAsset.Conversion rep = StationService.representativeConversionFor(all, "WoodPlanks");
-        assertEquals("Oak", rep.getOutput().getItemId());
+        assertEquals("Oak", rep.primaryOutput().getItemId());
         // representativeOutputFor is a thin wrapper over the SAME scan: must agree with it.
-        assertEquals(StationService.representativeOutputFor(all, "WoodPlanks"), rep.getOutput().getItemId());
+        assertEquals(StationService.representativeOutputFor(all, "WoodPlanks"), rep.primaryOutput().getItemId());
         assertNull(StationService.representativeConversionFor(all, "Unknown"));
         assertNull(StationService.representativeConversionFor(null, "WoodPlanks"));
     }
@@ -409,11 +411,11 @@ public class StationServiceTest {
         StationAsset.Conversion[] all = multiSpeciesConversions();
         // Both the 2-arg overload and an explicitly-null preference must answer the old first-match.
         assertEquals("Wood_Blackwood_Planks",
-                StationService.representativeConversionFor(all, "WoodPlanks").getOutput().getItemId());
+                StationService.representativeConversionFor(all, "WoodPlanks").primaryOutput().getItemId());
         assertEquals("Wood_Blackwood_Planks",
-                StationService.representativeConversionFor(all, "WoodPlanks", null, null).getOutput().getItemId());
+                StationService.representativeConversionFor(all, "WoodPlanks", null, null).primaryOutput().getItemId());
         assertEquals("Wood_Blackwood_Planks",
-                StationService.representativeConversionFor(all, "WoodPlanks", "  ", null).getOutput().getItemId());
+                StationService.representativeConversionFor(all, "WoodPlanks", "  ", null).primaryOutput().getItemId());
     }
 
     @Test
@@ -422,10 +424,10 @@ public class StationServiceTest {
         String[] hardwood = {"Wood_Hardwood_Trunk"};
         // THE BUG: a sawmill loaded with hardwood used to preview Blackwood in every tab.
         assertEquals("Wood_Hardwood_Planks", StationService.representativeConversionFor(
-                all, "WoodPlanks", "Wood_Hardwood_Log", hardwood).getOutput().getItemId());
+                all, "WoodPlanks", "Wood_Hardwood_Log", hardwood).primaryOutput().getItemId());
         // ... and the bias applies per category, so the whole strip stays on one species.
         assertEquals("Wood_Hardwood_Decorative", StationService.representativeConversionFor(
-                all, "DecorativePlanks", "Wood_Hardwood_Log", hardwood).getOutput().getItemId());
+                all, "DecorativePlanks", "Wood_Hardwood_Log", hardwood).primaryOutput().getItemId());
     }
 
     @Test
@@ -436,7 +438,7 @@ public class StationServiceTest {
                 StationAsset.Conversion.of(Ingredient.item("Food_Meat_Raw", 1),
                         Ingredient.item("Food_Meat_Grilled", 1), null, "Cook")};
         assertEquals("Food_Meat_Grilled", StationService.representativeConversionFor(
-                all, "Cook", "Food_Meat_Raw", null).getOutput().getItemId());
+                all, "Cook", "Food_Meat_Raw", null).primaryOutput().getItemId());
     }
 
     @Test
@@ -445,7 +447,7 @@ public class StationServiceTest {
         // A category the loaded material cannot produce must still render a tab (never vanish),
         // so an unmatched preference degrades to the plain first-match.
         assertEquals("Wood_Blackwood_Planks", StationService.representativeConversionFor(
-                all, "WoodPlanks", "Metal_Iron_Ore", new String[]{"Metal_Iron"}).getOutput().getItemId());
+                all, "WoodPlanks", "Metal_Iron_Ore", new String[]{"Metal_Iron"}).primaryOutput().getItemId());
         assertNull(StationService.representativeConversionFor(all, "Unknown", "Wood_Hardwood_Log",
                 new String[]{"Wood_Hardwood_Trunk"}));
         assertNull(StationService.representativeConversionFor(null, "WoodPlanks", "Wood_Hardwood_Log",
@@ -572,5 +574,46 @@ public class StationServiceTest {
         // first-authored default still applies.
         assertEquals("WoodPlanks",
                 StationService.effectiveCategory("  ", sawmillFromCrafting(), sawmillConversions()));
+    }
+
+    // ============ Work-site contribution forwarding (the deliberately weak filter) ============
+
+    @Test
+    void contributionsFrom_zeroAmountEntryStillForwards() {
+        // LOAD-BEARING asymmetry: the one-shot grants site gates on Contribution#isPostable (a
+        // positive amount), the per-cycle site deliberately does NOT. A zero-amount per-cycle entry
+        // must still reach a listener so it can render as a visible zero row in a breakdown rather
+        // than vanishing without explanation.
+        List<StationContribution> out = StationService.contributionsFrom(
+                new Contribution[]{Contribution.of("yourmod:test", "ALPHA", 0.0)}, false, 0.1);
+        assertEquals(1, out.size());
+        assertEquals("yourmod:test", out.get(0).channel());
+        assertEquals("ALPHA", out.get(0).param());
+        assertEquals(0.0, out.get(0).amount(), 1e-9);
+    }
+
+    @Test
+    void contributionsFrom_nullAmountReadsAsZero() {
+        List<StationContribution> out = StationService.contributionsFrom(
+                new Contribution[]{Contribution.of("yourmod:test", null, null)}, false, 0.1);
+        assertEquals(1, out.size());
+        assertNull(out.get(0).param());
+        assertEquals(0.0, out.get(0).amount(), 1e-9);
+    }
+
+    @Test
+    void contributionsFrom_blankChannelIsSkipped() {
+        List<StationContribution> out = StationService.contributionsFrom(new Contribution[]{
+                Contribution.of("  ", "ALPHA", 5.0),
+                Contribution.of("yourmod:test", "BETA", 5.0)}, false, 0.1);
+        assertEquals(1, out.size());
+        assertEquals("BETA", out.get(0).param());
+    }
+
+    @Test
+    void contributionsFrom_idleCyclePreScalesByTheIdleFraction() {
+        List<StationContribution> out = StationService.contributionsFrom(
+                new Contribution[]{Contribution.of("yourmod:test", "ALPHA", 8.0)}, true, 0.25);
+        assertEquals(2.0, out.get(0).amount(), 1e-9);
     }
 }

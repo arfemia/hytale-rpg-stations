@@ -8,22 +8,19 @@ import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
-/**
- * Pure tests for {@link StationToolScaling}. Ported from the MMO's
- * {@code StationToolScalingTest} (RPG Stations extraction leg 2).
- */
+/** Pure tests for {@link StationToolScaling}. */
 public class StationToolScalingTest {
 
-    private static StationAsset.Tool.XpScale scale(Double referencePower, Double exponent,
+    private static StationAsset.Tool.PowerScale scale(Double referencePower, Double exponent,
             Double minMult, Double maxMult) {
-        return StationAsset.Tool.XpScale.of(null, referencePower, exponent, minMult, maxMult);
+        return StationAsset.Tool.PowerScale.of(null, referencePower, exponent, minMult, maxMult);
     }
 
     // ==================== multiplier() ====================
 
     @Test
     void vanillaHatchetTriple_sawmillClamp() {
-        StationAsset.Tool.XpScale sawmillScale = scale(0.2, null, 0.75, 1.5);
+        StationAsset.Tool.PowerScale sawmillScale = scale(0.2, null, 0.75, 1.5);
         assertEquals(0.75, StationToolScaling.multiplier(0.15, sawmillScale), 1e-9);
         assertEquals(1.0, StationToolScaling.multiplier(0.20, sawmillScale), 1e-9);
         assertEquals(1.5, StationToolScaling.multiplier(0.30, sawmillScale), 1e-9);
@@ -31,19 +28,19 @@ public class StationToolScalingTest {
 
     @Test
     void pickaxeFlatPower_landsOnDefaultMinMult() {
-        StationAsset.Tool.XpScale defaultScale = scale(0.2, null, null, null);
+        StationAsset.Tool.PowerScale defaultScale = scale(0.2, null, null, null);
         assertEquals(0.5, StationToolScaling.multiplier(0.05, defaultScale), 1e-9);
     }
 
     @Test
     void exponentShaping() {
-        StationAsset.Tool.XpScale squared = scale(0.2, 2.0, 0.0, 10.0);
+        StationAsset.Tool.PowerScale squared = scale(0.2, 2.0, 0.0, 10.0);
         assertEquals(4.0, StationToolScaling.multiplier(0.4, squared), 1e-9);
     }
 
     @Test
     void clampEdges_neverExceedMinOrMax() {
-        StationAsset.Tool.XpScale clamped = scale(0.2, 1.0, 0.75, 1.5);
+        StationAsset.Tool.PowerScale clamped = scale(0.2, 1.0, 0.75, 1.5);
         assertEquals(1.5, StationToolScaling.multiplier(100.0, clamped), 1e-9);
         assertEquals(0.75, StationToolScaling.multiplier(0.0001, clamped), 1e-9);
     }
@@ -89,7 +86,7 @@ public class StationToolScalingTest {
         assertEquals(-1.0, StationToolScaling.heldPowerFor(List.of(), "Woods"), 1e-9);
     }
 
-    // ==================== resolvedIdleCycleMs() / resolvedXpFraction() ====================
+    // ==================== resolvedIdleCycleMs() / resolvedIdleFraction() ====================
 
     @Test
     void resolvedIdleCycleMs_defaultsToThreeXWorkCycle() {
@@ -105,11 +102,11 @@ public class StationToolScalingTest {
     }
 
     @Test
-    void resolvedXpFraction_defaultsAndClamps() {
-        assertEquals(0.1, StationToolScaling.resolvedXpFraction(null), 1e-9);
-        assertEquals(0.0, StationToolScaling.resolvedXpFraction(-0.5), 1e-9);
-        assertEquals(1.0, StationToolScaling.resolvedXpFraction(1.5), 1e-9);
-        assertEquals(0.35, StationToolScaling.resolvedXpFraction(0.35), 1e-9);
+    void resolvedIdleFraction_defaultsAndClamps() {
+        assertEquals(0.1, StationToolScaling.resolvedIdleFraction(null), 1e-9);
+        assertEquals(0.0, StationToolScaling.resolvedIdleFraction(-0.5), 1e-9);
+        assertEquals(1.0, StationToolScaling.resolvedIdleFraction(1.5), 1e-9);
+        assertEquals(0.35, StationToolScaling.resolvedIdleFraction(0.35), 1e-9);
     }
 
     // ==================== resolvedDurabilityAmount() ====================

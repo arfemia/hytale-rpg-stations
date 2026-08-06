@@ -6,13 +6,14 @@ import javax.annotation.Nullable;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
+import com.ziggfreed.common.codec.Vec3;
+import com.ziggfreed.common.codec.Rotation;
 
 /**
- * One presentation moment: sound/particles/animation/camera/shake asset ids. RpgStations'
- * OWN copy of the MMO's {@code asset.type.Presentation} shared value type (design section
- * 4.1/4.4.3 - deliberate small duplication, not a common lift, since the two copies diverge:
- * the MMO keeps a {@code Feedback} leaf that only makes sense against its own
- * {@code FeedbackService}; RpgStations drops it and gains {@link #shake}).
+ * One presentation moment: sound/particle bursts/animation/camera/shake asset references (design
+ * section 4.1/4.4.3). Every leaf names a NATIVE asset id this engine plays directly, with no
+ * feedback-service indirection in between.
  *
  * <p>Every leaf is {@code appendInherited} so a station whose {@code Parent} sibling
  * partially overrides a nested {@code Presentation} object still inherits the leaves it did
@@ -21,30 +22,38 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
 public final class Presentation {
 
     @Nullable protected String sound;
-    @Nullable protected String particles;
+    @Nullable protected ModelParticle[] particles;
     @Nullable protected String animation;
     @Nullable protected String animationItem;
     @Nullable protected String animationSlot;
-    @Nullable protected String camera;
+    @Nullable protected String cameraEffect;
     @Nullable protected Shake shake;
     @Nullable protected Interaction interaction;
     @Nullable protected EffectRef effect;
 
     public static final BuilderCodec<Presentation> CODEC = BuilderCodec.builder(Presentation.class, Presentation::new)
             .appendInherited(new KeyedCodec<>("Sound", Codec.STRING, false),
-                    (o, v) -> o.sound = v, o -> o.sound, (o, p) -> o.sound = p.sound).add()
-            .appendInherited(new KeyedCodec<>("Particles", Codec.STRING, false),
-                    (o, v) -> o.particles = v, o -> o.particles, (o, p) -> o.particles = p.particles).add()
+                    (o, v) -> o.sound = v, o -> o.sound, (o, p) -> o.sound = p.sound)
+            .documentation("A native one-shot SoundEvent id played at the moment's target position. Never author a LOOPING event here - nothing can stop it once fired.").add()
+            .appendInherited(new KeyedCodec<>("Particles",
+                            new ArrayCodec<>(ModelParticle.CODEC, ModelParticle[]::new), false),
+                    (o, v) -> o.particles = v, o -> o.particles, (o, p) -> o.particles = p.particles)
+            .documentation("The particle bursts played at this moment, in authored order (native InteractionEffects.Particles is an array too). Each entry is one ModelParticle-shaped burst; layering two is the author's call.").add()
             .appendInherited(new KeyedCodec<>("Animation", Codec.STRING, false),
-                    (o, v) -> o.animation = v, o -> o.animation, (o, p) -> o.animation = p.animation).add()
+                    (o, v) -> o.animation = v, o -> o.animation, (o, p) -> o.animation = p.animation)
+            .documentation("Reserved: an animation clip id for this moment. Station moments do not play it (an authored value warns as unused); worker swing clips are authored via the Puppet group and StationStep.Puppet.Clip instead.").add()
             .appendInherited(new KeyedCodec<>("AnimationItem", Codec.STRING, false),
-                    (o, v) -> o.animationItem = v, o -> o.animationItem, (o, p) -> o.animationItem = p.animationItem).add()
+                    (o, v) -> o.animationItem = v, o -> o.animationItem, (o, p) -> o.animationItem = p.animationItem)
+            .documentation("Reserved alongside Animation: the item id whose ItemPlayerAnimations set would resolve the clip. Station moments do not play it (an authored value warns as unused).").add()
             .appendInherited(new KeyedCodec<>("AnimationSlot", Codec.STRING, false),
-                    (o, v) -> o.animationSlot = v, o -> o.animationSlot, (o, p) -> o.animationSlot = p.animationSlot).add()
-            .appendInherited(new KeyedCodec<>("Camera", Codec.STRING, false),
-                    (o, v) -> o.camera = v, o -> o.camera, (o, p) -> o.camera = p.camera).add()
+                    (o, v) -> o.animationSlot = v, o -> o.animationSlot, (o, p) -> o.animationSlot = p.animationSlot)
+            .documentation("Reserved alongside Animation: the AnimationSlot the clip would play on (e.g. Emote, Action). Station moments do not play it (an authored value warns as unused).").add()
+            .appendInherited(new KeyedCodec<>("CameraEffect", Codec.STRING, false),
+                    (o, v) -> o.cameraEffect = v, o -> o.cameraEffect, (o, p) -> o.cameraEffect = p.cameraEffect)
+            .documentation("Reserved: a native CameraEffect asset id (spelled as native InteractionEffects does; the nested Camera GROUP one level up is the station's own camera pull, a different thing). Station moments do not play it (an authored value warns as unused); one-shot shakes route through Shake.").add()
             .appendInherited(new KeyedCodec<>("Shake", Shake.CODEC, false),
-                    (o, v) -> o.shake = v, o -> o.shake, (o, p) -> o.shake = p.shake).add()
+                    (o, v) -> o.shake = v, o -> o.shake, (o, p) -> o.shake = p.shake)
+            .documentation("A one-shot camera shake: a CameraEffect asset id plus a contextual intensity.").add()
             .appendInherited(new KeyedCodec<>("Interaction", Interaction.CODEC, false),
                     (o, v) -> o.interaction = v, o -> o.interaction, (o, p) -> o.interaction = p.interaction)
             .documentation("A native RootInteraction chain fired at this moment (id-ref-only); null = none.").add()
@@ -64,27 +73,31 @@ public final class Presentation {
         return p;
     }
 
-    /** Java-side factory carrying a {@code Sound} and/or {@code Particles}. */
+    /**
+     * Java-side factory carrying a {@code Sound} and/or a single default-tuned particle burst (the
+     * one-id convenience shape - {@link ModelParticle#of(String)}).
+     */
     @Nonnull
-    public static Presentation of(@Nullable String sound, @Nullable String particles) {
+    public static Presentation of(@Nullable String sound, @Nullable String particleSystemId) {
         Presentation p = new Presentation();
         p.sound = sound;
-        p.particles = particles;
+        p.particles = particleSystemId == null || particleSystemId.isBlank()
+                ? null : new ModelParticle[] {ModelParticle.of(particleSystemId)};
         return p;
     }
 
     /** Fully-populated Java-side factory; does NOT touch the codec or JSON keys. */
     @Nonnull
-    public static Presentation of(@Nullable String sound, @Nullable String particles,
+    public static Presentation of(@Nullable String sound, @Nullable ModelParticle[] particles,
             @Nullable String animation, @Nullable String animationItem, @Nullable String animationSlot,
-            @Nullable String camera, @Nullable Shake shake) {
+            @Nullable String cameraEffect, @Nullable Shake shake) {
         Presentation p = new Presentation();
         p.sound = sound;
         p.particles = particles;
         p.animation = animation;
         p.animationItem = animationItem;
         p.animationSlot = animationSlot;
-        p.camera = camera;
+        p.cameraEffect = cameraEffect;
         p.shake = shake;
         return p;
     }
@@ -94,8 +107,9 @@ public final class Presentation {
         return sound;
     }
 
+    /** The particle bursts played at this moment, in authored order; null/empty = none. */
     @Nullable
-    public String getParticles() {
+    public ModelParticle[] getParticles() {
         return particles;
     }
 
@@ -114,9 +128,15 @@ public final class Presentation {
         return animationSlot;
     }
 
+    /**
+     * A native {@code CameraEffect} asset id for this moment. Named for the native
+     * {@code InteractionEffects.CameraEffect} leaf it mirrors, which also disambiguates it from the
+     * NESTED {@code Camera} GROUP one level up ({@code StationAsset.Camera}, the station's own
+     * third-person camera pull) - the two used to share the spelling at different altitudes.
+     */
     @Nullable
-    public String getCamera() {
-        return camera;
+    public String getCameraEffect() {
+        return cameraEffect;
     }
 
     /** One-shot camera shake (nullable); null = no shake. */
@@ -138,6 +158,140 @@ public final class Presentation {
     }
 
     /**
+     * ONE particle burst played at a moment, shaped after the native {@code ModelParticle} leaf set
+     * ({@code SystemId}/{@code Scale}/{@code RotationOffset}/{@code PositionOffset}) so a station
+     * author reads the same vocabulary here as in a native {@code InteractionEffects.Particles}
+     * entry, plus {@link #durationSeconds} (the per-burst client-playback cap this engine has always
+     * applied, promoted from a Java constant to an authored knob).
+     *
+     * <p>Every leaf is nullable and its reader default reproduces the pre-array behavior exactly, so
+     * an entry authoring only {@code SystemId} plays byte-identically to the old bare-string leaf:
+     * {@code Scale} 1.0, {@code DurationSeconds} {@value #DEFAULT_DURATION_SECONDS}, a zero
+     * {@code RotationOffset}, and no {@code PositionOffset}.
+     *
+     * <p><b>{@link #durationSeconds} is a leak guard, not decoration.</b> At least one shipped
+     * particle asset ({@code Block_Gem_Sparks}) authors an UNBOUNDED spawner
+     * ({@code TotalParticles < 0}) which, fired without a cap, never stops spawning. Authoring
+     * {@code 0} or a negative value means UNCAPPED - only do that for a system whose own spawner
+     * budget is known to terminate.
+     *
+     * <p><b>{@link #positionOffset} is FACING-RELATIVE</b> to the placed station block's own yaw,
+     * exactly like {@code Custody.Display.Offset} and {@code Puppet.Offset}: authored {@code +Z} is
+     * the block's FRONT, {@code +X} its right, {@code Y} stays vertical, and the composition runs
+     * through the one shared {@code station.StationBlockFacing} reader. It is IDENTITY at a
+     * default-orientation placement. {@link #rotationOffset} is the burst's own emission rotation in
+     * DEGREES, passed straight to the engine's yaw/pitch/roll particle arguments (it is NOT composed
+     * with the block facing - a rotated burst is authored relative to the burst itself).
+     *
+     * <p><b>No {@code Color} leaf.</b> The only colour-capable engine overload takes no playback cap,
+     * so a tinted burst could not carry {@link #durationSeconds} - and the unbounded-spawner leak
+     * that cap closes must never be reintroduced. Vary the tint by referencing a different particle
+     * system id.
+     */
+    public static final class ModelParticle {
+
+        /** The per-burst client-playback cap applied when {@link #durationSeconds} is not authored. */
+        public static final float DEFAULT_DURATION_SECONDS = 4.0f;
+
+        /** The uniform burst scale applied when {@link #scale} is not authored. */
+        public static final double DEFAULT_SCALE = 1.0;
+
+        @Nullable protected String systemId;
+        @Nullable protected Double scale;
+        @Nullable protected Double durationSeconds;
+        @Nullable protected Rotation rotationOffset;
+        @Nullable protected Vec3 positionOffset;
+
+        public static final BuilderCodec<ModelParticle> CODEC =
+                BuilderCodec.builder(ModelParticle.class, ModelParticle::new)
+                        .appendInherited(new KeyedCodec<>("SystemId", Codec.STRING, false),
+                                (o, v) -> o.systemId = v, o -> o.systemId, (o, p) -> o.systemId = p.systemId)
+                        .documentation("The native particle-system asset id to spawn (required; a blank entry is skipped).").add()
+                        .appendInherited(new KeyedCodec<>("Scale", Codec.DOUBLE, false),
+                                (o, v) -> o.scale = v, o -> o.scale, (o, p) -> o.scale = p.scale)
+                        .documentation("Uniform burst scale; defaults to 1.0 when absent or non-positive.").add()
+                        .appendInherited(new KeyedCodec<>("DurationSeconds", Codec.DOUBLE, false),
+                                (o, v) -> o.durationSeconds = v, o -> o.durationSeconds,
+                                (o, p) -> o.durationSeconds = p.durationSeconds)
+                        .documentation("Client-playback cap in seconds; defaults to 4. Author 0 or less for UNCAPPED, which an unbounded-spawner system will never stop.").add()
+                        .appendInherited(new KeyedCodec<>("RotationOffset", Rotation.CODEC, false),
+                                (o, v) -> o.rotationOffset = v, o -> o.rotationOffset,
+                                (o, p) -> o.rotationOffset = p.rotationOffset)
+                        .documentation("Burst emission rotation in degrees (Yaw/Pitch/Roll); each unauthored axis is 0. Not composed with the block facing.").add()
+                        .appendInherited(new KeyedCodec<>("PositionOffset", Vec3.CODEC, false),
+                                (o, v) -> o.positionOffset = v, o -> o.positionOffset,
+                                (o, p) -> o.positionOffset = p.positionOffset)
+                        .documentation("Facing-relative shift off the moment's target position: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical.").add()
+                        .build();
+
+        public ModelParticle() {
+        }
+
+        /** Convenience: a default-tuned burst of {@code systemId} (the one-id authoring shape). */
+        @Nonnull
+        public static ModelParticle of(@Nullable String systemId) {
+            return of(systemId, null, null, null, null);
+        }
+
+        /** Java-side factory; sets the same fields the codec fills. */
+        @Nonnull
+        public static ModelParticle of(@Nullable String systemId, @Nullable Double scale,
+                @Nullable Double durationSeconds, @Nullable Rotation rotationOffset,
+                @Nullable Vec3 positionOffset) {
+            ModelParticle m = new ModelParticle();
+            m.systemId = systemId;
+            m.scale = scale;
+            m.durationSeconds = durationSeconds;
+            m.rotationOffset = rotationOffset;
+            m.positionOffset = positionOffset;
+            return m;
+        }
+
+        @Nullable
+        public String getSystemId() {
+            return systemId;
+        }
+
+        /** True when {@link #systemId} is authored (a blank-id burst is skipped at play time). */
+        public boolean hasSystemId() {
+            return systemId != null && !systemId.isBlank();
+        }
+
+        @Nullable
+        public Double getScale() {
+            return scale;
+        }
+
+        @Nullable
+        public Double getDurationSeconds() {
+            return durationSeconds;
+        }
+
+        @Nullable
+        public Rotation getRotationOffset() {
+            return rotationOffset;
+        }
+
+        @Nullable
+        public Vec3 getPositionOffset() {
+            return positionOffset;
+        }
+
+        /** {@link #scale}, reader-defaulted to {@link #DEFAULT_SCALE} when null/non-positive. */
+        public double effectiveScale() {
+            return scale != null && scale > 0 ? scale : DEFAULT_SCALE;
+        }
+
+        /**
+         * {@link #durationSeconds}, reader-defaulted to {@link #DEFAULT_DURATION_SECONDS} when null.
+         * An AUTHORED zero/negative passes through verbatim as the engine's "uncapped" sentinel.
+         */
+        public float effectiveDurationSeconds() {
+            return durationSeconds != null ? durationSeconds.floatValue() : DEFAULT_DURATION_SECONDS;
+        }
+    }
+
+    /**
      * One-shot camera shake, matching {@code com.ziggfreed.common.camera.CameraShakeService
      * #shake(PlayerRef, String cameraEffectId, float intensity)} EXACTLY (critique m6 binding
      * fix: verified against the ziggfreed-common source before authoring this leaf - the
@@ -154,9 +308,12 @@ public final class Presentation {
 
         public static final BuilderCodec<Shake> CODEC = BuilderCodec.builder(Shake.class, Shake::new)
                 .appendInherited(new KeyedCodec<>("EffectId", Codec.STRING, false),
-                        (o, v) -> o.effectId = v, o -> o.effectId, (o, p) -> o.effectId = p.effectId).add()
+                        (o, v) -> o.effectId = v, o -> o.effectId, (o, p) -> o.effectId = p.effectId)
+                .documentation("The native CameraEffect asset id to play; a bare id (never a timed EffectRef) since the shake's duration is baked inside the referenced asset.").add()
                 .appendInherited(new KeyedCodec<>("Intensity", Codec.DOUBLE, false),
-                        (o, v) -> o.intensity = v, o -> o.intensity, (o, p) -> o.intensity = p.intensity).add()
+                        (o, v) -> o.intensity = v, o -> o.intensity, (o, p) -> o.intensity = p.intensity)
+                .documentation("The contextual shake intensity in the engine's 0..1 space; null lands on the shake service's own no-op guard.")
+                .addValidator(CodecWarnValidators.nonNegative("Presentation.Shake.Intensity should not be negative.")).add()
                 .build();
 
         /** Java-side factory; sets the same fields the codec fills. */
@@ -168,6 +325,15 @@ public final class Presentation {
             return s;
         }
 
+        /**
+         * The {@code CameraEffect} asset id to play. Deliberately a BARE id, NOT the shared
+         * {@link EffectRef} {@code {Id, DurationMs?}} group: a camera shake's duration lives
+         * INSIDE the referenced asset (per first/third-person), and firing one is a single
+         * fire-and-forget packet the client renders for the asset's own baked duration - the
+         * engine exposes no per-use duration override anywhere on that path. A {@code DurationMs}
+         * leaf here would be inert, so the leaf stays an id; vary the duration by referencing a
+         * different {@code CameraEffect} asset.
+         */
         @Nullable
         public String getEffectId() {
             return effectId;

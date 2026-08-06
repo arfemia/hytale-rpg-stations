@@ -18,6 +18,7 @@ import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
+import com.ziggfreed.common.codec.TagMatch;
 
 /**
  * The resolution of a station's effective per-action groups (design 9.1 + scope-2 1.5): the
@@ -89,7 +90,7 @@ public final class ActionResolver {
 
     /**
      * The ONE {@code Target:{Action}} identity every Action-targeted extension payload resolves
-     * by (adversarial-verify F4: one rule for Loot/Xp appends AND the Puppet/Custody overlays,
+     * by (adversarial-verify F4: one rule for the Loot/Contributions appends AND the Puppet/Custody overlays,
      * never two different widths): the {@code Ref}'d {@link ActionAsset} id when the inline entry
      * Refs one (an Action target "reaches every Ref user of that action" - the documented
      * semantic, and what the validator checks the id against), else the inline map key for an
@@ -312,23 +313,7 @@ public final class ActionResolver {
         if (wantFunction != null && !wantFunction.isBlank() && wantFunction.equalsIgnoreCase(heldFunction)) {
             return true;
         }
-        Map<String, String[]> wantTags = input.getTags();
-        if (wantTags != null && !wantTags.isEmpty() && heldTags != null && !heldTags.isEmpty()) {
-            for (Map.Entry<String, String[]> req : wantTags.entrySet()) {
-                String[] have = heldTags.get(req.getKey());
-                if (have == null || req.getValue() == null) {
-                    continue;
-                }
-                for (String want : req.getValue()) {
-                    for (String h : have) {
-                        if (want != null && want.equalsIgnoreCase(h)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
+        return TagMatch.matches(input.getTags(), heldTags);
     }
 
     /**
@@ -460,7 +445,7 @@ public final class ActionResolver {
         }
 
         /**
-         * The declared multi-station anchor map ({@code anchorId -> {Station, MaxRadius}}, scope-2
+         * The declared multi-station anchor map ({@code anchorId -> {Station, MaxRadiusMeters}}, scope-2
          * 2.2); null = a single-station action. No station-level default (anchors are action-level
          * only, like {@code Input}/{@code Steps}).
          */

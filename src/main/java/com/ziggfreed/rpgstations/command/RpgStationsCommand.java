@@ -22,18 +22,13 @@ import com.ziggfreed.rpgstations.validation.Finding;
 
 /**
  * {@code /rpgstations <camera|validate> [action]} - the admin maintenance/tuning command group
- * (phase-1 closeout: the design 4.1 scope this mod never landed before the MMO deleted its own
- * camera subgroup, see {@code MmoStationCommand}'s prior shape in the hyMMO root repo's git
- * history). Admin-gated with {@link HytalePermissionsProvider#GROUP_ADMIN} at the framework
+ * (design 4.1). Admin-gated with {@link HytalePermissionsProvider#GROUP_ADMIN} at the framework
  * level (the mob-scaling/kweebec sibling-mod idiom), never a manual runtime permission check.
  *
  * <ul>
  *   <li>{@code camera <preset>} - set the CALLING player's own {@link StationCameraPreset}
  *       tuning override for their next station session (transient, {@link StationCameraPrefs},
- *       never persisted; overrides a station asset's own {@code Camera.Recipe} default).
- *       Ported verbatim (shape) from the MMO's deleted {@code MmoStationCommand} camera
- *       subgroup, moved onto this mod's own {@link StationCameraPrefs}/{@link
- *       StationCameraPreset}.</li>
+ *       never persisted; overrides a station asset's own {@code Camera.Recipe} default).</li>
  *   <li>{@code camera list} - chat every known preset id (dynamic over {@link
  *       StationCameraPreset#values()}, never a hand-maintained list) plus the caller's current
  *       preset.</li>
@@ -41,8 +36,7 @@ import com.ziggfreed.rpgstations.validation.Finding;
  *       station/lootable catalog and chat the aggregate: the summary line plus every finding,
  *       the SAME information {@code RpgStationsPlugin.onStationAssetsLoaded}'s boot-log audit
  *       already prints via {@link StationValidator#runAndLog()} (also called here so the log
- *       carries an identical run, mirroring the MMO's own {@code /mmoconfig validate} dual-call
- *       shape: chat a live run, then log a matching one).</li>
+ *       carries an identical run: chat a live run, then log a matching one).</li>
  * </ul>
  */
 public final class RpgStationsCommand extends CommandBase {

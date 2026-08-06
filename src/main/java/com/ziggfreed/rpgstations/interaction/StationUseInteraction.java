@@ -23,11 +23,9 @@ import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * Custom interaction handler for in-world <b>station</b> blocks. Ported from the MMO's
- * {@code interaction.StationUseInteraction} (RPG Stations extraction leg 2); registered
- * type name changes to {@code "rpg_station_use"} (the MMO's own copy stays
- * {@code "mmo_station_use"} and coexists unchanged until leg 5 - the two ids let both jars'
- * station engines run side by side without collision).
+ * Custom interaction handler for in-world <b>station</b> blocks, registered under the type name
+ * {@code "rpg_station_use"} (namespaced to this mod, so a station block's chain can never collide
+ * with another mod's interaction type).
  *
  * <p>Referenced from a station block's {@code RootInteraction} in the OBJECT form,
  * {@code { "Type": "rpg_station_use", "Station": "sawmill" } }, so ONE interaction type backs

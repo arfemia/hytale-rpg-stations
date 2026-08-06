@@ -23,8 +23,8 @@ public class ImplicitProgramTest {
 
     @Test
     void build_producesOneStepWithEveryClassicPhase() {
-        StationStep.Consume consume = StationStep.Consume.of("Wood_Oak_Trunk", null, 1, "Inventory");
-        StationStep.Produce produce = StationStep.Produce.of("Wood_Hardwood_Planks", 2, "Inventory");
+        StationStep.Consume consume = StationStep.Consume.ofOne("Wood_Oak_Trunk", null, 1, "Inventory");
+        StationStep.Produce produce = StationStep.Produce.ofOne("Wood_Hardwood_Planks", 2, "Inventory");
         Presentation cyclePresentation = Presentation.ofSound("SFX_Wood_Break");
 
         List<StationStep> steps = ImplicitProgram.build(consume, produce, new Roll[0], cyclePresentation);
@@ -37,8 +37,8 @@ public class ImplicitProgramTest {
 
     @Test
     void build_carriesTheCallersValueObjectsVerbatim() {
-        StationStep.Consume consume = StationStep.Consume.of("Wood_Oak_Trunk", null, 1, "Inventory");
-        StationStep.Produce produce = StationStep.Produce.of("Wood_Hardwood_Planks", 2, "Inventory");
+        StationStep.Consume consume = StationStep.Consume.ofOne("Wood_Oak_Trunk", null, 1, "Inventory");
+        StationStep.Produce produce = StationStep.Produce.ofOne("Wood_Hardwood_Planks", 2, "Inventory");
         Roll[] rolls = new Roll[]{Roll.of("Cycle", null, null, null, Roll.Grants.of(1, null, null))};
         Presentation cyclePresentation = Presentation.ofSound("SFX_Wood_Break");
 
@@ -55,8 +55,8 @@ public class ImplicitProgramTest {
 
     @Test
     void build_withNullCyclePresentation_carriesNull() {
-        StationStep.Consume consume = StationStep.Consume.of("X", null, 1, "Inventory");
-        StationStep.Produce produce = StationStep.Produce.of("Y", 1, "Inventory");
+        StationStep.Consume consume = StationStep.Consume.ofOne("X", null, 1, "Inventory");
+        StationStep.Produce produce = StationStep.Produce.ofOne("Y", 1, "Inventory");
 
         List<StationStep> steps = ImplicitProgram.build(consume, produce, new Roll[0], null);
 
@@ -65,8 +65,8 @@ public class ImplicitProgramTest {
 
     @Test
     void build_stepIdIsStable() {
-        StationStep.Consume consume = StationStep.Consume.of("X", null, 1, "Inventory");
-        StationStep.Produce produce = StationStep.Produce.of("Y", 1, "Inventory");
+        StationStep.Consume consume = StationStep.Consume.ofOne("X", null, 1, "Inventory");
+        StationStep.Produce produce = StationStep.Produce.ofOne("Y", 1, "Inventory");
 
         List<StationStep> steps = ImplicitProgram.build(consume, produce, new Roll[0], null);
 

@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import org.junit.jupiter.api.Test;
+import com.ziggfreed.common.codec.Vec3;
+import com.ziggfreed.common.codec.Rotation;
+import com.ziggfreed.common.codec.TagMatch;
 
 /**
  * Forces static init of every RpgStations asset codec so a lower-case {@code KeyedCodec} key
@@ -136,7 +139,9 @@ public class AssetCodecInitTest {
         assertDoesNotThrow(() -> assertNotNull(Puppet.CODEC));
         assertDoesNotThrow(() -> assertNotNull(Puppet.Hide.CODEC));
         assertDoesNotThrow(() -> assertNotNull(Puppet.Look.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(Puppet.Offset.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(Vec3.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(Rotation.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(TagMatch.CODEC));
         assertDoesNotThrow(() -> assertNotNull(Puppet.Prop.CODEC));
         assertDoesNotThrow(() -> assertNotNull(StationStep.PuppetOverride.CODEC));
     }

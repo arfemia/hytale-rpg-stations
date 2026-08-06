@@ -10,7 +10,7 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 /**
- * The context a {@link SummaryEnricher#rows} call receives (design section 3.2): plain session
+ * The context a {@link SummaryEnricher#rows} call receives: plain session
  * totals plus sync-only live world-thread context. {@link #store()}/{@link #playerRef()} are
  * valid ONLY synchronously during the call.
  */

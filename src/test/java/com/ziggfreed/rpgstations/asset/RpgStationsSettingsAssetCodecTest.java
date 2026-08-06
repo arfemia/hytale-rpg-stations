@@ -7,14 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
-import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 
 /** Codec layer for {@link RpgStationsSettingsAsset} (design section 4.6): decode + native {@code Parent} sibling-leaf inherit. */
 public class RpgStationsSettingsAssetCodecTest {
 
     private static RpgStationsSettingsAsset decodeAsset(String body) throws Exception {
-        return RpgStationsSettingsAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body), new ExtraInfo());
+        return RpgStationsSettingsAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body),
+                new AssetExtraInfo<>(new AssetExtraInfo.Data(RpgStationsSettingsAsset.class, "fixture", null)));
     }
 
     private static RpgStationsSettingsAsset decodeWithParent(String body, RpgStationsSettingsAsset parent, String key, String parentKey)

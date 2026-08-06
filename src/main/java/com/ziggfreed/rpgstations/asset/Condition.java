@@ -6,6 +6,7 @@ import javax.annotation.Nullable;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 
 /**
  * ONE shared numeric-factor GATE leaf (design section 4.4.2/4.5.1, documented as a
@@ -18,8 +19,8 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
  * a redundant second shape.
  *
  * <p>{@link #factor} is a namespaced id (e.g. {@code "rpgstations:tool_power"},
- * {@code "mmoskilltree:skill_level"}); {@link #param} is an optional argument the factor
- * provider interprets (e.g. a skill id). {@link #min}/{@link #max} bound the resolved value
+ * {@code "yourmod:reputation"}); {@link #param} is an optional argument the factor provider
+ * interprets. {@link #min}/{@link #max} bound the resolved value
  * (either or both may be authored; a factor that resolves outside the bound fails the
  * condition). An unregistered factor id fails CLOSED at runtime (a gate never silently opens
  * because a provider has not registered yet).
@@ -34,10 +35,13 @@ public final class Condition {
     public static final BuilderCodec<Condition> CODEC = BuilderCodec.builder(Condition.class, Condition::new)
             .appendInherited(new KeyedCodec<>("Factor", Codec.STRING, false),
                     (o, v) -> o.factor = v, o -> o.factor, (o, p) -> o.factor = p.factor)
-            .documentation("The namespaced factor channel id to gate on. Unregistered = fails CLOSED (the gate never silently opens).").add()
+            .documentation("The namespaced factor channel id to gate on. Unregistered = fails CLOSED (the gate never silently opens).")
+            .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:factors"))).add()
             .appendInherited(new KeyedCodec<>("Param", Codec.STRING, false),
                     (o, v) -> o.param = v, o -> o.param, (o, p) -> o.param = p.param)
-            .documentation("Optional provider-interpreted argument (e.g. a skill id, or a 'stat' channel id).").add()
+            .documentation("Optional provider-interpreted argument, opaque to this engine (for the built-in 'stat' "
+                    + "factor, a registered EntityStatType channel id; for a third-party factor, whatever that "
+                    + "provider documents).").add()
             .appendInherited(new KeyedCodec<>("Min", Codec.DOUBLE, false),
                     (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
             .documentation("Lower bound (inclusive); the resolved factor value must be >= Min. Omit for no lower bound.").add()

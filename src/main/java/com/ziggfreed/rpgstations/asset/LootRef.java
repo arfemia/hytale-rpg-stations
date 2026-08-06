@@ -26,9 +26,13 @@ public final class LootRef {
     @Nullable protected Roll[] rolls;
 
     public static final BuilderCodec<LootRef> CODEC = BuilderCodec.builder(LootRef.class, LootRef::new)
-            .appendInherited(new KeyedCodec<>("Lootables", new ArrayCodec<>(Codec.STRING, String[]::new), false),
+            .appendInherited(new KeyedCodec<>("Lootables",
+                            new ArrayCodec<>(LootableAsset.CHILD_ASSET_CODEC, String[]::new), false),
                     (o, v) -> o.lootables = v, o -> o.lootables, (o, p) -> o.lootables = p.lootables)
-            .documentation("Referenced LootableAsset ids (case-insensitive at resolve). Each table's Rolls evaluate.").add()
+            .documentation("Referenced LootableAsset ids (case-insensitive at resolve); each table's Rolls evaluate. "
+                    + "An entry may also be an INLINE lootable body, optionally with its own Parent - but a "
+                    + "LootableAsset's single Rolls array REPLACES the parent's wholesale, it never appends to it, "
+                    + "so use an ExtensionAsset (or the sibling inline Rolls leaf here) to ADD rolls to a shared table.").add()
             .appendInherited(new KeyedCodec<>("Rolls", new ArrayCodec<>(Roll.CODEC, Roll[]::new), false),
                     (o, v) -> o.rolls = v, o -> o.rolls, (o, p) -> o.rolls = p.rolls)
             .documentation("Inline Rolls authored directly at this site, in addition to any referenced Lootables.").add()

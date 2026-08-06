@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import com.hypixel.hytale.assetstore.codec.ContainedAssetCodec;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.WrappedCodec;
@@ -47,7 +48,7 @@ import com.ziggfreed.rpgstations.asset.StationStep;
  * the docs-site's Schema Reference page ({@code docs-site/rpg-stations-docs/src/data/reference/
  * schema.json}, design doc section 6.2).
  *
- * <p>Mirrors the MMO's {@code i18n.lang.EnglishLangWriter} pattern: a single pure
+ * <p>ONE pure
  * {@link #render()} function shared by the Gradle {@code generateSchemaDocs} task ({@link #main})
  * and {@code SchemaDocDriftTest}, so the two can never diverge. Field documentation strings are
  * REAL (not backfilled here): every rewritten codec field in this mod's scope-2 authoring surface
@@ -247,6 +248,20 @@ public final class SchemaDocWriter {
         if (codec instanceof EnumCodec<?> ec) {
             out.put("type", "enum");
             out.put("values", Arrays.asList(ec.getEnumKeys()));
+            return out;
+        }
+
+        if (codec instanceof ContainedAssetCodec<?, ?, ?> contained) {
+            // A ref-or-inline leaf: the value is EITHER an id string naming an asset of this type,
+            // OR an inline anonymous body of it. Name the target type so the reference page can
+            // render a typed cross-link rather than an opaque "containedAsset".
+            out.put("type", "containedAsset");
+            String target = contained.getAssetClass().getSimpleName();
+            out.put("assetType", target);
+            String rootName = ROOT_TYPE_NAMES.get(contained.getAssetClass());
+            if (rootName != null) {
+                out.put("ref", rootName);
+            }
             return out;
         }
 

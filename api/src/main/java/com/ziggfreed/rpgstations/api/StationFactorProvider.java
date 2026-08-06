@@ -3,7 +3,7 @@ package com.ziggfreed.rpgstations.api;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-/** A numeric-factor resolver registered under one factor id (design section 3.2). */
+/** A numeric-factor resolver registered under one factor id. */
 @FunctionalInterface
 public interface StationFactorProvider {
 

@@ -19,12 +19,14 @@ import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.FactorRef;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
+import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.Roll;
@@ -50,7 +52,7 @@ import com.ziggfreed.rpgstations.validation.Finding;
  * A-SCHEMA leg's rewritten codecs. New sections cover {@code ACTION_REF_UNKNOWN},
  * {@code ANCHOR_STATION_UNKNOWN}, {@code WALK_TARGET_UNKNOWN_ANCHOR},
  * {@code STEP_AT_UNKNOWN_ANCHOR}, {@code WALK_REQUIRES_PUPPET},
- * {@code LOOT_DOUBLE_LUCK}, the reshaped {@code Stamp.Caps.Budgets[]} checks, and the two new
+ * {@code LOOT_DUPLICATE_FACTOR}, the reshaped {@code Stamp.Caps.Budgets[]} checks, and the two new
  * standalone-collection validators ({@link StationValidator#validateActionAssets} /
  * {@link StationValidator#validateExtensions}) covering {@code EXTENSION_TARGET_UNKNOWN},
  * {@code EXTENSION_PAYLOAD_MISMATCH}, {@code EXTENSION_KEY_COLLISION},
@@ -123,8 +125,8 @@ public class StationValidatorTest {
         return StationAsset.of("sawmill",
                 StationAsset.Identity.of("rpgstations.station.sawmill.name", "rpgstations.station.sawmill.desc",
                         "Wood_Hardwood_Planks"),
-                StationAsset.Work.of(5000L, 600000L, 1.5, true, new StationAsset.WorkXp[]{
-                        StationAsset.WorkXp.of("WOODCUTTING", 8.0)}),
+                StationAsset.Work.of(5000L, 600000L, 1.5, true, new Contribution[]{
+                        Contribution.of("yourmod:test", "ALPHA", 8.0)}),
                 oakRecipe(),
                 StationAsset.Hold.of(true, "RPG_Station_Hold", true),
                 null,
@@ -328,14 +330,25 @@ public class StationValidatorTest {
     }
 
     @Test
-    void nonpositivePerCycle_flagged() {
-        StationAsset a = StationAsset.of("badxp",
-                StationAsset.Identity.of("rpgstations.station.badxp.name", null, null),
-                StationAsset.Work.of(5000L, null, null, null, new StationAsset.WorkXp[]{
-                        StationAsset.WorkXp.of("WOODCUTTING", 0.0)}),
+    void nonpositiveContributionAmount_flagged() {
+        StationAsset a = StationAsset.of("badamount",
+                StationAsset.Identity.of("rpgstations.station.badamount.name", null, null),
+                StationAsset.Work.of(5000L, null, null, null, new Contribution[]{
+                        Contribution.of("yourmod:test", "ALPHA", 0.0)}),
                 oakRecipe(),
                 null, null, null, null, null, null);
-        assertTrue(codes(validate(a)).contains("NONPOSITIVE_XP_PER_CYCLE"));
+        assertTrue(codes(validate(a)).contains("NONPOSITIVE_CONTRIBUTION_AMOUNT"));
+    }
+
+    @Test
+    void missingContributionChannel_flagged() {
+        StationAsset a = StationAsset.of("nochannel",
+                StationAsset.Identity.of("rpgstations.station.nochannel.name", null, null),
+                StationAsset.Work.of(5000L, null, null, null, new Contribution[]{
+                        Contribution.of("  ", "ALPHA", 4.0)}),
+                oakRecipe(),
+                null, null, null, null, null, null);
+        assertTrue(codes(validate(a)).contains("MISSING_CONTRIBUTION_CHANNEL"));
     }
 
     @Test
@@ -415,30 +428,30 @@ public class StationValidatorTest {
         assertFalse(codes.contains("BLANK_GATHER_TYPE"));
     }
 
-    // ==================== Tool.XpScale ====================
+    // ==================== Tool.PowerScale ====================
 
     @Test
-    void deadXpScale_flagged() {
+    void deadPowerScale_flagged() {
         StationAsset a = StationAsset.of("deadscale",
                 StationAsset.Identity.of("rpgstations.station.deadscale.name", null, null),
                 null, oakRecipe(),
                 null,
                 StationAsset.Tool.of(null, StationAsset.Tool.Gather.of("Woods", 0.1), null,
-                        StationAsset.Tool.XpScale.of(null, null, null, null, null)),
+                        StationAsset.Tool.PowerScale.of(null, null, null, null, null)),
                 null, null, null, null);
-        assertTrue(codes(validate(a)).contains("DEAD_XP_SCALE"));
+        assertTrue(codes(validate(a)).contains("DEAD_POWER_SCALE"));
     }
 
     @Test
-    void xpScaleBadClamp_flagged() {
+    void powerScaleBadClamp_flagged() {
         StationAsset a = StationAsset.of("badclamp",
                 StationAsset.Identity.of("rpgstations.station.badclamp.name", null, null),
                 null, oakRecipe(),
                 null,
                 StationAsset.Tool.of(null, StationAsset.Tool.Gather.of("Woods", 0.1), null,
-                        StationAsset.Tool.XpScale.of(null, 0.2, null, 1.5, 0.75)),
+                        StationAsset.Tool.PowerScale.of(null, 0.2, null, 1.5, 0.75)),
                 null, null, null, null);
-        assertTrue(codes(validate(a)).contains("XP_SCALE_BAD_CLAMP"));
+        assertTrue(codes(validate(a)).contains("POWER_SCALE_BAD_CLAMP"));
     }
 
     // ==================== Tool.Durability ====================
@@ -605,41 +618,48 @@ public class StationValidatorTest {
                 .contains("LOOT_UNKNOWN_TABLE"));
     }
 
-    // ==================== LOOT_DOUBLE_LUCK (scope-2 design 4.4, the either-or luck guard) ====================
+    // ============ LOOT_DUPLICATE_FACTOR (the generic redundant-reference lint) ============
 
     @Test
-    void lootDoubleLuck_flagged() {
-        Roll roll = Roll.of("Cycle", null,
-                Roll.Chance.of(0.0, new FactorRef[]{
-                        FactorRef.of("mmoskilltree:station_luck", null),
-                        FactorRef.of("stat", "MMO_Luck")}, 90.0),
+    void lootDuplicateFactorPair_flagged() {
+        // The only shape that genuinely fires: a param-less zero-arg engine factor read twice in
+        // one roll (once as a gate, once as a chance term) - the same number, counted twice.
+        Roll roll = Roll.of("Cycle",
+                new Condition[]{Condition.of("rpgstations:cycle_count", null, 5.0, null)},
+                Roll.Chance.of(0.0, new FactorRef[]{FactorRef.of("rpgstations:cycle_count", null)}, 90.0),
                 null, Roll.Grants.of(null, "T1", null));
-        StationAsset a = StationAsset.of("doubleluck",
-                StationAsset.Identity.of("rpgstations.station.doubleluck.name", null, null),
+        StationAsset a = StationAsset.of("dupefactor",
+                StationAsset.Identity.of("rpgstations.station.dupefactor.name", null, null),
                 null, oakRecipe(), null, null, null, null, null, null, loot(roll));
-        assertTrue(codes(validate(a)).contains("LOOT_DOUBLE_LUCK"));
+        assertTrue(codes(validate(a)).contains("LOOT_DUPLICATE_FACTOR"));
     }
 
     @Test
-    void lootSingleLuckSource_notFlaggedDoubleLuck() {
-        Roll roll = Roll.of("Cycle", null,
-                Roll.Chance.of(0.0, new FactorRef[]{FactorRef.of("stat", "MMO_Luck")}, 90.0),
-                null, Roll.Grants.of(null, "T1", null));
-        StationAsset a = StationAsset.of("singleluck",
-                StationAsset.Identity.of("rpgstations.station.singleluck.name", null, null),
+    void lootSameFactorDifferentParams_notFlagged() {
+        // LOAD-BEARING: the lint keys on the (Factor, Param) PAIR, never the factor id alone.
+        // Every stat read carries the same "stat" factor id, so a ladder composing two DIFFERENT
+        // stat channels is correct, documented, shipped content - and must stay silent.
+        Roll roll = Roll.of("Cycle", null, null,
+                Roll.Ladder.of(new FactorRef[]{
+                        FactorRef.of("stat", "Yourmod_Luck"),
+                        FactorRef.of("stat", "Yourmod_Luck_Woodcutting")},
+                        new Roll.Ladder.Floor[]{Roll.Ladder.Floor.of(1.0, Roll.Grants.of(null, "T1", null), null)}),
+                null);
+        StationAsset a = StationAsset.of("twostats",
+                StationAsset.Identity.of("rpgstations.station.twostats.name", null, null),
                 null, oakRecipe(), null, null, null, null, null, null, loot(roll));
-        assertFalse(codes(validate(a)).contains("LOOT_DOUBLE_LUCK"));
+        assertFalse(codes(validate(a)).contains("LOOT_DUPLICATE_FACTOR"));
     }
 
     @Test
-    void lootStationLuckAggregateAlone_notFlaggedDoubleLuck() {
+    void lootSingleFactorReference_notFlagged() {
         Roll roll = Roll.of("Cycle", null,
-                Roll.Chance.of(0.0, new FactorRef[]{FactorRef.of("mmoskilltree:station_luck", null)}, 90.0),
+                Roll.Chance.of(0.0, new FactorRef[]{FactorRef.of("stat", "Yourmod_Luck")}, 90.0),
                 null, Roll.Grants.of(null, "T1", null));
-        StationAsset a = StationAsset.of("aggregateluck",
-                StationAsset.Identity.of("rpgstations.station.aggregateluck.name", null, null),
+        StationAsset a = StationAsset.of("onefactor",
+                StationAsset.Identity.of("rpgstations.station.onefactor.name", null, null),
                 null, oakRecipe(), null, null, null, null, null, null, loot(roll));
-        assertFalse(codes(validate(a)).contains("LOOT_DOUBLE_LUCK"));
+        assertFalse(codes(validate(a)).contains("LOOT_DUPLICATE_FACTOR"));
     }
 
     // ==================== validateLootables (standalone LootableAsset content) ====================
@@ -913,7 +933,7 @@ public class StationValidatorTest {
 
     @Test
     void puppetHideEffect_withId_noFinding() {
-        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_EFFECT, "Portal_Teleport"), null, null, null, null);
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_EFFECT, EffectRef.of("Portal_Teleport")), null, null, null, null);
         StationAsset a = puppetStation("hideeffectwithid", puppet, null);
         assertFalse(codes(validate(a)).contains("PUPPET_HIDE_EFFECT_MISSING_ID"));
     }
@@ -1208,7 +1228,7 @@ public class StationValidatorTest {
 
     @Test
     void consumeStepEmpty_flagged() {
-        StationStep consume = StationStep.of("c").withConsume(StationStep.Consume.of(null, null, 1, "Inventory"));
+        StationStep consume = StationStep.of("c").withConsume(StationStep.Consume.ofOne(null, null, 1, "Inventory"));
         Map<String, ActionDef> actions = new LinkedHashMap<>();
         actions.put("ritual", actionDef().withSteps(new StationStep[]{consume}));
         assertTrue(codes(validate(stationWithActions(actions))).contains("CONSUME_STEP_EMPTY"));
@@ -1217,7 +1237,7 @@ public class StationValidatorTest {
     @Test
     void consumeStepFromCustody_withItemId_notFlaggedEmpty() {
         // Custody (design 9.4, phase-2 leg C) is an implemented Consume.From route.
-        StationStep consume = StationStep.of("c").withConsume(StationStep.Consume.of("X", null, 1, "Custody"));
+        StationStep consume = StationStep.of("c").withConsume(StationStep.Consume.ofOne("X", null, 1, "Custody"));
         Map<String, ActionDef> actions = new LinkedHashMap<>();
         actions.put("ritual", actionDef().withSteps(new StationStep[]{consume}));
         assertFalse(codes(validate(stationWithActions(actions))).contains("CONSUME_STEP_EMPTY"));
@@ -1225,7 +1245,7 @@ public class StationValidatorTest {
 
     @Test
     void produceStepEmpty_flagged() {
-        StationStep produce = StationStep.of("p").withProduce(StationStep.Produce.of(null, 1, "Inventory"));
+        StationStep produce = StationStep.of("p").withProduce(StationStep.Produce.ofOne(null, 1, "Inventory"));
         Map<String, ActionDef> actions = new LinkedHashMap<>();
         actions.put("ritual", actionDef().withSteps(new StationStep[]{produce}));
         assertTrue(codes(validate(stationWithActions(actions))).contains("PRODUCE_STEP_EMPTY"));
@@ -1358,9 +1378,44 @@ public class StationValidatorTest {
     }
 
     @Test
+    void grantsContributions_onCompletionTrigger_flagged() {
+        // A one-shot contribution rides the cycle-completed event, so a Completion-trigger roll
+        // authoring one warns exactly the way BonusOutputCopies already does.
+        StationAsset a = StationAsset.of("badposttrigger",
+                StationAsset.Identity.of("rpgstations.station.badposttrigger.name", null, null),
+                null, oakRecipe(),
+                null, null, null, null, null, null,
+                loot(Roll.of("Completion", null, null, null, Roll.Grants.of(null, null, null, null,
+                        new Contribution[]{Contribution.of("yourmod:test", "ALPHA", 10.0)}))));
+        assertTrue(codes(validate(a)).contains("LOOT_CONTRIBUTION_WRONG_TRIGGER"));
+    }
+
+    @Test
+    void grantsContributions_onCycleTrigger_notFlagged() {
+        StationAsset a = StationAsset.of("goodposttrigger",
+                StationAsset.Identity.of("rpgstations.station.goodposttrigger.name", null, null),
+                null, oakRecipe(),
+                null, null, null, null, null, null,
+                loot(Roll.of("Cycle", null, null, null, Roll.Grants.of(null, null, null, null,
+                        new Contribution[]{Contribution.of("yourmod:test", "ALPHA", 10.0)}))));
+        assertFalse(codes(validate(a)).contains("LOOT_CONTRIBUTION_WRONG_TRIGGER"));
+    }
+
+    @Test
+    void grantsContributions_blankChannel_flagged() {
+        StationAsset a = StationAsset.of("blankpostchannel",
+                StationAsset.Identity.of("rpgstations.station.blankpostchannel.name", null, null),
+                null, oakRecipe(),
+                null, null, null, null, null, null,
+                loot(Roll.of("Cycle", null, null, null, Roll.Grants.of(null, null, null, null,
+                        new Contribution[]{Contribution.of("  ", "ALPHA", 10.0)}))));
+        assertTrue(codes(validate(a)).contains("LOOT_CONTRIBUTION_MISSING_CHANNEL"));
+    }
+
+    @Test
     void produceToCustody_notFlaggedWave3Pending() {
         // Scope-2 wave 3: Produce.To:Custody EXECUTES now, so the temporary WAVE3_PENDING warn is gone.
-        StationStep step = StationStep.of("deposit").withProduce(StationStep.Produce.of("Food_Fish_Grilled", 1, "Custody"));
+        StationStep step = StationStep.of("deposit").withProduce(StationStep.Produce.ofOne("Food_Fish_Grilled", 1, "Custody"));
         Map<String, ActionDef> actions = new LinkedHashMap<>();
         actions.put("ritual", actionDef().withSteps(new StationStep[]{step}));
         assertFalse(codes(validate(stationWithActions(actions))).contains("WAVE3_PENDING"));
@@ -1580,9 +1635,9 @@ public class StationValidatorTest {
 
     @Test
     void extensionPayloadMismatch_flagged() throws Exception {
-        // A Lootable target can only carry Rolls[] - Xp is not a legal payload for it.
+        // A Lootable target can only carry Rolls[] - PerCycleContributions is not legal for it.
         ExtensionAsset ext = extensionAsset("badpayload", "{ \"Target\": { \"Lootable\": \"sawmillfinds\" },"
-                + " \"Xp\": [ { \"Skill\": \"WOODCUTTING\", \"PerCycle\": 5 } ] }");
+                + " \"PerCycleContributions\": [ { \"Channel\": \"yourmod:test\", \"Amount\": 5 } ] }");
         List<Finding> findings = StationValidator.validateExtensions(List.of(ext), List.of(), List.of(),
                 ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL);
         assertTrue(codes(findings).contains("EXTENSION_PAYLOAD_MISMATCH"));

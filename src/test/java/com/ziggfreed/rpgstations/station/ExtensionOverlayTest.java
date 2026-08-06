@@ -12,7 +12,6 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
-import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
@@ -49,15 +48,17 @@ public class ExtensionOverlayTest {
             + " },"
             + " \"Custody\": {"
             + "   \"MaxQuantity\": 7,"
+            + "   \"SingleFamily\": true,"
             + "   \"Input\": { \"ResourceTypeId\": \"Fixture_Family\" },"
             + "   \"States\": { \"Empty\": \"FixtureEmpty\", \"Loaded\": \"FixtureLoaded\","
             + "                 \"Working\": \"FixtureWorking\" },"
             + "   \"Display\": { \"Offset\": { \"X\": 0.25, \"Y\": 0.75, \"Z\": 1.25 }, \"Scale\": 2.0,"
-            + "                  \"Rotation\": { \"X\": 10.0 } }"
+            + "                  \"Rotation\": { \"Pitch\": 10.0 } }"
             + " } }";
 
     private static StationAsset station(String body) throws Exception {
-        return StationAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body), new ExtraInfo());
+        return StationAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body),
+                new AssetExtraInfo<>(new AssetExtraInfo.Data(StationAsset.class, "fixture", null)));
     }
 
     private static ExtensionAsset ext(String id, String body) throws Exception {
@@ -131,6 +132,7 @@ public class ExtensionOverlayTest {
         assertEquals(9.0, d(merged.getDisplay().getScale()));
         // Everything the overlay did NOT author survives, at BOTH nesting depths.
         assertEquals(Integer.valueOf(7), merged.getMaxQuantity(), "MaxQuantity survives a Display-only overlay");
+        assertEquals(Boolean.TRUE, merged.getSingleFamily(), "SingleFamily survives a Display-only overlay");
         assertEquals("Fixture_Family", merged.getInput().getResourceTypeId(), "Input survives");
         assertEquals("FixtureEmpty", merged.getStates().getEmpty(), "States.Empty survives");
         assertEquals("FixtureLoaded", merged.getStates().getLoaded(), "States.Loaded survives");
@@ -138,7 +140,7 @@ public class ExtensionOverlayTest {
         assertEquals(0.25, d(merged.getDisplay().getOffset().getX()), "a sibling leaf inside Display survives");
         assertEquals(0.75, d(merged.getDisplay().getOffset().getY()));
         assertEquals(1.25, d(merged.getDisplay().getOffset().getZ()));
-        assertEquals(10.0, d(merged.getDisplay().getRotation().getX()), "Rotation survives a Scale-only overlay");
+        assertEquals(10.0, d(merged.getDisplay().getRotation().getPitch()), "Rotation survives a Scale-only overlay");
     }
 
     @Test

@@ -16,9 +16,9 @@
  * (section 6.3) PLUS two pages the design's late-adoption header added - Selection
  * & Output Categories and Native Composition - neither of which existed as a
  * concept when 6.3 was drafted. Every leaf below is backed by a real page: the
- * Authoring Guides, the reference pages (Stat Channels, CustomSkillAsset,
- * Commands, Add-ons & Integrations), and Schema Reference, which renders the
- * generated per-type field tables from the codec-walked schema.json.
+ * Authoring Guides, the reference pages (Extension Channels, Commands, Add-ons &
+ * Integrations), and Schema Reference, which renders the generated per-type field
+ * tables from the codec-walked schema.json.
  */
 import type { ElementType } from 'react'
 import {
@@ -32,7 +32,6 @@ import {
   Rocket,
   ScrollText,
   Settings,
-  Wand2,
 } from 'lucide-react'
 
 export type SearchCategory =
@@ -101,7 +100,7 @@ export const nav: NavItem[] = [
       category: 'General',
       keywords: ['install', 'setup', 'download', 'server', 'ziggfreedcommon', 'dependency', 'mods folder', 'manifest'],
       sections: [
-        { title: 'Dependencies', hash: 'dependencies', description: 'ZiggfreedCommon is the only hard dependency; MMO Skill Tree is an optional bridge partner', keywords: ['ziggfreedcommon', 'mmo skill tree', 'optional'] },
+        { title: 'Dependencies', hash: 'dependencies', description: 'ZiggfreedCommon is the only hard dependency; every other mod is an optional add-on', keywords: ['ziggfreedcommon', 'optional', 'add-on'] },
         { title: 'Installing', hash: 'installing', description: 'Drop the jar in Mods/, restart, confirm the boot log', keywords: ['mods folder', 'restart', 'boot log'] },
         { title: 'Enabling', hash: 'enabling', description: 'The Settings asset Enabled flag and how it differs from a config file', keywords: ['settings', 'enabled', 'settings.json'] },
       ],
@@ -232,7 +231,7 @@ export const nav: NavItem[] = [
         title: 'Localization',
         href: '/docs/guides/localization/',
         search: {
-          description: 'The three lang families: rpgstations.lang, the native item/emote namespaces, and mmoskilltree.lang',
+          description: 'The two lang families: rpgstations.lang and the native item/emote namespaces',
           category: 'Authoring',
           keywords: ['localization', 'lang', 'i18n', 'translation', 'RpgMsg', 'items.lang', 'avatarCustomization'],
         },
@@ -251,23 +250,19 @@ export const nav: NavItem[] = [
     },
   },
   {
-    title: 'Stat Channels',
-    href: '/docs/stat-channels/',
+    title: 'Extension Channels',
+    href: '/docs/extension-channels/',
     icon: Gauge,
     search: {
-      description: 'The MMO Skill Tree channel-id table, units, MMO_Level_*/MMO_CombatLevel, and the generic Zig_Entity_Stats tag',
-      category: 'Reference',
-      keywords: ['stat channel', 'MMO_Level', 'MMO_CombatLevel', 'Zig_Entity_Stats', 'stat', 'channel', 'MMO_Luck', 'station_luck', 'EntityStatMap'],
-    },
-  },
-  {
-    title: 'CustomSkillAsset',
-    href: '/docs/custom-skill-asset/',
-    icon: Wand2,
-    search: {
-      description: 'The MMO-side custom skill type, documented with the same treatment as a native asset',
-      category: 'Reference',
-      keywords: ['CustomSkillAsset', 'custom skill', 'mmo'],
+      description: 'One vocabulary, two directions: factors read a number in, contributions post a number out',
+      category: 'Developer',
+      keywords: ['contribution', 'channel', 'factor', 'FactorRegistry', 'ContributionChannelRegistry', 'PerCycleContributions', 'Grants.Contributions', 'declare', 'namespaced id', 'Param', 'EntityStatMap', 'Zig_Entity_Stats'],
+      sections: [
+        { title: 'Reads: Factor and Param', hash: 'reads', description: 'Register a provider; the engine resolves the id to a number', keywords: ['factor', 'provider', 'resolve'] },
+        { title: 'Writes: Contributions', hash: 'writes', description: 'Declare a channel; the engine forwards {Channel, Param, Amount} and interprets nothing', keywords: ['channel', 'declare', 'forward', 'UNKNOWN_CHANNEL'] },
+        { title: 'Two authoring sites, two meanings', hash: 'two-sites', description: 'Work.PerCycleContributions is scaled per cycle; Roll.Grants.Contributions is one-shot and verbatim', keywords: ['PerCycleContributions', 'Grants', 'toolMultiplier', 'Idle.Fraction', 'one-shot'] },
+        { title: 'A worked example', hash: 'worked-example', description: 'A fictitious yourmod declaring a channel, authoring content, and listening', keywords: ['yourmod', 'example', 'listener', 'filter'] },
+      ],
     },
   },
   {
@@ -286,9 +281,9 @@ export const nav: NavItem[] = [
     href: '/docs/integrations/',
     icon: Boxes,
     search: {
-      description: 'Any progression mod can hook the api artifact; the MMO Skill Tree pairing',
+      description: 'Any mod can hook the api artifact: native events, typed registries, the two-step presence check',
       category: 'Developer',
-      keywords: ['integration', 'api', 'MMO Skill Tree', 'progression mod', 'native events'],
+      keywords: ['integration', 'api', 'add-on', 'native events', 'registry', 'presence check', 'known integrations'],
     },
   },
   {

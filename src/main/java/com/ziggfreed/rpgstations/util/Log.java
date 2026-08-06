@@ -6,9 +6,8 @@ import javax.annotation.Nullable;
 import com.ziggfreed.rpgstations.RpgStationsPlugin;
 
 /**
- * RPG Stations' own logging facade over {@link RpgStationsPlugin#LOGGER} (a port of
- * hyMMO's {@code util.SafeLog} and the kweebec-nightmare {@code util.SafeLog}; RPG
- * Stations never reaches for the MMO's facade).
+ * RPG Stations' own logging facade over {@link RpgStationsPlugin#LOGGER} - this mod's single
+ * logging seam, never another mod's.
  *
  * <p>The raw flogger {@code LOGGER} throws when no Hytale log manager is installed (a
  * unit-test JVM): the resulting {@link Error} escapes {@code catch (Exception)} blocks

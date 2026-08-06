@@ -31,7 +31,7 @@ class StationEventsTest {
     @Test
     void fireCycleCompleted_noListener_neverThrows() {
         assertDoesNotThrow(() -> StationEvents.fireCycleCompleted(null, null, null, PLAYER_ID, SESSION_ID,
-                "sawmill", "work", 1, false, List.of(), 1.0));
+                "sawmill", "work", 1, false, List.of(), List.of(), 1.0));
     }
 
     @Test

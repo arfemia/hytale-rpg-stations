@@ -16,8 +16,8 @@ reward routes through its own `Grants` - no direct floor `DropList` leaf, top-le
   `Roll` list, then evaluates + APPLIES every roll matching a trigger against ONE
   [`FactorSnapshot`](FactorSnapshot.java) built fresh per batch (memoizes each `(factorId, param)`
   resolution so a bonus-copy `Chance` and a `Ladder` reading the SAME factor - e.g.
-  `mmoskilltree:station_luck` - see the identical resolved number, restoring the pre-extraction
-  engine's "one aggregation, two consumers" invariant). Every grant routes through the shared
+  `yourmod:station_luck` - see the identical resolved number, the "one aggregation, two
+  consumers" invariant). Every grant routes through the shared
   `util.ItemGrantUtil` seam (round-5, 2026-07-22: hotbar-first, then backpack storage, then
   drop-at-block - `ItemGrantUtil` is a thin policy wrapper over `ziggfreed-common`'s
   `inventory.InventoryGrant`, the mod-agnostic ordering primitive) - a stack that cannot fit
@@ -31,7 +31,19 @@ reward routes through its own `Grants` - no direct floor `DropList` leaf, top-le
   `emitMoment` choke point (see `../station/CLAUDE.md`), never a second playback path here.
 - **[`LootableCatalog`](LootableCatalog.java)** - the folded `asset.LootableAsset` store
   (`Server/RpgStations/Lootables/*.json`), `defaults < pack`, referenced by a station's
-  `Loot.Tables`.
+  `Loot.Lootables`.
+- **`Roll.Grants.Contributions[]` collection** - the engine grants items/commands/effects itself but
+  NEVER resolves a contribution channel; a granted `{Channel, Param, Amount}` entry (top-level AND
+  per-floor) is COLLECTED onto the roll result (`getContributions()`) for `station.StationEvents` to
+  forward on `StationCycleCompletedEvent.oneShotContributions`, a list deliberately separate from
+  the station's own `Work.PerCycleContributions`: a one-shot find grant BYPASSES both the tool-power
+  multiplier and the idle fraction, so a rare find is worth the same whatever tool the worker holds.
+  The two sites also keep DIFFERENT filters on purpose - the grants site gates on
+  `Contribution.isPostable()` (non-blank channel AND a positive amount, because a grant either fires
+  or does not), while the per-cycle site forwards any non-blank channel with a null amount read as
+  `0.0`, so a zero-amount entry still reaches a listener as a visible zero row. Collection is gated on
+  a `Cycle` trigger, because a `Completion` roll fires from inside `stop()` with no cycle event left
+  to ride (the validator warns on that authoring, exactly as it does for `BonusOutputCopies`).
 - **[`CommandRewardExecutor`](CommandRewardExecutor.java)** - the zero-code third-party
   integration surface: a `Roll.Grants.Commands` entry runs through common's `util.CommandExecutor`
   AS THE SERVER CONSOLE (never limited to the triggering player's own permissions - an authored

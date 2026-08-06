@@ -39,27 +39,32 @@
         {
           "key": "Name",
           "required": false,
+          "documentation": "Ignored - the station id comes from the asset filename, not this key. Kept as a schema field for editor display only.",
           "type": "string"
         },
         {
           "key": "Identity",
           "required": false,
+          "documentation": "Display name/description localization keys plus the icon item id, shown at the station's engage prompt and any station-listing UI.",
           "type": "object",
           "nestedType": "Identity",
           "fields": [
             {
               "key": "NameKey",
               "required": false,
+              "documentation": "The localization key resolved client-side for the station's display name; null = no name shown.",
               "type": "string"
             },
             {
               "key": "DescKey",
               "required": false,
+              "documentation": "The localization key resolved client-side for the station's description; null = no description shown.",
               "type": "string"
             },
             {
               "key": "Icon",
               "required": false,
+              "documentation": "An item id whose icon represents this station in any station-listing UI (the ability-icon convention).",
               "type": "string"
             }
           ]
@@ -67,45 +72,59 @@
         {
           "key": "Work",
           "required": false,
+          "documentation": "The work-loop cadence, duration/exit bounds, per-cycle contributions, looping flag, and optional idle-practice mode.",
           "type": "object",
           "nestedType": "Work",
           "fields": [
             {
               "key": "CycleMs",
               "required": false,
+              "documentation": "Milliseconds per work cycle (one Convert transaction / one implicit-program run). Reader-defaults to 5000.",
               "type": "long"
             },
             {
               "key": "MaxDurationMs",
               "required": false,
+              "documentation": "The hard session-duration cap in milliseconds; the heartbeat stops the session once elapsed. Reader-defaults to 600000 (10 minutes).",
               "type": "long"
             },
             {
               "key": "MaxMoveMeters",
               "required": false,
+              "documentation": "The walk-off EXIT trigger radius in meters from the engage position (not an anti-idle guard). Reader-defaults to 1.5.",
               "type": "double"
             },
             {
               "key": "Exclusive",
               "required": false,
+              "documentation": "Whether the station block is exclusive to one worker at a time (a second player's engage is denied while occupied). Reader-defaults to true.",
               "type": "boolean"
             },
             {
-              "key": "Xp",
+              "key": "PerCycleContributions",
               "required": false,
+              "documentation": "Amounts posted on every completed cycle, forwarded verbatim on the cycle-completed event; the engine never interprets a channel itself. SCALED: each Amount is multiplied by the resolved tool multiplier (Tool.PowerScale) and, on an idle cycle, pre-scaled by Work.Idle.Fraction. Contrast Roll.Grants.Contributions, which is one-shot and never scaled.",
               "type": "array",
               "of": {
                 "type": "object",
-                "nestedType": "WorkXp",
+                "nestedType": "Contribution",
                 "fields": [
                   {
-                    "key": "Skill",
+                    "key": "Channel",
                     "required": false,
+                    "documentation": "The namespaced channel id this contribution posts to (e.g. 'yourmod:crop_quality'), opaque to this engine - it is never resolved here, only forwarded. Pick it from the rpgstations:channels dropdown, or declare your own via ContributionChannelRegistry.",
                     "type": "string"
                   },
                   {
-                    "key": "PerCycle",
+                    "key": "Param",
                     "required": false,
+                    "documentation": "Optional channel-interpreted argument, opaque to this engine - whatever the channel's owner documents (commonly the specific thing being credited).",
+                    "type": "string"
+                  },
+                  {
+                    "key": "Amount",
+                    "required": false,
+                    "documentation": "The amount posted. Scaling is decided by WHERE this entry is authored - see the owning group's documentation.",
                     "type": "double"
                   }
                 ]
@@ -114,29 +133,34 @@
             {
               "key": "Idle",
               "required": false,
+              "documentation": "Opt-in no-material idle practice mode; null/absent Enabled = off (a NO_INPUTS start is denied).",
               "type": "object",
               "nestedType": "Idle",
               "fields": [
                 {
                   "key": "Enabled",
                   "required": false,
+                  "documentation": "Opts into no-material idle practice when no conversion is runnable. Default false (a NO_INPUTS start denies).",
                   "type": "boolean"
                 },
                 {
                   "key": "CycleMs",
                   "required": false,
+                  "documentation": "Milliseconds per idle cycle. Reader-defaults to 3x the effective Work.CycleMs, floored at 2x it.",
                   "type": "long"
                 },
                 {
-                  "key": "XpFraction",
+                  "key": "Fraction",
                   "required": false,
+                  "documentation": "The fraction of a normal cycle's Work.PerCycleContributions amounts an idle cycle posts (tool multiplier forced to 1.0, no conversion/loot). Reader-defaults to 0.1, clamped to [0,1].",
                   "type": "double"
                 }
               ]
             },
             {
-              "key": "Repeat",
+              "key": "Looping",
               "required": false,
+              "documentation": "Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape).",
               "type": "boolean"
             }
           ]
@@ -144,12 +168,14 @@
         {
           "key": "Recipe",
           "required": false,
+          "documentation": "The Convert recipe: authored Conversions and/or a FromCrafting derivation from native recipes.",
           "type": "object",
           "nestedType": "Recipe",
           "fields": [
             {
               "key": "Conversions",
               "required": false,
+              "documentation": "Hand-authored input-to-output conversions, evaluated FIRST (before any FromCrafting-derived ones).",
               "type": "array",
               "of": {
                 "type": "object",
@@ -158,18 +184,24 @@
                   {
                     "key": "Input",
                     "required": false,
-                    "documentation": "The conversion input: a native Ingredient (exactly one of ItemId | ResourceTypeId).",
-                    "type": "object",
-                    "nestedType": "Ingredient",
-                    "ref": "Ingredient"
+                    "documentation": "The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, exactly one of ItemId | ResourceTypeId. Every entry must be available for the cycle to run.",
+                    "type": "array",
+                    "of": {
+                      "type": "object",
+                      "nestedType": "Ingredient",
+                      "ref": "Ingredient"
+                    }
                   },
                   {
                     "key": "Output",
                     "required": false,
-                    "documentation": "The conversion output: an exact-ItemId Ingredient.",
-                    "type": "object",
-                    "nestedType": "Ingredient",
-                    "ref": "Ingredient"
+                    "documentation": "The conversion outputs (native CraftingRecipe.Output shape): each an exact-ItemId Ingredient. Every entry needs inventory room for the cycle to run.",
+                    "type": "array",
+                    "of": {
+                      "type": "object",
+                      "nestedType": "Ingredient",
+                      "ref": "Ingredient"
+                    }
                   },
                   {
                     "key": "DurationMs",
@@ -189,6 +221,7 @@
             {
               "key": "FromCrafting",
               "required": false,
+              "documentation": "Derive additional Conversions from the engine's own native crafting/processing recipes; null = no derivation.",
               "type": "object",
               "nestedType": "FromCrafting",
               "fields": [
@@ -253,60 +286,71 @@
         {
           "key": "Hold",
           "required": false,
+          "documentation": "The movement lock while working: the default self-effect hold, or the Mount knob family (seated/standing mount).",
           "type": "object",
           "nestedType": "Hold",
           "fields": [
             {
               "key": "MovementLock",
               "required": false,
+              "documentation": "Whether the movement-lock effect applies while working. Reader-defaults to true. Ignored while a Block-surface Mount is active (the mount itself is the lock).",
               "type": "boolean"
             },
             {
               "key": "EffectId",
               "required": false,
+              "documentation": "The native EntityEffect asset id re-applied every heartbeat under decay-as-release. Reader-defaults to 'RPG_Station_Hold'. A bare id, never a timed EffectRef - the hold's lifetime is engine-owned.",
               "type": "string"
             },
             {
               "key": "InterruptOnDamage",
               "required": false,
+              "documentation": "Whether taking damage stops the session. Reader-defaults to true.",
               "type": "boolean"
             },
             {
               "key": "Mount",
               "required": false,
+              "documentation": "The alternate mount-based hold strategy (Block seat or Entity standing mount); null = the default self-effect hold above.",
               "type": "object",
               "nestedType": "Mount",
               "fields": [
                 {
                   "key": "Surface",
                   "required": false,
+                  "documentation": "The mount mechanism union discriminator: 'Block' (native seat mount, default) or 'Entity' (standing work mount). Unrecognized values fall to Block with a validator warn.",
                   "type": "string"
                 },
                 {
                   "key": "Entity",
                   "required": false,
+                  "documentation": "The standing work mount's sub-knobs; read only when Surface is 'Entity' (a validator warns if authored under 'Block').",
                   "type": "object",
                   "nestedType": "Entity",
                   "fields": [
                     {
                       "key": "Offset",
                       "required": false,
+                      "documentation": "The mount attachment offset from the anchor entity, in blocks (X right, Y up, Z forward).",
                       "type": "object",
-                      "nestedType": "Offset",
+                      "nestedType": "Vec3",
                       "fields": [
                         {
                           "key": "X",
                           "required": false,
+                          "documentation": "The X component; unauthored means 0 (each axis is independently optional).",
                           "type": "double"
                         },
                         {
                           "key": "Y",
                           "required": false,
+                          "documentation": "The Y component; unauthored means 0 (each axis is independently optional).",
                           "type": "double"
                         },
                         {
                           "key": "Z",
                           "required": false,
+                          "documentation": "The Z component; unauthored means 0 (each axis is independently optional).",
                           "type": "double"
                         }
                       ]
@@ -314,16 +358,19 @@
                     {
                       "key": "DismountOnMove",
                       "required": false,
+                      "documentation": "Whether a heartbeat walk-off check dismounts the player (no native auto-dismount for this route). Reader-defaults to true; false = hard-lock until crouch/re-press.",
                       "type": "boolean"
                     },
                     {
                       "key": "Steerable",
                       "required": false,
+                      "documentation": "Whether the anchor may be WASD-steered by the mounted player. Reader-defaults to false (a per-heartbeat snap-back defeats native steering); true is validator-flagged as untested.",
                       "type": "boolean"
                     },
                     {
                       "key": "VisibleAnchorItemId",
                       "required": false,
+                      "documentation": "Diagnostic/authoring aid: an item id the invisible anchor renders as a dropped-item-style prop, so its position is visible in-game. Null = no visual (the shipped default).",
                       "type": "string"
                     }
                   ]
@@ -335,6 +382,7 @@
         {
           "key": "Tool",
           "required": false,
+          "documentation": "The held-tool gate (tag/gather/id match routes), tool-power contribution scaling, durability drain, and minimum-durability start gate.",
           "type": "object",
           "nestedType": "Tool",
           "fields": [
@@ -353,17 +401,20 @@
             {
               "key": "Gather",
               "required": false,
+              "documentation": "The functional gather-power match route: a native GatherType plus a minimum power floor.",
               "type": "object",
               "nestedType": "Gather",
               "fields": [
                 {
                   "key": "GatherType",
                   "required": false,
+                  "documentation": "The native GatherType id the held tool's ItemToolSpec must report.",
                   "type": "string"
                 },
                 {
                   "key": "MinPower",
                   "required": false,
+                  "documentation": "The minimum ItemToolSpec power the held tool must report for this GatherType.",
                   "type": "double"
                 }
               ]
@@ -371,40 +422,47 @@
             {
               "key": "Ids",
               "required": false,
+              "documentation": "The FALLBACK exact/underscore-segment item id match route, for modded tools with no matching tag or gather spec.",
               "type": "array",
               "of": {
                 "type": "string"
               }
             },
             {
-              "key": "XpScale",
+              "key": "PowerScale",
               "required": false,
+              "documentation": "Maps held-tool power to the multiplier applied to every Work.PerCycleContributions amount on a real cycle (forwarded as the cycle event's toolMultiplier); forced 1.0 on an idle cycle. Null = the multiplier stays neutral 1.0 regardless of held tool.",
               "type": "object",
-              "nestedType": "XpScale",
+              "nestedType": "PowerScale",
               "fields": [
                 {
                   "key": "GatherType",
                   "required": false,
+                  "documentation": "The native GatherType id whose power is read off the held tool each cycle for this scale.",
                   "type": "string"
                 },
                 {
                   "key": "ReferencePower",
                   "required": false,
+                  "documentation": "The tool power treated as the neutral 1.0x baseline the held tool's power is divided by.",
                   "type": "double"
                 },
                 {
                   "key": "Exponent",
                   "required": false,
+                  "documentation": "The power curve exponent applied to (heldPower / ReferencePower). Reader-defaults to 1.0 (linear).",
                   "type": "double"
                 },
                 {
                   "key": "MinMult",
                   "required": false,
+                  "documentation": "The floor the resolved multiplier clamps to. Reader-defaults to 0.5.",
                   "type": "double"
                 },
                 {
                   "key": "MaxMult",
                   "required": false,
+                  "documentation": "The ceiling the resolved multiplier clamps to. Reader-defaults to 2.0.",
                   "type": "double"
                 }
               ]
@@ -412,20 +470,29 @@
             {
               "key": "Durability",
               "required": false,
+              "documentation": "Opt-in held-tool durability drain per swing and/or per cycle; null = no drain.",
               "type": "object",
               "nestedType": "Durability",
               "fields": [
                 {
                   "key": "PerSwing",
                   "required": false,
+                  "documentation": "Durability points drained from the held tool per swing cue. Reader-defaults to 0 (off).",
                   "type": "integer"
                 },
                 {
                   "key": "PerCycle",
                   "required": false,
+                  "documentation": "Durability points drained from the held tool per completed cycle. Reader-defaults to 0 (off).",
                   "type": "integer"
                 }
               ]
+            },
+            {
+              "key": "MinDurabilityPercent",
+              "required": false,
+              "documentation": "Minimum held-tool durability (0-100) required to START working; null = no wear gate. Checked at engage only, so a session already running is never cut short by wear.",
+              "type": "double"
             }
           ]
         },
@@ -440,27 +507,32 @@
         {
           "key": "Camera",
           "required": false,
+          "documentation": "The third-person camera pull while working, plus the optional fixed-look FaceBlock preset.",
           "type": "object",
           "nestedType": "Camera",
           "fields": [
             {
               "key": "Mode",
               "required": false,
+              "documentation": "The camera route: 'ThirdPerson' (default, the pull applies) or 'None' (no camera pull at all - a mounted station with no authored Camera also defaults to none).",
               "type": "string"
             },
             {
               "key": "Locked",
               "required": false,
+              "documentation": "Whether the third-person camera is locked in place while working (blocks player-driven camera rotation). Reader-defaults to true.",
               "type": "boolean"
             },
             {
               "key": "FaceBlock",
               "required": false,
+              "documentation": "Whether the fixed-look FaceBlock camera preset applies (mouse-driven spin is fully frozen, not just locked). Only takes effect when the camera is applied at all.",
               "type": "boolean"
             },
             {
               "key": "Recipe",
               "required": false,
+              "documentation": "The StationCameraPreset recipe id the FaceBlock route applies (the exact ServerCameraSettings field combination); null = the engine's default FROZEN recipe.",
               "type": "string"
             }
           ]
@@ -468,28 +540,33 @@
         {
           "key": "Animation",
           "required": false,
+          "documentation": "The work emote id plus the optional per-swing cadence/impact cue layer.",
           "type": "object",
           "nestedType": "Animation",
           "fields": [
             {
               "key": "EmoteId",
               "required": false,
+              "documentation": "The registered EmoteAsset id looped while working; null = no work animation played.",
               "type": "string"
             },
             {
               "key": "Swing",
               "required": false,
+              "documentation": "The optional per-swing cadence layer (re-fires a one-shot cue on an interval); null = no swing layer.",
               "type": "object",
               "nestedType": "Swing",
               "fields": [
                 {
                   "key": "IntervalMs",
                   "required": false,
+                  "documentation": "Milliseconds between swing cues while working; a non-looping EmoteId needs this authored or the work animation never re-fires.",
                   "type": "long"
                 },
                 {
                   "key": "Presentation",
                   "required": false,
+                  "documentation": "The presentation cue fired together with each swing re-fire; null = the swing plays with no extra sound/particles.",
                   "type": "object",
                   "nestedType": "Presentation",
                   "ref": "Presentation"
@@ -497,17 +574,20 @@
                 {
                   "key": "Impact",
                   "required": false,
+                  "documentation": "An optional delayed impact cue scheduled off this swing; null = no impact cue.",
                   "type": "object",
                   "nestedType": "Impact",
                   "fields": [
                     {
                       "key": "DelayMs",
                       "required": false,
+                      "documentation": "Milliseconds after the swing before the impact cue fires. Null/non-positive = fire together with the swing.",
                       "type": "long"
                     },
                     {
                       "key": "Presentation",
                       "required": false,
+                      "documentation": "The presentation cue fired at the scheduled impact moment.",
                       "type": "object",
                       "nestedType": "Presentation",
                       "ref": "Presentation"
@@ -519,6 +599,7 @@
             {
               "key": "ActionClip",
               "required": false,
+              "documentation": "The Action-slot clip id for a SEAT-MODE swing (plays against the held item's own ItemPlayerAnimations set). Null/blank falls to the 'Chop' default.",
               "type": "string"
             }
           ]
@@ -526,6 +607,7 @@
         {
           "key": "Presentation",
           "required": false,
+          "documentation": "The CYCLE-complete presentation moment: sound/particles/animation cues fired at the block each finished cycle.",
           "type": "object",
           "nestedType": "Presentation",
           "ref": "Presentation"
@@ -533,6 +615,7 @@
         {
           "key": "Completion",
           "required": false,
+          "documentation": "The SESSION-COMPLETION presentation moment, played on a non-silent stop with at least one completed cycle. Null = silent completion.",
           "type": "object",
           "nestedType": "Presentation",
           "ref": "Presentation"
@@ -540,6 +623,7 @@
         {
           "key": "Requires",
           "required": false,
+          "documentation": "The start gate: an optional permission node plus factor Conditions, evaluated once at engage.",
           "type": "object",
           "nestedType": "Requires",
           "ref": "Requires"
@@ -547,6 +631,7 @@
         {
           "key": "Custody",
           "required": false,
+          "documentation": "Session-scoped placed-input custody; null = the classic direct-inventory Consume/Produce flow.",
           "type": "object",
           "nestedType": "Custody",
           "ref": "Custody"
@@ -554,6 +639,7 @@
         {
           "key": "Puppet",
           "required": false,
+          "documentation": "The puppet presentation route: mount the player, hide their body, spawn a skinned visual performing the work. Null = the classic in-body worker.",
           "type": "object",
           "nestedType": "Puppet",
           "ref": "Puppet"
@@ -561,6 +647,7 @@
         {
           "key": "Flairs",
           "required": false,
+          "documentation": "Named cosmetic flair overrides, keyed by flair id; each entry overlays its non-null Moments onto the base presentation when that flair is unlocked for the player.",
           "type": "map",
           "of": {
             "type": "object",
@@ -569,6 +656,7 @@
               {
                 "key": "Moments",
                 "required": false,
+                "documentation": "An open moment id (cycle/swing/impact/rare_find/completion, or step:<actionId>:<stepId>) to a Presentation overlay; each authored leaf overlays the base moment's own leaves, per moment id.",
                 "type": "map",
                 "of": {
                   "type": "object",
@@ -582,6 +670,7 @@
         {
           "key": "Actions",
           "required": false,
+          "documentation": "Named, authored-order multi-action overrides; null/empty means the single implicit 'work' action built from this station's own groups.",
           "type": "map",
           "of": {
             "type": "object",
@@ -623,6 +712,7 @@
         {
           "key": "Name",
           "required": false,
+          "documentation": "Ignored - the action id comes from the asset filename, not this key. Kept as a schema field for editor display only.",
           "type": "string"
         },
         {
@@ -696,39 +786,52 @@
             {
               "key": "CycleMs",
               "required": false,
+              "documentation": "Milliseconds per work cycle (one Convert transaction / one implicit-program run). Reader-defaults to 5000.",
               "type": "long"
             },
             {
               "key": "MaxDurationMs",
               "required": false,
+              "documentation": "The hard session-duration cap in milliseconds; the heartbeat stops the session once elapsed. Reader-defaults to 600000 (10 minutes).",
               "type": "long"
             },
             {
               "key": "MaxMoveMeters",
               "required": false,
+              "documentation": "The walk-off EXIT trigger radius in meters from the engage position (not an anti-idle guard). Reader-defaults to 1.5.",
               "type": "double"
             },
             {
               "key": "Exclusive",
               "required": false,
+              "documentation": "Whether the station block is exclusive to one worker at a time (a second player's engage is denied while occupied). Reader-defaults to true.",
               "type": "boolean"
             },
             {
-              "key": "Xp",
+              "key": "PerCycleContributions",
               "required": false,
+              "documentation": "Amounts posted on every completed cycle, forwarded verbatim on the cycle-completed event; the engine never interprets a channel itself. SCALED: each Amount is multiplied by the resolved tool multiplier (Tool.PowerScale) and, on an idle cycle, pre-scaled by Work.Idle.Fraction. Contrast Roll.Grants.Contributions, which is one-shot and never scaled.",
               "type": "array",
               "of": {
                 "type": "object",
-                "nestedType": "WorkXp",
+                "nestedType": "Contribution",
                 "fields": [
                   {
-                    "key": "Skill",
+                    "key": "Channel",
                     "required": false,
+                    "documentation": "The namespaced channel id this contribution posts to (e.g. 'yourmod:crop_quality'), opaque to this engine - it is never resolved here, only forwarded. Pick it from the rpgstations:channels dropdown, or declare your own via ContributionChannelRegistry.",
                     "type": "string"
                   },
                   {
-                    "key": "PerCycle",
+                    "key": "Param",
                     "required": false,
+                    "documentation": "Optional channel-interpreted argument, opaque to this engine - whatever the channel's owner documents (commonly the specific thing being credited).",
+                    "type": "string"
+                  },
+                  {
+                    "key": "Amount",
+                    "required": false,
+                    "documentation": "The amount posted. Scaling is decided by WHERE this entry is authored - see the owning group's documentation.",
                     "type": "double"
                   }
                 ]
@@ -737,29 +840,34 @@
             {
               "key": "Idle",
               "required": false,
+              "documentation": "Opt-in no-material idle practice mode; null/absent Enabled = off (a NO_INPUTS start is denied).",
               "type": "object",
               "nestedType": "Idle",
               "fields": [
                 {
                   "key": "Enabled",
                   "required": false,
+                  "documentation": "Opts into no-material idle practice when no conversion is runnable. Default false (a NO_INPUTS start denies).",
                   "type": "boolean"
                 },
                 {
                   "key": "CycleMs",
                   "required": false,
+                  "documentation": "Milliseconds per idle cycle. Reader-defaults to 3x the effective Work.CycleMs, floored at 2x it.",
                   "type": "long"
                 },
                 {
-                  "key": "XpFraction",
+                  "key": "Fraction",
                   "required": false,
+                  "documentation": "The fraction of a normal cycle's Work.PerCycleContributions amounts an idle cycle posts (tool multiplier forced to 1.0, no conversion/loot). Reader-defaults to 0.1, clamped to [0,1].",
                   "type": "double"
                 }
               ]
             },
             {
-              "key": "Repeat",
+              "key": "Looping",
               "required": false,
+              "documentation": "Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape).",
               "type": "boolean"
             }
           ]
@@ -774,6 +882,7 @@
             {
               "key": "Conversions",
               "required": false,
+              "documentation": "Hand-authored input-to-output conversions, evaluated FIRST (before any FromCrafting-derived ones).",
               "type": "array",
               "of": {
                 "type": "object",
@@ -782,18 +891,24 @@
                   {
                     "key": "Input",
                     "required": false,
-                    "documentation": "The conversion input: a native Ingredient (exactly one of ItemId | ResourceTypeId).",
-                    "type": "object",
-                    "nestedType": "Ingredient",
-                    "ref": "Ingredient"
+                    "documentation": "The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, exactly one of ItemId | ResourceTypeId. Every entry must be available for the cycle to run.",
+                    "type": "array",
+                    "of": {
+                      "type": "object",
+                      "nestedType": "Ingredient",
+                      "ref": "Ingredient"
+                    }
                   },
                   {
                     "key": "Output",
                     "required": false,
-                    "documentation": "The conversion output: an exact-ItemId Ingredient.",
-                    "type": "object",
-                    "nestedType": "Ingredient",
-                    "ref": "Ingredient"
+                    "documentation": "The conversion outputs (native CraftingRecipe.Output shape): each an exact-ItemId Ingredient. Every entry needs inventory room for the cycle to run.",
+                    "type": "array",
+                    "of": {
+                      "type": "object",
+                      "nestedType": "Ingredient",
+                      "ref": "Ingredient"
+                    }
                   },
                   {
                     "key": "DurationMs",
@@ -813,6 +928,7 @@
             {
               "key": "FromCrafting",
               "required": false,
+              "documentation": "Derive additional Conversions from the engine's own native crafting/processing recipes; null = no derivation.",
               "type": "object",
               "nestedType": "FromCrafting",
               "fields": [
@@ -896,17 +1012,20 @@
             {
               "key": "Gather",
               "required": false,
+              "documentation": "The functional gather-power match route: a native GatherType plus a minimum power floor.",
               "type": "object",
               "nestedType": "Gather",
               "fields": [
                 {
                   "key": "GatherType",
                   "required": false,
+                  "documentation": "The native GatherType id the held tool's ItemToolSpec must report.",
                   "type": "string"
                 },
                 {
                   "key": "MinPower",
                   "required": false,
+                  "documentation": "The minimum ItemToolSpec power the held tool must report for this GatherType.",
                   "type": "double"
                 }
               ]
@@ -914,40 +1033,47 @@
             {
               "key": "Ids",
               "required": false,
+              "documentation": "The FALLBACK exact/underscore-segment item id match route, for modded tools with no matching tag or gather spec.",
               "type": "array",
               "of": {
                 "type": "string"
               }
             },
             {
-              "key": "XpScale",
+              "key": "PowerScale",
               "required": false,
+              "documentation": "Maps held-tool power to the multiplier applied to every Work.PerCycleContributions amount on a real cycle (forwarded as the cycle event's toolMultiplier); forced 1.0 on an idle cycle. Null = the multiplier stays neutral 1.0 regardless of held tool.",
               "type": "object",
-              "nestedType": "XpScale",
+              "nestedType": "PowerScale",
               "fields": [
                 {
                   "key": "GatherType",
                   "required": false,
+                  "documentation": "The native GatherType id whose power is read off the held tool each cycle for this scale.",
                   "type": "string"
                 },
                 {
                   "key": "ReferencePower",
                   "required": false,
+                  "documentation": "The tool power treated as the neutral 1.0x baseline the held tool's power is divided by.",
                   "type": "double"
                 },
                 {
                   "key": "Exponent",
                   "required": false,
+                  "documentation": "The power curve exponent applied to (heldPower / ReferencePower). Reader-defaults to 1.0 (linear).",
                   "type": "double"
                 },
                 {
                   "key": "MinMult",
                   "required": false,
+                  "documentation": "The floor the resolved multiplier clamps to. Reader-defaults to 0.5.",
                   "type": "double"
                 },
                 {
                   "key": "MaxMult",
                   "required": false,
+                  "documentation": "The ceiling the resolved multiplier clamps to. Reader-defaults to 2.0.",
                   "type": "double"
                 }
               ]
@@ -955,20 +1081,29 @@
             {
               "key": "Durability",
               "required": false,
+              "documentation": "Opt-in held-tool durability drain per swing and/or per cycle; null = no drain.",
               "type": "object",
               "nestedType": "Durability",
               "fields": [
                 {
                   "key": "PerSwing",
                   "required": false,
+                  "documentation": "Durability points drained from the held tool per swing cue. Reader-defaults to 0 (off).",
                   "type": "integer"
                 },
                 {
                   "key": "PerCycle",
                   "required": false,
+                  "documentation": "Durability points drained from the held tool per completed cycle. Reader-defaults to 0 (off).",
                   "type": "integer"
                 }
               ]
+            },
+            {
+              "key": "MinDurabilityPercent",
+              "required": false,
+              "documentation": "Minimum held-tool durability (0-100) required to START working; null = no wear gate. Checked at engage only, so a session already running is never cut short by wear.",
+              "type": "double"
             }
           ]
         },
@@ -982,54 +1117,64 @@
             {
               "key": "MovementLock",
               "required": false,
+              "documentation": "Whether the movement-lock effect applies while working. Reader-defaults to true. Ignored while a Block-surface Mount is active (the mount itself is the lock).",
               "type": "boolean"
             },
             {
               "key": "EffectId",
               "required": false,
+              "documentation": "The native EntityEffect asset id re-applied every heartbeat under decay-as-release. Reader-defaults to 'RPG_Station_Hold'. A bare id, never a timed EffectRef - the hold's lifetime is engine-owned.",
               "type": "string"
             },
             {
               "key": "InterruptOnDamage",
               "required": false,
+              "documentation": "Whether taking damage stops the session. Reader-defaults to true.",
               "type": "boolean"
             },
             {
               "key": "Mount",
               "required": false,
+              "documentation": "The alternate mount-based hold strategy (Block seat or Entity standing mount); null = the default self-effect hold above.",
               "type": "object",
               "nestedType": "Mount",
               "fields": [
                 {
                   "key": "Surface",
                   "required": false,
+                  "documentation": "The mount mechanism union discriminator: 'Block' (native seat mount, default) or 'Entity' (standing work mount). Unrecognized values fall to Block with a validator warn.",
                   "type": "string"
                 },
                 {
                   "key": "Entity",
                   "required": false,
+                  "documentation": "The standing work mount's sub-knobs; read only when Surface is 'Entity' (a validator warns if authored under 'Block').",
                   "type": "object",
                   "nestedType": "Entity",
                   "fields": [
                     {
                       "key": "Offset",
                       "required": false,
+                      "documentation": "The mount attachment offset from the anchor entity, in blocks (X right, Y up, Z forward).",
                       "type": "object",
-                      "nestedType": "Offset",
+                      "nestedType": "Vec3",
                       "fields": [
                         {
                           "key": "X",
                           "required": false,
+                          "documentation": "The X component; unauthored means 0 (each axis is independently optional).",
                           "type": "double"
                         },
                         {
                           "key": "Y",
                           "required": false,
+                          "documentation": "The Y component; unauthored means 0 (each axis is independently optional).",
                           "type": "double"
                         },
                         {
                           "key": "Z",
                           "required": false,
+                          "documentation": "The Z component; unauthored means 0 (each axis is independently optional).",
                           "type": "double"
                         }
                       ]
@@ -1037,16 +1182,19 @@
                     {
                       "key": "DismountOnMove",
                       "required": false,
+                      "documentation": "Whether a heartbeat walk-off check dismounts the player (no native auto-dismount for this route). Reader-defaults to true; false = hard-lock until crouch/re-press.",
                       "type": "boolean"
                     },
                     {
                       "key": "Steerable",
                       "required": false,
+                      "documentation": "Whether the anchor may be WASD-steered by the mounted player. Reader-defaults to false (a per-heartbeat snap-back defeats native steering); true is validator-flagged as untested.",
                       "type": "boolean"
                     },
                     {
                       "key": "VisibleAnchorItemId",
                       "required": false,
+                      "documentation": "Diagnostic/authoring aid: an item id the invisible anchor renders as a dropped-item-style prop, so its position is visible in-game. Null = no visual (the shipped default).",
                       "type": "string"
                     }
                   ]
@@ -1065,21 +1213,25 @@
             {
               "key": "Mode",
               "required": false,
+              "documentation": "The camera route: 'ThirdPerson' (default, the pull applies) or 'None' (no camera pull at all - a mounted station with no authored Camera also defaults to none).",
               "type": "string"
             },
             {
               "key": "Locked",
               "required": false,
+              "documentation": "Whether the third-person camera is locked in place while working (blocks player-driven camera rotation). Reader-defaults to true.",
               "type": "boolean"
             },
             {
               "key": "FaceBlock",
               "required": false,
+              "documentation": "Whether the fixed-look FaceBlock camera preset applies (mouse-driven spin is fully frozen, not just locked). Only takes effect when the camera is applied at all.",
               "type": "boolean"
             },
             {
               "key": "Recipe",
               "required": false,
+              "documentation": "The StationCameraPreset recipe id the FaceBlock route applies (the exact ServerCameraSettings field combination); null = the engine's default FROZEN recipe.",
               "type": "string"
             }
           ]
@@ -1094,22 +1246,26 @@
             {
               "key": "EmoteId",
               "required": false,
+              "documentation": "The registered EmoteAsset id looped while working; null = no work animation played.",
               "type": "string"
             },
             {
               "key": "Swing",
               "required": false,
+              "documentation": "The optional per-swing cadence layer (re-fires a one-shot cue on an interval); null = no swing layer.",
               "type": "object",
               "nestedType": "Swing",
               "fields": [
                 {
                   "key": "IntervalMs",
                   "required": false,
+                  "documentation": "Milliseconds between swing cues while working; a non-looping EmoteId needs this authored or the work animation never re-fires.",
                   "type": "long"
                 },
                 {
                   "key": "Presentation",
                   "required": false,
+                  "documentation": "The presentation cue fired together with each swing re-fire; null = the swing plays with no extra sound/particles.",
                   "type": "object",
                   "nestedType": "Presentation",
                   "ref": "Presentation"
@@ -1117,17 +1273,20 @@
                 {
                   "key": "Impact",
                   "required": false,
+                  "documentation": "An optional delayed impact cue scheduled off this swing; null = no impact cue.",
                   "type": "object",
                   "nestedType": "Impact",
                   "fields": [
                     {
                       "key": "DelayMs",
                       "required": false,
+                      "documentation": "Milliseconds after the swing before the impact cue fires. Null/non-positive = fire together with the swing.",
                       "type": "long"
                     },
                     {
                       "key": "Presentation",
                       "required": false,
+                      "documentation": "The presentation cue fired at the scheduled impact moment.",
                       "type": "object",
                       "nestedType": "Presentation",
                       "ref": "Presentation"
@@ -1139,6 +1298,7 @@
             {
               "key": "ActionClip",
               "required": false,
+              "documentation": "The Action-slot clip id for a SEAT-MODE swing (plays against the held item's own ItemPlayerAnimations set). Null/blank falls to the 'Chop' default.",
               "type": "string"
             }
           ]
@@ -1189,7 +1349,7 @@
         {
           "key": "Anchors",
           "required": false,
-          "documentation": "Named multi-station anchor declarations (id -> {Station, MaxRadius}). [wave 3 discovery]",
+          "documentation": "Named multi-station anchor declarations (id -> {Station, MaxRadiusMeters}); a step's At/Walk.To names one and the engine discovers + claims the nearest matching placed block within MaxRadiusMeters.",
           "type": "map",
           "of": {
             "type": "object",
@@ -1202,9 +1362,9 @@
                 "type": "string"
               },
               {
-                "key": "MaxRadius",
+                "key": "MaxRadiusMeters",
                 "required": false,
-                "documentation": "The horizontal block radius to search for the anchor station (reader-defaults to 12).",
+                "documentation": "The horizontal search radius for the anchor station, in meters (one block = one meter); reader-defaults to 12.",
                 "type": "double"
               }
             ]
@@ -1223,8 +1383,10 @@
         {
           "key": "Ref",
           "required": false,
-          "documentation": "Names a standalone ActionAsset as the BASE; other groups authored here overlay it group-wise.",
-          "type": "string"
+          "documentation": "Names a standalone ActionAsset as the BASE; other groups authored here overlay it group-wise. May also be an INLINE action body (optionally with its own Parent), registered as a generated child action asset.",
+          "type": "containedAsset",
+          "assetType": "ActionAsset",
+          "ref": "ActionAsset"
         },
         {
           "key": "Input",
@@ -1291,39 +1453,52 @@
             {
               "key": "CycleMs",
               "required": false,
+              "documentation": "Milliseconds per work cycle (one Convert transaction / one implicit-program run). Reader-defaults to 5000.",
               "type": "long"
             },
             {
               "key": "MaxDurationMs",
               "required": false,
+              "documentation": "The hard session-duration cap in milliseconds; the heartbeat stops the session once elapsed. Reader-defaults to 600000 (10 minutes).",
               "type": "long"
             },
             {
               "key": "MaxMoveMeters",
               "required": false,
+              "documentation": "The walk-off EXIT trigger radius in meters from the engage position (not an anti-idle guard). Reader-defaults to 1.5.",
               "type": "double"
             },
             {
               "key": "Exclusive",
               "required": false,
+              "documentation": "Whether the station block is exclusive to one worker at a time (a second player's engage is denied while occupied). Reader-defaults to true.",
               "type": "boolean"
             },
             {
-              "key": "Xp",
+              "key": "PerCycleContributions",
               "required": false,
+              "documentation": "Amounts posted on every completed cycle, forwarded verbatim on the cycle-completed event; the engine never interprets a channel itself. SCALED: each Amount is multiplied by the resolved tool multiplier (Tool.PowerScale) and, on an idle cycle, pre-scaled by Work.Idle.Fraction. Contrast Roll.Grants.Contributions, which is one-shot and never scaled.",
               "type": "array",
               "of": {
                 "type": "object",
-                "nestedType": "WorkXp",
+                "nestedType": "Contribution",
                 "fields": [
                   {
-                    "key": "Skill",
+                    "key": "Channel",
                     "required": false,
+                    "documentation": "The namespaced channel id this contribution posts to (e.g. 'yourmod:crop_quality'), opaque to this engine - it is never resolved here, only forwarded. Pick it from the rpgstations:channels dropdown, or declare your own via ContributionChannelRegistry.",
                     "type": "string"
                   },
                   {
-                    "key": "PerCycle",
+                    "key": "Param",
                     "required": false,
+                    "documentation": "Optional channel-interpreted argument, opaque to this engine - whatever the channel's owner documents (commonly the specific thing being credited).",
+                    "type": "string"
+                  },
+                  {
+                    "key": "Amount",
+                    "required": false,
+                    "documentation": "The amount posted. Scaling is decided by WHERE this entry is authored - see the owning group's documentation.",
                     "type": "double"
                   }
                 ]
@@ -1332,29 +1507,34 @@
             {
               "key": "Idle",
               "required": false,
+              "documentation": "Opt-in no-material idle practice mode; null/absent Enabled = off (a NO_INPUTS start is denied).",
               "type": "object",
               "nestedType": "Idle",
               "fields": [
                 {
                   "key": "Enabled",
                   "required": false,
+                  "documentation": "Opts into no-material idle practice when no conversion is runnable. Default false (a NO_INPUTS start denies).",
                   "type": "boolean"
                 },
                 {
                   "key": "CycleMs",
                   "required": false,
+                  "documentation": "Milliseconds per idle cycle. Reader-defaults to 3x the effective Work.CycleMs, floored at 2x it.",
                   "type": "long"
                 },
                 {
-                  "key": "XpFraction",
+                  "key": "Fraction",
                   "required": false,
+                  "documentation": "The fraction of a normal cycle's Work.PerCycleContributions amounts an idle cycle posts (tool multiplier forced to 1.0, no conversion/loot). Reader-defaults to 0.1, clamped to [0,1].",
                   "type": "double"
                 }
               ]
             },
             {
-              "key": "Repeat",
+              "key": "Looping",
               "required": false,
+              "documentation": "Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape).",
               "type": "boolean"
             }
           ]
@@ -1369,6 +1549,7 @@
             {
               "key": "Conversions",
               "required": false,
+              "documentation": "Hand-authored input-to-output conversions, evaluated FIRST (before any FromCrafting-derived ones).",
               "type": "array",
               "of": {
                 "type": "object",
@@ -1377,18 +1558,24 @@
                   {
                     "key": "Input",
                     "required": false,
-                    "documentation": "The conversion input: a native Ingredient (exactly one of ItemId | ResourceTypeId).",
-                    "type": "object",
-                    "nestedType": "Ingredient",
-                    "ref": "Ingredient"
+                    "documentation": "The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, exactly one of ItemId | ResourceTypeId. Every entry must be available for the cycle to run.",
+                    "type": "array",
+                    "of": {
+                      "type": "object",
+                      "nestedType": "Ingredient",
+                      "ref": "Ingredient"
+                    }
                   },
                   {
                     "key": "Output",
                     "required": false,
-                    "documentation": "The conversion output: an exact-ItemId Ingredient.",
-                    "type": "object",
-                    "nestedType": "Ingredient",
-                    "ref": "Ingredient"
+                    "documentation": "The conversion outputs (native CraftingRecipe.Output shape): each an exact-ItemId Ingredient. Every entry needs inventory room for the cycle to run.",
+                    "type": "array",
+                    "of": {
+                      "type": "object",
+                      "nestedType": "Ingredient",
+                      "ref": "Ingredient"
+                    }
                   },
                   {
                     "key": "DurationMs",
@@ -1408,6 +1595,7 @@
             {
               "key": "FromCrafting",
               "required": false,
+              "documentation": "Derive additional Conversions from the engine's own native crafting/processing recipes; null = no derivation.",
               "type": "object",
               "nestedType": "FromCrafting",
               "fields": [
@@ -1491,17 +1679,20 @@
             {
               "key": "Gather",
               "required": false,
+              "documentation": "The functional gather-power match route: a native GatherType plus a minimum power floor.",
               "type": "object",
               "nestedType": "Gather",
               "fields": [
                 {
                   "key": "GatherType",
                   "required": false,
+                  "documentation": "The native GatherType id the held tool's ItemToolSpec must report.",
                   "type": "string"
                 },
                 {
                   "key": "MinPower",
                   "required": false,
+                  "documentation": "The minimum ItemToolSpec power the held tool must report for this GatherType.",
                   "type": "double"
                 }
               ]
@@ -1509,40 +1700,47 @@
             {
               "key": "Ids",
               "required": false,
+              "documentation": "The FALLBACK exact/underscore-segment item id match route, for modded tools with no matching tag or gather spec.",
               "type": "array",
               "of": {
                 "type": "string"
               }
             },
             {
-              "key": "XpScale",
+              "key": "PowerScale",
               "required": false,
+              "documentation": "Maps held-tool power to the multiplier applied to every Work.PerCycleContributions amount on a real cycle (forwarded as the cycle event's toolMultiplier); forced 1.0 on an idle cycle. Null = the multiplier stays neutral 1.0 regardless of held tool.",
               "type": "object",
-              "nestedType": "XpScale",
+              "nestedType": "PowerScale",
               "fields": [
                 {
                   "key": "GatherType",
                   "required": false,
+                  "documentation": "The native GatherType id whose power is read off the held tool each cycle for this scale.",
                   "type": "string"
                 },
                 {
                   "key": "ReferencePower",
                   "required": false,
+                  "documentation": "The tool power treated as the neutral 1.0x baseline the held tool's power is divided by.",
                   "type": "double"
                 },
                 {
                   "key": "Exponent",
                   "required": false,
+                  "documentation": "The power curve exponent applied to (heldPower / ReferencePower). Reader-defaults to 1.0 (linear).",
                   "type": "double"
                 },
                 {
                   "key": "MinMult",
                   "required": false,
+                  "documentation": "The floor the resolved multiplier clamps to. Reader-defaults to 0.5.",
                   "type": "double"
                 },
                 {
                   "key": "MaxMult",
                   "required": false,
+                  "documentation": "The ceiling the resolved multiplier clamps to. Reader-defaults to 2.0.",
                   "type": "double"
                 }
               ]
@@ -1550,20 +1748,29 @@
             {
               "key": "Durability",
               "required": false,
+              "documentation": "Opt-in held-tool durability drain per swing and/or per cycle; null = no drain.",
               "type": "object",
               "nestedType": "Durability",
               "fields": [
                 {
                   "key": "PerSwing",
                   "required": false,
+                  "documentation": "Durability points drained from the held tool per swing cue. Reader-defaults to 0 (off).",
                   "type": "integer"
                 },
                 {
                   "key": "PerCycle",
                   "required": false,
+                  "documentation": "Durability points drained from the held tool per completed cycle. Reader-defaults to 0 (off).",
                   "type": "integer"
                 }
               ]
+            },
+            {
+              "key": "MinDurabilityPercent",
+              "required": false,
+              "documentation": "Minimum held-tool durability (0-100) required to START working; null = no wear gate. Checked at engage only, so a session already running is never cut short by wear.",
+              "type": "double"
             }
           ]
         },
@@ -1577,54 +1784,64 @@
             {
               "key": "MovementLock",
               "required": false,
+              "documentation": "Whether the movement-lock effect applies while working. Reader-defaults to true. Ignored while a Block-surface Mount is active (the mount itself is the lock).",
               "type": "boolean"
             },
             {
               "key": "EffectId",
               "required": false,
+              "documentation": "The native EntityEffect asset id re-applied every heartbeat under decay-as-release. Reader-defaults to 'RPG_Station_Hold'. A bare id, never a timed EffectRef - the hold's lifetime is engine-owned.",
               "type": "string"
             },
             {
               "key": "InterruptOnDamage",
               "required": false,
+              "documentation": "Whether taking damage stops the session. Reader-defaults to true.",
               "type": "boolean"
             },
             {
               "key": "Mount",
               "required": false,
+              "documentation": "The alternate mount-based hold strategy (Block seat or Entity standing mount); null = the default self-effect hold above.",
               "type": "object",
               "nestedType": "Mount",
               "fields": [
                 {
                   "key": "Surface",
                   "required": false,
+                  "documentation": "The mount mechanism union discriminator: 'Block' (native seat mount, default) or 'Entity' (standing work mount). Unrecognized values fall to Block with a validator warn.",
                   "type": "string"
                 },
                 {
                   "key": "Entity",
                   "required": false,
+                  "documentation": "The standing work mount's sub-knobs; read only when Surface is 'Entity' (a validator warns if authored under 'Block').",
                   "type": "object",
                   "nestedType": "Entity",
                   "fields": [
                     {
                       "key": "Offset",
                       "required": false,
+                      "documentation": "The mount attachment offset from the anchor entity, in blocks (X right, Y up, Z forward).",
                       "type": "object",
-                      "nestedType": "Offset",
+                      "nestedType": "Vec3",
                       "fields": [
                         {
                           "key": "X",
                           "required": false,
+                          "documentation": "The X component; unauthored means 0 (each axis is independently optional).",
                           "type": "double"
                         },
                         {
                           "key": "Y",
                           "required": false,
+                          "documentation": "The Y component; unauthored means 0 (each axis is independently optional).",
                           "type": "double"
                         },
                         {
                           "key": "Z",
                           "required": false,
+                          "documentation": "The Z component; unauthored means 0 (each axis is independently optional).",
                           "type": "double"
                         }
                       ]
@@ -1632,16 +1849,19 @@
                     {
                       "key": "DismountOnMove",
                       "required": false,
+                      "documentation": "Whether a heartbeat walk-off check dismounts the player (no native auto-dismount for this route). Reader-defaults to true; false = hard-lock until crouch/re-press.",
                       "type": "boolean"
                     },
                     {
                       "key": "Steerable",
                       "required": false,
+                      "documentation": "Whether the anchor may be WASD-steered by the mounted player. Reader-defaults to false (a per-heartbeat snap-back defeats native steering); true is validator-flagged as untested.",
                       "type": "boolean"
                     },
                     {
                       "key": "VisibleAnchorItemId",
                       "required": false,
+                      "documentation": "Diagnostic/authoring aid: an item id the invisible anchor renders as a dropped-item-style prop, so its position is visible in-game. Null = no visual (the shipped default).",
                       "type": "string"
                     }
                   ]
@@ -1660,21 +1880,25 @@
             {
               "key": "Mode",
               "required": false,
+              "documentation": "The camera route: 'ThirdPerson' (default, the pull applies) or 'None' (no camera pull at all - a mounted station with no authored Camera also defaults to none).",
               "type": "string"
             },
             {
               "key": "Locked",
               "required": false,
+              "documentation": "Whether the third-person camera is locked in place while working (blocks player-driven camera rotation). Reader-defaults to true.",
               "type": "boolean"
             },
             {
               "key": "FaceBlock",
               "required": false,
+              "documentation": "Whether the fixed-look FaceBlock camera preset applies (mouse-driven spin is fully frozen, not just locked). Only takes effect when the camera is applied at all.",
               "type": "boolean"
             },
             {
               "key": "Recipe",
               "required": false,
+              "documentation": "The StationCameraPreset recipe id the FaceBlock route applies (the exact ServerCameraSettings field combination); null = the engine's default FROZEN recipe.",
               "type": "string"
             }
           ]
@@ -1689,22 +1913,26 @@
             {
               "key": "EmoteId",
               "required": false,
+              "documentation": "The registered EmoteAsset id looped while working; null = no work animation played.",
               "type": "string"
             },
             {
               "key": "Swing",
               "required": false,
+              "documentation": "The optional per-swing cadence layer (re-fires a one-shot cue on an interval); null = no swing layer.",
               "type": "object",
               "nestedType": "Swing",
               "fields": [
                 {
                   "key": "IntervalMs",
                   "required": false,
+                  "documentation": "Milliseconds between swing cues while working; a non-looping EmoteId needs this authored or the work animation never re-fires.",
                   "type": "long"
                 },
                 {
                   "key": "Presentation",
                   "required": false,
+                  "documentation": "The presentation cue fired together with each swing re-fire; null = the swing plays with no extra sound/particles.",
                   "type": "object",
                   "nestedType": "Presentation",
                   "ref": "Presentation"
@@ -1712,17 +1940,20 @@
                 {
                   "key": "Impact",
                   "required": false,
+                  "documentation": "An optional delayed impact cue scheduled off this swing; null = no impact cue.",
                   "type": "object",
                   "nestedType": "Impact",
                   "fields": [
                     {
                       "key": "DelayMs",
                       "required": false,
+                      "documentation": "Milliseconds after the swing before the impact cue fires. Null/non-positive = fire together with the swing.",
                       "type": "long"
                     },
                     {
                       "key": "Presentation",
                       "required": false,
+                      "documentation": "The presentation cue fired at the scheduled impact moment.",
                       "type": "object",
                       "nestedType": "Presentation",
                       "ref": "Presentation"
@@ -1734,6 +1965,7 @@
             {
               "key": "ActionClip",
               "required": false,
+              "documentation": "The Action-slot clip id for a SEAT-MODE swing (plays against the held item's own ItemPlayerAnimations set). Null/blank falls to the 'Chop' default.",
               "type": "string"
             }
           ]
@@ -1784,7 +2016,7 @@
         {
           "key": "Anchors",
           "required": false,
-          "documentation": "Named multi-station anchor declarations (id -> {Station, MaxRadius}). [wave 3 discovery]",
+          "documentation": "Named multi-station anchor declarations (id -> {Station, MaxRadiusMeters}); a step's At/Walk.To names one and the engine discovers + claims the nearest matching placed block within MaxRadiusMeters.",
           "type": "map",
           "of": {
             "type": "object",
@@ -1797,9 +2029,9 @@
                 "type": "string"
               },
               {
-                "key": "MaxRadius",
+                "key": "MaxRadiusMeters",
                 "required": false,
-                "documentation": "The horizontal block radius to search for the anchor station (reader-defaults to 12).",
+                "documentation": "The horizontal search radius for the anchor station, in meters (one block = one meter); reader-defaults to 12.",
                 "type": "double"
               }
             ]
@@ -1865,7 +2097,7 @@
         {
           "key": "At",
           "required": false,
-          "documentation": "The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'self'. [wave 3]",
+          "documentation": "The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'self'.",
           "type": "string"
         },
         {
@@ -1952,16 +2184,19 @@
                 {
                   "key": "Source",
                   "required": false,
+                  "documentation": "The held-prop discriminator: 'MirrorHeld' (default, copies the player's live hotbar item), 'ItemId' (a forced prop), or 'None' (empty hands).",
                   "type": "string"
                 },
                 {
                   "key": "ItemId",
                   "required": false,
+                  "documentation": "The forced item id the puppet holds when Source is 'ItemId'; ignored by the other arms.",
                   "type": "string"
                 },
                 {
                   "key": "Slot",
                   "required": false,
+                  "documentation": "Which hand the prop occupies: 'Hotbar' (main, default) or 'Utility' (off-hand).",
                   "type": "string"
                 }
               ]
@@ -1971,7 +2206,7 @@
         {
           "key": "Walk",
           "required": false,
-          "documentation": "Move the puppet to an anchor (To) at SpeedMps. Requires Puppet enabled. [wave 3]",
+          "documentation": "Move the puppet to an anchor (To) at SpeedMps; requires Puppet enabled (WALK_REQUIRES_PUPPET warns otherwise).",
           "type": "object",
           "nestedType": "Walk",
           "fields": [
@@ -1992,32 +2227,25 @@
         {
           "key": "Consume",
           "required": false,
-          "documentation": "Consume Quantity of ItemId|ResourceTypeId From Inventory (default) or Custody.",
+          "documentation": "Consume every Items entry From Inventory (default) or Custody; all-or-nothing across the whole list.",
           "type": "object",
           "nestedType": "Consume",
           "fields": [
             {
-              "key": "ItemId",
+              "key": "Items",
               "required": false,
-              "documentation": "Exact item id to consume (exactly one of ItemId | ResourceTypeId).",
-              "type": "string"
-            },
-            {
-              "key": "ResourceTypeId",
-              "required": false,
-              "documentation": "A native resource-type family to consume (exactly one of ItemId | ResourceTypeId).",
-              "type": "string"
-            },
-            {
-              "key": "Quantity",
-              "required": false,
-              "documentation": "The count to consume (reader-defaults to 1).",
-              "type": "integer"
+              "documentation": "The items this phase consumes, each an Ingredient (exactly one of ItemId | ResourceTypeId, plus Quantity). All-or-nothing: a shortfall on any entry consumes none of them.",
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "Ingredient",
+                "ref": "Ingredient"
+              }
             },
             {
               "key": "From",
               "required": false,
-              "documentation": "The source: 'Inventory' (default) or 'Custody' (the block's placed-input claim).",
+              "documentation": "The source for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the block's placed-input claim).",
               "type": "string"
             }
           ]
@@ -2025,26 +2253,25 @@
         {
           "key": "Produce",
           "required": false,
-          "documentation": "Produce Quantity of ItemId To Inventory (default). To Custody is [wave 3].",
+          "documentation": "Produce every Items entry To Inventory (default) or Custody (the At-anchor's claim).",
           "type": "object",
           "nestedType": "Produce",
           "fields": [
             {
-              "key": "ItemId",
+              "key": "Items",
               "required": false,
-              "documentation": "The exact item id to produce.",
-              "type": "string"
-            },
-            {
-              "key": "Quantity",
-              "required": false,
-              "documentation": "The count to produce (reader-defaults to 1).",
-              "type": "integer"
+              "documentation": "The items this phase produces, each an exact-ItemId Ingredient plus Quantity (ResourceTypeId is an INPUT-only route).",
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "Ingredient",
+                "ref": "Ingredient"
+              }
             },
             {
               "key": "To",
               "required": false,
-              "documentation": "The destination: 'Inventory' (default). 'Custody' is [wave 3].",
+              "documentation": "The destination for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the At-anchor's claim).",
               "type": "string"
             }
           ]
@@ -2087,7 +2314,7 @@
             {
               "key": "Durability",
               "required": false,
-              "documentation": "RpgStations-native durability upgrade (AddMax). Real without any progression mod.",
+              "documentation": "RpgStations-native durability upgrade (AddMax). Real with no other mod installed.",
               "type": "object",
               "nestedType": "Durability",
               "fields": [
@@ -2109,8 +2336,10 @@
                 {
                   "key": "Pool",
                   "required": false,
-                  "documentation": "A reusable RollPool asset id to pick stat entries from (alternative/addition to inline Entries).",
-                  "type": "string"
+                  "documentation": "A reusable RollPool asset id to pick stat entries from (alternative/addition to inline Entries). May also be an INLINE roll-pool body, optionally with its own Parent - but a RollPool's single Entries array REPLACES the parent's wholesale, it never appends to it, so use an ExtensionAsset (or the sibling inline Entries leaf here) to ADD entries to a shared pool.",
+                  "type": "containedAsset",
+                  "assetType": "RollPool",
+                  "ref": "RollPool"
                 },
                 {
                   "key": "Entries",
@@ -2223,7 +2452,7 @@
           ]
         },
         {
-          "key": "Working",
+          "key": "IsWork",
           "required": false,
           "documentation": "Does this step count as WORK at its At-anchor block (driving that block's Custody.States.Working look)? Default: true for a Consume+Produce convert step, false otherwise. Author true on a pure beat that IS the work (a cook hold), false to suppress.",
           "type": "boolean"
@@ -2263,7 +2492,7 @@
         {
           "key": "Param",
           "required": false,
-          "documentation": "Optional provider-interpreted argument (for 'stat' the native stat channel id, e.g. 'MMO_Luck'; for a skill factor a skill id).",
+          "documentation": "Optional provider-interpreted argument, opaque to this engine (for the built-in 'stat' factor, a registered EntityStatType channel id; for a third-party factor, whatever that provider documents).",
           "type": "string"
         },
         {
@@ -2279,10 +2508,12 @@
         {
           "key": "Lootables",
           "required": false,
-          "documentation": "Referenced LootableAsset ids (case-insensitive at resolve). Each table's Rolls evaluate.",
+          "documentation": "Referenced LootableAsset ids (case-insensitive at resolve); each table's Rolls evaluate. An entry may also be an INLINE lootable body, optionally with its own Parent - but a LootableAsset's single Rolls array REPLACES the parent's wholesale, it never appends to it, so use an ExtensionAsset (or the sibling inline Rolls leaf here) to ADD rolls to a shared table.",
           "type": "array",
           "of": {
-            "type": "string"
+            "type": "containedAsset",
+            "assetType": "LootableAsset",
+            "ref": "LootableAsset"
           }
         },
         {
@@ -2433,6 +2664,36 @@
                             }
                           ]
                         }
+                      },
+                      {
+                        "key": "Contributions",
+                        "required": false,
+                        "documentation": "One-shot amounts posted verbatim when this roll grants. Cycle trigger ONLY (a Completion-trigger roll has no cycle event to ride on; the validator warns) and DELIBERATELY UNSCALED: unlike the station's own Work.PerCycleContributions, a find's grant never inherits the tool multiplier or the idle fraction.",
+                        "type": "array",
+                        "of": {
+                          "type": "object",
+                          "nestedType": "Contribution",
+                          "fields": [
+                            {
+                              "key": "Channel",
+                              "required": false,
+                              "documentation": "The namespaced channel id this contribution posts to (e.g. 'yourmod:crop_quality'), opaque to this engine - it is never resolved here, only forwarded. Pick it from the rpgstations:channels dropdown, or declare your own via ContributionChannelRegistry.",
+                              "type": "string"
+                            },
+                            {
+                              "key": "Param",
+                              "required": false,
+                              "documentation": "Optional channel-interpreted argument, opaque to this engine - whatever the channel's owner documents (commonly the specific thing being credited).",
+                              "type": "string"
+                            },
+                            {
+                              "key": "Amount",
+                              "required": false,
+                              "documentation": "The amount posted. Scaling is decided by WHERE this entry is authored - see the owning group's documentation.",
+                              "type": "double"
+                            }
+                          ]
+                        }
                       }
                     ]
                   },
@@ -2500,6 +2761,36 @@
                   }
                 ]
               }
+            },
+            {
+              "key": "Contributions",
+              "required": false,
+              "documentation": "One-shot amounts posted verbatim when this roll grants. Cycle trigger ONLY (a Completion-trigger roll has no cycle event to ride on; the validator warns) and DELIBERATELY UNSCALED: unlike the station's own Work.PerCycleContributions, a find's grant never inherits the tool multiplier or the idle fraction.",
+              "type": "array",
+              "of": {
+                "type": "object",
+                "nestedType": "Contribution",
+                "fields": [
+                  {
+                    "key": "Channel",
+                    "required": false,
+                    "documentation": "The namespaced channel id this contribution posts to (e.g. 'yourmod:crop_quality'), opaque to this engine - it is never resolved here, only forwarded. Pick it from the rpgstations:channels dropdown, or declare your own via ContributionChannelRegistry.",
+                    "type": "string"
+                  },
+                  {
+                    "key": "Param",
+                    "required": false,
+                    "documentation": "Optional channel-interpreted argument, opaque to this engine - whatever the channel's owner documents (commonly the specific thing being credited).",
+                    "type": "string"
+                  },
+                  {
+                    "key": "Amount",
+                    "required": false,
+                    "documentation": "The amount posted. Scaling is decided by WHERE this entry is authored - see the owning group's documentation.",
+                    "type": "double"
+                  }
+                ]
+              }
             }
           ]
         }
@@ -2516,7 +2807,7 @@
         {
           "key": "Param",
           "required": false,
-          "documentation": "Optional provider-interpreted argument (e.g. a skill id, or a 'stat' channel id).",
+          "documentation": "Optional provider-interpreted argument, opaque to this engine (for the built-in 'stat' factor, a registered EntityStatType channel id; for a third-party factor, whatever that provider documents).",
           "type": "string"
         },
         {
@@ -2538,11 +2829,19 @@
         {
           "key": "MaxQuantity",
           "required": false,
+          "documentation": "The total item count this block's claim holds; reader-defaults to 100.",
           "type": "integer"
+        },
+        {
+          "key": "SingleFamily",
+          "required": false,
+          "documentation": "When true the claim locks to the FIRST placed item's resource family: a later placement of a different family is refused until the claim empties. Default false (any accepted material mixes freely).",
+          "type": "boolean"
         },
         {
           "key": "Input",
           "required": false,
+          "documentation": "The explicit placement-acceptance matcher; absent derives acceptance from the resolved action's Recipe.Conversions inputs.",
           "type": "object",
           "nestedType": "ActionInput",
           "fields": [
@@ -2581,6 +2880,7 @@
         {
           "key": "States",
           "required": false,
+          "documentation": "The block State.Definitions names custody flips between; null = no visual/hint flip.",
           "type": "object",
           "nestedType": "States",
           "fields": [
@@ -2607,28 +2907,33 @@
         {
           "key": "Display",
           "required": false,
+          "documentation": "Opts the placed input into a placed-as-entity prop visual at the block-top anchor; null = no visual.",
           "type": "object",
           "nestedType": "Display",
           "fields": [
             {
               "key": "Offset",
               "required": false,
+              "documentation": "Facing-relative shift off the block-top anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical.",
               "type": "object",
-              "nestedType": "Offset",
+              "nestedType": "Vec3",
               "fields": [
                 {
                   "key": "X",
                   "required": false,
+                  "documentation": "The X component; unauthored means 0 (each axis is independently optional).",
                   "type": "double"
                 },
                 {
                   "key": "Y",
                   "required": false,
+                  "documentation": "The Y component; unauthored means 0 (each axis is independently optional).",
                   "type": "double"
                 },
                 {
                   "key": "Z",
                   "required": false,
+                  "documentation": "The Z component; unauthored means 0 (each axis is independently optional).",
                   "type": "double"
                 }
               ]
@@ -2636,30 +2941,32 @@
             {
               "key": "Scale",
               "required": false,
+              "documentation": "Uniform prop scale; defaults to 1.0 when absent or non-positive.",
               "type": "double"
             },
             {
               "key": "Rotation",
               "required": false,
+              "documentation": "Facing-relative rotation in degrees; the placed block's own facing is added into Yaw at spawn.",
               "type": "object",
               "nestedType": "Rotation",
               "fields": [
                 {
-                  "key": "X",
+                  "key": "Yaw",
                   "required": false,
-                  "documentation": "Pitch in degrees (tips the prop forward/back - the 'lay it flat' axis). Default 0.",
+                  "documentation": "Yaw in degrees (turns about the vertical axis). Default 0.",
                   "type": "double"
                 },
                 {
-                  "key": "Y",
+                  "key": "Pitch",
                   "required": false,
-                  "documentation": "Yaw in degrees (turns about vertical; the placed block's facing is added at spawn). Default 0.",
+                  "documentation": "Pitch in degrees (tips forward/back - the 'lay it flat' axis). Default 0.",
                   "type": "double"
                 },
                 {
-                  "key": "Z",
+                  "key": "Roll",
                   "required": false,
-                  "documentation": "Roll in degrees (tips sideways about the prop's own long axis). Default 0.",
+                  "documentation": "Roll in degrees (tips sideways about the subject's own long axis). Default 0.",
                   "type": "double"
                 }
               ]
@@ -2673,29 +2980,49 @@
         {
           "key": "Enabled",
           "required": false,
+          "documentation": "Activates the whole puppet route (spawn + hide together). Reader-defaults to true when the group is authored at all; false = the classic in-body worker.",
           "type": "boolean"
         },
         {
           "key": "Hide",
           "required": false,
+          "documentation": "How the real player's own body is hidden while the puppet performs.",
           "type": "object",
           "nestedType": "Hide",
           "fields": [
             {
               "key": "Route",
               "required": false,
+              "documentation": "How the puppeteer's own body is hidden: 'Scale' (default), 'Effect' (Hide.Effect), or 'None'.",
               "type": "string"
             },
             {
-              "key": "EffectId",
+              "key": "Effect",
               "required": false,
-              "type": "string"
+              "documentation": "The native EntityEffect reference the 'Effect' route applies to hide the body (id-ref-only, optional DurationMs).",
+              "type": "object",
+              "nestedType": "EffectRef",
+              "fields": [
+                {
+                  "key": "Id",
+                  "required": false,
+                  "documentation": "The native EntityEffect asset id to apply (id-ref-only; never inlines the effect body).",
+                  "type": "string"
+                },
+                {
+                  "key": "DurationMs",
+                  "required": false,
+                  "documentation": "Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL.",
+                  "type": "long"
+                }
+              ]
             }
           ]
         },
         {
           "key": "Look",
           "required": false,
+          "documentation": "The puppet's appearance: whose model it wears and where that model comes from.",
           "type": "object",
           "nestedType": "Look",
           "fields": [
@@ -2764,22 +3091,26 @@
         {
           "key": "Offset",
           "required": false,
+          "documentation": "The puppet's stance shift off the station's block-top anchor, facing-relative: X/Z are in the block's own horizontal frame (+Z = its front), Y is vertical.",
           "type": "object",
-          "nestedType": "Offset",
+          "nestedType": "Vec3",
           "fields": [
             {
               "key": "X",
               "required": false,
+              "documentation": "The X component; unauthored means 0 (each axis is independently optional).",
               "type": "double"
             },
             {
               "key": "Y",
               "required": false,
+              "documentation": "The Y component; unauthored means 0 (each axis is independently optional).",
               "type": "double"
             },
             {
               "key": "Z",
               "required": false,
+              "documentation": "The Z component; unauthored means 0 (each axis is independently optional).",
               "type": "double"
             }
           ]
@@ -2787,27 +3118,32 @@
         {
           "key": "Yaw",
           "required": false,
+          "documentation": "The puppet's facing in degrees, facing-relative to the placed block's own yaw (the block facing folds in additively). Reader-defaults to 0 (faces the same way the block does).",
           "type": "double"
         },
         {
           "key": "Prop",
           "required": false,
+          "documentation": "The item the puppet holds while performing.",
           "type": "object",
           "nestedType": "Prop",
           "fields": [
             {
               "key": "Source",
               "required": false,
+              "documentation": "The held-prop discriminator: 'MirrorHeld' (default, copies the player's live hotbar item), 'ItemId' (a forced prop), or 'None' (empty hands).",
               "type": "string"
             },
             {
               "key": "ItemId",
               "required": false,
+              "documentation": "The forced item id the puppet holds when Source is 'ItemId'; ignored by the other arms.",
               "type": "string"
             },
             {
               "key": "Slot",
               "required": false,
+              "documentation": "Which hand the prop occupies: 'Hotbar' (main, default) or 'Utility' (off-hand).",
               "type": "string"
             }
           ]
@@ -2840,47 +3176,134 @@
         {
           "key": "Sound",
           "required": false,
+          "documentation": "A native one-shot SoundEvent id played at the moment's target position. Never author a LOOPING event here - nothing can stop it once fired.",
           "type": "string"
         },
         {
           "key": "Particles",
           "required": false,
-          "type": "string"
+          "documentation": "The particle bursts played at this moment, in authored order (native InteractionEffects.Particles is an array too). Each entry is one ModelParticle-shaped burst; layering two is the author's call.",
+          "type": "array",
+          "of": {
+            "type": "object",
+            "nestedType": "ModelParticle",
+            "fields": [
+              {
+                "key": "SystemId",
+                "required": false,
+                "documentation": "The native particle-system asset id to spawn (required; a blank entry is skipped).",
+                "type": "string"
+              },
+              {
+                "key": "Scale",
+                "required": false,
+                "documentation": "Uniform burst scale; defaults to 1.0 when absent or non-positive.",
+                "type": "double"
+              },
+              {
+                "key": "DurationSeconds",
+                "required": false,
+                "documentation": "Client-playback cap in seconds; defaults to 4. Author 0 or less for UNCAPPED, which an unbounded-spawner system will never stop.",
+                "type": "double"
+              },
+              {
+                "key": "RotationOffset",
+                "required": false,
+                "documentation": "Burst emission rotation in degrees (Yaw/Pitch/Roll); each unauthored axis is 0. Not composed with the block facing.",
+                "type": "object",
+                "nestedType": "Rotation",
+                "fields": [
+                  {
+                    "key": "Yaw",
+                    "required": false,
+                    "documentation": "Yaw in degrees (turns about the vertical axis). Default 0.",
+                    "type": "double"
+                  },
+                  {
+                    "key": "Pitch",
+                    "required": false,
+                    "documentation": "Pitch in degrees (tips forward/back - the 'lay it flat' axis). Default 0.",
+                    "type": "double"
+                  },
+                  {
+                    "key": "Roll",
+                    "required": false,
+                    "documentation": "Roll in degrees (tips sideways about the subject's own long axis). Default 0.",
+                    "type": "double"
+                  }
+                ]
+              },
+              {
+                "key": "PositionOffset",
+                "required": false,
+                "documentation": "Facing-relative shift off the moment's target position: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical.",
+                "type": "object",
+                "nestedType": "Vec3",
+                "fields": [
+                  {
+                    "key": "X",
+                    "required": false,
+                    "documentation": "The X component; unauthored means 0 (each axis is independently optional).",
+                    "type": "double"
+                  },
+                  {
+                    "key": "Y",
+                    "required": false,
+                    "documentation": "The Y component; unauthored means 0 (each axis is independently optional).",
+                    "type": "double"
+                  },
+                  {
+                    "key": "Z",
+                    "required": false,
+                    "documentation": "The Z component; unauthored means 0 (each axis is independently optional).",
+                    "type": "double"
+                  }
+                ]
+              }
+            ]
+          }
         },
         {
           "key": "Animation",
           "required": false,
+          "documentation": "Reserved: an animation clip id for this moment. Station moments do not play it (an authored value warns as unused); worker swing clips are authored via the Puppet group and StationStep.Puppet.Clip instead.",
           "type": "string"
         },
         {
           "key": "AnimationItem",
           "required": false,
+          "documentation": "Reserved alongside Animation: the item id whose ItemPlayerAnimations set would resolve the clip. Station moments do not play it (an authored value warns as unused).",
           "type": "string"
         },
         {
           "key": "AnimationSlot",
           "required": false,
+          "documentation": "Reserved alongside Animation: the AnimationSlot the clip would play on (e.g. Emote, Action). Station moments do not play it (an authored value warns as unused).",
           "type": "string"
         },
         {
-          "key": "Camera",
+          "key": "CameraEffect",
           "required": false,
+          "documentation": "Reserved: a native CameraEffect asset id (spelled as native InteractionEffects does; the nested Camera GROUP one level up is the station's own camera pull, a different thing). Station moments do not play it (an authored value warns as unused); one-shot shakes route through Shake.",
           "type": "string"
         },
         {
           "key": "Shake",
           "required": false,
+          "documentation": "A one-shot camera shake: a CameraEffect asset id plus a contextual intensity.",
           "type": "object",
           "nestedType": "Shake",
           "fields": [
             {
               "key": "EffectId",
               "required": false,
+              "documentation": "The native CameraEffect asset id to play; a bare id (never a timed EffectRef) since the shake's duration is baked inside the referenced asset.",
               "type": "string"
             },
             {
               "key": "Intensity",
               "required": false,
+              "documentation": "The contextual shake intensity in the engine's 0..1 space; null lands on the shake service's own no-op guard.",
               "type": "double"
             }
           ]
@@ -2994,6 +3417,7 @@
         {
           "key": "Name",
           "required": false,
+          "documentation": "Ignored - the roll pool id comes from the asset filename, not this key. Kept as a schema field for editor display only.",
           "type": "string"
         },
         {
@@ -3026,6 +3450,7 @@
         {
           "key": "Name",
           "required": false,
+          "documentation": "Ignored - the lootable id comes from the asset filename, not this key. Kept as a schema field for editor display only.",
           "type": "string"
         },
         {
@@ -3058,6 +3483,7 @@
         {
           "key": "Name",
           "required": false,
+          "documentation": "Ignored - the flair id comes from the asset filename, not this key. Kept as a schema field for editor display only.",
           "type": "string"
         },
         {
@@ -3099,6 +3525,7 @@
         {
           "key": "Name",
           "required": false,
+          "documentation": "Ignored - the extension id comes from the asset filename, not this key. Kept as a schema field for editor display only.",
           "type": "string"
         },
         {
@@ -3141,22 +3568,30 @@
           "type": "integer"
         },
         {
-          "key": "Xp",
+          "key": "PerCycleContributions",
           "required": false,
-          "documentation": "Appended Work.Xp declarations (Station/Action target).",
+          "documentation": "Appended Work.PerCycleContributions entries (Station/Action target).",
           "type": "array",
           "of": {
             "type": "object",
-            "nestedType": "WorkXp",
+            "nestedType": "Contribution",
             "fields": [
               {
-                "key": "Skill",
+                "key": "Channel",
                 "required": false,
+                "documentation": "The namespaced channel id this contribution posts to (e.g. 'yourmod:crop_quality'), opaque to this engine - it is never resolved here, only forwarded. Pick it from the rpgstations:channels dropdown, or declare your own via ContributionChannelRegistry.",
                 "type": "string"
               },
               {
-                "key": "PerCycle",
+                "key": "Param",
                 "required": false,
+                "documentation": "Optional channel-interpreted argument, opaque to this engine - whatever the channel's owner documents (commonly the specific thing being credited).",
+                "type": "string"
+              },
+              {
+                "key": "Amount",
+                "required": false,
+                "documentation": "The amount posted. Scaling is decided by WHERE this entry is authored - see the owning group's documentation.",
                 "type": "double"
               }
             ]
@@ -3193,18 +3628,24 @@
               {
                 "key": "Input",
                 "required": false,
-                "documentation": "The conversion input: a native Ingredient (exactly one of ItemId | ResourceTypeId).",
-                "type": "object",
-                "nestedType": "Ingredient",
-                "ref": "Ingredient"
+                "documentation": "The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, exactly one of ItemId | ResourceTypeId. Every entry must be available for the cycle to run.",
+                "type": "array",
+                "of": {
+                  "type": "object",
+                  "nestedType": "Ingredient",
+                  "ref": "Ingredient"
+                }
               },
               {
                 "key": "Output",
                 "required": false,
-                "documentation": "The conversion output: an exact-ItemId Ingredient.",
-                "type": "object",
-                "nestedType": "Ingredient",
-                "ref": "Ingredient"
+                "documentation": "The conversion outputs (native CraftingRecipe.Output shape): each an exact-ItemId Ingredient. Every entry needs inventory room for the cycle to run.",
+                "type": "array",
+                "of": {
+                  "type": "object",
+                  "nestedType": "Ingredient",
+                  "ref": "Ingredient"
+                }
               },
               {
                 "key": "DurationMs",
@@ -3299,9 +3740,9 @@
                 "type": "string"
               },
               {
-                "key": "MaxRadius",
+                "key": "MaxRadiusMeters",
                 "required": false,
-                "documentation": "The horizontal block radius to search for the anchor station (reader-defaults to 12).",
+                "documentation": "The horizontal search radius for the anchor station, in meters (one block = one meter); reader-defaults to 12.",
                 "type": "double"
               }
             ]
@@ -3364,37 +3805,50 @@
         {
           "key": "Name",
           "required": false,
+          "documentation": "Ignored - the settings asset id is always the fixed 'settings' id, not this key. Kept as a schema field for editor display only.",
           "type": "string"
         },
         {
           "key": "Enabled",
           "required": false,
+          "documentation": "The engine master switch; false disables the whole RpgStations engine at the SettingsCatalog check. Reader-defaults to true.",
           "type": "boolean"
         },
         {
           "key": "SummaryHud",
           "required": false,
+          "documentation": "The end-of-session summary panel's layout and lifetime.",
           "type": "object",
           "nestedType": "SummaryHud",
           "fields": [
             {
               "key": "Enabled",
               "required": false,
+              "documentation": "Whether the end-of-session summary panel shows at all; defaults to true.",
               "type": "boolean"
             },
             {
               "key": "Position",
               "required": false,
+              "documentation": "A HudPosition preset id (e.g. 'top_center'); null or unknown falls back to the HUD's own default.",
               "type": "string"
+            },
+            {
+              "key": "OffsetX",
+              "required": false,
+              "documentation": "Horizontal pixel offset from the chosen Position preset; defaults to 0.",
+              "type": "integer"
             },
             {
               "key": "OffsetY",
               "required": false,
+              "documentation": "Vertical pixel offset from the chosen Position preset.",
               "type": "integer"
             },
             {
               "key": "TtlMs",
               "required": false,
+              "documentation": "How long the summary panel stays on screen, in milliseconds.",
               "type": "long"
             }
           ]

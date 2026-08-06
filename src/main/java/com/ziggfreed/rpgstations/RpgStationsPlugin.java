@@ -30,6 +30,7 @@ import com.ziggfreed.rpgstations.api.impl.EnhanceStamperRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
+import com.ziggfreed.rpgstations.asset.AssetEditorDataSets;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
 import com.ziggfreed.rpgstations.asset.LootableAsset;
@@ -59,27 +60,26 @@ import com.ziggfreed.rpgstations.util.Log;
 
 /**
  * Entry point for RPG Stations, a standalone Hytale mod owning the diegetic interactive
- * work-station engine (sawmill, forge, and friends) extracted out of the MMO Skill Tree mod.
- * It depends on {@code ziggfreed-common} ONLY - the MMO Skill Tree keeps every piece of
- * progression and reaches the station engine exclusively through a soft extension surface
- * (native events + the {@code api} artifact, leg 4); neither mod hard-deps the other.
+ * work-station engine (sawmill, forge, and friends). It depends on {@code ziggfreed-common} ONLY;
+ * any other mod reaches the station engine exclusively through a soft extension surface (native
+ * events plus the {@code api} artifact), and nothing here hard-deps a consumer.
  *
- * <p><b>Leg 4 (api artifact + wiring) stage:</b> registers the station engine (asset store,
- * catalog fold, the {@code rpg_station_use} interaction, the frame-drain system, the
- * damage-interrupt system) and the conditional-lootable layer ({@link LootableAsset} store), the
- * engine {@link RpgStationsSettingsAsset} store - AND installs the real extension surface: {@link
- * RpgStationsApi#set} injects {@link RpgStationsApiImpl} before anything else runs, then {@link
- * FactorRegistryImpl#registerBuiltins} registers the four {@code rpgstations:} built-ins through
- * that SAME api-backed registry (design section 3.2, dogfooded). The engine now fires its four
- * lifecycle events ({@code StationSessionStartedEvent}/{@code StationCycleCompletedEvent}/{@code
- * StationSessionCompletedEvent}/{@code StationToolBrokeEvent}) and consults the {@code
- * FlairUnlockRegistry}/{@code SummaryEnricherRegistry} unions from {@code StationService}/{@code
- * StationFlairs} - see {@code .claude/research/raw/rpg-stations-unified-design-2026-07-21.md}
- * section 3. The MMO bridge (leg 5) is the first real external consumer.
+ * <p>Setup registers the station engine (asset store, catalog fold, the {@code rpg_station_use}
+ * interaction, the frame-drain system, the damage-interrupt system), the conditional-lootable
+ * layer ({@link LootableAsset} store), the engine {@link RpgStationsSettingsAsset} store, AND the
+ * extension surface: {@link RpgStationsApi#set} injects {@link RpgStationsApiImpl} before anything
+ * else runs, then {@link FactorRegistryImpl#registerBuiltins} registers the {@code rpgstations:}
+ * built-in factors through that SAME api-backed registry (design section 3.2, dogfooded). It
+ * deliberately declares ZERO built-in contribution CHANNELS: the engine owns built-in factors
+ * because it can compute them, and owns no channels because it interprets none. The engine fires
+ * its lifecycle events ({@code StationSessionStartedEvent}/{@code StationCycleCompletedEvent}/
+ * {@code StationSessionCompletedEvent}/{@code StationToolBrokeEvent}) and consults the
+ * {@code FlairUnlockRegistry}/{@code SummaryEnricherRegistry} unions from
+ * {@code StationService}/{@code StationFlairs} - see
+ * {@code .claude/research/raw/rpg-stations-unified-design-2026-07-21.md} section 3.
  *
- * <p><b>Phase-1 closeout (leg P0):</b> registers {@link RpgStationsCommand}
- * ({@code /rpgstations camera <preset>|list}, {@code /rpgstations validate}), the design 4.1
- * command-group scope that was never landed before the MMO deleted its own camera subgroup.
+ * <p>It also registers {@link RpgStationsCommand} ({@code /rpgstations camera <preset>|list},
+ * {@code /rpgstations validate}), the design 4.1 command-group scope.
  */
 public class RpgStationsPlugin extends JavaPlugin {
 
@@ -89,8 +89,7 @@ public class RpgStationsPlugin extends JavaPlugin {
 
     /**
      * One-shot gate for {@link #registerPostLoadAudit}'s deferred FULL {@link StationValidator}
-     * pass (D4 fix) - mirrors the MMO's own {@code ContentAudit.runAndLogAll()} first-{@code
-     * PlayerReadyEvent} gate ({@code MMOSkillTreePlugin}'s {@code contentAuditLogged}).
+     * pass (D4 fix): the audit runs at the FIRST {@code PlayerReadyEvent} and never again.
      */
     private static final AtomicBoolean postLoadAuditLogged = new AtomicBoolean(false);
 
@@ -130,6 +129,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerRollPoolAssetStore();
         registerFlairAssetStore();
         registerSettingsAssetStore();
+        registerAssetEditorDataSets();
         registerStationInteraction();
         registerStationRetrieveInteraction();
         registerStationSystems();
@@ -144,6 +144,24 @@ public class RpgStationsPlugin extends JavaPlugin {
     }
 
     /**
+     * Serve the in-game Asset Editor's dropdown value lists for every dataset id this mod's
+     * codecs name in their {@code UIEditor.Dropdown} metadata (see {@link AssetEditorDataSets}).
+     *
+     * <p>Guarded as a whole: the Asset Editor is a builtin module, so a server build without it
+     * would throw here on class resolution. An authoring convenience must never be able to fail
+     * plugin startup - a failure degrades every dropdown to a plain free-text field, and the
+     * content validator (which never depended on the editor) still backs every one of them.
+     */
+    private void registerAssetEditorDataSets() {
+        try {
+            AssetEditorDataSets.register(getEventRegistry());
+        } catch (Throwable t) {
+            Log.warn("RpgStations could not register its Asset Editor dropdown datasets; "
+                    + "editor fields fall back to free text.", t);
+        }
+    }
+
+    /**
      * The ONE deferred full {@link StationValidator} audit (D4 fix - "fix the timing, not the
      * checks"): every per-fold {@code LoadedAssetsEvent} handler below now logs only the
      * STRUCTURAL pass ({@link StationValidator#runStructuralAndLog}), because a cross-layer
@@ -155,8 +173,7 @@ public class RpgStationsPlugin extends JavaPlugin {
      * Drops/lang that had not settled yet relative to that SAME layer's Station fold). By the
      * first {@link PlayerReadyEvent} every asset pack (RpgStations' own AND every installed
      * content pack) has finished merging, so the FULL {@link StationValidator#runAndLog} pass is
-     * race-free here - the EXACT same timing guarantee {@code MMOSkillTreePlugin}'s {@code
-     * ContentAudit.runAndLogAll()} relies on for its own first-PlayerReady startup audit.
+     * race-free here.
      */
     private void registerPostLoadAudit() {
         getEventRegistry().registerGlobal(PlayerReadyEvent.class, event -> {
@@ -183,8 +200,7 @@ public class RpgStationsPlugin extends JavaPlugin {
     /**
      * The two teardown hooks {@link StationService#stopForRef}/{@link StationService#stopFor}
      * were ALREADY shaped for (see their own javadoc: "Death hook", "Disconnect hook") but never
-     * wired to a live event until now (design section 4.2; leg 5 relies on RpgStations owning
-     * these once the MMO's equivalent calls are deleted). Server-shutdown teardown was already
+     * wired to a live event until now (design section 4.2). Server-shutdown teardown was already
      * covered by {@link #shutdown()}'s {@code stopAll}.
      *
      * <p><b>SMOKE-FIX S3 (custody return "not coming back at session stop at all"):</b>
@@ -194,9 +210,9 @@ public class RpgStationsPlugin extends JavaPlugin {
      * owning world thread. Every OTHER {@code stop()} entry point already runs on the world
      * thread (the heartbeat/cycle paths run inside an {@code AbstractWorldFrameSystem} tick,
      * {@code toggle()} runs inside the {@code rpg_station_use} interaction handler, death runs
-     * inside an {@code EntityStoreRegistry} system) - {@code PlayerDisconnectEvent} does NOT
-     * (mirrors the MMO's OWN {@code PlayerDisconnectEvent} handler, which world.execute-hops its
-     * own store-touching cleanup for the identical reason). Calling {@code stopFor} directly here
+     * inside an {@code EntityStoreRegistry} system) - {@code PlayerDisconnectEvent} does NOT, which
+     * is exactly why every store-touching disconnect cleanup has to world.execute-hop first.
+     * Calling {@code stopFor} directly here
      * risked an off-thread throw partway through {@code returnCustody} - AFTER it had already
      * removed the claim from {@code custodyByBlock} but before the items landed in the owner's
      * inventory or were dropped at the block - silently losing them. Hopping to the player's own
@@ -233,7 +249,6 @@ public class RpgStationsPlugin extends JavaPlugin {
 
     /**
      * Registers the {@link StationAsset} Pattern-A store at {@code Server/RpgStations/Stations}
-     * (the design's leg-2 store-path change from the MMO's {@code Server/MMOSkillTree/Stations})
      * and folds every loaded entry into {@link StationCatalog}. No {@code PackControlAsset}
      * infra exists yet this leg, so the fold is always additive (replace=false); a reload
      * re-fires this event and re-folds for free.
@@ -484,15 +499,13 @@ public class RpgStationsPlugin extends JavaPlugin {
 
     /**
      * SMOKE-FIX S1: installs the session-summary HUD ({@link StationSummaryHud}) on the native
-     * per-player {@code HudManager} at first ready, the missing half of the phase-1 leg-5 move
-     * ("RpgStations installs its own HUD now" per {@code MMOSkillTreePlugin}'s own comment at the
-     * spot it deleted the old install call) - nothing in this jar ever called {@code
+     * per-player {@code HudManager} at first ready. Nothing in this jar ever called {@code
      * player.getHudManager().addCustomHud(...)} for this HUD, so {@code StationSummaryHud.tryShow}
      * always failed {@code KeyedCustomHud.get}'s native lookup and every session silently fell
      * back to the plain-toast path, which read in-game as "the completion HUD no longer appears
-     * at all". Mirrors the pre-extraction MMO's own {@code AbilityCooldownHud}/{@code
-     * QuestTrackerHud} install shape at {@code PlayerReadyEvent} (world.execute hop before any
-     * Store/Ref/HudManager touch); {@code HudManager#addCustomHud} itself is replace-safe on a
+     * at all". The install shape is the standard custom-HUD one: at {@code PlayerReadyEvent}, with
+     * a world.execute hop before any
+     * Store/Ref/HudManager touch; {@code HudManager#addCustomHud} itself is replace-safe on a
      * reconnect (clears + re-adds under the same key), so no existence guard is needed here.
      */
     private void registerSummaryHudInstall() {

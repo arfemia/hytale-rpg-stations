@@ -2,8 +2,7 @@ package com.ziggfreed.rpgstations.station;
 
 /**
  * PURE yaw math for the optional player-model rotation lock: computes the yaw a player at one
- * position must face to look at another position, in the engine's own convention. Ported
- * verbatim from the MMO's {@code station.StationFacing} (RPG Stations extraction leg 2).
+ * position must face to look at another position, in the engine's own convention.
  *
  * <p>The convention: the protocol {@code Direction} struct is three RADIAN floats
  * {@code (yaw, pitch, roll)}. The yaw formula mirrors the engine's own

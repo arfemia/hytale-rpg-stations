@@ -11,6 +11,7 @@ import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
+import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 
 /**
  * ONE action body (design section 9.1 / scope-2 1.5): a WHOLE-GROUP override set for one action.
@@ -26,7 +27,7 @@ import com.hypixel.hytale.codec.codecs.map.MapCodec;
  * {@link #ref} is a validator finding ({@code ACTION_REF_UNKNOWN}); engage denies gracefully.
  *
  * <p><b>{@link #anchors} (scope-2 2.2):</b> named multi-station anchor declarations
- * ({@code id -> {Station, MaxRadius}}), legal on both forms but expected mostly on an
+ * ({@code id -> {Station, MaxRadiusMeters}}), legal on both forms but expected mostly on an
  * {@link ActionAsset}. Decodes and validates this wave; anchor DISCOVERY/claiming/walk execution
  * is [wave 3].
  *
@@ -58,10 +59,14 @@ public final class ActionDef {
     public static final BuilderCodec<ActionDef> CODEC = BuilderCodec.builder(ActionDef.class, ActionDef::new)
             .appendInherited(new KeyedCodec<>("Label", Codec.STRING, false),
                     (o, v) -> o.label = v, o -> o.label, (o, p) -> o.label = p.label)
-            .documentation("An advisory localization key for admin/UI display of the action's name.").add()
-            .appendInherited(new KeyedCodec<>("Ref", Codec.STRING, false),
+            .documentation("An advisory localization key for admin/UI display of the action's name.")
+            .metadata(new UIEditor(new UIEditor.LocalizationKeyField("rpgstations.action.{assetId}.label"))).add()
+            .appendInherited(new KeyedCodec<>("Ref", ActionAsset.CHILD_ASSET_CODEC, false),
                     (o, v) -> o.ref = v, o -> o.ref, (o, p) -> o.ref = p.ref)
-            .documentation("Names a standalone ActionAsset as the BASE; other groups authored here overlay it group-wise.").add()
+            .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:actions")))
+            .documentation("Names a standalone ActionAsset as the BASE; other groups authored here overlay it group-wise. "
+                    + "May also be an INLINE action body (optionally with its own Parent), registered as a generated "
+                    + "child action asset.").add()
             .appendInherited(new KeyedCodec<>("Input", ActionInput.CODEC, false),
                     (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input)
             .documentation("The diegetic action-selection matcher (held item / custody). Absent = a catch-all action.").add()
@@ -107,7 +112,7 @@ public final class ActionDef {
             .appendInherited(new KeyedCodec<>("Anchors",
                             new MapCodec<>(Anchor.CODEC, LinkedHashMap::new), false),
                     (o, v) -> o.anchors = v, o -> o.anchors, (o, p) -> o.anchors = p.anchors)
-            .documentation("Named multi-station anchor declarations (id -> {Station, MaxRadius}). [wave 3 discovery]").add()
+            .documentation("Named multi-station anchor declarations (id -> {Station, MaxRadiusMeters}); a step's At/Walk.To names one and the engine discovers + claims the nearest matching placed block within MaxRadiusMeters.").add()
             .appendInherited(new KeyedCodec<>("Picker", Picker.CODEC, false),
                     (o, v) -> o.picker = v, o -> o.picker, (o, p) -> o.picker = p.picker)
             .documentation("Per-action multi-output picker override (whole-group replace of the station-level Picker).").add()
@@ -341,7 +346,7 @@ public final class ActionDef {
         return steps;
     }
 
-    /** Named multi-station anchor declarations ({@code id -> {Station, MaxRadius}}); null = none. [wave 3] */
+    /** Named multi-station anchor declarations ({@code id -> {Station, MaxRadiusMeters}}); null = none. [wave 3] */
     @Nullable
     public Map<String, Anchor> getAnchors() {
         return anchors;
@@ -355,7 +360,7 @@ public final class ActionDef {
 
     /**
      * ONE multi-station anchor declaration (scope-2 2.2): {@link #station} is the target STATION id
-     * (a type filter), {@link #maxRadius} the horizontal block radius from the primary station
+     * (a type filter), {@link #maxRadiusMeters} the horizontal radius in meters from the primary station
      * block. The reserved anchor id {@code "self"} = the primary block (never authored; the
      * validator rejects declaring it). Anchor DISCOVERY/claiming/walk is [wave 3]; this leaf
      * decodes and validates in wave 2.
@@ -363,26 +368,29 @@ public final class ActionDef {
     public static final class Anchor {
         /** The reserved anchor id every program has implicitly (the primary station block); never authored. */
         public static final String RESERVED_SELF = "self";
-        /** The design default anchor discovery radius (horizontal blocks). */
-        public static final double DEFAULT_MAX_RADIUS = 12.0;
+        /** The design default anchor discovery radius (horizontal blocks/meters). */
+        public static final double DEFAULT_MAX_RADIUS_METERS = 12.0;
 
         @Nullable protected String station;
-        @Nullable protected Double maxRadius;
+        @Nullable protected Double maxRadiusMeters;
 
         public static final BuilderCodec<Anchor> CODEC = BuilderCodec.builder(Anchor.class, Anchor::new)
                 .appendInherited(new KeyedCodec<>("Station", Codec.STRING, false),
                         (o, v) -> o.station = v, o -> o.station, (o, p) -> o.station = p.station)
-                .documentation("The target station id this anchor resolves against (a type filter).").add()
-                .appendInherited(new KeyedCodec<>("MaxRadius", Codec.DOUBLE, false),
-                        (o, v) -> o.maxRadius = v, o -> o.maxRadius, (o, p) -> o.maxRadius = p.maxRadius)
-                .documentation("The horizontal block radius to search for the anchor station (reader-defaults to 12).").add()
+                .documentation("The target station id this anchor resolves against (a type filter).")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:stations"))).add()
+                .appendInherited(new KeyedCodec<>("MaxRadiusMeters", Codec.DOUBLE, false),
+                        (o, v) -> o.maxRadiusMeters = v, o -> o.maxRadiusMeters,
+                        (o, p) -> o.maxRadiusMeters = p.maxRadiusMeters)
+                .documentation("The horizontal search radius for the anchor station, in meters (one block = one meter); reader-defaults to 12.")
+                .addValidator(CodecWarnValidators.positive("ActionDef.Anchors[].MaxRadiusMeters should be positive.")).add()
                 .build();
 
         @Nonnull
-        public static Anchor of(@Nullable String station, @Nullable Double maxRadius) {
+        public static Anchor of(@Nullable String station, @Nullable Double maxRadiusMeters) {
             Anchor a = new Anchor();
             a.station = station;
-            a.maxRadius = maxRadius;
+            a.maxRadiusMeters = maxRadiusMeters;
             return a;
         }
 
@@ -392,13 +400,16 @@ public final class ActionDef {
         }
 
         @Nullable
-        public Double getMaxRadius() {
-            return maxRadius;
+        public Double getMaxRadiusMeters() {
+            return maxRadiusMeters;
         }
 
-        /** {@link #maxRadius}, reader-defaulted to {@link #DEFAULT_MAX_RADIUS} when null/non-positive. */
-        public double effectiveMaxRadius() {
-            return maxRadius != null && maxRadius > 0 ? maxRadius : DEFAULT_MAX_RADIUS;
+        /**
+         * {@link #maxRadiusMeters}, reader-defaulted to {@link #DEFAULT_MAX_RADIUS_METERS} when
+         * null/non-positive.
+         */
+        public double effectiveMaxRadiusMeters() {
+            return maxRadiusMeters != null && maxRadiusMeters > 0 ? maxRadiusMeters : DEFAULT_MAX_RADIUS_METERS;
         }
     }
 }

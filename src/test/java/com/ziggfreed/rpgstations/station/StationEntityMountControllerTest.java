@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Pure tests for {@link StationEntityMountController}'s ONLY unit-JVM-safe logic -
  * {@link StationEntityMountController#resolveAttachmentOffset} (design section 9.2's CRITIQUE FIX
- * m7: the authored {@code Hold.Mount.Entity.Offset} converts to a float triple the ECS-touching
+ * m7: the authored {@code Hold.Mount.Entity.Offset} ({@code Vec3}) converts to a float triple the ECS-touching
  * {@code attach} method feeds a {@code Rotation3f} constructor). Every other method in that class
  * touches live Hytale ECS/component types (Store/CommandBuffer/Holder/MountedComponent) and has
  * NO unit coverage, matching {@link StationMountController}'s own precedent (zero tests - a

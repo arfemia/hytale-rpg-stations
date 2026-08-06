@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
-import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 
 /**
@@ -28,7 +27,8 @@ public class ActionAssetCodecTest {
     }
 
     private static StationAsset station(String body) throws Exception {
-        return StationAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body), new ExtraInfo());
+        return StationAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body),
+                new AssetExtraInfo<>(new AssetExtraInfo.Data(StationAsset.class, "fixture", null)));
     }
 
     // ==================== id + body decode ====================
@@ -43,17 +43,17 @@ public class ActionAssetCodecTest {
     void body_decodesLabelInputStepsAnchors() throws Exception {
         ActionAsset a = decode("prepfish", null, "{ \"Label\": \"action.prepfish.label\","
                 + " \"Input\": { \"ResourceTypeId\": \"Fish\" },"
-                + " \"Work\": { \"Repeat\": true },"
-                + " \"Anchors\": { \"fire\": { \"Station\": \"cookingfire\", \"MaxRadius\": 12 } },"
+                + " \"Work\": { \"Looping\": true },"
+                + " \"Anchors\": { \"fire\": { \"Station\": \"cookingfire\", \"MaxRadiusMeters\": 12 } },"
                 + " \"Steps\": [ { \"Id\": \"load\", \"Consume\": { \"ResourceTypeId\": \"Fish\", \"Quantity\": 1, \"From\": \"Custody\" } } ] }", null);
         ActionDef body = a.getBody();
         assertEquals("action.prepfish.label", body.getLabel());
         assertEquals("Fish", body.getInput().getResourceTypeId());
-        assertEquals(Boolean.TRUE, body.getWork().getRepeat());
+        assertEquals(Boolean.TRUE, body.getWork().getLooping());
         assertNotNull(body.getAnchors());
         ActionDef.Anchor fire = body.getAnchors().get("fire");
         assertEquals("cookingfire", fire.getStation());
-        assertEquals(12.0, fire.effectiveMaxRadius());
+        assertEquals(12.0, fire.effectiveMaxRadiusMeters());
         assertEquals("load", body.getSteps()[0].getId());
         assertNull(body.getRef(), "a standalone ActionAsset never carries Ref (no Ref key in its codec)");
     }
@@ -63,8 +63,8 @@ public class ActionAssetCodecTest {
     @Test
     void parentInheritance_wholesaleOnOmit_ownWins_siblingLeafInherit() throws Exception {
         ActionAsset parent = decode("base_action", null, "{ \"Label\": \"base.label\","
-                + " \"Work\": { \"CycleMs\": 4000, \"Repeat\": true },"
-                + " \"Anchors\": { \"fire\": { \"Station\": \"cookingfire\", \"MaxRadius\": 8 } } }", null);
+                + " \"Work\": { \"CycleMs\": 4000, \"Looping\": true },"
+                + " \"Anchors\": { \"fire\": { \"Station\": \"cookingfire\", \"MaxRadiusMeters\": 8 } } }", null);
         assertEquals(4000L, parent.getBody().getWork().getCycleMs());
 
         ActionAsset childOmit = decode("child_omit", "base_action", "{}", parent);
@@ -74,7 +74,7 @@ public class ActionAssetCodecTest {
 
         ActionAsset childOwn = decode("child_own", "base_action", "{ \"Work\": { \"CycleMs\": 3000 } }", parent);
         assertEquals(3000L, childOwn.getBody().getWork().getCycleMs(), "own leaf wins");
-        assertEquals(Boolean.TRUE, childOwn.getBody().getWork().getRepeat(), "sibling leaf (Repeat) inherits inside Work");
+        assertEquals(Boolean.TRUE, childOwn.getBody().getWork().getLooping(), "sibling leaf (Looping) inherits inside Work");
     }
 
     // ==================== inline Actions-map Ref + overlay (the shape ActionResolver resolves) ====================
@@ -83,7 +83,7 @@ public class ActionAssetCodecTest {
     void inlineActionRef_decodesRefAndOverlayGroupsTogether() throws Exception {
         StationAsset s = station("{ \"Actions\": {"
                 + " \"prepfish\": { \"Ref\": \"prepfish\" },"
-                + " \"quickfix\": { \"Ref\": \"prepfish\", \"Work\": { \"Repeat\": false } } } }");
+                + " \"quickfix\": { \"Ref\": \"prepfish\", \"Work\": { \"Looping\": false } } } }");
         ActionDef pure = s.getActions().get("prepfish");
         assertTrue(pure.hasRef());
         assertEquals("prepfish", pure.getRef());
@@ -93,7 +93,7 @@ public class ActionAssetCodecTest {
         assertTrue(overlaid.hasRef());
         assertEquals("prepfish", overlaid.getRef());
         assertNotNull(overlaid.getWork(), "the overlay group decodes alongside Ref for ActionResolver to compose");
-        assertEquals(Boolean.FALSE, overlaid.getWork().getRepeat());
+        assertEquals(Boolean.FALSE, overlaid.getWork().getLooping());
     }
 
     @Test

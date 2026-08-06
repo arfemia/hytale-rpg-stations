@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -53,11 +54,11 @@ import com.hypixel.hytale.server.core.modules.interaction.interaction.config.Roo
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.ParticleUtil;
 import com.hypixel.hytale.server.core.universe.world.accessor.BlockAccessor;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.core.util.NotificationUtil;
 import com.ziggfreed.common.camera.CameraShakeService;
-import com.ziggfreed.common.cast.ModelParticleService;
 import com.ziggfreed.common.effect.AppliedEffectTracker;
 import com.ziggfreed.common.effect.NativeEffectUtil;
 import com.ziggfreed.common.interaction.NativeChainFire;
@@ -79,20 +80,23 @@ import com.ziggfreed.rpgstations.api.FactorContext;
 import com.ziggfreed.rpgstations.api.SummaryContext;
 import com.ziggfreed.rpgstations.api.SummaryDecorateContext;
 import com.ziggfreed.rpgstations.api.SummaryEnricher;
-import com.ziggfreed.rpgstations.api.XpAsk;
+import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.SummaryEnricherRegistryImpl;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
+import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
+import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.FactorSnapshot;
@@ -106,30 +110,24 @@ import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * Session lifecycle + work loop for interactive stations. Ported from the MMO Skill Tree's
- * {@code station.StationService} (RPG Stations extraction phase 1, leg 2 - the engine move).
+ * Session lifecycle + work loop for interactive stations.
  *
  * <p><b>State machine:</b> {@code IDLE -> STARTING -> WORKING -> STOPPING -> IDLE}. One entry
  * point ({@link #toggle}, from {@code interaction.StationUseInteraction} on the world thread),
  * one idempotent exit funnel ({@link #stop}). Every start-denial is a localized toast, never
  * an interaction {@code Failed}.
  *
- * <p><b>SCOPE NOTE (leg 2 engine move, leg 3 loot + summary, leg 4 api artifact):</b> the port
- * keeps the ENGINE mechanics fully functional (session machine, toggle/stop funnel, heartbeat,
- * the Convert cycle transaction, swing/impact scheduling, idle mode, the {@link #emitMoment}
- * presentation choke point, durability drain, seat mount calls) and SEVERS every MMO-specific
- * progression call the original made ({@code SkillService}-driven XP awards, {@code
- * SkillTreeService}/{@code MasteryService}-driven luck aggregation, {@code ProgressEvents.fire},
- * {@code FeedbackService.emit}, the MMO's session-summary HUD) - those become event firing
- * (LANDED this leg via {@link StationEvents}: {@link #onCycleCompleted} fires {@code
- * StationCycleCompletedEvent} with the station's forwarded {@code Work.Xp} asks + resolved tool
- * multiplier) and the conditional-lootable engine + the standalone-rich summary panel, landed
- * leg 3 ({@link #rollCompletionLoot}, {@link #showSessionSummary} over {@code loot.LootEngine} /
- * {@code ui.StationSummaryHud} - the per-cycle Roll pass moved into {@link StationStepHandlers
- * .RollHandler} at phase-2 leg B's step-engine refactor), now ALSO consulting the api's
- * {@code SummaryEnricherRegistry} union for extra rows/theming (leg 4). The MMO is NOT touched by
- * this leg; its own copy of this class (registered interaction id {@code mmo_station_use})
- * coexists unchanged until leg 5's bridge.
+ * <p><b>What this class owns, and what it deliberately does not.</b> It owns the whole ENGINE
+ * (session machine, toggle/stop funnel, heartbeat, the Convert cycle transaction, swing/impact
+ * scheduling, idle mode, the {@link #emitMoment} presentation choke point, durability drain,
+ * mount calls) plus the standalone reward layer (the conditional-lootable engine and the
+ * self-sufficient summary panel - {@link #rollCompletionLoot}, {@link #showSessionSummary} over
+ * {@code loot.LootEngine} / {@code ui.StationSummaryHud}, with the per-cycle Roll pass living in
+ * {@code StationStepHandlers}' Roll phase). It owns NO progression: {@link #onCycleCompleted}
+ * fires {@code StationCycleCompletedEvent} carrying the station's authored contributions plus the
+ * resolved tool multiplier, and whichever mod declared a channel decides what a post means. Extra
+ * summary rows and cross-jar theming arrive the same way, through the api's
+ * {@code SummaryEnricherRegistry} union.
  */
 public final class StationService {
 
@@ -146,13 +144,6 @@ public final class StationService {
      * named ids on top - see {@link ActionResolver#ACTION_WORK} (the shared constant).
      */
     private static final String ACTION_WORK = ActionResolver.ACTION_WORK;
-
-    /**
-     * Every station moment fired through {@link #emitMoment} is a ONE-SHOT beat, so its
-     * particle playback is always capped to this many seconds of client playback (an
-     * unbounded-spawner particle asset fired at a bare position would otherwise leak forever).
-     */
-    private static final float MOMENT_PARTICLE_MAX_DURATION_SECONDS = 4.0f;
 
     /** Round-5 refinement 3: the "lucky grant" notification color (distinct from {@link #toast}'s plain YELLOW). */
     private static final Color GOLD = new Color(0xFFD700);
@@ -181,7 +172,7 @@ public final class StationService {
          */
         STEP_FAILED,
         /**
-         * {@code Work.Repeat: false}'s "one completed program run completes the SESSION" (design
+         * {@code Work.Looping: false}'s "one completed program run completes the SESSION" (design
          * 9.3, phase 2 leg E - the anvil's Enhance ritual): a non-repeating action's program
          * completed successfully; the session stops right here, non-silent (a real completion,
          * not a denial).
@@ -190,13 +181,13 @@ public final class StationService {
         /**
          * A Stamp step's {@code Stats} leaf clamped its roll to nothing (design 9.5: "a
          * fully-capped item stamps nothing, consumes nothing, and denies with a keyed toast") -
-         * every authored cap ({@code PerItemBudget}/{@code PerStat}/{@code SkillScaledBudget}) is
+         * every authored cap ({@code Caps.Budgets[]}/{@code Caps.PerStat}) is
          * already saturated for this item. No reagents were consumed.
          */
         ENHANCE_CAPPED,
         /**
          * Repeat-while-inputs completed naturally (scope-2 wave 3, design 2.4): a REPEATING program
-         * ({@code Work.Repeat: true}) whose {@code Consume} phase found insufficient inputs at its
+         * ({@code Work.Looping: true}) whose {@code Consume} phase found insufficient inputs at its
          * claimed source ends GRACEFULLY here (the fish exemplar's "repeats while fish remain"). A
          * real completion, non-silent, summary shows totals - distinct from {@link #OUT_OF_INPUTS}
          * (a NON-repeating program's material shortage) only in its toast wording.
@@ -436,7 +427,7 @@ public final class StationService {
                         store.getComponent(ref, InventoryComponent.Hotbar.getComponentType());
                 ItemStack heldForPlacement = hotbarComp != null ? hotbarComp.getActiveItem() : null;
                 int moved = 0;
-                if (custodyAccepts(custody, asset, action, heldForPlacement)) {
+                if (custodyAccepts(custody, asset, action, heldForPlacement, claim)) {
                     moved = placeIntoCustody(store, ref, commandBuffer, blockKey, playerUuid, asset.getId(),
                             action.getActionId(), hotbarComp.getInventory(), hotbarComp.getActiveSlot(),
                             heldForPlacement, custody, blockX, blockY, blockZ);
@@ -447,7 +438,7 @@ public final class StationService {
                     // so matching material sitting unheld in the backpack is no longer invisible
                     // to placement.
                     InventoryMatch found = findFirstCustodyMatchInInventory(store, ref, custody, asset, action,
-                            hotbarComp.getActiveSlot());
+                            hotbarComp.getActiveSlot(), claim);
                     if (found != null) {
                         moved = placeIntoCustody(store, ref, commandBuffer, blockKey, playerUuid, asset.getId(),
                                 action.getActionId(), found.container(), found.slot(), found.stack(), custody,
@@ -501,6 +492,15 @@ public final class StationService {
             toast(playerRef, RpgMsg.tr("ui.station.wrong_tool"));
             return;
         }
+        // 4b) Tool WEAR gate (decision 74), orthogonal to the identity routes above and checked at
+        // ENGAGE only - the per-heartbeat re-check stays about tool identity, so a session already
+        // running still ends at breakage (TOOL_BROKEN) rather than at this threshold.
+        StationAsset.Tool toolGate = action.getTool();
+        if (toolGate != null && toolGate.hasDurabilityGate()
+                && resolveHeldToolDurabilityPercent(player) < toolGate.getMinDurabilityPercent()) {
+            toast(playerRef, RpgMsg.tr("ui.station.tool_worn"));
+            return;
+        }
 
         // 5) Viability: a Steps-authored action (design 9.3, phase 2 leg E - no Recipe/Convert
         // check applies) is runnable exactly when its OWN Custody governs and already holds
@@ -518,8 +518,7 @@ public final class StationService {
         ConversionCheck check;
         if (stepsProgram) {
             boolean runnable = custody == null || (preClaim != null && !preClaim.isEmpty());
-            check = new ConversionCheck(runnable ? ConversionState.RUNNABLE : ConversionState.NO_INPUTS,
-                    false, null, 0, null, 0);
+            check = new ConversionCheck(runnable ? ConversionState.RUNNABLE : ConversionState.NO_INPUTS);
         } else {
             StationAsset.Conversion[] conversions =
                     StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
@@ -716,22 +715,22 @@ public final class StationService {
         s.idleEnabled = idleEnabled;
         s.idleCycleMs = StationToolScaling.resolvedIdleCycleMs(
                 idleGroup != null ? idleGroup.getCycleMs() : null, s.cycleMs);
-        s.idleXpFraction = StationToolScaling.resolvedXpFraction(
-                idleGroup != null ? idleGroup.getXpFraction() : null);
+        s.idleFraction = StationToolScaling.resolvedIdleFraction(
+                idleGroup != null ? idleGroup.getFraction() : null);
         s.idleMode = startIdle;
 
         long now = System.currentTimeMillis();
         s.startedAtMs = now;
         s.nextHeartbeatAtMs = now + HEARTBEAT_MS;
         // Instant dispatch for a non-repeating authored Steps program (maintainer-approved,
-        // round-7 D77): a ritual-shaped action (Work.Repeat: false, e.g. the anvil's Enhance)
+        // round-7 D77): a ritual-shaped action (Work.Looping: false, e.g. the anvil's Enhance)
         // has exactly ONE program run to make, so waiting a full CycleMs before ever attempting
         // it is pure latency with no gameplay purpose - fire the first (and only) cycle
         // immediately at engage. A REPEATING program (the sawmill's classic loop, or any
-        // Repeat: true steps program) keeps the existing CycleMs pre-delay unchanged; idle mode
+        // Looping: true steps program) keeps the existing CycleMs pre-delay unchanged; idle mode
         // never applies to a Steps program (idleEnabled is forced false above), so this never
         // races s.idleMode's own cadence.
-        boolean instantFirstDispatch = stepsProgram && work != null && !work.effectiveRepeat();
+        boolean instantFirstDispatch = stepsProgram && work != null && !work.effectiveLooping();
         s.nextCycleAtMs = instantFirstDispatch ? now : now + (s.idleMode ? s.idleCycleMs : s.cycleMs);
         s.nextSwingAtMs = now + s.swingIntervalMs;
 
@@ -1015,14 +1014,13 @@ public final class StationService {
         // engine ran per cycle is retired for any station custody governs.
         String consumeFrom = action.getCustody() != null
                 ? StationStep.Consume.FROM_CUSTODY : StationStep.Consume.FROM_INVENTORY;
-        StationStep.Consume consumeStep = StationStep.Consume.of(
-                check.inputIsResource ? null : check.inputRef,
-                check.inputIsResource ? check.inputRef : null,
-                check.inputCount, consumeFrom);
-        StationStep.Produce produceStep = StationStep.Produce.of(check.outputItem, check.outputCount,
+        // Decision 73: the chosen conversion's FULL Ingredient arrays drive the implicit program, so
+        // a multi-input recipe stays ONE atomic Consume/Produce step pair.
+        StationStep.Consume consumeStep = StationStep.Consume.of(check.inputs, consumeFrom);
+        StationStep.Produce produceStep = StationStep.Produce.of(check.outputs,
                 StationStep.Produce.TO_INVENTORY);
         // Scope-2 (design 1.8): fold Station/Action-targeted ExtensionAsset Loot into the cycle's
-        // effective loot refs (the SawmillProgression extension's luck-tier lootable lands here).
+        // effective loot refs (a pack extension's appended lootables and rolls land here).
         LootRef effectiveLoot = ExtensionCatalog.getInstance().applyToStationLoot(s.stationId, action.getLoot());
         String lootActionTarget = actionTargetIdFor(s, action.getActionId());
         if (lootActionTarget != null) {
@@ -1031,7 +1029,9 @@ public final class StationService {
         Roll[] resolvedRolls = LootEngine.resolveRolls(effectiveLoot).toArray(new Roll[0]);
         List<StationStep> steps = ImplicitProgram.build(consumeStep, produceStep, resolvedRolls,
                 action.getPresentation());
-        ItemStack cycleOutput = new ItemStack(check.outputItem, check.outputCount);
+        // Roll.Grants.BonusOutputCopies duplicates the cycle's PRIMARY output (the first authored
+        // one) - a multi-output conversion's byproducts are not bonus-copied.
+        ItemStack cycleOutput = new ItemStack(check.primaryOutputItem(), check.primaryOutputCount());
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, cycleOutput,
                 attemptCycleIndex, 0, false);
     }
@@ -1098,10 +1098,10 @@ public final class StationService {
      * early. {@code cycleOutput} is nullable (an authored program with no live Convert check,
      * design 9.3/9.5's Steps programs, phase 2 leg E).
      *
-     * <p>{@code Work.Repeat: false} (design 9.3's "one completed program run completes the
+     * <p>{@code Work.Looping: false} (design 9.3's "one completed program run completes the
      * SESSION" - the anvil's Enhance ritual): a COMPLETED program under a non-repeating action
      * stops the session right here, non-silent, immediately after the cycle-completed event fires
-     * (so XP/luck listeners still see it) - never schedules another cycle attempt.
+     * (so every listener still sees the last cycle) - never schedules another cycle attempt.
      *
      * <p><b>The {@code resuming} flag + the stepDeadlineMs hardening (round-7):</b> {@code false}
      * from {@link #runRealCycle}/{@link #runAuthoredProgram} (a FRESH cycle attempt,
@@ -1164,15 +1164,15 @@ public final class StationService {
             drainHeldToolDurability(store, s.ref, player, s.durabilityPerCycle);
         }
         // FIX ROUND: both reads below now resolve off the RESOLVED action, not the station-level
-        // asset - mirroring the action.getWork().effectiveRepeat() read two lines down. Before this
+        // asset - mirroring the action.getWork().effectiveLooping() read two lines down. Before this
         // fix a multi-action station whose Work groups live entirely under Actions.* (the anvil's
-        // convert/enhance) forwarded ZERO xp asks: asset.getWork() was null, so xpAsks() returned
-        // List.of() and StationCycleCompletedEvent.xpAsks() was empty for every real cycle.
-        double xpMult = resolveXpMultiplier(player, action.getTool());
-        onCycleCompleted(s, store, commandBuffer, action, xpMult, false, s.cyclesDone);
+        // convert/enhance) forwarded ZERO contributions: asset.getWork() was null, so the forwarded
+        // list was empty on the cycle event for every real cycle.
+        double toolMult = resolveToolMultiplier(player, action.getTool());
+        onCycleCompleted(s, store, commandBuffer, action, toolMult, false, s.cyclesDone);
 
         StationAsset.Work work = action.getWork();
-        if (work != null && !work.effectiveRepeat()) {
+        if (work != null && !work.effectiveLooping()) {
             stop(s, StopReason.RITUAL_COMPLETE, store, commandBuffer);
             return false;
         }
@@ -1266,8 +1266,8 @@ public final class StationService {
     }
 
     /**
-     * Opt-in idle practice cycle: NO conversion, NO loot roll, NO progress fire - just the
-     * cycle presentation + the (idle-scaled) XP-ask forwarding. Threads the RESOLVED action
+     * Opt-in idle practice cycle: NO conversion, NO loot roll - just the cycle presentation plus
+     * the (idle-scaled) contribution forwarding. Threads the RESOLVED action
      * (FIX ROUND, the same correction as the real-cycle path in {@link #dispatchProgram}) so a
      * multi-action station's idle practice reads ITS running action's {@code Work}/
      * {@code Presentation}, not the station-level default.
@@ -1285,16 +1285,16 @@ public final class StationService {
 
     /**
      * Fires {@code StationCycleCompletedEvent} (design section 3.1/7.2): forwards this cycle's
-     * {@code Work.Xp} asks (idle-scaled by {@code Work.Idle.XpFraction} when {@code idle}) plus
-     * the resolved tool multiplier (forced {@code 1.0} for an idle cycle). A listening
-     * progression mod (the MMO bridge) reads {@code action.getWork().getXp()} semantics off the
-     * event's {@code XpAsk} list to know what an ask means; this engine never interprets it.
+     * {@code Work.PerCycleContributions} (idle-scaled by {@code Work.Idle.Fraction} when
+     * {@code idle}) plus the resolved tool multiplier (forced {@code 1.0} for an idle cycle).
+     * Whichever mod declared a channel decides what a post on it means; this engine never
+     * interprets one.
      *
      * <p><b>FIX ROUND:</b> takes the RESOLVED {@code action}, not the station-level
      * {@code StationAsset} - a multi-action station whose {@code Work} groups live entirely under
-     * {@code Actions.*} (the anvil's {@code convert}/{@code enhance}, both authoring {@code Xp}
-     * with NO station-level {@code Work} group at all) forwarded ZERO xp asks before this fix
-     * ({@code asset.getWork()} resolved {@code null}, so {@link #xpAsks} always returned
+     * {@code Actions.*} (the anvil's {@code convert}/{@code enhance}, both authoring contributions
+     * with NO station-level {@code Work} group at all) forwarded ZERO of them before this fix
+     * ({@code asset.getWork()} resolved {@code null}, so {@link #contributions} always returned
      * {@code List.of()}) and the event always carried {@code actionId="work"} regardless of which
      * action actually ran. {@code action.getActionId()}/{@code action.getWork()} carry the fix -
      * see {@link ActionResolver#resolve} for why this is safe for every single-action station too
@@ -1309,82 +1309,107 @@ public final class StationService {
     private static void onCycleCompleted(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull ActionResolver.ResolvedAction action,
             double toolMultiplier, boolean idle, int cycleIndex) {
-        // Scope-2 (design 1.8): fold any Station/Action-targeted ExtensionAsset Xp into the
-        // forwarded asks so an extension authoring a genuinely-new Xp skill reaches the MMO bridge
-        // exactly as if authored inline on Work.Xp (decision 27). Append-only over the base Xp,
-        // never a re-add of a skill the base already grants (that would double it - A8 review M1).
-        StationAsset.WorkXp[] baseXp = action.getWork() != null ? action.getWork().getXp() : null;
-        StationAsset.WorkXp[] mergedXp = ExtensionCatalog.getInstance().applyToStationXp(s.stationId, baseXp);
-        String xpActionTarget = actionTargetIdFor(s, action.getActionId());
-        if (xpActionTarget != null) {
-            mergedXp = ExtensionCatalog.getInstance().applyToActionXp(xpActionTarget, mergedXp);
+        // Scope-2 (design 1.8): fold any Station/Action-targeted ExtensionAsset contributions into
+        // the forwarded list so an extension authoring a genuinely-new one reaches a listener
+        // exactly as if it were authored inline on Work.PerCycleContributions (decision 27).
+        // Append-only over the base, never a re-add of a (Channel, Param) pair the base already
+        // posts (that would double it - A8 review M1).
+        Contribution[] base = action.getWork() != null ? action.getWork().getPerCycleContributions() : null;
+        Contribution[] merged = ExtensionCatalog.getInstance().applyToStationContributions(s.stationId, base);
+        String actionTarget = actionTargetIdFor(s, action.getActionId());
+        if (actionTarget != null) {
+            merged = ExtensionCatalog.getInstance().applyToActionContributions(actionTarget, merged);
         }
-        List<XpAsk> asks = xpAsksFromXp(mergedXp, idle, s.idleXpFraction);
+        List<StationContribution> perCycle = contributionsFrom(merged, idle, s.idleFraction);
+        // A one-shot Roll.Grants.Contributions find rides its OWN list, never the scaled one - it
+        // must not pick up toolMultiplier (applied listener-side to the per-cycle list) or the idle
+        // fraction (pre-applied above). Drained here so each grant is forwarded exactly once.
+        List<StationContribution> oneShot = s.pendingOneShotContributions.isEmpty()
+                ? List.of() : List.copyOf(s.pendingOneShotContributions);
+        s.pendingOneShotContributions.clear();
         StationEvents.fireCycleCompleted(store, commandBuffer, s.playerRef, s.playerUuid, s.sessionId,
-                s.stationId, action.getActionId(), cycleIndex, idle, asks, toolMultiplier);
+                s.stationId, action.getActionId(), cycleIndex, idle, perCycle, oneShot, toolMultiplier);
     }
 
     /**
-     * The forwarded {@code Work.Xp} asks for one cycle-completed event (design section 4.4.1):
-     * a real cycle forwards the RAW authored {@code PerCycle} (the listener multiplies by
-     * {@link StationCycleCompletedEvent#toolMultiplier()}); an idle cycle pre-scales each ask
-     * by {@code idleXpFraction} and the caller forces {@code toolMultiplier} to {@code 1.0}
-     * (matching today's idle semantics: fractional XP, no progress). A blank/missing skill id
-     * entry is skipped (the validator's {@code MISSING_XP_SKILL} catches the authoring mistake).
-     * {@code work} MUST be the resolved action's own {@code Work} group (FIX ROUND) - the
+     * The forwarded {@code Work.PerCycleContributions} for one cycle-completed event (design
+     * section 4.4.1): a real cycle forwards the RAW authored {@code Amount} (the listener
+     * multiplies by {@link StationCycleCompletedEvent#toolMultiplier()}); an idle cycle pre-scales
+     * each amount by {@code idleFraction} and the caller forces {@code toolMultiplier} to
+     * {@code 1.0} (matching idle semantics: a fraction of the usual posts, no conversion, no
+     * loot). {@code work} MUST be the resolved action's own {@code Work} group (FIX ROUND) - the
      * station-level {@code StationAsset.getWork()} is null for a station like the anvil whose
      * every {@code Work} group lives under {@code Actions.*}.
      */
     @Nonnull
-    private static List<XpAsk> xpAsks(@Nullable StationAsset.Work work, boolean idle, double idleXpFraction) {
-        return xpAsksFromXp(work != null ? work.getXp() : null, idle, idleXpFraction);
+    private static List<StationContribution> contributions(@Nullable StationAsset.Work work, boolean idle,
+            double idleFraction) {
+        return contributionsFrom(work != null ? work.getPerCycleContributions() : null, idle, idleFraction);
     }
 
-    /** The {@link #xpAsks} core over an already-resolved (extension-merged) {@code WorkXp[]}. */
+    /**
+     * The {@link #contributions} core over an already-resolved (extension-merged) array.
+     *
+     * <p>The per-cycle filter is deliberately WEAKER than {@code Contribution.isPostable()} (the
+     * one-shot grants-site gate): only a blank {@code Channel} is skipped, and a null
+     * {@code Amount} reads as {@code 0.0}. A zero-amount per-cycle entry therefore still reaches a
+     * listener, which is what lets it render as a visible zero row in a session breakdown instead
+     * of silently vanishing.
+     */
     @Nonnull
-    private static List<XpAsk> xpAsksFromXp(@Nullable StationAsset.WorkXp[] xp, boolean idle, double idleXpFraction) {
-        if (xp == null || xp.length == 0) {
+    static List<StationContribution> contributionsFrom(@Nullable Contribution[] posts, boolean idle,
+            double idleFraction) {
+        if (posts == null || posts.length == 0) {
             return List.of();
         }
-        List<XpAsk> out = new ArrayList<>(xp.length);
-        for (StationAsset.WorkXp x : xp) {
-            if (x == null || x.getSkill() == null || x.getSkill().isBlank()) {
+        List<StationContribution> out = new ArrayList<>(posts.length);
+        for (Contribution c : posts) {
+            if (c == null || c.getChannel() == null || c.getChannel().isBlank()) {
                 continue;
             }
-            double perCycle = x.getPerCycle() != null ? x.getPerCycle() : 0.0;
-            out.add(new XpAsk(x.getSkill(), idle ? perCycle * idleXpFraction : perCycle));
+            double amount = c.getAmount() != null ? c.getAmount() : 0.0;
+            out.add(new StationContribution(c.getChannel(), c.getParam(),
+                    idle ? amount * idleFraction : amount));
         }
         return out;
     }
 
     /**
-     * Station-level {@code Work.Xp} skill ids, in authoring order (for {@link
-     * FactorContext#progressionSkills()}) - used only by {@link #checkRequires} (pre-session, no
-     * resolved action exists yet) and {@link #rollCompletionLoot} (post-session, station-level
-     * {@code Loot}, not per-action). Delegates to the {@link #progressionSkills(StationAsset.Work)}
-     * overload every per-cycle/action-aware caller uses instead (FIX ROUND).
+     * Station-level contribution {@code Param}s keyed by channel, in authoring order (for
+     * {@link FactorContext#contributionParams(String)}) - used only by {@link #checkRequires}
+     * (pre-session, no resolved action exists yet) and {@link #rollCompletionLoot} (post-session,
+     * station-level {@code Loot}, not per-action). Delegates to the
+     * {@link #contributionParams(StationAsset.Work)} overload every per-cycle/action-aware caller
+     * uses instead (FIX ROUND).
      */
     @Nonnull
-    private static List<String> progressionSkills(@Nonnull StationAsset asset) {
-        return progressionSkills(asset.getWork());
+    private static Map<String, List<String>> contributionParams(@Nonnull StationAsset asset) {
+        return contributionParams(asset.getWork());
     }
 
     /**
      * {@code Work}-overriding form (FIX ROUND): {@link #buildFactorContext}'s action-aware
      * overload passes the RESOLVED action's own {@code Work} group here - a multi-action
-     * station's per-cycle factor context must see the ACTUAL running action's {@code Xp} skills,
-     * not the (possibly {@code Work}-less) station-level default the anvil authors.
+     * station's per-cycle factor context must see the ACTUAL running action's contribution
+     * channels, not the (possibly {@code Work}-less) station-level default the anvil authors.
+     * Channel keys are lowercased by {@code FactorContext} itself on copy; a blank {@code Param}
+     * is dropped, so a channel posted to with no params answers an empty list rather than
+     * disappearing.
      */
     @Nonnull
-    private static List<String> progressionSkills(@Nullable StationAsset.Work work) {
-        StationAsset.WorkXp[] xp = work != null ? work.getXp() : null;
-        if (xp == null || xp.length == 0) {
-            return List.of();
+    private static Map<String, List<String>> contributionParams(@Nullable StationAsset.Work work) {
+        Contribution[] posts = work != null ? work.getPerCycleContributions() : null;
+        if (posts == null || posts.length == 0) {
+            return Map.of();
         }
-        List<String> out = new ArrayList<>(xp.length);
-        for (StationAsset.WorkXp x : xp) {
-            if (x != null && x.getSkill() != null && !x.getSkill().isBlank()) {
-                out.add(x.getSkill());
+        Map<String, List<String>> out = new LinkedHashMap<>();
+        for (Contribution c : posts) {
+            if (c == null || c.getChannel() == null || c.getChannel().isBlank()) {
+                continue;
+            }
+            List<String> params = out.computeIfAbsent(c.getChannel(), k -> new ArrayList<>());
+            if (c.getParam() != null && !c.getParam().isBlank()) {
+                params.add(c.getParam());
             }
         }
         return out;
@@ -1438,6 +1463,14 @@ public final class StationService {
         }
         for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
             s.luckItems.merge(e.getKey(), e.getValue(), Integer::sum);
+        }
+        // Roll.Grants.Contributions: buffer the one-shot posts for THIS cycle's completed event,
+        // which forwards them on oneShotContributions. LootEngine only ever collects them for a
+        // Cycle trigger, so a Completion-trigger roll never queues one nothing would drain. Every
+        // entry here already passed Contribution#isPostable (non-blank channel, positive amount).
+        for (Contribution post : result.getContributions()) {
+            s.pendingOneShotContributions.add(
+                    new StationContribution(post.getChannel(), post.getParam(), post.getAmount()));
         }
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
         for (Presentation p : result.getFloorPresentations()) {
@@ -1512,7 +1545,7 @@ public final class StationService {
      * api.impl.FactorRegistryImpl#registerBuiltins}) plus every other registered provider:
      * session seconds elapsed, the CURRENT (already-incremented) cycle index, and the
      * currently-held item's tool power / durability percent - read fresh, mirroring {@link
-     * #resolveXpMultiplier}'s no-snapshot convention. Station-level (no resolved action) - used
+     * #resolveToolMultiplier}'s no-snapshot convention. Station-level (no resolved action) - used
      * only by {@link #rollCompletionLoot} (post-session, station-level {@code Loot}, not
      * per-action; every real/idle cycle instead uses the {@link #buildFactorContext(StationSession,
      * Store, Player, ActionResolver.ResolvedAction, int)} action-aware overload, FIX ROUND).
@@ -1540,16 +1573,17 @@ public final class StationService {
                 .cycleIndex(cycleIndex)
                 .toolPower(resolveHeldToolPower(player, asset.getTool()))
                 .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
-                .progressionSkills(progressionSkills(asset))
+                .contributions(contributionParams(asset))
                 .build();
     }
 
     /**
      * ACTION-AWARE form (FIX ROUND): {@link #dispatchProgram} passes the RESOLVED action here
      * instead of the station-level {@code asset} - a Roll/Stamp step's factor context must report
-     * the ACTUAL running action id and its OWN {@code Work.Xp} skills (mirroring {@link #xpAsks}'
-     * same correction), not the station-level default. The anvil's {@code convert}/{@code enhance}
-     * author NO station-level {@code Work} at all, so {@code progressionSkills(asset)} always
+     * the ACTUAL running action id and its OWN contribution channels (mirroring
+     * {@link #contributions}' same correction), not the station-level default. The anvil's
+     * {@code convert}/{@code enhance} author NO station-level {@code Work} at all, so
+     * {@code contributionParams(asset)} always
      * resolved empty here and every step saw {@code actionId="work"} instead of {@code "convert"}/
      * {@code "enhance"} before this fix. {@code cycleIndex} is the ATTEMPT index (design section
      * 9.3 - {@code s.cyclesDone + 1}, computed before {@code s.cyclesDone} itself advances) so a
@@ -1570,15 +1604,16 @@ public final class StationService {
                 .cycleIndex(cycleIndex)
                 .toolPower(resolveHeldToolPower(player, action.getTool()))
                 .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
-                .progressionSkills(progressionSkills(action.getWork()))
+                .contributions(contributionParams(action.getWork()))
                 .build();
     }
 
     /**
      * The held tool's power for the station's effective gather type ({@code Tool.Gather.GatherType}
-     * only - unlike {@link #resolveXpMultiplier}, this reads regardless of whether {@code
-     * Tool.XpScale} is authored, since {@code rpgstations:tool_power} is a general-purpose
-     * factor, not an XP multiplier). 0 when no gather type resolves or no matching spec is held.
+     * only - unlike {@link #resolveToolMultiplier}, this reads regardless of whether {@code
+     * Tool.PowerScale} is authored, since {@code rpgstations:tool_power} is a general-purpose
+     * factor, not a contribution multiplier). 0 when no gather type resolves or no matching spec
+     * is held.
      */
     private static double resolveHeldToolPower(@Nonnull Player player, @Nullable StationAsset.Tool tool) {
         StationAsset.Tool.Gather gather = tool != null ? tool.getGather() : null;
@@ -1605,8 +1640,8 @@ public final class StationService {
     /**
      * The standalone-rich end-of-session summary panel ({@code ui.StationSummaryHud}, design
      * section 4.1/4.3): title + a cycles-only body + every registered {@code SummaryEnricher}'s
-     * extra rows PREPENDED before the engine's own item ledger (design section 3.2/7.2-7.3 - the
-     * MMO bridge's per-skill XP rows land here, leg 5) + a post-build {@code decorate} pass for
+     * extra rows PREPENDED before the engine's own item ledger (design section 3.2/7.2-7.3 - a
+     * listening mod's own progress rows land here) + a post-build {@code decorate} pass for
      * cross-jar theming. Falls back to the classic {@code NotificationUtil} toast (cycles-only
      * body, no ledger rows - a text toast has no icon slot) on a settings-disabled HUD, an
      * unregistered instance, or a push failure.
@@ -1700,7 +1735,7 @@ public final class StationService {
      * The enhance ledger rows for the summary panel (design section 9.5, phase 2 round-7 D-6):
      * per committed {@link StationEnhanceOutcome}, one row per {@link EnhanceLine} the registered
      * stamper reported (the {@code line.label()} renders VERBATIM - the provider owns the stat
-     * vocabulary, wording, and per-stat color, so RpgStations stays free of MMO stat vocabulary),
+     * vocabulary, wording, and per-stat color, so no foreign stat vocabulary reaches this engine),
      * plus, when a stamp added max durability, ONE engine-owned durability row the engine composes
      * AND colors itself ({@link #ENHANCE_ROW_COLOR} - durability is RpgStations-native, real even
      * with no stamper registered). Extracted pure/static so it unit-tests without a live session
@@ -1754,9 +1789,7 @@ public final class StationService {
         if (p.getSound() != null && !p.getSound().isBlank()) {
             Sound3D.play(p.getSound(), targetPos, store, "STATION");
         }
-        if (p.getParticles() != null && !p.getParticles().isBlank()) {
-            ModelParticleService.spawnAt(store, p.getParticles(), targetPos, MOMENT_PARTICLE_MAX_DURATION_SECONDS);
-        }
+        spawnMomentParticles(store, s, p.getParticles(), targetPos);
         Presentation.Shake shake = p.getShake();
         if (shake != null && shake.getEffectId() != null && !shake.getEffectId().isBlank()) {
             float intensity = shake.getIntensity() != null ? shake.getIntensity().floatValue() : 1.0f;
@@ -1783,6 +1816,73 @@ public final class StationService {
                     s.appliedEffects.track(s.ref, effect.getId());
                 }
             }
+        }
+    }
+
+    /**
+     * Plays every authored {@code Presentation.Particles} burst at {@code targetPos}, in authored
+     * order: each entry contributes its own {@code Scale}, {@code DurationSeconds} playback cap,
+     * {@code RotationOffset} (degrees, converted to the engine's radian yaw/pitch/roll arguments),
+     * and FACING-RELATIVE {@code PositionOffset} (composed through the one shared
+     * {@link StationBlockFacing} reader, exactly like {@code Custody.Display.Offset} and
+     * {@code Puppet.Offset}). An entry authoring only {@code SystemId} reproduces the pre-array
+     * single-string behavior byte for byte (scale 1, a 4s cap, zero rotation, no offset).
+     *
+     * <p>This reaches the engine's own full-arity {@code ParticleUtil} overload rather than
+     * {@code ziggfreed-common}'s {@code ModelParticleService.spawnAt}, whose signature hardcodes the
+     * rotation and scale arguments this schema now authors; the guard shape (one try/catch per
+     * burst, a failure never escapes a moment) mirrors that primitive's own. The convergence target
+     * is a common-side overload taking the full argument set - lift this call when one exists.
+     * The per-burst duration cap is load-bearing: at least one shipped particle asset
+     * ({@code Block_Gem_Sparks}) authors an unbounded spawner that never stops without it.
+     */
+    private static void spawnMomentParticles(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
+            @Nullable Presentation.ModelParticle[] particles, @Nonnull Vector3d targetPos) {
+        if (particles == null || particles.length == 0) {
+            return;
+        }
+        double blockYaw = Double.NaN;
+        for (Presentation.ModelParticle burst : particles) {
+            if (burst == null || !burst.hasSystemId()) {
+                continue;
+            }
+            Vector3d pos = targetPos;
+            Vec3 offset = burst.getPositionOffset();
+            if (offset != null) {
+                if (Double.isNaN(blockYaw)) {
+                    blockYaw = momentBlockYaw(store, s);
+                }
+                double[] world = StationBlockFacing.rotateOffset(
+                        offset.getX() != null ? offset.getX() : 0.0,
+                        offset.getY() != null ? offset.getY() : 0.0,
+                        offset.getZ() != null ? offset.getZ() : 0.0,
+                        blockYaw);
+                pos = new Vector3d(targetPos.x() + world[0], targetPos.y() + world[1], targetPos.z() + world[2]);
+            }
+            Rotation rot = burst.getRotationOffset();
+            float yaw = rot != null && rot.getYaw() != null ? (float) Math.toRadians(rot.getYaw()) : 0f;
+            float pitch = rot != null && rot.getPitch() != null ? (float) Math.toRadians(rot.getPitch()) : 0f;
+            float roll = rot != null && rot.getRoll() != null ? (float) Math.toRadians(rot.getRoll()) : 0f;
+            try {
+                ParticleUtil.spawnParticleEffect(burst.getSystemId(), pos, yaw, pitch, roll,
+                        (float) burst.effectiveScale(), burst.effectiveDurationSeconds(), store);
+            } catch (Throwable t) {
+                Log.fine("STATION moment particle '" + burst.getSystemId() + "' failed: " + t.getMessage());
+            }
+        }
+    }
+
+    /**
+     * The placed station block's own facing yaw for a moment's facing-relative particle offset,
+     * try-guarded to {@code 0.0} (an unresolvable world degrades to world-space placement, never
+     * aborts the burst) - the same fail-soft contract {@link StationBlockFacing} itself keeps.
+     */
+    private static double momentBlockYaw(@Nonnull Store<EntityStore> store, @Nonnull StationSession s) {
+        try {
+            return StationBlockFacing.yawRadians(WorldEvictors.worldOf(store), s.blockX, s.blockY, s.blockZ);
+        } catch (Throwable t) {
+            Log.fine("STATION could not resolve the world for a moment particle offset: " + t.getMessage());
+            return 0.0;
         }
     }
 
@@ -1866,18 +1966,18 @@ public final class StationService {
      * The tool-power multiplier for THIS cycle: resolves {@code tool}'s EFFECTIVE gather type,
      * reads the held item's max matching {@code ItemToolSpec} power, and delegates the clamp
      * formula to {@link StationToolScaling}. Returns 1.0 when {@code tool} authors no
-     * {@code Tool.XpScale}, or when neither gather type resolves.
+     * {@code Tool.PowerScale}, or when neither gather type resolves.
      *
      * <p><b>FIX ROUND:</b> {@code tool} is the RESOLVED action's own {@code Tool} group ({@code
      * action.getTool()}), not the station-level {@code asset.getTool()} - the same
      * station-vs-action smell {@link #onCycleCompleted}/{@link #buildFactorContext} had. Harmless
      * for every shipped station today (none override {@code Tool} per-action - the anvil's
      * {@code convert}/{@code enhance} both inherit the station-level {@code Tool.Ids} gate, and
-     * neither authors an {@code XpScale}), but a future multi-action station with a per-action
-     * {@code Tool.XpScale} would silently read the wrong one without this fix.
+     * neither authors a {@code PowerScale}), but a future multi-action station with a per-action
+     * {@code Tool.PowerScale} would silently read the wrong one without this fix.
      */
-    private static double resolveXpMultiplier(@Nonnull Player player, @Nullable StationAsset.Tool tool) {
-        StationAsset.Tool.XpScale scale = tool != null ? tool.getXpScale() : null;
+    private static double resolveToolMultiplier(@Nonnull Player player, @Nullable StationAsset.Tool tool) {
+        StationAsset.Tool.PowerScale scale = tool != null ? tool.getPowerScale() : null;
         if (scale == null) {
             return 1.0;
         }
@@ -2207,13 +2307,15 @@ public final class StationService {
 
     private enum ConversionState { RUNNABLE, NO_INPUTS, NO_ROOM }
 
+    /**
+     * One resolved conversion attempt. {@link #inputs}/{@link #outputs} are the chosen conversion's
+     * FULL native-shaped arrays (decision 73), so a multi-input recipe drives the implicit program's
+     * one atomic Consume/Produce phase pair rather than needing a step split.
+     */
     private static final class ConversionCheck {
         final ConversionState state;
-        final boolean inputIsResource;
-        final String inputRef;
-        final int inputCount;
-        final String outputItem;
-        final int outputCount;
+        @Nullable final Ingredient[] inputs;
+        @Nullable final Ingredient[] outputs;
         /**
          * The chosen conversion's effective per-cycle pace override in ms (seam wave decision 52's
          * {@code Conversion.DurationMs}, incl. a baked {@code FromCrafting.NativeTime} transform), or
@@ -2222,20 +2324,28 @@ public final class StationService {
          */
         final long durationMs;
 
-        ConversionCheck(ConversionState state, boolean inputIsResource, String inputRef, int inputCount,
-                        String outputItem, int outputCount) {
-            this(state, inputIsResource, inputRef, inputCount, outputItem, outputCount, 0L);
+        /** The non-runnable shape: no chosen conversion at all. */
+        ConversionCheck(ConversionState state) {
+            this(state, null, null, 0L);
         }
 
-        ConversionCheck(ConversionState state, boolean inputIsResource, String inputRef, int inputCount,
-                        String outputItem, int outputCount, long durationMs) {
+        ConversionCheck(ConversionState state, @Nullable Ingredient[] inputs, @Nullable Ingredient[] outputs,
+                        long durationMs) {
             this.state = state;
-            this.inputIsResource = inputIsResource;
-            this.inputRef = inputRef;
-            this.inputCount = inputCount;
-            this.outputItem = outputItem;
-            this.outputCount = outputCount;
+            this.inputs = inputs;
+            this.outputs = outputs;
             this.durationMs = durationMs;
+        }
+
+        /** The FIRST output item id, for the bonus-copy source + the session's cycle-output read. */
+        @Nullable
+        String primaryOutputItem() {
+            return outputs != null && outputs.length > 0 ? outputs[0].getItemId() : null;
+        }
+
+        /** The FIRST output's count, paired with {@link #primaryOutputItem()}. */
+        int primaryOutputCount() {
+            return outputs != null && outputs.length > 0 ? outputs[0].effectiveQuantity() : 0;
         }
     }
 
@@ -2417,7 +2527,8 @@ public final class StationService {
             if (c == null || c.getCategory() == null || !category.equalsIgnoreCase(c.getCategory())) {
                 continue;
             }
-            String outItem = c.getOutput() != null ? c.getOutput().getItemId() : null;
+            Ingredient repOut = c.primaryOutput();
+            String outItem = repOut != null ? repOut.getItemId() : null;
             if (outItem == null || outItem.isBlank()) {
                 continue;
             }
@@ -2443,7 +2554,8 @@ public final class StationService {
     @Nullable
     static String representativeOutputFor(@Nullable StationAsset.Conversion[] conversions, @Nonnull String category) {
         StationAsset.Conversion rep = representativeConversionFor(conversions, category);
-        return rep != null && rep.getOutput() != null ? rep.getOutput().getItemId() : null;
+        Ingredient out = rep != null ? rep.primaryOutput() : null;
+        return out != null ? out.getItemId() : null;
     }
 
     /**
@@ -2460,8 +2572,8 @@ public final class StationService {
      */
     @Nullable
     static Message pickerCostLine(@Nonnull StationAsset.Conversion conversion) {
-        Ingredient input = conversion.getInput();
-        Ingredient output = conversion.getOutput();
+        Ingredient input = conversion.primaryInput();
+        Ingredient output = conversion.primaryOutput();
         if (input == null || output == null) {
             return null;
         }
@@ -2556,10 +2668,11 @@ public final class StationService {
         for (String cat : categories) {
             StationAsset.Conversion rep = representativeConversionFor(conversions, cat, previewInputItemId,
                     previewInputResourceTypeIds);
-            if (rep == null || rep.getOutput() == null) {
+            Ingredient repOutput = rep != null ? rep.primaryOutput() : null;
+            if (repOutput == null) {
                 continue; // no representative item to render as the tab icon; skip this category
             }
-            String icon = rep.getOutput().getItemId();
+            String icon = repOutput.getItemId();
             Message name = NativeNames.itemNameMsg(icon);
             Message cost = pickerCostLine(rep);
             tabs.add(PickerCategories.Category.unlocked(cat, icon, name, cost));
@@ -2625,49 +2738,103 @@ public final class StationService {
     private ConversionCheck firstRunnableConversion(@Nonnull Player player,
             @Nullable StationAsset.Conversion[] conversions) {
         if (conversions == null || conversions.length == 0) {
-            return new ConversionCheck(ConversionState.NO_INPUTS, false, null, 0, null, 0);
+            return new ConversionCheck(ConversionState.NO_INPUTS);
         }
         boolean sawInputWithoutRoom = false;
         try {
             var combined = InventoryAccess.combinedBackpackStorageHotbarOf(player);
             var backpack = InventoryAccess.storageOf(player);
             for (StationAsset.Conversion c : conversions) {
-                if (c == null || c.getInput() == null || c.getOutput() == null) {
+                if (!runnableShape(c)) {
                     continue;
                 }
-                Ingredient in = c.getInput();
-                Ingredient out = c.getOutput();
-                String outItem = out.getItemId();
-                if (outItem == null || outItem.isBlank()) {
+                // The exact-item entries are checked as ONE batch (two entries naming the same item
+                // must not each pass against the same stack); resource-family entries have no batch
+                // API, so they are checked individually.
+                List<ItemStack> itemInputs = new ArrayList<>();
+                boolean hasEveryInput = true;
+                for (Ingredient in : c.getInput()) {
+                    String ref = ingredientRef(in);
+                    int need = in.effectiveQuantity();
+                    if (isResourceRoute(in)) {
+                        if (!combined.canRemoveResource(new ResourceQuantity(ref, need))) {
+                            hasEveryInput = false;
+                            break;
+                        }
+                    } else {
+                        itemInputs.add(new ItemStack(ref, need));
+                    }
+                }
+                if (!hasEveryInput || (!itemInputs.isEmpty() && !combined.canRemoveItemStacks(itemInputs))) {
                     continue;
                 }
-                String resourceId = in.getResourceTypeId();
-                boolean isResource = resourceId != null && !resourceId.isBlank();
-                String inputRef = isResource ? resourceId : in.getItemId();
-                if (inputRef == null || inputRef.isBlank()) {
-                    continue;
-                }
-                int inCount = in.getQuantity() != null && in.getQuantity() > 0 ? in.getQuantity() : 1;
-                int outCount = out.getQuantity() != null && out.getQuantity() > 0 ? out.getQuantity() : 1;
-                boolean hasInput = isResource
-                        ? combined.canRemoveResource(new ResourceQuantity(inputRef, inCount))
-                        : combined.canRemoveItemStacks(List.of(new ItemStack(inputRef, inCount)));
-                if (!hasInput) {
-                    continue;
-                }
-                if (!backpack.canAddItemStacks(List.of(new ItemStack(outItem, outCount)))) {
+                if (!backpack.canAddItemStacks(outputStacks(c))) {
                     sawInputWithoutRoom = true;
                     continue;
                 }
-                return new ConversionCheck(ConversionState.RUNNABLE, isResource, inputRef, inCount,
-                        outItem, outCount, effectiveConversionDurationMs(c));
+                return new ConversionCheck(ConversionState.RUNNABLE, c.getInput(), c.getOutput(),
+                        effectiveConversionDurationMs(c));
             }
         } catch (Throwable t) {
             Log.warn("STATION inventory check failed: " + t.getMessage());
         }
         return new ConversionCheck(
-                sawInputWithoutRoom ? ConversionState.NO_ROOM : ConversionState.NO_INPUTS,
-                false, null, 0, null, 0);
+                sawInputWithoutRoom ? ConversionState.NO_ROOM : ConversionState.NO_INPUTS);
+    }
+
+    /**
+     * PURE: is this conversion a runnable SHAPE - both sides authored, every input carrying a usable
+     * route ref, every output an exact non-blank item id? A malformed conversion is skipped by both
+     * runnable scans (the validator flags it at author time).
+     */
+    private static boolean runnableShape(@Nullable StationAsset.Conversion c) {
+        if (c == null || !c.isComplete()) {
+            return false;
+        }
+        for (Ingredient in : c.getInput()) {
+            if (in == null || ingredientRef(in) == null) {
+                return false;
+            }
+        }
+        for (Ingredient out : c.getOutput()) {
+            if (out == null || out.getItemId() == null || out.getItemId().isBlank()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * PURE: an ingredient's live lookup ref - its ResourceTypeId family, else its exact ItemId;
+     * null when neither is authored.
+     */
+    @Nullable
+    private static String ingredientRef(@Nullable Ingredient in) {
+        if (in == null) {
+            return null;
+        }
+        String resource = in.getResourceTypeId();
+        if (resource != null && !resource.isBlank()) {
+            return resource;
+        }
+        String item = in.getItemId();
+        return item != null && !item.isBlank() ? item : null;
+    }
+
+    /** PURE: does this ingredient take the native resource-type FAMILY route rather than an exact item id? */
+    private static boolean isResourceRoute(@Nullable Ingredient in) {
+        return in != null && in.getResourceTypeId() != null && !in.getResourceTypeId().isBlank();
+    }
+
+    /** Every output of {@code c} as an {@link ItemStack}, for the one all-outputs-fit room check. */
+    @Nonnull
+    private static List<ItemStack> outputStacks(@Nonnull StationAsset.Conversion c) {
+        Ingredient[] outputs = c.getOutput();
+        List<ItemStack> stacks = new ArrayList<>(outputs.length);
+        for (Ingredient out : outputs) {
+            stacks.add(new ItemStack(out.getItemId(), out.effectiveQuantity()));
+        }
+        return stacks;
     }
 
     /**
@@ -2684,47 +2851,41 @@ public final class StationService {
     private ConversionCheck firstRunnableConversionFromCustody(@Nullable StationCustodyClaim claim,
             @Nonnull Player player, @Nullable StationAsset.Conversion[] conversions) {
         if (conversions == null || conversions.length == 0 || claim == null) {
-            return new ConversionCheck(ConversionState.NO_INPUTS, false, null, 0, null, 0);
+            return new ConversionCheck(ConversionState.NO_INPUTS);
         }
         boolean sawInputWithoutRoom = false;
         try {
             var backpack = InventoryAccess.storageOf(player);
             for (StationAsset.Conversion c : conversions) {
-                if (c == null || c.getInput() == null || c.getOutput() == null) {
+                if (!runnableShape(c)) {
                     continue;
                 }
-                Ingredient in = c.getInput();
-                Ingredient out = c.getOutput();
-                String outItem = out.getItemId();
-                if (outItem == null || outItem.isBlank()) {
+                boolean hasEveryInput = true;
+                for (Ingredient in : c.getInput()) {
+                    String ref = ingredientRef(in);
+                    boolean isResource = isResourceRoute(in);
+                    int have = StationCustody.available(claim, isResource ? null : ref,
+                            isResource ? ref : null, StationService::liveResourceTypeIdsOf);
+                    if (have < in.effectiveQuantity()) {
+                        hasEveryInput = false;
+                        break;
+                    }
+                }
+                if (!hasEveryInput) {
                     continue;
                 }
-                String resourceId = in.getResourceTypeId();
-                boolean isResource = resourceId != null && !resourceId.isBlank();
-                String inputRef = isResource ? resourceId : in.getItemId();
-                if (inputRef == null || inputRef.isBlank()) {
-                    continue;
-                }
-                int inCount = in.getQuantity() != null && in.getQuantity() > 0 ? in.getQuantity() : 1;
-                int outCount = out.getQuantity() != null && out.getQuantity() > 0 ? out.getQuantity() : 1;
-                int have = StationCustody.available(claim, isResource ? null : inputRef,
-                        isResource ? inputRef : null, StationService::liveResourceTypeIdsOf);
-                if (have < inCount) {
-                    continue;
-                }
-                if (!backpack.canAddItemStacks(List.of(new ItemStack(outItem, outCount)))) {
+                if (!backpack.canAddItemStacks(outputStacks(c))) {
                     sawInputWithoutRoom = true;
                     continue;
                 }
-                return new ConversionCheck(ConversionState.RUNNABLE, isResource, inputRef, inCount,
-                        outItem, outCount, effectiveConversionDurationMs(c));
+                return new ConversionCheck(ConversionState.RUNNABLE, c.getInput(), c.getOutput(),
+                        effectiveConversionDurationMs(c));
             }
         } catch (Throwable t) {
             Log.warn("STATION custody check failed: " + t.getMessage());
         }
         return new ConversionCheck(
-                sawInputWithoutRoom ? ConversionState.NO_ROOM : ConversionState.NO_INPUTS,
-                false, null, 0, null, 0);
+                sawInputWithoutRoom ? ConversionState.NO_ROOM : ConversionState.NO_INPUTS);
     }
 
     // ==================== Placed-input custody (design section 9.4) ====================
@@ -3013,7 +3174,7 @@ public final class StationService {
                 return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_missing",
                         Msg.raw(anchorId != null ? anchorId : ""), 0));
             }
-            int radius = StationAnchors.cappedRadius(anchor.effectiveMaxRadius());
+            int radius = StationAnchors.cappedRadius(anchor.effectiveMaxRadiusMeters());
             String blockKey = discoverAnchorBlock(world, worldUuid, px, py, pz, anchor.getStation(), radius);
             if (blockKey == null) {
                 releaseClaimed(claimed, playerUuid);
@@ -3414,12 +3575,19 @@ public final class StationService {
      * instead, since it has no {@code Recipe} at all).
      */
     private static boolean custodyAccepts(@Nonnull Custody custody, @Nonnull StationAsset asset,
-            @Nonnull ActionResolver.ResolvedAction action, @Nullable ItemStack held) {
+            @Nonnull ActionResolver.ResolvedAction action, @Nullable ItemStack held,
+            @Nullable StationCustodyClaim claim) {
         if (held == null || held.isEmpty()) {
             return false;
         }
         String heldItemId = held.getItemId();
         String[] heldResourceTypeIds = liveResourceTypeIdsOf(heldItemId);
+        // Decision 74: SingleFamily locks a non-empty claim to its first-placed material's family.
+        // Checked FIRST so it gates both acceptance routes below with one statement.
+        if (!StationCustody.acceptsFamily(custody.effectiveSingleFamily(), claim, heldItemId, heldResourceTypeIds,
+                StationService::liveResourceTypeIdsOf)) {
+            return false;
+        }
         var matcher = custody.getInput();
         if (matcher != null) {
             return StationCustody.matchesInput(matcher, heldItemId, heldResourceTypeIds, liveRawTagsOf(heldItemId),
@@ -3454,7 +3622,8 @@ public final class StationService {
     @Nullable
     private static InventoryMatch findFirstCustodyMatchInInventory(@Nonnull Store<EntityStore> store,
             @Nonnull Ref<EntityStore> ref, @Nonnull Custody custody, @Nonnull StationAsset asset,
-            @Nonnull ActionResolver.ResolvedAction action, short skipSlot) {
+            @Nonnull ActionResolver.ResolvedAction action, short skipSlot,
+            @Nullable StationCustodyClaim claim) {
         try {
             CombinedItemContainer combined =
                     InventoryComponent.getCombined(store, ref, InventoryComponent.HOTBAR_STORAGE_BACKPACK);
@@ -3467,7 +3636,7 @@ public final class StationService {
                 if (ItemStack.isEmpty(stack)) {
                     continue;
                 }
-                if (custodyAccepts(custody, asset, action, stack)) {
+                if (custodyAccepts(custody, asset, action, stack, claim)) {
                     return new InventoryMatch(combined, slot, stack);
                 }
             }
@@ -4093,9 +4262,8 @@ public final class StationService {
     /**
      * The held item's FUNCTIONAL route (design 9.1's {@code ActionInput.Function}, phase 2 leg E -
      * previously schema-only, resolved for the first time here): {@code "Weapon"}/{@code "Armor"}/
-     * {@code "Tool"} tested against the live {@link Item} shape (the {@code item/ItemEnhanceRoll}
-     * gate precedent from the MMO's own item-enhancement package - re-derived independently here
-     * since RpgStations has zero MMO dependency). {@code null} when unresolvable or none apply.
+     * {@code "Tool"} tested against the live {@link Item} shape - the item's own weapon/armor/tool
+     * group is the whole test, no registry involved. {@code null} when unresolvable or none apply.
      */
     @Nullable
     private static String liveFunctionOf(@Nullable String itemId) {
@@ -4125,9 +4293,9 @@ public final class StationService {
      * condition must pass (see {@link #conditionPasses}), resolved against a fresh pre-session
      * {@link FactorContext} (design section 3.2's api {@link FactorRegistryImpl}, leg 4 - a
      * degenerate context since no session exists yet: {@code sessionSeconds}/{@code cycleIndex}
-     * 0, held-tool power/durability not read here since the station's own {@code Requires}
-     * shipped station never authors a tool-power condition; a skill-level-style condition needs
-     * only {@code playerId}). A null {@code reqs} always passes.
+     * 0, held-tool power/durability not read here since no shipped station authors a tool-power
+     * gate condition; a player-standing condition needs only {@code playerId}). A null
+     * {@code reqs} always passes.
      */
     private static boolean checkRequires(@Nullable Requires reqs, @Nonnull PlayerRef playerRef,
             @Nonnull StationAsset asset) {
@@ -4153,7 +4321,7 @@ public final class StationService {
                 .actionId(ACTION_WORK)
                 .sessionSeconds(0L)
                 .cycleIndex(0)
-                .progressionSkills(progressionSkills(asset))
+                .contributions(contributionParams(asset))
                 .build();
         FactorLookup lookup = (factorId, param) -> FactorRegistryImpl.getInstance().resolve(factorId, param, ctx);
         for (Condition c : conditions) {

@@ -1,22 +1,22 @@
-// RpgStations end-of-session summary HUD (design section 4.1/4.3). Ships hidden and is
+// RpgStations end-of-session summary HUD. Ships hidden and is
 // shown/hidden entirely by StationSummaryHud.showSummary via partial updates - there is no
 // ticking system for this document.
 //
-// LAYOUT (copies the MMO SessionSummaryHud's hard-won fixes verbatim - see its own .ui header
-// comment for the failure history): a HUD document's outermost appended element is an
+// LAYOUT (each rule below is a hard-won fix, not decoration): a HUD document's outermost
+// appended element is an
 // unanchored full-viewport coordinate space; the ACTUAL sized/backgrounded/positioned panel
 // MUST be a named CHILD one level in, which is what StationSummaryHud.rootSelector() addresses.
 // #RpgStationSummaryHudCanvas is that outer transparent canvas; #RpgStationSummaryRoot is the
 // real panel (content-height sized - StationSummaryHud#usesContentHeight - so it hugs exactly
 // its crest/title/text/however-many ledger rows are showing this session).
 //
-// FRAME: the neutral common $F.@ZigDecoratedFrame (ZigFrames.ui) - RpgStations has no MMO
-// dependency, so it never reaches for @MmoDecoratedFrame. #Content (inside the frame invocation)
-// is the FROZEN root selector a future MMO-bridge SummaryEnricherRegistry.decorate hook themes
-// through (design section 3.2 / the critique's binding note) - do not rename it casually.
+// FRAME: the neutral common $F.@ZigDecoratedFrame (ZigFrames.ui), never another mod's frame set.
+// #Content (inside the frame invocation)
+// is the FROZEN root selector a registered SummaryEnricherRegistry.decorate hook themes
+// through - part of the api contract, do not rename it casually.
 //
 // WIDTH: the frame invocation itself carries the explicit Anchor Width (not just its #Content
-// children) - the MMO panel's root-cause fix: an Anchor-less frame Group fills the nearest sized
+// children), and that is the root-cause fix: an Anchor-less frame Group fills the nearest sized
 // ancestor (the full-viewport canvas), so #Content's own background rendered full width even
 // after every label got its own width cap. Every #Content child below also carries an explicit
 // Width, matching the panelWidth() (528) the Java side reads.

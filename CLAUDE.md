@@ -1,22 +1,21 @@
 # CLAUDE.md - RPG Stations
 
 A **standalone Hytale mod** owning the diegetic interactive work-station engine (sawmill, forge,
-and friends) extracted out of the MMO Skill Tree mod. It depends on `ziggfreed-common` ONLY -
-never the MMO jar; the MMO reaches the engine back through a soft extension surface (native
-events + the `api` artifact, both live). Neither mod hard-deps the other, and the standalone mod
-is RICH, not a husk: with RpgStations alone installed, its own jar-shipped Sawmill runs the full
-diegetic work loop plus a generic reward layer (conditional lootables over native `ItemDropList`s,
-command rewards) with zero progression. Package root `com.ziggfreed.rpgstations`. **Status:
-phase 1 (extraction) legs 0-6 landed** (scaffold, common lift, engine move, lootables, api
-artifact, MMO bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
-camera <preset>|list` + `/rpgstations validate`, the design 4.1 scope the phase-1 legs had left
-unimplemented); **phase 2 legs A-G are LANDED**: leg A (common kernel reshape), leg B
+and friends). It depends on `ziggfreed-common` ONLY; any other mod reaches the engine through a
+soft extension surface (native events + the `api` artifact, both live), never a hard dependency in
+either direction. The standalone mod is RICH, not a husk: with RpgStations alone installed, its own
+jar-shipped Sawmill runs the full diegetic work loop plus a generic reward layer (conditional
+lootables over native `ItemDropList`s, command rewards) and needs nothing else. Package root
+`com.ziggfreed.rpgstations`. **Status:
+phase 1 legs 0-6 landed** (scaffold, common lift, engine, lootables, api
+artifact, consumer bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
+camera <preset>|list` + `/rpgstations validate`); **phase 2 legs A-G are LANDED**: leg A (common kernel reshape), leg B
 (multi-action schema + step engine), leg C (placed-input custody + block states + sawmill
 migration), leg D (the `Hold.Mount` knob family - the Block/Entity surface discriminator, the
 standing work mount), leg E (the anvil arc - the `Stamp` step, composable roll+cap models,
 the `EnhanceStamperRegistry` api registry, AND the live wiring that makes multi-action stations
 actually run: diegetic action selection at engage, an authored-`Steps` program dispatch path,
-`Work.Repeat` session completion), leg F (the open flair/moment vocabulary - the fixed
+`Work.Looping` session completion), leg F (the open flair/moment vocabulary - the fixed
 `Slot` enum retired for open string moment ids, a new standalone `FlairAsset` type ANY mod can
 ship, `FlairCatalog` as the ONE merge point), and **leg G (the placed-input PLACED-AS-ENTITY
 visual - a new `Custody.Display` group spawning a static, network-replicated, pickup-immune,
@@ -53,15 +52,15 @@ show|off>`, see `command/CLAUDE.md`) and the five `[SMOKEDIAG]` log lines in
 puppet route (`station.StationPuppetController`, legs P3-P5) is unaffected and stays live.
 
 **Round-7/round-8 (2026-07-23) landed on top:** round-7 fixes (the `Custody.Display.Rotation`
-`{X,Y,Z}` degrees group, the MMO-agnostic enhance session-summary + `StationEnhanceCompletedEvent`,
+`{Yaw,Pitch,Roll}` degrees group, the vocabulary-agnostic enhance session-summary + `StationEnhanceCompletedEvent`,
 the native-pickup-shaped item-gain toast) plus a maintainer-approved timing pass: **instant dispatch
-for a non-repeating authored Steps program** (`Work.Repeat: false`, e.g. the anvil's Enhance, fires
+for a non-repeating authored Steps program** (`Work.Looping: false`, e.g. the anvil's Enhance, fires
 its first and only cycle immediately at engage rather than waiting a full `Work.CycleMs`), the
 explicit `dispatchProgram` `resuming` flag + fresh-dispatch `stepDeadlineMs` zeroing, and the generic
 per-step `Presentation` emission (any step's own `Presentation` plays once at step entry, not just
 the `Present` step's). **Round-8**: (a) `Custody.Display` `Offset`/`Rotation` are now FACING-RELATIVE
 to the placed block's yaw (authored `+Z` = block front, `+X` = block right, block yaw folded into
-`Rotation.Y`, `Offset.Y` stays vertical; identity at yaw 0 so pre-round-8 values are byte-identical;
+`Rotation.Yaw`, `Offset.Y` stays vertical; identity at yaw 0 so pre-round-8 values are byte-identical;
 commit `cc52fb4`, read `StationCustodyDisplay`/`asset.Custody`), and (b) **step-synced puppet swings**
 - a `StationStep` authoring its own `Puppet.Clip` plays that clip once at STEP ITERATION ENTRY
 (`StationStepRegistry`'s guard, `StationStepDecisions.shouldPlayClipOnEntry` mirroring the generic
@@ -83,7 +82,7 @@ a reusable action instead of always inlining one; a new `asset.ExtensionAsset` t
 (`Server/RpgStations/Extensions/*.json`) is the ONE additive fourth-party extension mechanism
 (Station/Action/Lootable/RollPool targets, additive-only, base-wins key collisions) superseding
 ad hoc full-file pack overrides; the Stamp step's `Caps` re-shaped onto a weighted `FactorRef`
-budget vocabulary (`Budgets[]` replaces `PerItemBudget`/`SkillScaledBudget`) that also now drives
+budget vocabulary (`Budgets[]`) that also now drives
 loot chances, ladder values, and roll magnitudes (one factor vocabulary everywhere). **Wave-3
 pending (decodes/validates, does not execute yet)**: the multi-station seam - `StationStep.Walk`/
 `At`, `Produce.To:"Custody"`, and `ActionDef.Anchors` discovery/claiming. See `asset/CLAUDE.md`
@@ -116,11 +115,11 @@ dependency-ordered (`ziggfreed-common` first).
 
 **`ziggfreed-common` is the ONLY dependency** (`manifest.json` `Dependencies:
 {"Ziggfreed:ZiggfreedCommon": ">=1.4.0"}`; `build.gradle` `compileOnly` + `testImplementation`
-against the sibling submodule's built jar, the mmo-mob-scaling sibling-relative path pattern -
+against the sibling submodule's built jar, the sibling-relative path pattern -
 `${rootDir}/../ziggfreed-common/build/libs/ZiggfreedCommon-${ziggfreedCommonVersion}.jar`). **NO
-reference to the MMO jar anywhere** - this is the load-bearing structural difference from
-mmo-mob-scaling (which hard-deps the MMO): RpgStations sits in kweebec's structural position,
-optionally listened to by other mods, never a consumer of one.
+reference to any other mod's jar anywhere**, and that is load-bearing, not incidental: RpgStations
+is optionally listened to by other mods and is never a consumer of one. A `build.gradle` line that
+would reverse that arrow is the failure this rule exists to prevent.
 
 ## Layout
 
@@ -129,9 +128,8 @@ settings.gradle / gradle.properties / build.gradle   RpgStations root module + t
 build.ps1                                             build + auto-install (self-locating, pins RpgStations-1.0.0.jar)
 api/                                                   the FROZEN-ONCE-1.0.0-releases extension-surface
   build.gradle                                         java-library, archivesName 'rpg-stations-api', BUNDLED into
-                                                        the runtime jar (kweebec api-bundling mechanic) AND builds
-                                                        standalone as rpg-stations-api-<version>.jar for compile-time
-                                                        consumers (the MMO bridge's own compileOnly link)
+                                                        the runtime jar AND builds standalone as
+                                                        rpg-stations-api-<version>.jar for a consumer's compileOnly link
   src/main/java/com/ziggfreed/rpgstations/api/         see api/CLAUDE.md
 src/main/resources/
   manifest.json                                        Group Ziggfreed, IncludesAssetPack:true, ServerVersion Update 5
@@ -156,14 +154,17 @@ src/main/java/com/ziggfreed/rpgstations/
   ui/                         see ui/CLAUDE.md - StationSummaryHud (extends common's KeyedCustomHud)
   i18n/                       see i18n/CLAUDE.md - RpgMsg (the rpgstations. prefix wrapper over common Msg) + RpgStationsLangKeys
   validation/                 see validation/CLAUDE.md - Finding/Severity/Report (the mini content-audit core; StationValidator itself lives in station/)
-  util/                       Log (this mod's own SafeLog-shaped facade over RpgStationsPlugin.LOGGER - NEVER the MMO's
-                               SafeLog) + Permissions (OP-when-permissions-off else "rpgstations.admin") + ItemGrantUtil
-                               (round-5: this mod's policy wrapper over ziggfreed-common's InventoryGrant, adding only
+  util/                       Log (this mod's OWN guarded logging facade over RpgStationsPlugin.LOGGER - never another
+                               mod's) + Permissions (OP-when-permissions-off else "rpgstations.admin") + ItemGrantUtil
+                               (this mod's policy wrapper over ziggfreed-common's InventoryGrant, adding only
                                the drop-at-block fallback)
 ```
 
 ## Conventions (this mod's own; hyMMO's root CLAUDE.md does NOT auto-apply)
 
+- **COMPLETELY PROGRESSION-AGNOSTIC (maintainer edict, 2026-08-05, supreme over everything below).**
+  See the dedicated section below; it is the first thing to check before adding any leaf, event, or
+  registry.
 - `@Nonnull`/`@Nullable` on params; log through `util.Log` (info/warn/severe/fine, `Throwable`
   overloads, guarded `try/catch(Throwable)` so a unit-JVM without a Hytale log manager never
   crashes a test) - never a raw `RpgStationsPlugin.LOGGER` fluent chain outside `Log` itself.
@@ -181,35 +182,77 @@ src/main/java/com/ziggfreed/rpgstations/
 - DRY: shared codecs (`Condition`, `Roll`, `Presentation`) are ONE type reused everywhere they
   apply, never duplicated per consumer.
 
-## Origin story: the RPG Stations extraction
+## The progression-agnosticism paradigm (BINDS EVERYTHING)
 
-Interactive work stations shipped first as an in-jar MMO Skill Tree feature (press F on a block,
-camera pulls third-person, a work loop converts materials per cycle for skill XP). The 2026-07-21
-maintainer pivot moved the entire diegetic ENGINE out to this standalone mod (phase 1) so the
-mechanic is independently valuable (a rich standalone reward loop, third-party-consumable) while
-every piece of PROGRESSION (XP awards with the named-factor breakdown, luck aggregation,
-flair-unlock persistence, `WORK_STATION` objectives/statistics, the session-summary XP rows) stays
-MMO-side, reached back through native events (observe-only moments) + typed registries
-(request/response points) - never a bespoke listener registry, per the root hyMMO CLAUDE.md's
-native-events rule. See `../CLAUDE.md` (the `additional-mods/` router) for this mod's one-line
-entry among its siblings, and `../../src/main/java/com/ziggfreed/mmoskilltree/integration/stations/CLAUDE.md`
-for the MMO-side half of the bridge.
+**This engine carries no progression vocabulary at all.** XP, skills, levels, and every other
+progression concept belong to whichever mod owns them and must NEVER appear in this mod's schema
+keys, api types, engine identifiers, validator ids, lang values, or shipped jar JSON - **not even
+as an uninterpreted declaration the engine merely forwards.** Forwarding-without-interpreting is
+explicitly NOT a defense: the pre-1.0.0 `Work.Xp`/`XpAsk` shape was retired on exactly that
+reasoning, having been defended on exactly that argument.
 
-**The shared `RPG_Station_Sawmill` block id story** (maintainer decision, phase 1 leg 6): both
-this jar AND the standalone `skill-stations-pack` ship a Sawmill block, and BOTH use the exact
-SAME item id, `RPG_Station_Sawmill` - the pack's copy overrides the jar default purely through
-native asset-pack LOAD ORDER (`defaults < pack`), not a different id. This means a dev-world
-Sawmill placed BEFORE the extraction (the old `MMO_Station_Sawmill` id) breaks on upgrade
-(accepted - stations were pre-release, never shipped publicly under the old id). The station id
-itself (`sawmill`, the `StationAsset` json's filename lowercased) never changed; only the block
-item id and its RootInteraction's registered `Type` did (`mmo_station_use` -> `rpg_station_use`,
-this mod's own interaction type - see `interaction/CLAUDE.md`).
+**One vocabulary, two directions.** The extension paradigm is one shape, mirrored. A content asset
+names a namespaced id; some other mod owns what it means.
+
+| | READ - factors | WRITE - contributions |
+|---|---|---|
+| authored leaf | `{"Factor": "<ns>:<id>", "Param": "<opaque>"}` | `{"Channel": "<ns>:<id>", "Param": "<opaque>", "Amount": <double>}` |
+| asset type | `asset/FactorRef`, `asset/Condition` | `asset/Contribution` |
+| api type | `api/StationFactorProvider` + `api/FactorContext` | `api/StationContribution` |
+| registry | `FactorRegistry.register(id, provider)` | `ContributionChannelRegistry.declare(id)` |
+| api accessor | `RpgStationsApi.factors()` | `RpgStationsApi.channels()` |
+| editor dropdown | `rpgstations:factors` (LIVE) | `rpgstations:channels` (LIVE) |
+| validator | `UNKNOWN_FACTOR` (WARN, fail-open) | `UNKNOWN_CHANNEL` (WARN, fail-open) |
+| engine knowledge | resolves the id to a `double` | **never resolves anything** - forwards it on the event |
+
+**The engine owns built-in FACTORS because it can compute them, and owns ZERO built-in channels
+because it interprets none.** That asymmetry is the whole ruling in one line.
+
+Scaling is decided by the authoring SITE, never a flag on the record:
+`Work.PerCycleContributions[]` posts every completed cycle and IS scaled (the tool multiplier, and
+pre-scaled by `Work.Idle.Fraction` on an idle cycle); `Roll.Grants.Contributions[]` posts once and
+is VERBATIM, inheriting neither. Same record, two documented meanings, no mode.
+
+**Three rules resolve every remaining case.**
+1. **Schema / api / engine / validator / lang / jar JSON: a foreign mod's name, id, type, or
+   domain concept may NEVER appear.** Not a key, not a value, not a branch, not a shipped
+   `.documentation()` string (those land in the jar schema AND the docsite's generated
+   `reference/schema.json`).
+2. **Javadoc and `.documentation()` may name the ENGINE's own namespaces** (`EntityStatType`,
+   `DamageCause`, `ItemDropList`) and this mod's own ids. For a third-party example, use the
+   fictitious **`yourmod:`** namespace.
+3. **The DOCSITE may keep ONE short "Known integrations" listing** naming a consumer with an
+   outbound link. It may NOT host that mod's reference tables.
+
+**Enforcement is a test, not a habit.** `src/test/java/com/ziggfreed/rpgstations/MmoAgnosticismTest`
+scans `src/main/java`, `api/src/main/java`, and `src/main/resources` (every `.java`, `.json`,
+`.lang`, `.ui`) for a forbidden-token regex and FAILS THE BUILD on any hit. The allowlist is empty
+on purpose: a hit is a real finding, never a candidate for an exception. `src/test` is deliberately
+out of scope (fixture values are author-owned and ship nothing) and prose surfaces (docsite,
+`CHANGELOG.md`, `CURSEFORGE.md`, these routers) are reviewed as documentation instead, which is
+also why they may name a consumer where a cross-repo pointer is genuinely useful. **A leak in a
+convenient comment is how the vocabulary creeps back in, one "for context" sentence at a time** -
+that is the entire reason the test scans comments too.
+
+When a new leaf / event / registry is progression-shaped, genericize it BEFORE it lands. A generic
+primitive several mods would share belongs in `ziggfreed-common` per the root lift paradigm - but
+`StationContribution`/`ContributionChannelRegistry` deliberately stay api-local until a genuine
+SECOND consumer appears (see `api/CLAUDE.md`'s promotion trigger).
+
+**Pack-authored VALUES are NOT covered by this.** A pack naming its own mod's ids in its own
+content (`{"Factor": "mmoskilltree:station_luck"}`, a `Budgets` entry reading that mod's stat
+channel) is CORRECT and untouched: this rule governs the ENGINE's vocabulary, not a pack's content.
+
+**The shared `RPG_Station_Sawmill` block id**: both this jar AND the sibling stations pack ship a
+Sawmill block under the exact SAME item id, `RPG_Station_Sawmill` - the pack's copy overrides the
+jar default purely through native asset-pack LOAD ORDER (`defaults < pack`), not a different id.
+The station id itself (`sawmill`, the `StationAsset` json's filename lowercased) is independent of
+the block item id. See `interaction/CLAUDE.md` for the `rpg_station_use` interaction type both use.
 
 ## The extension surface (api/, live)
 
 Package `com.ziggfreed.rpgstations.api` (+ `.api.event`), the FROZEN-once-1.0.0-releases contract
-between this engine and any progression mod that wants to hook it (the MMO bridge is the first and
-only consumer today). Split by shape, per the root hyMMO CLAUDE.md's native-events rule:
+between this engine and any mod that wants to hook it. Split by shape, per the native-events rule:
 **observe-only moments are native Hytale events** (`StationSessionStartedEvent`/
 `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`, POJOs
 `implements IEvent<Void>`, dispatched `HytaleServer.get().getEventBus().dispatchFor(...)` +
@@ -281,7 +324,7 @@ fix layers on cleanly.
   this leg (mechanism-first ruling; visuals land in a later leg) and self-heal: a Loaded state
   surviving a restart with no live claim behind it resets to Empty on the next interaction (custody
   is never persisted - a crash loses it, documented/accepted). The shipped sawmill (both the jar
-  default and the pack's MMO-bridged copy) MIGRATED to placed input in this leg - `Custody:
+  default and the pack's own copy) MIGRATED to placed input in this leg - `Custody:
   {"MaxQuantity":100,"States":{"Empty":"Default","Loaded":"Loaded"}}` in `Sawmill.json`, the block
   JSON gained `State.Definitions.Default/Loaded` with per-state `InteractionHint`, the backpack
   drain per real cycle is retired. See `station/CLAUDE.md` for the file-by-file detail
@@ -308,11 +351,10 @@ fix layers on cleanly.
   `SEAT_FACE_BLOCK_CONFLICT`), `UNKNOWN_MOUNT_SURFACE`, `MOUNT_ENTITY_GROUP_IGNORED`, and
   `MOUNT_STEERABLE_UNTESTED` (all warn-only, per the maintainer ruling). See `station/CLAUDE.md`'s
   Mount bullet for the full file-by-file detail.
-- **Leg E (LANDED, this mod + the MMO bridge + the pack)**: the anvil arc (design 9.5) - the
+- **Leg E (LANDED, this mod + a consumer bridge + the pack)**: the anvil arc - the
   `Stamp` step un-reserved (`asset.StationStep.Stamp{Reagents,Durability,Stats}`, nested
-  `Stats{Pool,Entries,Picks,Unique,Caps{PerItemBudget,PerStat,SkillScaledBudget,Economics}}`
-  as originally shipped this leg; **scope-2 (wave 2) re-shaped `Caps` onto a weighted
-  `Budgets[]`/`FactorRef` vocabulary, `PerItemBudget`/`SkillScaledBudget` are GONE - see
+  `Stats{Pool,Entries,Picks,Unique,Caps}`; **scope-2 (wave 2) re-shaped `Caps` onto a weighted
+  `Budgets[]`/`FactorRef` vocabulary - see
   `station/CLAUDE.md`'s anvil-arc bullet and `asset/CLAUDE.md`'s `StationStep` bullet for the
   current shape**), a
   NEW `asset.RollPool` Pattern-A store (`Server/RpgStations/RollPools/*.json`, `loot.RollPoolCatalog`)
@@ -332,19 +374,19 @@ fix layers on cleanly.
   `Animation`/`Tool`/`Requires`) switched from the station-level default to the RESOLVED action,
   an authored-`Steps` dispatch path (`runAuthoredProgram`, bypassing the Convert-check machinery
   entirely - a Steps action's viability is "does its own Custody already hold something"), and
-  `Work.Repeat: false` session completion (`StopReason.RITUAL_COMPLETE`) wired into
+  `Work.Looping: false` session completion (`StopReason.RITUAL_COMPLETE`) wired into
   `dispatchProgram`. **A genuine correctness fix along the way**: `StationCustodyClaim` gained an
   optional `uniqueStack` (the REAL placed `ItemStack`, metadata intact) for a `MaxQuantity: 1`
   placement - the pre-existing count-only model would have silently reset a placed weapon's
   durability/prior enhancements to a bare fresh stack on auto-return, an item-loss-equivalent bug
   the bulk sawmill-logs case never exercised. See `station/CLAUDE.md`'s Stamp bullet for the full
-  file-by-file detail, `api/CLAUDE.md`'s `EnhanceStamperRegistry` entry for the api contract, and
-  `content-packs/skill-stations-pack/CLAUDE.md` (hyMMO root) for the shipped Anvil content.
+  file-by-file detail and `api/CLAUDE.md`'s `EnhanceStamperRegistry` entry for the api contract;
+  the shipped Anvil content lives in its own pack's repo.
   **Deviations from the design doc's literal prose** (all evidence-grounded, see each site's own
   javadoc): the Convert action matches vanilla `Metal_Bars` (not the doc's placeholder
   `Metal_Ingot`); the anvil's Tool gate uses `Ids: ["Tool_Hammer_Crude","Tool_Hammer_Iron"]` (no
   `Tags.Family:["Hammer"]` exists on the real vanilla hammer items); the shipped `PerStat` cap key
-  is `MMO_CritChance` (the MMO's real `reward.MmoStats` constant, not the doc's `MMO_Crit_Chance`);
+  is a real registered stat id from the pack's own consumer mod, not the doc's placeholder;
   the ritual's Wait steps used `DurationMs` as originally shipped (`Beats` stayed schema-reserved/
   unimplemented - the doc's own example would have hard-failed the ritual at its first step);
   **scope-2 (wave 2) retired the `Wait` type entirely - the anvil's strikes/settle now author
@@ -354,13 +396,8 @@ fix layers on cleanly.
   rolling, a second roll layer added nothing); `EnhanceStamper` is a lean 2-method
   `inspect`/`apply` contract, not the doc's literal `StampContext`/`StampResult` shape (the api is
   unfrozen pre-1.0.0, free to reshape - RpgStations owns all the roll/cap math, so the stamper
-  needs nothing richer). **m9 correction (Smithing skill ownership)**: SMITHING is NOT shipped via
-  `custom-skills.json` in the pack - that file is a local SERVER-OWNER config
-  (`mods/mmoskilltree/custom-skills.json`, loaded from a `Path` at plugin startup), not a
-  pack-authorable asset at all, so a pack zip cannot ship into it. SMITHING was ALREADY a dormant
-  `BUILTIN_SKILL_DATA` entry in the MMO's `skill.SkillRegistry`; leg E promotes it to `BUILTIN_SKILL_NAMES`
-  with `requiresFeatures: ["stations"]` - the EXACT TAMING precedent (a built-in, feature-gated on
-  the owning integration's presence), a small MMO-jar code change, not pack content.
+  needs nothing richer). Whatever progression a pack layers on top of the anvil is that pack's
+  consumer mod's business and lives in that mod's own repo, never here.
 - **Leg F (LANDED, this mod)**: the open flair/moment vocabulary (design section 9.6) - the fixed
   `station.StationFlairs.Slot` enum (`CYCLE`/`SWING`/`RARE_FIND`/`COMPLETION`) is RETIRED for an
   open STRING moment id (`StationFlairs.MOMENT_CYCLE`/`MOMENT_SWING`/`MOMENT_IMPACT`/
@@ -378,9 +415,9 @@ fix layers on cleanly.
   `step:`-prefixed id or one of the 5 well-known ids always passes, so a FUTURE engine moment
   never breaks an OLDER pack), and a `FlairAsset.Stations` entry naming an unknown station.
   `api.impl.StationViewImpl.flairIds()` and `station.StationCatalog.allFlairIds()` both reuse the
-  merge point rather than an inline-only view that would now be incomplete. The MMO bridge's
-  `FlairUnlockRegistry`/`StationComponent` provider is UNTOUCHED (it already answers "which ids
-  has this player unlocked" and was always vocabulary-agnostic). See `station/CLAUDE.md`'s "Loot +
+  merge point rather than an inline-only view that would now be incomplete. A registered
+  `FlairUnlockProvider` is UNTOUCHED by this leg (it only ever answered "which ids has this player
+  unlocked", which was always vocabulary-agnostic). See `station/CLAUDE.md`'s "Loot +
   flairs" bullet for the full file-by-file detail.
 - **Leg G (LANDED, this mod + the pack)**: the placed-input PLACED-AS-ENTITY visual - the
   maintainer's directed route (a scout-resolved, source-verified mechanism: the engine's own
@@ -405,12 +442,11 @@ fix layers on cleanly.
 - **Leg H (docs-landed, this leg)**: the phase-2 smoke round. No engine change - collects the
   8-locale lang-key gap report (the pack's `items.lang`/`rpgstations.lang` overlay are the only
   ones with real gaps; RPG Stations' own `rpgstations.lang` needed zero new phase-2 keys, no
-  phase-2 leg added a new player-facing UI string), updates this router tree + the MMO/pack docs
-  the earlier legs left slightly behind (the pack's `README.md`, the MMO `CHANGELOG.md`'s
-  bridge/item-seam entries for leg E), and assembles the PHASE-2 SMOKE CHECKLIST as a clearly
-  marked section in `../../.claude/plans/work-stations-mod-extraction-prompt.md` (the standing-mount
-  spike, custody place/return incl. relog, state-dependent F-hints, placed-item visuals, the anvil
-  Convert+Enhance ritual end to end incl. cancel custody-return and budget caps, Smithing XP + the
-  skill page, multi-action selection UX, plus the still-pending phase-1 parity items). The actual
+  phase-2 leg added a new player-facing UI string), updates this router tree + the sibling repos'
+  docs the earlier legs left slightly behind, and assembles the PHASE-2 SMOKE CHECKLIST as a
+  clearly marked section in `../../.claude/plans/work-stations-mod-extraction-prompt.md` (the
+  standing-mount spike, custody place/return incl. relog, state-dependent F-hints, placed-item
+  visuals, the anvil Convert+Enhance ritual end to end incl. cancel custody-return and budget caps,
+  multi-action selection UX, plus the still-pending phase-1 parity items). The actual
   in-game confirmation pass is still batched/pending, alongside phase 1's own parity gate (design
   section 11) - neither has run yet; both are one maintainer smoke session away.

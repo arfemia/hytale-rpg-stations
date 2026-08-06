@@ -16,7 +16,7 @@ import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
  * StationFactorRegistry} pair is retired in favor of this): resolves each distinct {@code
  * (factorId, param)} pair AT MOST ONCE per {@link FactorSnapshot} instance, restoring the "one
  * aggregation, many consumers" invariant a Roll's {@code Chance} and {@code Ladder} both need
- * when they reference the SAME factor (e.g. both reading {@code mmoskilltree:station_luck} - one
+ * when they reference the SAME factor (e.g. both reading {@code yourmod:station_luck} - one
  * capped, one raw, but off the identical resolved number). One instance per trigger evaluation
  * batch (a real cycle, an idle cycle, or a session-completion roll pass); never shared across
  * batches (the underlying {@link FactorContext} is a per-batch snapshot too).

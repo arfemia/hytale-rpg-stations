@@ -6,6 +6,8 @@ import javax.annotation.Nullable;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.ziggfreed.common.codec.Vec3;
+import com.ziggfreed.common.codec.Rotation;
 
 /**
  * Session-scoped PLACED-INPUT custody (design section 9.4, phase-2 leg C): an authored group
@@ -51,19 +53,28 @@ public final class Custody {
     public static final int DEFAULT_MAX_QUANTITY = 100;
 
     @Nullable protected Integer maxQuantity;
+    @Nullable protected Boolean singleFamily;
     @Nullable protected ActionInput input;
     @Nullable protected States states;
     @Nullable protected Display display;
 
     public static final BuilderCodec<Custody> CODEC = BuilderCodec.builder(Custody.class, Custody::new)
             .appendInherited(new KeyedCodec<>("MaxQuantity", Codec.INTEGER, false),
-                    (o, v) -> o.maxQuantity = v, o -> o.maxQuantity, (o, p) -> o.maxQuantity = p.maxQuantity).add()
+                    (o, v) -> o.maxQuantity = v, o -> o.maxQuantity, (o, p) -> o.maxQuantity = p.maxQuantity)
+            .documentation("The total item count this block's claim holds; reader-defaults to 100.")
+            .addValidator(CodecWarnValidators.positive("Custody.MaxQuantity should be positive; it reader-defaults to 100 otherwise.")).add()
+            .appendInherited(new KeyedCodec<>("SingleFamily", Codec.BOOLEAN, false),
+                    (o, v) -> o.singleFamily = v, o -> o.singleFamily, (o, p) -> o.singleFamily = p.singleFamily)
+            .documentation("When true the claim locks to the FIRST placed item's resource family: a later placement of a different family is refused until the claim empties. Default false (any accepted material mixes freely).").add()
             .appendInherited(new KeyedCodec<>("Input", ActionInput.CODEC, false),
-                    (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input).add()
+                    (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input)
+            .documentation("The explicit placement-acceptance matcher; absent derives acceptance from the resolved action's Recipe.Conversions inputs.").add()
             .appendInherited(new KeyedCodec<>("States", States.CODEC, false),
-                    (o, v) -> o.states = v, o -> o.states, (o, p) -> o.states = p.states).add()
+                    (o, v) -> o.states = v, o -> o.states, (o, p) -> o.states = p.states)
+            .documentation("The block State.Definitions names custody flips between; null = no visual/hint flip.").add()
             .appendInherited(new KeyedCodec<>("Display", Display.CODEC, false),
-                    (o, v) -> o.display = v, o -> o.display, (o, p) -> o.display = p.display).add()
+                    (o, v) -> o.display = v, o -> o.display, (o, p) -> o.display = p.display)
+            .documentation("Opts the placed input into a placed-as-entity prop visual at the block-top anchor; null = no visual.").add()
             .build();
 
     public Custody() {
@@ -79,8 +90,16 @@ public final class Custody {
     @Nonnull
     public static Custody of(@Nullable Integer maxQuantity, @Nullable ActionInput input, @Nullable States states,
             @Nullable Display display) {
+        return of(maxQuantity, null, input, states, display);
+    }
+
+    /** Java-side factory carrying every leaf incl. {@link #singleFamily}. */
+    @Nonnull
+    public static Custody of(@Nullable Integer maxQuantity, @Nullable Boolean singleFamily,
+            @Nullable ActionInput input, @Nullable States states, @Nullable Display display) {
         Custody c = new Custody();
         c.maxQuantity = maxQuantity;
+        c.singleFamily = singleFamily;
         c.input = input;
         c.states = states;
         c.display = display;
@@ -95,6 +114,23 @@ public final class Custody {
     /** {@link #maxQuantity}, reader-defaulted to {@link #DEFAULT_MAX_QUANTITY} when null/non-positive. */
     public int effectiveMaxQuantity() {
         return maxQuantity != null && maxQuantity > 0 ? maxQuantity : DEFAULT_MAX_QUANTITY;
+    }
+
+    /**
+     * Does this claim lock to ONE resource family (decision 74)? When true, the first placement
+     * fixes the claim's family and any later placement outside it is refused with
+     * {@code ui.station.wrong_input} until the claim empties again - "50 oak OR 50 pine, never 100
+     * mixed", the exclusivity a per-family quantity map could not express. Enforced in the accept
+     * path ({@code station.StationCustody#acceptsFamily}).
+     */
+    @Nullable
+    public Boolean getSingleFamily() {
+        return singleFamily;
+    }
+
+    /** {@link #getSingleFamily()}, reader-defaulted to {@code false} (mixing allowed). */
+    public boolean effectiveSingleFamily() {
+        return singleFamily != null && singleFamily;
     }
 
     @Nullable
@@ -128,7 +164,7 @@ public final class Custody {
      * fire leaves it unlit until the cook beat begins. Applies to the block a step runs AT, so both
      * the primary station block and a claimed remote anchor get it (engine side:
      * {@code station.StationService#enterWorkingState}/{@code #exitWorkingState}). Which steps count
-     * as work is the step's own {@code Working} knob ({@code asset.StationStep#isWorkingStep}),
+     * as work is the step's own {@code IsWork} knob ({@code asset.StationStep#effectiveIsWork}),
      * defaulting to "a step that both Consumes and Produces is a convert". Omitting {@code Working}
      * is byte-identical to the pre-knob behavior - no extra flip ever happens.
      *
@@ -193,22 +229,23 @@ public final class Custody {
      * asset-authored knobs for the display prop's spatial fit relative to the station's block-top
      * anchor - the same point every cycle/swing/impact/rare-find moment already targets
      * ({@code blockX+0.5, blockY+0.5, blockZ+0.5}). All three leaves are nullable/orthogonal
-     * (independently composable, never a mode): {@link #offset} shifts the anchor,
-     * {@link #scale} resizes the prop, {@link #rotation} (a nested {@code {X,Y,Z}} degrees group)
-     * turns it about all three axes.
+     * (independently composable, never a mode): {@link #offset} (the shared {@link Vec3}
+     * {@code {X,Y,Z}} group) shifts the anchor, {@link #scale} resizes the prop, and
+     * {@link #rotation} (the shared {@link Rotation} {@code {Yaw,Pitch,Roll}} degrees group) turns
+     * it about all three axes.
      *
      * <p><b>FACING-RELATIVE (round-8), not absolute world-space:</b> {@link #offset} and
      * {@link #rotation} are authored RELATIVE TO THE PLACED STATION BLOCK'S OWN FACING, not in
      * absolute world axes (the pre-round-8 simplification). {@code station.StationCustodyDisplay}
      * reads the placed block's own facing yaw at spawn time (the non-deprecated
      * {@code World#getBlockRotationIndex} -> {@code RotationTuple#yaw()}, resolved off the spawn
-     * command buffer's store) and composes it two ways: the horizontal {@link Offset} (X/Z) is
-     * ROTATED by that yaw (Y stays vertical), and the block's yaw is ADDED into the {@link Rotation}
-     * group's Y (yaw) axis - so a station block placed rotated carries its display prop's POSITION and
+     * command buffer's store) and composes it two ways: the horizontal {@code Offset} (X/Z) is
+     * ROTATED by that yaw (Y stays vertical), and the block's yaw is ADDED into the {@code Rotation}
+     * group's {@code Yaw} axis - so a station block placed rotated carries its display prop's POSITION and
      * FACING around with it, and a {@code +Z} authored offset lands toward the SAME face of the block
      * for every placement orientation. <b>Convention:</b> authored {@code Offset.X}/{@code .Z} are in
-     * the block's own horizontal frame under the engine's block-vector yaw convention
-     * ({@code Rotation.rotateY}); at a DEFAULT-orientation placement (block yaw {@code None}/0deg) the
+     * the block's own horizontal frame under the engine's block-vector yaw convention; at a
+     * DEFAULT-orientation placement (block yaw {@code None}/0deg) the
      * local frame equals the world frame and the yaw addition is 0, so <b>every pre-round-8 authored
      * value renders byte-identically</b> - existing packs need no blind re-tune (both shipped exemplars
      * authored only a vertical {@code Offset.Y}, untouched by the change; only the anvil's enhance
@@ -216,7 +253,7 @@ public final class Custody {
      * {@code StationCustodyDisplay#resolveWorldOffset}/{@code #resolveRotationRadians} (each taking the
      * block yaw as a plain scalar); the ONE impure block-facing read try-guards to yaw 0 (an unloaded
      * chunk / bad read degrades to the old world-space behavior, never aborts the spawn). Grounded in
-     * the shared source's {@code BlockRotationUtil}/{@code RotationTuple}/{@code Rotation} discrete
+     * the shared source's {@code BlockRotationUtil}/{@code RotationTuple} discrete
      * 0/90/180/270 block-rotation model.
      *
      * <p><b>Rotation applies through {@code TransformComponent} on BOTH spawn routes, but is only
@@ -231,21 +268,24 @@ public final class Custody {
      * identically.
      */
     public static final class Display {
-        @Nullable protected Offset offset;
+        @Nullable protected Vec3 offset;
         @Nullable protected Double scale;
         @Nullable protected Rotation rotation;
 
         public static final BuilderCodec<Display> CODEC = BuilderCodec.builder(Display.class, Display::new)
-                .appendInherited(new KeyedCodec<>("Offset", Offset.CODEC, false),
-                        (o, v) -> o.offset = v, o -> o.offset, (o, p) -> o.offset = p.offset).add()
+                .appendInherited(new KeyedCodec<>("Offset", Vec3.CODEC, false),
+                        (o, v) -> o.offset = v, o -> o.offset, (o, p) -> o.offset = p.offset)
+                .documentation("Facing-relative shift off the block-top anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical.").add()
                 .appendInherited(new KeyedCodec<>("Scale", Codec.DOUBLE, false),
-                        (o, v) -> o.scale = v, o -> o.scale, (o, p) -> o.scale = p.scale).add()
+                        (o, v) -> o.scale = v, o -> o.scale, (o, p) -> o.scale = p.scale)
+                .documentation("Uniform prop scale; defaults to 1.0 when absent or non-positive.").add()
                 .appendInherited(new KeyedCodec<>("Rotation", Rotation.CODEC, false),
-                        (o, v) -> o.rotation = v, o -> o.rotation, (o, p) -> o.rotation = p.rotation).add()
+                        (o, v) -> o.rotation = v, o -> o.rotation, (o, p) -> o.rotation = p.rotation)
+                .documentation("Facing-relative rotation in degrees; the placed block's own facing is added into Yaw at spawn.").add()
                 .build();
 
         @Nonnull
-        public static Display of(@Nullable Offset offset, @Nullable Double scale, @Nullable Rotation rotation) {
+        public static Display of(@Nullable Vec3 offset, @Nullable Double scale, @Nullable Rotation rotation) {
             Display d = new Display();
             d.offset = offset;
             d.scale = scale;
@@ -254,7 +294,7 @@ public final class Custody {
         }
 
         @Nullable
-        public Offset getOffset() {
+        public Vec3 getOffset() {
             return offset;
         }
 
@@ -271,117 +311,6 @@ public final class Custody {
         /** {@link #scale}, reader-defaulted to {@code 1.0} when null/non-positive. */
         public double effectiveScale() {
             return scale != null && scale > 0 ? scale : 1.0;
-        }
-
-        /**
-         * FACING-RELATIVE rotation of the display prop, in DEGREES per axis (engine default 0 per
-         * leaf). {@code X} = pitch (tips the prop forward/back about the horizontal axis - the
-         * "lay it flat" axis), {@code Y} = yaw (turns it about the vertical axis), {@code Z} =
-         * roll (tips it sideways about its own long axis). Applied engine-side as radians in the
-         * engine's Y-X-Z (yaw, then pitch, then roll) intrinsic euler order
-         * ({@code Rotation3f.getQuaternion} composes {@code rotationYXZ}). Authored in DEGREES (the
-         * {@code BlockMountPoint}/{@code EntitySpawnPage} human-authoring precedent), never raw
-         * {@code Rotation3f.CODEC} radians. Every leaf is independently nullable (partial owner
-         * overlays and native {@code Parent} reuse), mirroring {@link Offset}.
-         *
-         * <p><b>Round-8 facing-relative:</b> the placed block's own facing yaw is ADDED into the
-         * {@code Y} (yaw) axis at spawn so the prop turns WITH the block (see the enclosing
-         * {@link Display} class javadoc for the full convention); {@code X}/{@code Z} are the prop's
-         * own local pitch/roll and ride that yaw unchanged. At a default-orientation placement the
-         * added yaw is 0, so an authored {@code Y} reads exactly as before.
-         *
-         * <p><b>Scope-2:</b> the retired scalar-yaw {@code LegacyTolerantCodec} is DELETED (with the
-         * whole surface re-authored in-wave there is no legacy JSON to tolerate). {@link #CODEC} is
-         * now the plain nested {@code {X,Y,Z}} group codec.
-         */
-        public static final class Rotation {
-            @Nullable protected Double x;
-            @Nullable protected Double y;
-            @Nullable protected Double z;
-
-            /** The structured {@code {X,Y,Z}} degrees group codec (mirrors {@link Offset#CODEC} verbatim). */
-            public static final BuilderCodec<Rotation> CODEC = BuilderCodec.builder(Rotation.class, Rotation::new)
-                    .appendInherited(new KeyedCodec<>("X", Codec.DOUBLE, false),
-                            (o, v) -> o.x = v, o -> o.x, (o, p) -> o.x = p.x)
-                    .documentation("Pitch in degrees (tips the prop forward/back - the 'lay it flat' axis). Default 0.").add()
-                    .appendInherited(new KeyedCodec<>("Y", Codec.DOUBLE, false),
-                            (o, v) -> o.y = v, o -> o.y, (o, p) -> o.y = p.y)
-                    .documentation("Yaw in degrees (turns about vertical; the placed block's facing is added at spawn). Default 0.").add()
-                    .appendInherited(new KeyedCodec<>("Z", Codec.DOUBLE, false),
-                            (o, v) -> o.z = v, o -> o.z, (o, p) -> o.z = p.z)
-                    .documentation("Roll in degrees (tips sideways about the prop's own long axis). Default 0.").add()
-                    .build();
-
-            @Nonnull
-            public static Rotation of(@Nullable Double x, @Nullable Double y, @Nullable Double z) {
-                Rotation r = new Rotation();
-                r.x = x;
-                r.y = y;
-                r.z = z;
-                return r;
-            }
-
-            @Nullable
-            public Double getX() {
-                return x;
-            }
-
-            @Nullable
-            public Double getY() {
-                return y;
-            }
-
-            @Nullable
-            public Double getZ() {
-                return z;
-            }
-        }
-
-        /**
-         * A relative {@code X}/{@code Y}/{@code Z} shift off the block-top anchor, each leaf
-         * independently nullable (default 0). <b>Round-8 facing-relative:</b> the horizontal
-         * {@code X}/{@code Z} are in the block's OWN facing frame (rotated by the placed block's yaw
-         * at spawn; {@code +Z} = toward the block's front), {@code Y} stays vertical - see the
-         * enclosing {@link Display} class javadoc for the convention. A default-orientation placement
-         * makes the block frame equal the world frame, so pre-round-8 values are unchanged.
-         */
-        public static final class Offset {
-            @Nullable protected Double x;
-            @Nullable protected Double y;
-            @Nullable protected Double z;
-
-            public static final BuilderCodec<Offset> CODEC = BuilderCodec.builder(Offset.class, Offset::new)
-                    .appendInherited(new KeyedCodec<>("X", Codec.DOUBLE, false),
-                            (o, v) -> o.x = v, o -> o.x, (o, p) -> o.x = p.x).add()
-                    .appendInherited(new KeyedCodec<>("Y", Codec.DOUBLE, false),
-                            (o, v) -> o.y = v, o -> o.y, (o, p) -> o.y = p.y).add()
-                    .appendInherited(new KeyedCodec<>("Z", Codec.DOUBLE, false),
-                            (o, v) -> o.z = v, o -> o.z, (o, p) -> o.z = p.z).add()
-                    .build();
-
-            @Nonnull
-            public static Offset of(@Nullable Double x, @Nullable Double y, @Nullable Double z) {
-                Offset o = new Offset();
-                o.x = x;
-                o.y = y;
-                o.z = z;
-                return o;
-            }
-
-            @Nullable
-            public Double getX() {
-                return x;
-            }
-
-            @Nullable
-            public Double getY() {
-                return y;
-            }
-
-            @Nullable
-            public Double getZ() {
-                return z;
-            }
         }
     }
 }

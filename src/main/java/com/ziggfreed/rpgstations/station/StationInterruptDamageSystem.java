@@ -16,10 +16,8 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * Interrupts a live station work session when its player takes damage. Ported verbatim from
- * the MMO's {@code event.StationInterruptDamageSystem} (RPG Stations extraction leg 2), moved
- * into {@code station/} per the design's package layout (section 4.2) and {@code SafeLog}
- * severed to RpgStations' own {@code util.Log}.
+ * Interrupts a live station work session when its player takes damage. Lives in {@code station/}
+ * per the design's package layout (section 4.2).
  *
  * <p>Runs in the <b>Inspect</b> damage group: it only READS the final damage and calls
  * {@code StationService.onDamage} - it never mutates the damage or adds a component, so it

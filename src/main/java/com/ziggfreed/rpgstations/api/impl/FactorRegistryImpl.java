@@ -1,5 +1,8 @@
 package com.ziggfreed.rpgstations.api.impl;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -85,5 +88,19 @@ public final class FactorRegistryImpl implements FactorRegistry {
     /** True when a provider is registered for {@code factorId} (the validator's known-factor check). */
     public boolean isKnown(@Nullable String factorId) {
         return factorId != null && !factorId.isBlank() && providers.containsKey(factorId.toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * Every currently-registered factor id, lowercased and sorted - the third engine-internal
+     * extension read beside {@link #resolve}/{@link #isKnown} (never part of the frozen
+     * register-only api contract). Backs the {@code rpgstations:factors} Asset-Editor dropdown
+     * dataset, which is why it is a snapshot: a mod registering a factor later simply widens the
+     * next request's answer.
+     */
+    @Nonnull
+    public List<String> registeredIds() {
+        List<String> ids = new ArrayList<>(providers.keySet());
+        Collections.sort(ids);
+        return ids;
     }
 }

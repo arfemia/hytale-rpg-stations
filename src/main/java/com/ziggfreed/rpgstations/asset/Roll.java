@@ -7,6 +7,7 @@ import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
+import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 
 /**
  * ONE conditional-lootable roll: gate ({@code Conditions}/{@code Chance}) + payoff
@@ -15,26 +16,25 @@ import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
  * section 4.5.1, TIGHTENED per the adversarial critique's binding M3 fix (all five items below are
  * load-bearing).
  *
- * <p><b>Scope-2 changes (weighted-factor unification, design 4.2):</b>
+ * <p><b>Weighted-factor unification (design 4.2):</b>
  * <ul>
- *   <li>{@link Chance#getAddFactors()} entries are now {@link FactorRef}s ({@code {Factor, Param?,
+ *   <li>{@link Chance#getAddFactors()} entries are {@link FactorRef}s ({@code {Factor, Param?,
  *   Weight?}}), so a chance can weight several factor channels: {@code effective =
  *   clamp(BasePercent + sum(resolve(f.Factor, f.Param) * f.Weight), 0, CapPercent)}.
- *   <li>{@link Ladder#getValues()} (JSON key {@code Values}) REPLACES the old single
- *   {@code Ladder.Value}: a {@link FactorRef}{@code []} summed BEFORE the floor lookup, so a ladder
- *   composes {@code stat}-channel luck (e.g. {@code MMO_Luck} + {@code MMO_Luck_WOODCUTTING})
- *   exactly the way the loot middle path requires. A single-factor ladder authors a one-element
- *   array.
+ *   <li>{@link Ladder#getValues()} (JSON key {@code Values}) is a {@link FactorRef}{@code []}
+ *   summed BEFORE the floor lookup, so one ladder composes several channels (a third-party
+ *   aggregate plus a native stat channel, each weighted) exactly the way the loot middle path
+ *   requires. A single-factor ladder authors a one-element array.
  * </ul>
  *
  * <pre>{@code
  * {
  *   "Trigger": "Cycle",
  *   "Conditions": [ { "Factor": "rpgstations:cycle_count", "Min": 3 } ],
- *   "Chance":    { "BasePercent": 0, "AddFactors": [ { "Factor": "stat", "Param": "MMO_Luck" } ],
+ *   "Chance":    { "BasePercent": 0, "AddFactors": [ { "Factor": "yourmod:fortune" } ],
  *                  "CapPercent": 90 },
- *   "Ladder":    { "Values": [ { "Factor": "stat", "Param": "MMO_Luck" },
- *                              { "Factor": "stat", "Param": "MMO_Luck_WOODCUTTING" } ],
+ *   "Ladder":    { "Values": [ { "Factor": "yourmod:fortune" },
+ *                              { "Factor": "stat", "Param": "<EntityStatType id>", "Weight": 0.5 } ],
  *                  "Floors": [ { "Min": 50,  "Grants": { "DropList": "SawmillFinds_T1" } },
  *                              { "Min": 100, "Grants": { "DropList": "SawmillFinds_T2" },
  *                                "Presentation": { "Sound": "SFX_Coins_Land" } } ] },
@@ -64,7 +64,8 @@ public final class Roll {
     public static final BuilderCodec<Roll> CODEC = BuilderCodec.builder(Roll.class, Roll::new)
             .appendInherited(new KeyedCodec<>("Trigger", Codec.STRING, false),
                     (o, v) -> o.trigger = v, o -> o.trigger, (o, p) -> o.trigger = p.trigger)
-            .documentation("When this roll fires: 'Cycle' (per completed cycle, the default) or 'Completion' (at session stop).").add()
+            .documentation("When this roll fires: 'Cycle' (per completed cycle, the default) or 'Completion' (at session stop).")
+            .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:roll-trigger"))).add()
             .appendInherited(new KeyedCodec<>("Conditions", new ArrayCodec<>(Condition.CODEC, Condition[]::new), false),
                     (o, v) -> o.conditions = v, o -> o.conditions, (o, p) -> o.conditions = p.conditions)
             .documentation("Gate: every Condition must pass (bounded factor checks) before the roll is considered.").add()
@@ -148,13 +149,15 @@ public final class Roll {
         public static final BuilderCodec<Chance> CODEC = BuilderCodec.builder(Chance.class, Chance::new)
                 .appendInherited(new KeyedCodec<>("BasePercent", Codec.DOUBLE, false),
                         (o, v) -> o.basePercent = v, o -> o.basePercent, (o, p) -> o.basePercent = p.basePercent)
-                .documentation("The flat base chance in percent (0..100) before any factor contributions.").add()
+                .documentation("The flat base chance in percent (0..100) before any factor contributions.")
+                .addValidator(CodecWarnValidators.nonNegative("Roll.Chance.BasePercent should not be negative.")).add()
                 .appendInherited(new KeyedCodec<>("AddFactors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
                         (o, v) -> o.addFactors = v, o -> o.addFactors, (o, p) -> o.addFactors = p.addFactors)
                 .documentation("Weighted factor references summed onto BasePercent: sum(resolve(Factor, Param) * Weight).").add()
                 .appendInherited(new KeyedCodec<>("CapPercent", Codec.DOUBLE, false),
                         (o, v) -> o.capPercent = v, o -> o.capPercent, (o, p) -> o.capPercent = p.capPercent)
-                .documentation("The maximum effective chance in percent; the summed chance clamps to [0, CapPercent].").add()
+                .documentation("The maximum effective chance in percent; the summed chance clamps to [0, CapPercent].")
+                .addValidator(CodecWarnValidators.positive("Roll.Chance.CapPercent should be positive; a zero/negative cap means the roll never fires.")).add()
                 .build();
 
         @Nonnull
@@ -276,12 +279,14 @@ public final class Roll {
         @Nullable protected String dropList;
         @Nullable protected String[] commands;
         @Nullable protected EffectRef[] effects;
+        @Nullable protected Contribution[] contributions;
 
         public static final BuilderCodec<Grants> CODEC = BuilderCodec.builder(Grants.class, Grants::new)
                 .appendInherited(new KeyedCodec<>("BonusOutputCopies", Codec.INTEGER, false),
                         (o, v) -> o.bonusOutputCopies = v, o -> o.bonusOutputCopies,
                         (o, p) -> o.bonusOutputCopies = p.bonusOutputCopies)
-                .documentation("N extra copies of THIS cycle's Output (Cycle trigger only); silently skipped when inventory is full.").add()
+                .documentation("N extra copies of THIS cycle's Output (Cycle trigger only); silently skipped when inventory is full.")
+                .addValidator(CodecWarnValidators.positive("Roll.Grants.BonusOutputCopies should be positive.")).add()
                 .appendInherited(new KeyedCodec<>("DropList", Codec.STRING, false),
                         (o, v) -> o.dropList = v, o -> o.dropList, (o, p) -> o.dropList = p.dropList)
                 .documentation("A native ItemDropList asset id, rolled via ItemModule.getRandomItemDrops.").add()
@@ -296,6 +301,13 @@ public final class Roll {
                         + "roll's effect applies from INSIDE that same stop() (after its teardown already ran) and "
                         + "deliberately PERSISTS for its own authored/asset duration as a finishing reward, never "
                         + "stripped by this session.").add()
+                .appendInherited(new KeyedCodec<>("Contributions",
+                                new ArrayCodec<>(Contribution.CODEC, Contribution[]::new), false),
+                        (o, v) -> o.contributions = v, o -> o.contributions, (o, p) -> o.contributions = p.contributions)
+                .documentation("One-shot amounts posted verbatim when this roll grants. Cycle trigger ONLY (a "
+                        + "Completion-trigger roll has no cycle event to ride on; the validator warns) and "
+                        + "DELIBERATELY UNSCALED: unlike the station's own Work.PerCycleContributions, a find's grant "
+                        + "never inherits the tool multiplier or the idle fraction.").add()
                 .build();
 
         @Nonnull
@@ -307,11 +319,19 @@ public final class Roll {
         @Nonnull
         public static Grants of(@Nullable Integer bonusOutputCopies, @Nullable String dropList,
                 @Nullable String[] commands, @Nullable EffectRef[] effects) {
+            return of(bonusOutputCopies, dropList, commands, effects, null);
+        }
+
+        @Nonnull
+        public static Grants of(@Nullable Integer bonusOutputCopies, @Nullable String dropList,
+                @Nullable String[] commands, @Nullable EffectRef[] effects,
+                @Nullable Contribution[] contributions) {
             Grants g = new Grants();
             g.bonusOutputCopies = bonusOutputCopies;
             g.dropList = dropList;
             g.commands = commands;
             g.effects = effects;
+            g.contributions = contributions;
             return g;
         }
 
@@ -337,12 +357,23 @@ public final class Roll {
             return effects;
         }
 
+        /**
+         * One-shot {@link Contribution} posts; null = none. Meaningful only under a {@code Cycle}
+         * trigger (the validator warns otherwise) and deliberately UNSCALED - see
+         * {@link Contribution}'s own javadoc for the site-fixed scaling contract.
+         */
+        @Nullable
+        public Contribution[] getContributions() {
+            return contributions;
+        }
+
         /** True when no leaf is authored (an empty group is a no-op, same as an absent one). */
         public boolean isEmpty() {
             return bonusOutputCopies == null
                     && (dropList == null || dropList.isBlank())
                     && (commands == null || commands.length == 0)
-                    && (effects == null || effects.length == 0);
+                    && (effects == null || effects.length == 0)
+                    && (contributions == null || contributions.length == 0);
         }
     }
 }

@@ -72,6 +72,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.retrieve.hint",
             "rpgstations.ui.station.inventory_full",
             "rpgstations.ui.station.wrong_tool",
+            "rpgstations.ui.station.tool_worn",
             "rpgstations.ui.station.seat_unavailable",
             "rpgstations.ui.station.mount_unavailable",
             "rpgstations.ui.station.practice",

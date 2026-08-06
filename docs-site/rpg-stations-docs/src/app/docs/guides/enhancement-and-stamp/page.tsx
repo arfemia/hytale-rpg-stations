@@ -31,7 +31,7 @@ export default function EnhancementAndStampPage() {
 
       <H2 id="the-shape">The shape</H2>
       <pre><code>{`"Stamp": {
-  "Reagents": [ { "ResourceTypeId": "MMO_Sharpened_Bar", "Quantity": 2 } ],
+  "Reagents": [ { "ResourceTypeId": "Metal_Bars", "Quantity": 2 } ],
   "Durability": { "AddMax": 10 },
   "Stats": {
     "Pool": "anvilweaponpool",
@@ -40,15 +40,15 @@ export default function EnhancementAndStampPage() {
     "Caps": {
       "Budgets": [
         { "Points": 30 },
-        { "PointsPer": 0.5, "Factors": [ { "Factor": "stat", "Param": "MMO_Level_SMITHING" } ] }
+        { "PointsPer": 0.5, "Factors": [ { "Factor": "yourmod:skill_level", "Param": "SMITHING" } ] }
       ],
-      "PerStat": { "MMO_CritChance": 10 }
+      "PerStat": { "YourMod_CritChance": 10 }
     }
   }
 }`}</code></pre>
       <ul>
         <li><code>Reagents</code> - <code>Ingredient</code>s consumed from the player&apos;s INVENTORY at commit (never from a custody claim - the placed item being enhanced is what lives in custody).</li>
-        <li><code>Durability.AddMax</code> - raises the placed stack&apos;s max durability (and its current durability by the same amount) - a genuine upgrade, real even with no progression mod installed at all.</li>
+        <li><code>Durability.AddMax</code> - raises the placed stack&apos;s max durability (and its current durability by the same amount) - a genuine upgrade, real with no other mod installed at all.</li>
         <li><code>Stats</code> - the composable stat-roll model, below.</li>
       </ul>
 
@@ -56,7 +56,7 @@ export default function EnhancementAndStampPage() {
       <p>
         A candidate roll is a <code>StatRollEntry</code>: <code>{'{Stat, Points{Min,Max,AddFactors?}, Weight, Always}'}</code>.
         <code>Stat</code> is opaque to RPG Stations itself - the registered stamper interprets what a &quot;stat&quot;
-        id means (for the shipped Anvil, an MMO Skill Tree gear-stat channel). The rolled point value is{' '}
+        id means. The rolled point value is{' '}
         <code>uniform(Min, Max)</code>, optionally plus a weighted <code>AddFactors</code> sum (the same{' '}
         <Link href="/docs/guides/loot-and-factors/">FactorRef</Link> vocabulary loot chances use). An entry
         with <code>Always: true</code> is granted unconditionally on every stamp, independent of the weighted
@@ -70,12 +70,12 @@ export default function EnhancementAndStampPage() {
       </p>
       <pre><code>{`// RollPools/AnvilWeaponPool.json
 { "Entries": [
-  { "Stat": "MMO_CritChance",      "Points": { "Min": 2, "Max": 6 },  "Weight": 1 },
-  { "Stat": "MMO_CritMultiplier",  "Points": { "Min": 5, "Max": 15 }, "Weight": 1 },
-  { "Stat": "MMO_Lifesteal",       "Points": { "Min": 2, "Max": 5 },  "Weight": 1 },
-  { "Stat": "MMO_CooldownReduction","Points": { "Min": 2, "Max": 6 }, "Weight": 1 },
-  { "Stat": "MMO_Luck",            "Points": { "Min": 3, "Max": 10 }, "Weight": 1 },
-  { "Stat": "MMO_BonusXp",         "Points": { "Min": 5, "Max": 15 }, "Weight": 1 }
+  { "Stat": "YourMod_CritChance",      "Points": { "Min": 2, "Max": 6 },  "Weight": 1 },
+  { "Stat": "YourMod_CritMultiplier",  "Points": { "Min": 5, "Max": 15 }, "Weight": 1 },
+  { "Stat": "YourMod_Lifesteal",       "Points": { "Min": 2, "Max": 5 },  "Weight": 1 },
+  { "Stat": "YourMod_CooldownReduction","Points": { "Min": 2, "Max": 6 }, "Weight": 1 },
+  { "Stat": "YourMod_Luck",            "Points": { "Min": 3, "Max": 10 }, "Weight": 1 },
+  { "Stat": "Mana",                    "Points": { "Min": 5, "Max": 15 }, "Weight": 1 }
 ] }`}</code></pre>
 
       <H2 id="picks-and-unique">Picks and Unique</H2>
@@ -94,16 +94,17 @@ export default function EnhancementAndStampPage() {
         <thead><tr><th>Field</th><th>What it does</th></tr></thead>
         <tbody>
           <tr><td><code>Budgets</code></td><td>A list of total-point-budget entries. Each entry is EITHER a flat <code>{'{Points}'}</code> OR a factor-scaled <code>{'{PointsPer, Factors}'}</code> (effective = <code>PointsPer * sum(resolve(f) * f.Weight)</code>) - never both on the same entry. <strong>The EFFECTIVE total budget is the MINIMUM across every authored Budget entry.</strong></td></tr>
-          <tr><td><code>PerStat</code></td><td>A per-stat-id ceiling layered ON TOP of the total budget (<code>{'{"MMO_CritChance": 10}'}</code> caps that one stat at 10 points regardless of the total budget available).</td></tr>
+          <tr><td><code>PerStat</code></td><td>A per-stat-id ceiling layered ON TOP of the total budget (<code>{'{"YourMod_CritChance": 10}'}</code> caps that one stat at 10 points regardless of the total budget available).</td></tr>
           <tr><td><code>Economics</code></td><td><code>{'{RepeatCostMultiplier}'}</code> scales REAGENT cost per prior stamp count on the same item (<code>ceil(baseQuantity * (1 + mult * priorStampCount))</code>) - this affects cost only, never the point budget.</td></tr>
         </tbody>
       </table>
       <p>
         The Anvil&apos;s two <code>Budgets</code> entries compose the flat-plus-scaled pattern directly: a
-        flat 30-point ceiling, AND a Smithing-level-scaled budget (<code>0.5</code> points per level of{' '}
-        <code>MMO_Level_SMITHING</code>). The minimum of the two wins - so at low Smithing level the
-        level-scaled budget is the binding constraint, and past a certain level the flat 30-point ceiling takes
-        over. This is the same either-of-flat-or-scaled shape a factor-based budget always follows: author
+        flat 30-point ceiling, AND a budget scaled off a registered factor (<code>0.5</code> points per unit
+        of whatever <code>yourmod:skill_level</code> resolves to). The minimum of the two wins - so while the
+        factor is low the scaled budget is the binding constraint, and past a certain point the flat 30-point
+        ceiling takes over. This is the same either-of-flat-or-scaled shape a factor-based budget always
+        follows: author
         multiple <code>Budgets</code> entries to express &quot;never above X, but also never above Y that scales
         with something&quot;.
       </p>

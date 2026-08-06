@@ -226,4 +226,61 @@ class StationCustodyTest {
         assertTrue(StationCustody.matchesAnyConversionInput(conversions, "MMO_Iron_Ingot", new String[0]));
         assertFalse(StationCustody.matchesAnyConversionInput(conversions, "MMO_Gold_Ingot", new String[0]));
     }
+
+    @Test
+    void matchesAnyConversionInput_multiInput_acceptsEachMaterialIndependently() {
+        // Decision 73: a multi-input conversion is loaded one material at a time, so acceptance is
+        // ANY-of its inputs, never all-of.
+        StationAsset.Conversion[] conversions = {
+                StationAsset.Conversion.of(
+                        new Ingredient[] {Ingredient.item("Wood_Plank", 2), Ingredient.item("Metal_Nail", 1)},
+                        new Ingredient[] {Ingredient.item("Wood_Crate", 1)},
+                        null, null)
+        };
+        assertTrue(StationCustody.matchesAnyConversionInput(conversions, "Wood_Plank", new String[0]));
+        assertTrue(StationCustody.matchesAnyConversionInput(conversions, "Metal_Nail", new String[0]));
+        assertFalse(StationCustody.matchesAnyConversionInput(conversions, "Stone_Cobble", new String[0]));
+    }
+
+    // ==================== acceptsFamily (Custody.SingleFamily, decision 74) ====================
+
+    @Test
+    void acceptsFamily_disabled_alwaysAllows() {
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
+        claim.add("Wood_Oak_Trunk", 4);
+        assertTrue(StationCustody.acceptsFamily(false, claim, "Wood_Pine_Trunk", new String[] {"Wood_Softwood_Trunk"},
+                families(Map.of("Wood_Oak_Trunk", new String[] {"Wood_Hardwood_Trunk"}))));
+    }
+
+    @Test
+    void acceptsFamily_emptyClaim_allowsAnything() {
+        assertTrue(StationCustody.acceptsFamily(true, null, "Wood_Oak_Trunk", new String[] {"Wood_Hardwood_Trunk"},
+                families(Map.of())));
+        StationCustodyClaim empty = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
+        assertTrue(StationCustody.acceptsFamily(true, empty, "Wood_Oak_Trunk", new String[] {"Wood_Hardwood_Trunk"},
+                families(Map.of())));
+    }
+
+    @Test
+    void acceptsFamily_locksToTheFirstPlacedItemsFamily() {
+        Function<String, String[]> table = families(Map.of(
+                "Wood_Oak_Trunk", new String[] {"Wood_Hardwood_Trunk"},
+                "Wood_Birch_Trunk", new String[] {"Wood_Hardwood_Trunk"},
+                "Wood_Pine_Trunk", new String[] {"Wood_Softwood_Trunk"}));
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
+        claim.add("Wood_Oak_Trunk", 4);
+        assertTrue(StationCustody.acceptsFamily(true, claim, "Wood_Birch_Trunk",
+                new String[] {"Wood_Hardwood_Trunk"}, table), "a sibling of the locked family still fits");
+        assertFalse(StationCustody.acceptsFamily(true, claim, "Wood_Pine_Trunk",
+                new String[] {"Wood_Softwood_Trunk"}, table), "a different family is refused");
+    }
+
+    @Test
+    void acceptsFamily_sameItemIdAlwaysFits_evenWithNoFamilies() {
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "anvil", "enhance", 0, 64, 0);
+        claim.add("Metal_Bar", 1);
+        assertTrue(StationCustody.acceptsFamily(true, claim, "Metal_Bar", new String[0], families(Map.of())));
+        assertFalse(StationCustody.acceptsFamily(true, claim, "Metal_Ingot", new String[0], families(Map.of())),
+                "a family-less claim locks to its own item id rather than admitting everything");
+    }
 }

@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
+import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
-import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**
@@ -94,18 +94,21 @@ public class ExtensionCatalogTest {
         assertEquals(List.of("base1"), stepIds(merged), "an insertion targeting a different action is skipped");
     }
 
-    // ==================== mergeXp / mergeLoot append determinism ====================
+    // ============ mergeContributions / mergeLoot append determinism ============
 
     @Test
-    void mergeXp_appendsInApplyOrder_baseFirst() throws Exception {
-        StationAsset.WorkXp[] base = {StationAsset.WorkXp.of("WOODCUTTING", 5.0)};
-        ExtensionAsset a = ext("a", "{ \"Target\":{\"Station\":\"s\"}, \"Xp\":[ {\"Skill\":\"COOKING\",\"PerCycle\":3} ] }");
-        ExtensionAsset b = ext("b", "{ \"Target\":{\"Station\":\"s\"}, \"Xp\":[ {\"Skill\":\"MINING\",\"PerCycle\":1} ] }");
-        StationAsset.WorkXp[] merged = ExtensionCatalog.mergeXp(base, ExtensionAsset.sortedForApply(List.of(b, a)));
+    void mergeContributions_appendsInApplyOrder_baseFirst() throws Exception {
+        Contribution[] base = {Contribution.of("yourmod:test", "ALPHA", 5.0)};
+        ExtensionAsset a = ext("a", "{ \"Target\":{\"Station\":\"s\"}, \"PerCycleContributions\":"
+                + "[ {\"Channel\":\"yourmod:test\",\"Param\":\"BETA\",\"Amount\":3} ] }");
+        ExtensionAsset b = ext("b", "{ \"Target\":{\"Station\":\"s\"}, \"PerCycleContributions\":"
+                + "[ {\"Channel\":\"yourmod:test\",\"Param\":\"GAMMA\",\"Amount\":1} ] }");
+        Contribution[] merged = ExtensionCatalog.mergeContributions(base,
+                ExtensionAsset.sortedForApply(List.of(b, a)));
         assertEquals(3, merged.length);
-        assertEquals("WOODCUTTING", merged[0].getSkill());
-        assertEquals("COOKING", merged[1].getSkill(), "a-ext before b-ext by id tie-break");
-        assertEquals("MINING", merged[2].getSkill());
+        assertEquals("ALPHA", merged[0].getParam());
+        assertEquals("BETA", merged[1].getParam(), "a-ext before b-ext by id tie-break");
+        assertEquals("GAMMA", merged[2].getParam());
     }
 
     @Test

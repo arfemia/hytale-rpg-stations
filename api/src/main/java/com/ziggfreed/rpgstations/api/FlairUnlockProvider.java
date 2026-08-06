@@ -5,7 +5,7 @@ import java.util.UUID;
 
 import javax.annotation.Nonnull;
 
-/** Answers "which flair ids has this player unlocked" (design section 3.2). */
+/** Answers "which flair ids has this player unlocked". */
 @FunctionalInterface
 public interface FlairUnlockProvider {
 

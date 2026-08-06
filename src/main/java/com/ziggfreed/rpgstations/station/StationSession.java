@@ -15,6 +15,7 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.effect.AppliedEffectTracker;
 import com.ziggfreed.common.entity.performer.StationPerformer;
+import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationAsset;
@@ -27,16 +28,12 @@ import com.ziggfreed.rpgstations.asset.StationStep;
  * {@code StationService.toggle} so a mid-session catalog reload never half-changes a running
  * loop.
  *
- * <p>Ported from the MMO's {@code station.StationSession} (RPG Stations extraction leg 2).
- * Per the design's severance list, this port DROPS the MMO's per-cycle XP-factor-breakdown
- * bookkeeping ({@code xpBaseBySkill}/{@code xpAwardedBySkill}/{@code xpFactorSumBySkill}/
- * {@code accumulateXpFactors}/{@code avgXpFactor}/{@code toolMultSum}/{@code avgToolMult}) -
- * that accounting is MMO-bridge-side state now, built from the fired
- * {@code StationCycleCompletedEvent}s (an api-artifact concern, leg 4/5). This session keeps
- * only what the ENGINE itself needs: identity/anchors, the resolved config snapshot, cadence,
- * cycle count, item tallies (for the future standalone summary HUD, leg 3), and swing/impact
- * scheduling. {@link #sessionId} is a new field the loot engine (leg 3) and the api events
- * (leg 4) will key bookkeeping/dispatch off of.
+ * <p>The session deliberately holds NO per-cycle progression accounting of its own: a listening
+ * mod builds whatever running totals it wants from the fired {@code StationCycleCompletedEvent}s.
+ * This session keeps only what the ENGINE itself needs: identity/anchors, the resolved config
+ * snapshot, cadence, cycle count, item tallies (for the standalone summary HUD), and swing/impact
+ * scheduling. {@link #sessionId} is what the loot engine and the api events key their
+ * bookkeeping/dispatch off of.
  *
  * <p>Mutable fields are written on the world thread only (start + the frame drain); the
  * {@link #stopped} flag is the one cross-thread idempotency gate.
@@ -185,7 +182,7 @@ final class StationSession {
     // idleMode is a RUNTIME flag flipped by runCycle as materials come and go mid-session.
     boolean idleEnabled;
     long idleCycleMs;
-    double idleXpFraction;
+    double idleFraction;
     boolean idleMode;
 
     // Cadence.
@@ -338,6 +335,15 @@ final class StationSession {
     final Map<String, Integer> consumedItems = new LinkedHashMap<>();
     final Map<String, Integer> producedItems = new LinkedHashMap<>();
     final Map<String, Integer> luckItems = new LinkedHashMap<>();
+
+    /**
+     * One-shot {@code Roll.Grants.Contributions} posts that landed during the CURRENT cycle,
+     * buffered here between the cycle's Roll phase and the cycle-completed event that forwards them
+     * on {@code StationCycleCompletedEvent.oneShotContributions}. Drained (and cleared) by
+     * {@code StationService#onCycleCompleted}, so a suspended program accumulates across its
+     * iterations and delivers everything with the completing cycle. Session-scoped, never persisted.
+     */
+    final List<StationContribution> pendingOneShotContributions = new ArrayList<>();
 
     /**
      * Committed enhancement stamps this session (design section 9.5, phase 2 round-7 D-6): appended

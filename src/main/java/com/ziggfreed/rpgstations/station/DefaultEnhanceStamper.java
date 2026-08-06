@@ -16,10 +16,10 @@ import com.ziggfreed.rpgstations.api.StatRoll;
 
 /**
  * RpgStations' own BUILT-IN DEFAULT {@link EnhanceStamper} (design section 3.9, gate decision 19
- * / 37): registered at {@code RpgStationsPlugin#setup()} so a standalone (no-MMO) server's anvil
- * Stamp step stamps REAL native stat channels with zero progression-mod code. Writes the common
+ * / 37): registered at {@code RpgStationsPlugin#setup()} so an anvil's Stamp step stamps REAL
+ * native stat channels on a server running this jar alone. Writes the common
  * {@code ziggfreed-common} {@link StackStats} record directly - the SAME record any richer
- * stamper (the MMO's own included) reads/writes, so cross-mod cap/budget accounting holds no
+ * registered stamper reads/writes, so cross-mod cap/budget accounting holds no
  * matter which server stamped a given stack first (decision 21). A later {@code
  * EnhanceStamperRegistry#register} call REPLACES this one wholesale (last-registration-wins,
  * {@code EnhanceStamperRegistryImpl}'s own discipline) - this class is only ever active on a
@@ -42,8 +42,8 @@ import com.ziggfreed.rpgstations.api.StatRoll;
  * <p><b>Deliberately reports NO {@link com.ziggfreed.rpgstations.api.EnhanceLine}s</b> - {@link
  * #apply} always returns an empty line list ({@link StampResult#of}). Composing a per-stat display
  * line needs a localized, styled label, and this default has no "richer policy" layer (display
- * refresh, per-stat wording/color) to draw one from - the design doc's own words for what stays
- * MMO-side. The session summary's engine-owned Durability row still reports unconditionally
+ * refresh, per-stat wording/color) to draw one from - that layer belongs to a registered stamper.
+ * The session summary's engine-owned Durability row still reports unconditionally
  * (RpgStations-native, not stamper-sourced), so a bare anvil visibly did SOMETHING even with only
  * this default installed; per-stat labeled rows are the richer stamper's job. This mirrors the
  * documented "NO display refresh" ruling for the item's tooltip (design 3.9), extended here to the

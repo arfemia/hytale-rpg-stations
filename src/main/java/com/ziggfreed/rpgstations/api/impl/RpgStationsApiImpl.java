@@ -5,12 +5,14 @@ import java.util.Collection;
 
 import javax.annotation.Nonnull;
 
+import com.ziggfreed.rpgstations.api.ContributionChannelRegistry;
 import com.ziggfreed.rpgstations.api.EnhanceStamperRegistry;
 import com.ziggfreed.rpgstations.api.FactorRegistry;
 import com.ziggfreed.rpgstations.api.FlairUnlockRegistry;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.StationView;
 import com.ziggfreed.rpgstations.api.SummaryEnricherRegistry;
+import com.ziggfreed.rpgstations.api.ValidationHookRegistry;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.station.StationCatalog;
 
@@ -24,6 +26,9 @@ public final class RpgStationsApiImpl implements RpgStationsApi {
 
     private static final RpgStationsApiImpl INSTANCE = new RpgStationsApiImpl();
 
+    /** Bumped additively per {@code api/CLAUDE.md}'s growth policy; never on a signature change. */
+    private static final int API_VERSION = 2;
+
     private RpgStationsApiImpl() {
     }
 
@@ -33,9 +38,26 @@ public final class RpgStationsApiImpl implements RpgStationsApi {
     }
 
     @Override
+    public int apiVersion() {
+        return API_VERSION;
+    }
+
+    @Override
     @Nonnull
     public FactorRegistry factors() {
         return FactorRegistryImpl.getInstance();
+    }
+
+    @Override
+    @Nonnull
+    public ContributionChannelRegistry channels() {
+        return ContributionChannelRegistryImpl.getInstance();
+    }
+
+    @Override
+    @Nonnull
+    public ValidationHookRegistry validationHooks() {
+        return ValidationHookRegistryImpl.getInstance();
     }
 
     @Override

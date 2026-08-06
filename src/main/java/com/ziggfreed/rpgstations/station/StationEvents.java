@@ -12,7 +12,7 @@ import com.hypixel.hytale.event.IEventDispatcher;
 import com.hypixel.hytale.server.core.HytaleServer;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
-import com.ziggfreed.rpgstations.api.XpAsk;
+import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.api.event.StationCycleCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationEnhanceCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationSessionCompletedEvent;
@@ -53,13 +53,14 @@ final class StationEvents {
     static void fireCycleCompleted(@Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull PlayerRef playerRef,
             @Nonnull UUID playerId, @Nonnull UUID sessionId, @Nonnull String stationId, @Nonnull String actionId,
-            int cycleIndex, boolean idle, @Nonnull List<XpAsk> xpAsks, double toolMultiplier) {
+            int cycleIndex, boolean idle, @Nonnull List<StationContribution> contributions,
+            @Nonnull List<StationContribution> oneShotContributions, double toolMultiplier) {
         try {
             IEventDispatcher<StationCycleCompletedEvent, StationCycleCompletedEvent> d =
                     HytaleServer.get().getEventBus().dispatchFor(StationCycleCompletedEvent.class);
             if (d.hasListener()) {
                 d.dispatch(new StationCycleCompletedEvent(store, commandBuffer, playerRef, playerId, sessionId,
-                        stationId, actionId, cycleIndex, idle, xpAsks, toolMultiplier));
+                        stationId, actionId, cycleIndex, idle, contributions, oneShotContributions, toolMultiplier));
             }
         } catch (Throwable t) {
             log("StationCycleCompleted", t);

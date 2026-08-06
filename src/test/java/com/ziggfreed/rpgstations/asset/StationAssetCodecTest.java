@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
-import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 
 /**
@@ -26,7 +25,8 @@ import com.hypixel.hytale.codec.util.RawJsonReader;
 public class StationAssetCodecTest {
 
     private static StationAsset decodeAsset(String body) throws Exception {
-        return StationAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body), new ExtraInfo());
+        return StationAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body),
+                new AssetExtraInfo<>(new AssetExtraInfo.Data(StationAsset.class, "fixture", null)));
     }
 
     private static StationAsset decodeWithParent(String body, StationAsset parent, String key, String parentKey)
@@ -60,7 +60,8 @@ public class StationAssetCodecTest {
         StationAsset a = decodeAsset("{ \"Identity\": { \"NameKey\": \"rpgstations.station.sawmill.name\","
                 + " \"DescKey\": \"rpgstations.station.sawmill.desc\", \"Icon\": \"Wood_Hardwood_Planks\" },"
                 + " \"Work\": { \"CycleMs\": 4665, \"MaxDurationMs\": 600000,"
-                + "   \"Xp\": [ { \"Skill\": \"WOODCUTTING\", \"PerCycle\": 8.0 } ] },"
+                + "   \"PerCycleContributions\": [ { \"Channel\": \"yourmod:test\", \"Param\": \"ALPHA\","
+                + "     \"Amount\": 8.0 } ] },"
                 + " \"Recipe\": { \"FromCrafting\": { \"Categories\": [\"WoodPlanks\"] } },"
                 + " \"Hold\": { \"EffectId\": \"RPG_Station_Hold\", \"Mount\": { \"Surface\": \"Block\" } },"
                 + " \"Tool\": { \"Gather\": { \"GatherType\": \"Woods\", \"MinPower\": 0.1 } },"
@@ -70,7 +71,7 @@ public class StationAssetCodecTest {
         assertEquals("rpgstations.station.sawmill.name", a.getIdentity().getNameKey());
         assertEquals("Wood_Hardwood_Planks", a.getIdentity().getIcon());
         assertEquals(4665L, a.getWork().getCycleMs());
-        assertEquals("WOODCUTTING", a.getWork().getXp()[0].getSkill());
+        assertEquals("yourmod:test", a.getWork().getPerCycleContributions()[0].getChannel());
         assertNull(a.getRecipe().getConversions());
         assertEquals("WoodPlanks", a.getRecipe().getFromCrafting().getCategories()[0]);
         assertEquals("RPG_Station_Hold", a.getHold().getEffectId());
@@ -146,9 +147,10 @@ public class StationAssetCodecTest {
         String parentJson = "{ \"Identity\": { \"NameKey\": \"rpgstations.station.parent.name\","
                 + " \"DescKey\": \"rpgstations.station.parent.desc\", \"Icon\": \"Parent_Icon\" },"
                 + " \"Work\": { \"CycleMs\": 5000, \"MaxDurationMs\": 600000,"
-                + "   \"Xp\": [ { \"Skill\": \"WOODCUTTING\", \"PerCycle\": 8.0 } ] },"
-                + " \"Recipe\": { \"Conversions\": [ { \"Input\": { \"ResourceTypeId\": \"Wood_Hardwood_Trunk\", \"Quantity\": 1 },"
-                + "   \"Output\": { \"ItemId\": \"Wood_Hardwood_Planks\", \"Quantity\": 2 } } ] },"
+                + "   \"PerCycleContributions\": [ { \"Channel\": \"yourmod:test\", \"Param\": \"ALPHA\","
+                + "     \"Amount\": 8.0 } ] },"
+                + " \"Recipe\": { \"Conversions\": [ { \"Input\": [{ \"ResourceTypeId\": \"Wood_Hardwood_Trunk\", \"Quantity\": 1 }],"
+                + "   \"Output\": [{ \"ItemId\": \"Wood_Hardwood_Planks\", \"Quantity\": 2 }] } ] },"
                 + " \"Animation\": { \"EmoteId\": \"RPG_Emote_Saw\" } }";
         StationAsset parent = decodeWithParent(parentJson, null, "parent_station", null);
         assertEquals(5000L, parent.getWork().getCycleMs());
@@ -162,12 +164,13 @@ public class StationAssetCodecTest {
         assertEquals("rpgstations.station.parent.name", child.getIdentity().getNameKey());
         assertEquals("rpgstations.station.parent.desc", child.getIdentity().getDescKey());
         assertEquals(600000L, child.getWork().getMaxDurationMs());
-        assertNotNull(child.getWork().getXp(), "Work.Xp survives a CycleMs-only override");
-        assertEquals("WOODCUTTING", child.getWork().getXp()[0].getSkill());
+        assertNotNull(child.getWork().getPerCycleContributions(),
+                "Work.PerCycleContributions survives a CycleMs-only override");
+        assertEquals("ALPHA", child.getWork().getPerCycleContributions()[0].getParam());
 
         assertNotNull(child.getRecipe(), "Recipe inherits wholesale on omit");
         assertEquals("Wood_Hardwood_Trunk",
-                child.getRecipe().getConversions()[0].getInput().getResourceTypeId());
+                child.getRecipe().getConversions()[0].primaryInput().getResourceTypeId());
         assertNotNull(child.getAnimation());
         assertEquals("RPG_Emote_Saw", child.getAnimation().getEmoteId());
     }
@@ -231,7 +234,7 @@ public class StationAssetCodecTest {
         assertNull(a.getLoot());
     }
 
-    // ==================== Hold.Mount / Tool.XpScale / Work.Idle (sibling-leaf inherit) ====================
+    // ============ Hold.Mount / Tool.PowerScale / Work.Idle (sibling-leaf inherit) ============
 
     @Test
     void holdMountBlock_siblingLeafInherit() throws Exception {
@@ -299,24 +302,24 @@ public class StationAssetCodecTest {
     }
 
     @Test
-    void toolXpScale_siblingLeafInherit() throws Exception {
-        StationAsset parent = decodeWithParent("{ \"Tool\": { \"XpScale\": {"
+    void toolPowerScale_siblingLeafInherit() throws Exception {
+        StationAsset parent = decodeWithParent("{ \"Tool\": { \"PowerScale\": {"
                 + " \"ReferencePower\": 0.2, \"MinMult\": 0.75, \"MaxMult\": 1.5 } } }",
-                null, "xpscale_parent", null);
-        StationAsset child = decodeWithParent("{ \"Tool\": { \"XpScale\": { \"MaxMult\": 2.0 } } }",
-                parent, "xpscale_child", "xpscale_parent");
-        assertEquals(2.0, child.getTool().getXpScale().getMaxMult(), "own leaf wins");
-        assertEquals(0.2, child.getTool().getXpScale().getReferencePower(), "sibling leaf inherits");
+                null, "powerscale_parent", null);
+        StationAsset child = decodeWithParent("{ \"Tool\": { \"PowerScale\": { \"MaxMult\": 2.0 } } }",
+                parent, "powerscale_child", "powerscale_parent");
+        assertEquals(2.0, child.getTool().getPowerScale().getMaxMult(), "own leaf wins");
+        assertEquals(0.2, child.getTool().getPowerScale().getReferencePower(), "sibling leaf inherits");
     }
 
     @Test
     void workIdle_siblingLeafInherit() throws Exception {
         StationAsset parent = decodeWithParent("{ \"Work\": { \"Idle\": {"
-                + " \"Enabled\": true, \"CycleMs\": 15000, \"XpFraction\": 0.1 } } }",
+                + " \"Enabled\": true, \"CycleMs\": 15000, \"Fraction\": 0.1 } } }",
                 null, "idle_parent", null);
-        StationAsset child = decodeWithParent("{ \"Work\": { \"Idle\": { \"XpFraction\": 0.2 } } }",
+        StationAsset child = decodeWithParent("{ \"Work\": { \"Idle\": { \"Fraction\": 0.2 } } }",
                 parent, "idle_child", "idle_parent");
-        assertEquals(0.2, child.getWork().getIdle().getXpFraction(), "own leaf wins");
+        assertEquals(0.2, child.getWork().getIdle().getFraction(), "own leaf wins");
         assertEquals(Boolean.TRUE, child.getWork().getIdle().getEnabled(), "sibling leaf inherits");
         assertEquals(15000L, child.getWork().getIdle().getCycleMs(), "sibling leaf inherits");
     }
@@ -344,11 +347,12 @@ public class StationAssetCodecTest {
                 + " \"Actions\": { \"convert\": {"
                 + "   \"Input\": { \"ResourceTypeId\": \"Metal_Bars\" },"
                 + "   \"Work\": { \"CycleMs\": 3800,"
-                + "     \"Xp\": [ { \"Skill\": \"SMITHING\", \"PerCycle\": 6.0 } ] },"
+                + "     \"PerCycleContributions\": [ { \"Channel\": \"yourmod:test\","
+                + "       \"Param\": \"SMITHING\", \"Amount\": 6.0 } ] },"
                 + "   \"Loot\": { \"Lootables\": [\"anvil_sparks\"] } },"
                 + " \"enhance\": {"
                 + "   \"Input\": { \"Function\": \"Weapon\" },"
-                + "   \"Work\": { \"Repeat\": false },"
+                + "   \"Work\": { \"Looping\": false },"
                 + "   \"Steps\": [ { \"Id\": \"strike1\", \"Duration\": { \"Ms\": 650 },"
                 + "     \"Puppet\": { \"Clip\": \"MMO_Emote_Hammer\" } } ] } } }");
         assertNotNull(a.getActions());
@@ -359,13 +363,13 @@ public class StationAssetCodecTest {
         ActionDef convert = a.getActions().get("convert");
         assertEquals("Metal_Bars", convert.getInput().getResourceTypeId());
         assertEquals(3800L, convert.getWork().getCycleMs());
-        assertEquals("SMITHING", convert.getWork().getXp()[0].getSkill());
+        assertEquals("SMITHING", convert.getWork().getPerCycleContributions()[0].getParam());
         assertEquals("anvil_sparks", convert.getLoot().getLootables()[0]);
         assertNull(convert.getSteps(), "convert authors no Steps - the implicit program builds from Work/Recipe/Loot");
 
         ActionDef enhance = a.getActions().get("enhance");
         assertEquals("Weapon", enhance.getInput().getFunction());
-        assertEquals(Boolean.FALSE, enhance.getWork().getRepeat());
+        assertEquals(Boolean.FALSE, enhance.getWork().getLooping());
         assertEquals(1, enhance.getSteps().length);
         StationStep strike = enhance.getSteps()[0];
         assertEquals("strike1", strike.getId());
@@ -422,8 +426,8 @@ public class StationAssetCodecTest {
     void stationStep_decodesOrthogonalPhases() throws Exception {
         // Scope-2 phase model: composable nullable phase groups, no Type discriminator, no Wait.
         StationAsset a = decodeAsset("{ \"Actions\": { \"ritual\": { \"Steps\": ["
-                + " { \"Id\": \"c\", \"Consume\": { \"ItemId\": \"MMO_Sharpened_Bar\", \"Quantity\": 2, \"From\": \"Custody\" } },"
-                + " { \"Id\": \"p\", \"Produce\": { \"ItemId\": \"MMO_Enhanced_Sword\", \"Quantity\": 1 } },"
+                + " { \"Id\": \"c\", \"Consume\": { \"Items\": [{ \"ItemId\": \"MMO_Sharpened_Bar\", \"Quantity\": 2 }], \"From\": \"Custody\" } },"
+                + " { \"Id\": \"p\", \"Produce\": { \"Items\": [{ \"ItemId\": \"MMO_Enhanced_Sword\", \"Quantity\": 1 }] } },"
                 + " { \"Id\": \"beat\", \"Duration\": { \"Ms\": 1200 },"
                 + "   \"OnConditionFail\": { \"Result\": \"Skip\", \"Goto\": \"p\" },"
                 + "   \"Conditions\": [ { \"Factor\": \"stat\", \"Param\": \"MMO_Level_SMITHING\", \"Min\": 10 } ] },"
@@ -432,11 +436,11 @@ public class StationAssetCodecTest {
         StationStep[] steps = a.getActions().get("ritual").getSteps();
         assertEquals(5, steps.length);
 
-        assertEquals("MMO_Sharpened_Bar", steps[0].getConsume().getItemId());
-        assertEquals(2, steps[0].getConsume().getQuantity());
+        assertEquals("MMO_Sharpened_Bar", steps[0].getConsume().getItems()[0].getItemId());
+        assertEquals(2, steps[0].getConsume().getItems()[0].effectiveQuantity());
         assertEquals(StationStep.Consume.FROM_CUSTODY, steps[0].getConsume().effectiveFrom());
 
-        assertEquals("MMO_Enhanced_Sword", steps[1].getProduce().getItemId());
+        assertEquals("MMO_Enhanced_Sword", steps[1].getProduce().getItems()[0].getItemId());
         assertEquals(StationStep.Produce.TO_INVENTORY, steps[1].getProduce().effectiveTo(), "To defaults to Inventory");
 
         assertEquals(1200L, steps[2].getDuration().getMs());
@@ -517,10 +521,10 @@ public class StationAssetCodecTest {
     }
 
     @Test
-    void puppetHide_effectRoute_decodesEffectId() {
-        Puppet.Hide hide = Puppet.Hide.of("Effect", "Portal_Teleport");
+    void puppetHide_effectRoute_decodesEffectRef() {
+        Puppet.Hide hide = Puppet.Hide.of("Effect", EffectRef.of("Portal_Teleport"));
         assertEquals(Puppet.HIDE_ROUTE_EFFECT, hide.effectiveRoute());
-        assertEquals("Portal_Teleport", hide.getEffectId());
+        assertEquals("Portal_Teleport", hide.getEffect().getId());
     }
 
     @Test
@@ -630,12 +634,12 @@ public class StationAssetCodecTest {
     @Test
     void puppetHide_siblingLeafInherit() throws Exception {
         StationAsset parent = decodeWithParent(
-                "{ \"Puppet\": { \"Hide\": { \"Route\": \"Effect\", \"EffectId\": \"Portal_Teleport\" } } }",
+                "{ \"Puppet\": { \"Hide\": { \"Route\": \"Effect\", \"Effect\": { \"Id\": \"Portal_Teleport\" } } } }",
                 null, "puppethide_parent", null);
         StationAsset child = decodeWithParent("{ \"Puppet\": { \"Hide\": { \"Route\": \"Scale\" } } }",
                 parent, "puppethide_child", "puppethide_parent");
         assertEquals(Puppet.HIDE_ROUTE_SCALE, child.getPuppet().getHide().effectiveRoute(), "own leaf wins");
-        assertEquals("Portal_Teleport", child.getPuppet().getHide().getEffectId(), "sibling leaf inherits");
+        assertEquals("Portal_Teleport", child.getPuppet().getHide().getEffect().getId(), "sibling leaf inherits");
     }
 
     // ==================== Actions.Puppet (whole-group override) ====================
@@ -705,20 +709,93 @@ public class StationAssetCodecTest {
     }
 
     @Test
+    void conversion_multiInputMultiOutput_decodes() throws Exception {
+        // Decision 73: Input/Output mirror native CraftingRecipe's Ingredient ARRAYS.
+        StationAsset a = decodeAsset("{ \"Recipe\": { \"Conversions\": [ {"
+                + " \"Input\": [ { \"ItemId\": \"Wood_Plank\", \"Quantity\": 2 },"
+                + "              { \"ItemId\": \"Metal_Nail\", \"Quantity\": 1 } ],"
+                + " \"Output\": [ { \"ItemId\": \"Wood_Crate\", \"Quantity\": 1 },"
+                + "               { \"ItemId\": \"Wood_Scrap\", \"Quantity\": 3 } ] } ] } }");
+        StationAsset.Conversion c = a.getRecipe().getConversions()[0];
+        assertEquals(2, c.getInput().length);
+        assertEquals("Metal_Nail", c.getInput()[1].getItemId());
+        assertEquals(2, c.getOutput().length);
+        assertEquals("Wood_Scrap", c.getOutput()[1].getItemId());
+        assertEquals("Wood_Plank", c.primaryInput().getItemId(), "primaryInput is the first entry");
+        assertEquals("Wood_Crate", c.primaryOutput().getItemId(), "primaryOutput is the first entry");
+        assertTrue(c.isComplete());
+    }
+
+    @Test
+    void presentationParticles_decodeAsAnArrayOfTunableBursts() throws Exception {
+        StationAsset a = decodeAsset("{ \"Presentation\": { \"Particles\": ["
+                + " { \"SystemId\": \"Block_Hit_Wood\" },"
+                + " { \"SystemId\": \"Smoke_Black\", \"Scale\": 2.5, \"DurationSeconds\": 1.5,"
+                + "   \"RotationOffset\": { \"Yaw\": 90.0 }, \"PositionOffset\": { \"Y\": 0.5 } } ] } }");
+        Presentation.ModelParticle[] bursts = a.getPresentation().getParticles();
+        assertEquals(2, bursts.length);
+        assertEquals("Block_Hit_Wood", bursts[0].getSystemId());
+        assertNull(bursts[0].getScale(), "an unauthored Scale stays null on the model");
+        assertEquals(Presentation.ModelParticle.DEFAULT_SCALE, bursts[0].effectiveScale());
+        assertEquals(Presentation.ModelParticle.DEFAULT_DURATION_SECONDS, bursts[0].effectiveDurationSeconds());
+        assertEquals(2.5, bursts[1].effectiveScale());
+        assertEquals(1.5f, bursts[1].effectiveDurationSeconds());
+        assertEquals(90.0, bursts[1].getRotationOffset().getYaw());
+        assertEquals(0.5, bursts[1].getPositionOffset().getY());
+    }
+
+    @Test
+    void presentationCameraEffect_decodes() throws Exception {
+        StationAsset a = decodeAsset("{ \"Presentation\": { \"CameraEffect\": \"Camera_Shake_Heavy\" } }");
+        assertEquals("Camera_Shake_Heavy", a.getPresentation().getCameraEffect());
+    }
+
+    @Test
+    void toolMinDurabilityPercent_decodes() throws Exception {
+        StationAsset a = decodeAsset("{ \"Tool\": { \"MinDurabilityPercent\": 25.0 } }");
+        assertEquals(25.0, a.getTool().getMinDurabilityPercent());
+        assertTrue(a.getTool().hasDurabilityGate());
+        assertFalse(decodeAsset("{ \"Tool\": {} }").getTool().hasDurabilityGate(), "absent = no wear gate");
+    }
+
+    @Test
+    void custodySingleFamily_decodes() throws Exception {
+        StationAsset a = decodeAsset("{ \"Custody\": { \"SingleFamily\": true } }");
+        assertTrue(a.getCustody().effectiveSingleFamily());
+        assertFalse(decodeAsset("{ \"Custody\": {} }").getCustody().effectiveSingleFamily(), "defaults to false");
+    }
+
+    @Test
+    void rollGrantsContributions_decodes() throws Exception {
+        StationAsset a = decodeAsset("{ \"Loot\": { \"Rolls\": [ { \"Trigger\": \"Cycle\","
+                + " \"Grants\": { \"Contributions\": [ { \"Channel\": \"yourmod:test\","
+                + "   \"Param\": \"ALPHA\", \"Amount\": 12.5 } ] } } ] } }");
+        Contribution[] posts = a.getLoot().getRolls()[0].getGrants().getContributions();
+        assertEquals(1, posts.length);
+        assertEquals("yourmod:test", posts[0].getChannel());
+        assertEquals("ALPHA", posts[0].getParam());
+        assertEquals(12.5, posts[0].getAmount());
+        assertTrue(posts[0].isPostable());
+        assertFalse(Contribution.of("yourmod:test", "ALPHA", 0.0).isPostable(),
+                "a zero amount posts nothing at the one-shot grants site");
+        assertFalse(Contribution.of("  ", "ALPHA", 5.0).isPostable(), "a blank channel posts nothing");
+    }
+
+    @Test
     void conversion_durationMs_decodes() throws Exception {
         StationAsset a = decodeAsset("{ \"Recipe\": { \"Conversions\": [ {"
-                + " \"Input\": { \"ResourceTypeId\": \"Wood_Hardwood_Trunk\", \"Quantity\": 1 },"
-                + " \"Output\": { \"ItemId\": \"Wood_Hardwood_Planks\", \"Quantity\": 2 },"
+                + " \"Input\": [{ \"ResourceTypeId\": \"Wood_Hardwood_Trunk\", \"Quantity\": 1 }],"
+                + " \"Output\": [{ \"ItemId\": \"Wood_Hardwood_Planks\", \"Quantity\": 2 }],"
                 + " \"DurationMs\": 4200 } ] } }");
         StationAsset.Conversion c = a.getRecipe().getConversions()[0];
-        assertEquals("Wood_Hardwood_Planks", c.getOutput().getItemId());
+        assertEquals("Wood_Hardwood_Planks", c.primaryOutput().getItemId());
         assertEquals(4200L, c.getDurationMs());
     }
 
     @Test
     void conversion_durationMs_omitted_decodesNull() throws Exception {
         StationAsset a = decodeAsset("{ \"Recipe\": { \"Conversions\": [ {"
-                + " \"Input\": { \"ItemId\": \"Coal\" }, \"Output\": { \"ItemId\": \"Coke\" } } ] } }");
+                + " \"Input\": [{ \"ItemId\": \"Coal\" }], \"Output\": [{ \"ItemId\": \"Coke\" }] } ] } }");
         assertNull(a.getRecipe().getConversions()[0].getDurationMs());
     }
 

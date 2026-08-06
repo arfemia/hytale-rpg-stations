@@ -3,8 +3,8 @@
 Router for `station/`, THE big package in this mod: the diegetic work-loop session machine. Press
 F on a station block -> camera pulls third-person (or the player mounts the block as a seat, or a
 puppet spawns and performs the work), the work animation plays per swing, items convert per cycle
-or per an authored step program, loot rolls through `loot/`, and skill-XP declarations forward as
-`XpAsk`s any listening progression mod interprets. Design authority:
+or per an authored step program, loot rolls through `loot/`, and authored contributions forward as
+`StationContribution`s whichever mod owns the named channel interprets. Design authority:
 `../../../../../../.claude/research/raw/rpg-stations-scope2-unified-design-2026-07-23.md`
 (sections 2-3, decisions 33-41 in `../../../../../../.claude/research/rpg-stations-extraction-design.md`),
 superseding the phase-1/phase-2 design for everything the scope-2 redesign touches.
@@ -41,10 +41,12 @@ the WHOLE set executes:
   folds into [`StationCatalog`](StationCatalog.java). Ids are lowercase (canonicalized at
   decode). This jar ships its OWN default Sawmill (`Server/RpgStations/Stations/Sawmill.json`,
   standalone-playable with the built-in `rpgstations:` factors + `SawmillFinds` lootable); the
-  `skill-stations-pack` adds its own luck-tier lootable plus an MMO-luck-scaled bonus-copy roll as
-  an ADDITIVE `Extensions/SawmillProgression.json` (below) rather than a full-file override (it does
-  NOT re-author the jar's Woodcutting/Crafting Xp - the jar base is the single Xp authority; an
-  extension appends a genuinely-new skill, never re-adds one the base already grants, A8 review M1)
+  sibling stations pack adds its own luck-tier lootable plus a luck-scaled bonus-copy roll as
+  an ADDITIVE `Extensions/*.json` (below) rather than a full-file override. **The jar Sawmill
+  declares NO `Work.PerCycleContributions` at all** - jar-layer content is progression-free by
+  design, so a pack OWNS the sawmill's contributions outright and there is no base entry for an
+  extension to collide with. `Tool.PowerScale` stays authored on it with zero contributions
+  behind it, so a pack that layers contributions on inherits a tuned tool ladder for free
   - see `../../../../../../CONTENT_PACKS.md`'s Station authoring section for the authoring guide
   (brief reference only; do not duplicate it here). **The jar Sawmill owns the PRESENTATION defaults
   too** (`Puppet` + `Custody.Display`, the maintainer's in-game-tuned values, plus `Work.CycleMs`
@@ -157,22 +159,31 @@ shipped codecs). **Call-site status: WIRED** - the 2-arg live `ActionResolver.re
 overlays after the pure resolution (`applyExtensionOverlays`: the `Ref` `ActionAsset` id first, then
 the inline map key when it differs, then the station id - most-specific-wins per leaf;
 identity-preserving, so the zero-extension path returns the pure result untouched). The 3-arg pure
-core stays extension-free for unit tests. Unlike `Loot`/`Xp` (applied at `StationService`'s own read
+core stays extension-free for unit tests. Unlike `Loot`/`PerCycleContributions` (applied at `StationService`'s own read
 sites), `Puppet`/`Custody` overlay INSIDE the resolver choke point, so every reader
 (`StationService`, `StationStepHandlers`, `selectActionForBlockState`'s restart recovery) sees the
 same effective groups with no per-site wiring.
 
-## Held-tool gate (unchanged by scope-2)
+## Held-tool gate (identity routes unchanged; a separate WEAR gate this wave)
 
 `StationAsset.Tool`, checked at start AND per heartbeat -> `TOOL_CHANGED` stop
 (`heldToolMatches`): the player must HOLD a matching tool. Three NATIVE routes, match = ANY
-(null/no-live-route group = ungated): `Tags` = the native item-tag object map intersected
-case-insensitively with the held item's raw tags; `Gather` = the FUNCTIONAL test over the held
-item's `ItemToolSpec.getGatherType()/getPower()`; `Ids` = the FALLBACK for modded items, exact id
+(null/no-live-route group = ungated): `Tags` = the shared `asset.TagMatch` item-tag object map
+intersected case-insensitively with the held item's raw tags; `Gather` = the FUNCTIONAL test over
+the held item's `ItemToolSpec.getGatherType()/getPower()`; `Ids` = the FALLBACK for modded items, exact id
 OR case-insensitive underscore-segment match. Diegetic AND load-bearing for client stability: the
 work emote NEVER sets `HideItemInHand` (correlated with a client `NullReferenceException` in
 early smoke testing). Cycle consume prefers BACKPACK storage over the combined view for the same
 reason.
+
+**`Tool.MinDurabilityPercent` is a SEPARATE, orthogonal WEAR gate** (schema-review wave), not a
+fourth identity route: which tool and how worn it may be are two independent questions, so it
+composes with whichever routes are authored instead of joining their ANY-of match.
+`StationService#toggle` checks it at ENGAGE ONLY, right after `heldToolMatches`, denying with
+`ui.station.tool_worn`; the PER-HEARTBEAT re-check deliberately stays about tool IDENTITY, so a
+session already running still ends at breakage (`TOOL_BROKEN`) rather than being cut short the
+moment wear crosses the threshold. `hasDurabilityGate()` (non-null and `> 0`) is the one
+is-it-active predicate; the live read is `resolveHeldToolDurabilityPercent`.
 
 ## THE `ItemToolSpec` construction trap ([`StationToolScaling`](StationToolScaling.java))
 
@@ -184,25 +195,33 @@ a new pure-tested helper that reads tool data, follow this pattern - do not cons
 `ItemToolSpec` (or any other `AssetBuilderCodec`-backed engine type) in code that must run in a
 unit JVM.
 
-## Tool-power XP scaling (unchanged)
+## Tool-power contribution scaling
 
-`StationAsset.Tool.XpScale`: `multiplier()` = `clamp((heldPower/ReferencePower)^Exponent,
+`StationAsset.Tool.PowerScale`: `multiplier()` = `clamp((heldPower/ReferencePower)^Exponent,
 MinMult, MaxMult)` (defaults `Exponent 1.0`/`MinMult 0.5`/`MaxMult 2.0`), read fresh every cycle
 off the currently-held item, neutral 1.0 for a null/inactive scale or a held tool with no
-matching spec. Forwards on `StationCycleCompletedEvent.toolMultiplier`.
+matching spec. Forwards on `StationCycleCompletedEvent.toolMultiplier`, which applies to
+`contributions()` ONLY - never `oneShotContributions()`.
 
-## Recipe ingredients (now `asset.Ingredient`-shaped)
+## Recipe ingredients (`asset.Ingredient` ARRAYS, the native CraftingRecipe shape)
 
-`Conversion.Input`/`Output` are `asset.Ingredient` (`../asset/CLAUDE.md`) - exactly one of
-`ItemId`/`ResourceTypeId` on Input, `ItemId` only on Output; `ResourceTypeId` is a native
-`Item.ResourceTypes` FAMILY (e.g. `Wood_Hardwood_Trunk` = any hardwood log). `ItemResourceType`
-exposes its id as a PUBLIC FIELD `.id` (no `getId()` - a protocol class quirk).
+`Conversion.Input`/`Output` are `asset.Ingredient[]` (`../asset/CLAUDE.md`) - exactly one of
+`ItemId`/`ResourceTypeId` per Input entry, `ItemId` only on an Output entry; `ResourceTypeId` is a
+native `Item.ResourceTypes` FAMILY (e.g. `Wood_Hardwood_Trunk` = any hardwood log).
+`ItemResourceType` exposes its id as a PUBLIC FIELD `.id` (no `getId()` - a protocol class quirk).
+A conversion is ALL-OR-NOTHING per cycle: `firstRunnableConversion`/`firstRunnableConversionFromCustody`
+require EVERY input available and room for EVERY output before a cycle starts, and the chosen
+conversion's whole arrays drive the implicit program's one atomic Consume/Produce step pair
+(`ConversionCheck` carries them; `Conversion#primaryInput`/`#primaryOutput` are the display/matching
+convenience the picker preview, custody acceptance, and validator labels speak in, never the consume
+path). `Roll.Grants.BonusOutputCopies` duplicates the PRIMARY output only.
 [`StationRecipeDeriver`](StationRecipeDeriver.java)'s `Recipe.FromCrafting` derives one
 `Conversion` per LIVE `Item` whose native `Recipe.BenchRequirement[].Categories` intersects the
-authored `Categories` and whose native recipe has exactly one input, zero hardcoding (the shipped
-Sawmill is just `{"FromCrafting":{"Categories":["WoodPlanks"]}}`). The PURE core
-(`resolve`/`deriveFromCrafting`) takes injected `CraftingCandidate`s, unit-tested without a live
-item map.
+authored `Categories`, carrying that recipe's WHOLE native `Input` array (a multi-material recipe
+derives rather than being skipped; only a recipe with no inputs at all, or one whose input names
+neither an item nor a resource type, is skipped), zero hardcoding (the shipped Sawmill is just
+`{"FromCrafting":{"Categories":["WoodPlanks"]}}`). The PURE core (`resolve`/`deriveFromCrafting`)
+takes injected `CraftingCandidate`s, unit-tested without a live item map.
 
 ## Cadence + the `emitMoment` choke point (unchanged)
 
@@ -219,13 +238,23 @@ station with no `Actions`/`Steps` gets, so both paths converge on the SAME step 
 presentation-playback funnel every station moment goes through (`StationFlairs.MOMENT_CYCLE`/
 `MOMENT_SWING`/`MOMENT_IMPACT`/`MOMENT_RARE_FIND`/`MOMENT_COMPLETION`, plus a per-step
 `StationFlairs.stepMomentId(actionId, stepId)`) - it is ALSO the flair-resolution choke point
-(`StationFlairs.effective` against `FlairCatalog.effectiveFlairsFor`'s merged map). **Every
-particle spawned here is capped to `MOMENT_PARTICLE_MAX_DURATION_SECONDS` (4.0f)** via
-ziggfreed-common's `ModelParticleService`'s duration-capped `spawnAt` overload - at least one
-shipped particle asset (`Block_Gem_Sparks`) authors an UNBOUNDED spawner (`TotalParticles < 0`)
-that, fired without a duration cap, never stops spawning. Route a new moment call site through
-`emitMoment` - never call `ModelParticleService` directly, or you lose both the flair overlay AND
-the leak guard (this bug was found in-game; do not reintroduce it).
+(`StationFlairs.effective` against `FlairCatalog.effectiveFlairsFor`'s merged map).
+
+**Particles are an authored ARRAY of tunable bursts** (`Presentation.ModelParticle[]`, see
+`../asset/CLAUDE.md`) played in order by `StationService#spawnMomentParticles`: per burst a
+`Scale`, a `DurationSeconds` playback cap, a `RotationOffset` (degrees, converted to the engine's
+radian yaw/pitch/roll arguments), and a FACING-RELATIVE `PositionOffset` composed through the one
+shared [`StationBlockFacing`](StationBlockFacing.java) reader. **The per-burst duration cap
+(default 4s) is a LEAK GUARD, not decoration** - at least one shipped particle asset
+(`Block_Gem_Sparks`) authors an UNBOUNDED spawner (`TotalParticles < 0`) that, fired uncapped,
+never stops spawning; authoring `DurationSeconds: 0` deliberately means uncapped, so only do it for
+a system whose own spawner budget terminates. That spawn reaches the engine's full-arity
+`ParticleUtil` overload directly rather than ziggfreed-common's `ModelParticleService.spawnAt`,
+whose signature hardcodes exactly the rotation/scale arguments this schema now authors - the
+convergence target is a common-side overload taking the full argument set; lift the call when one
+exists. Route a new moment call site through `emitMoment` - never spawn particles at a station
+moment yourself, or you lose the flair overlay AND the leak guard (this bug was found in-game; do
+not reintroduce it).
 
 ## Per-swing cadence (unchanged)
 
@@ -272,7 +301,7 @@ what those three first-party sources establish.**
 - **`"Entity"`** ([`StationEntityMountController`](StationEntityMountController.java)) - the
   standing work mount (spawns a minimal anchor entity at the block center, attaches
   `MountedComponent` directly to the player, no interaction chain). Never populates the client's
-  `MountedUpdate.Block`, so the player renders standing. `Hold.Mount.Entity.Offset {X,Y,Z}`
+  `MountedUpdate.Block`, so the player renders standing. `Hold.Mount.Entity.Offset` (the shared `Vec3`)
   converts to the constructor's `Rotation3f attachmentOffset` parameter (a native mislabeling -
   it is really a spatial offset, not a rotation). `Steerable` (default false) applies the SAME
   hold effect effect-mode uses plus a per-heartbeat `snapBack`; `DismountOnMove` (default true)
@@ -303,8 +332,9 @@ on a different tool family must author its own `ActionClip` or the swing plays n
 ## Idle practice mode + tool durability drain (unchanged)
 
 `StationAsset.Work.Idle` (opt-in, default OFF): a `NO_INPUTS` start proceeds into idle mode
-instead of denying. Idle cycles grant fractional XP asks only (`PerCycle * XpFraction`,
-multiplier forced to 1.0) with NO conversion, NO loot, marked `idle=true` on
+instead of denying. An idle cycle posts fractional contributions only (each `Amount *
+Work.Idle.Fraction`, ALREADY pre-scaled on the event, tool multiplier forced to 1.0) with NO
+conversion and NO loot, marked `idle=true` on
 `StationCycleCompletedEvent`. `StationAsset.Tool.Durability {PerSwing, PerCycle}` (both default
 OFF): the mutation is native `ItemUtils.updateItemStackDurability`; a broken held stack
 (`ItemStack.isBroken()`) stops the session (`TOOL_BROKEN`) and fires `StationToolBrokeEvent`.
@@ -324,7 +354,7 @@ fires `StationSessionCompletedEvent` UNCONDITIONALLY (every stop, silent include
 `itemId -> quantity` tally, insertion-ordered oldest-first, plus an optional `uniqueStack` for a
 `MaxQuantity:1` placement that preserves metadata/durability - never persisted).
 [`StationCustody`](StationCustody.java) is the PURE decision core (`placeableQuantity`,
-`available`/`drain`, `matchesInput`/`matchesAnyConversionInput`). `toggle` gates a
+`available`/`drain`, `matchesInput`/`matchesAnyConversionInput`, `acceptsFamily`). `toggle` gates a
 `Custody`-governing action behind ONE state-dependent F: not-loaded + a matching held stack
 places/tops-up (`placeIntoCustody`); loaded + non-owner denies `ui.station.occupied`; otherwise
 falls through to the classic engage flow, sourcing viability from the claim
@@ -341,8 +371,14 @@ parameter) so `stopAll`'s shutdown sweep is covered too - returns to the owner's
 with no live claim behind it resets to Empty on the next interaction. **Precedence rule (gate
 m5)**: a block busy with its OWN session OR a non-empty `custodyByBlock` claim REFUSES an
 incoming anchor claim; restart self-heal consults `custodyByBlock`, not just the session map -
-load-bearing for `[wave 3]`'s multi-station claiming, already true today for the single-station
-case.
+load-bearing for multi-station claiming, already true for the single-station case.
+
+**`Custody.SingleFamily`** (schema-review wave) locks a NON-EMPTY claim to the first-placed item's
+resource family, so a station holds 50 oak or 50 pine but never 100 mixed. The pure core is
+`StationCustody#acceptsFamily`, called from the ONE acceptance choke point, so both the held-item
+place route and the inventory-scan fallback honour it; an empty claim accepts anything again. It is
+orthogonal to `MaxQuantity` (a capacity of 1 already enforces exclusivity on its own, which is
+what `CUSTODY_SINGLE_FAMILY_REDUNDANT` warns about).
 
 ## Anchor discovery: the DERIVED block-item seed (AV wave) + the two denial toasts
 
@@ -400,9 +436,9 @@ two package-private seams on `StationService`:
   `Empty` (it does not). Idempotent, so every "work is no longer running" moment can call it
   freely.
 
-**Which steps count as work** is `StationStep.isWorkingStep()` (derived default: a
+**Which steps count as work** is `StationStep.effectiveIsWork()` (derived default: a
 `Consume`+`Produce` atomic-transform CONVERT is work, everything else is not; an authored
-`"Working"` boolean overrides either way). **Flip sites, the complete set:**
+`"IsWork"` boolean overrides either way). **Flip sites, the complete set:**
 
 1. `toggle`'s engage, for a CLASSIC (non-`Steps`, non-idle) session - the implicit program has no
    authored step to light on entry and its first conversion only commits a full `CycleMs` later,
@@ -473,22 +509,21 @@ weapon mutation each run under their OWN try/catch that restores exactly what wa
 failure - `claim.setUniqueStack` is the LAST line, reached only on full success). **Caps
 composition is re-anchored on the scope-2 `Budgets[]` shape** (`../asset/CLAUDE.md`'s Stamp
 bullet: MIN over every `Budget` entry, `PerStat` layered on top, `Economics` unchanged) - the
-engine's MIN-composition RULE is identical to pre-scope-2, only the authoring shape (`Budgets`
-replacing `PerItemBudget`/`SkillScaledBudget`) changed; `StampCapEngineTest`'s fixtures were
-re-anchored on the new shape. `ActionResolver.selectActionByFamily` (a DIFFERENT NAME from
+engine's MIN-composition RULE is identical to pre-scope-2, only the authoring shape changed;
+`StampCapEngineTest`'s fixtures were re-anchored on it. `ActionResolver.selectActionByFamily` (a DIFFERENT NAME from
 `selectAction`, never an overload) is the resource-type-FAMILY-aware selection entry
 `StationService` calls from `selectActionForHeld`/`liveFunctionOf`. `StationCatalog` carries an
 action-aware `resolvedConversions(asset, actionId, actionRecipe)` overload. `StationService
-.dispatchProgram` reads the resolved action's `Work.effectiveRepeat()` and calls
+.dispatchProgram` reads the resolved action's `Work.effectiveLooping()` and calls
 `stop(..., StopReason.RITUAL_COMPLETE, ...)` on a completed non-repeating program; a
 non-repeating authored Steps program (e.g. the anvil's Enhance) gets INSTANT first dispatch
 (`s.nextCycleAtMs = now`, no `CycleMs` latency eaten before the ritual's only cycle).
 **Enhancement outcome reporting** (`StationEnhanceOutcome` on `StationSession
 #enhanceOutcomes`, `StationEvents#fireEnhanceCompleted`, `StationService#enhanceLedgerRows`) is
-MMO-agnostic - the stamper's `List<EnhanceLine>` renders verbatim, plus one engine-owned
+vocabulary-agnostic - the stamper's `List<EnhanceLine>` renders verbatim, plus one engine-owned
 `Durability +N` row, so a bare anvil with no registered stamper still reports its durability
-enhancement. See `../api/CLAUDE.md`'s `EnhanceStamperRegistry` entry for the api contract and
-`content-packs/skill-stations-pack/CLAUDE.md` for the shipped Anvil content.
+enhancement. See `../api/CLAUDE.md`'s `EnhanceStamperRegistry` entry for the api contract; the
+shipped Anvil content lives in its own pack's repo.
 
 ## The puppet presentation engine (unchanged)
 
@@ -514,8 +549,8 @@ target, the backend re-solves the path), not the raw ref. Identity/reconcile: `R
 at first ready (`StationService.reconcilePerformersAtBoot`); `toggle` fires a deferred `engageStale`
 sweep (`reconcileStalePerformersAtEngage`, via `world.execute` so the native sweep runs outside the
 processing lock). **Legacy mechanics carry over below.** **Spawn + hide, at engage**
-(`spawnAndHide`, called from `toggle` AFTER the mount-attach block): resolves `Puppet.Offset`/
-`Yaw` off the block-top anchor + the initial `Puppet.Prop`, spawns via `PlayerPuppetService
+(`spawnAndHide`, called from `toggle` AFTER the mount-attach block): resolves `Puppet.Offset` (the
+shared `Vec3`) / `Yaw` off the block-top anchor + the initial `Puppet.Prop`, spawns via `PlayerPuppetService
 .spawn`; a null spawn is non-fatal (session continues in-body). **`Offset`/`Yaw` are
 FACING-RELATIVE to the placed block's own yaw (round-3 smoke, 2026-07-29)** - authored `+Z` = the
 block's FRONT, `+X` = its right, `Offset.Y` vertical, block yaw folded additively into the authored
@@ -553,8 +588,8 @@ by construction) - not gated on any remembered session.
 ## Loot + flairs, the open vocabulary (unchanged mechanism; `LootRef` terminology)
 
 [`StationFlairs`](StationFlairs.java) resolves the per-player cosmetic overlay for a moment id
-against the UNION of every registered api `FlairUnlockProvider` (the MMO's `StationComponent`-
-backed provider is the only one registered today). The open STRING moment id vocabulary
+against the UNION of every registered api `FlairUnlockProvider` (persistence is the registering
+mod's own concern; this engine stores no per-player fact). The open STRING moment id vocabulary
 (`MOMENT_CYCLE`/`MOMENT_SWING`/`MOMENT_IMPACT`/`MOMENT_RARE_FIND`/`MOMENT_COMPLETION`, plus
 `stepMomentId(actionId, stepId)`) is unchanged. The flair map is the merge of TWO sources
 ([`FlairCatalog`](FlairCatalog.java)`.effectiveFlairsFor`): a station's own inline `Flairs`
@@ -574,15 +609,61 @@ check except cross-layer reference-existence ones); `validate()`/`runAndLog()` (
 runs ONCE post-load from the first `PlayerReadyEvent` and on demand from `/rpgstations validate`.
 The lang-key check (`langKeyKnownLive`) is a MERGED-view check: a miss against the jar's own
 `i18n.RpgStationsLangKeys` falls through to a LIVE `I18nModule.getMessage` query, so a pack's own
-additive `rpgstations.lang` overlay resolves correctly. **New scope-2 checks**:
-`ACTION_REF_UNKNOWN`, `EXTENSION_TARGET_UNKNOWN`, `EXTENSION_PAYLOAD_MISMATCH`,
-`EXTENSION_KEY_COLLISION`, `EXTENSION_ANCHOR_MISSING`, `EXTENSION_STEP_MISSING_ID`,
-`ANCHOR_STATION_UNKNOWN`, `ANCHOR_STATION_NOT_DISCOVERABLE` (AV wave - see the discovery-seed
-section above), `WALK_REQUIRES_PUPPET`, and the `[wave 3]` boundary marker
-(`WAVE3_PENDING`-style, one finding per step authoring `Walk`/`At`/`Produce.To:Custody`).
-**Dropped checks** (their reserved fields no longer exist): `UNIMPLEMENTED_STEP_TYPE`,
-`UNIMPLEMENTED_CONSUME_SOURCE`, `UNIMPLEMENTED_PRODUCE_DEST`, `WAIT_BOTH_ROUTES`,
-`UNIMPLEMENTED_WAIT_BEATS`. The pure `validate(...)` core is unit-tested.
+additive `rpgstations.lang` overlay resolves correctly. **Scope-2 checks**: `ACTION_REF_UNKNOWN`,
+`EXTENSION_TARGET_UNKNOWN`, `EXTENSION_PAYLOAD_MISMATCH`, `EXTENSION_KEY_COLLISION`,
+`EXTENSION_ANCHOR_MISSING`, `EXTENSION_STEP_MISSING_ID`, `ANCHOR_STATION_UNKNOWN`,
+`ANCHOR_STATION_NOT_DISCOVERABLE` (AV wave - see the discovery-seed section above),
+`WALK_TARGET_UNKNOWN_ANCHOR`, `STEP_AT_UNKNOWN_ANCHOR`, `WALK_REQUIRES_PUPPET`.
+**Schema-review-wave checks**: `EXTENSION_CONTRIBUTION_DUPLICATE` (keyed on the
+`(Channel, Param)` PAIR, case-folded and param-null-normalized; two arms - an extension's
+`PerCycleContributions[]` re-declaring a pair its base station/action already declares via
+`Work.PerCycleContributions`, and two extensions declaring the same pair on the same target;
+deliberately NOT routed through `reportCrossExtensionCollisions`, whose "the later one wins, this
+is skipped" wording is wrong here because `ExtensionCatalog#mergeContributions` APPENDS rather
+than resolving a keyed collision, so every claimant's amount genuinely SUMS),
+`TOOL_MIN_DURABILITY_OUT_OF_RANGE` (a `Tool.MinDurabilityPercent`
+outside `(0, 100]`, catching the fraction-vs-percent authoring slip),
+`CUSTODY_SINGLE_FAMILY_REDUNDANT` (`SingleFamily: true` where the effective `MaxQuantity <= 1`
+already enforces exclusivity), and `CONSUME_DUPLICATE_ITEM_REF` (one Consume's `Items` array
+authoring the same item/family ref in two entries - the engine sums them, one combined entry says
+it plainly). **Dropped checks**: `WAVE3_PENDING` (the multi-station seam
+executes, so the boundary warn has nothing left to gate - the anchor/walk checks above are the
+live coverage), plus the reserved-field set whose fields no longer exist
+(`UNIMPLEMENTED_STEP_TYPE`, `UNIMPLEMENTED_CONSUME_SOURCE`, `UNIMPLEMENTED_PRODUCE_DEST`,
+`WAIT_BOTH_ROUTES`, `UNIMPLEMENTED_WAIT_BEATS`). The pure `validate(...)` core is unit-tested.
+
+**Contribution-channel checks**: `MISSING_CONTRIBUTION_CHANNEL` / `NONPOSITIVE_CONTRIBUTION_AMOUNT`
+on a `Work.PerCycleContributions` entry, `LOOT_CONTRIBUTION_WRONG_TRIGGER` (a
+`Roll.Grants.Contributions` on a `Completion` roll, which fires from inside `stop()` with no cycle
+event left to ride) / `LOOT_CONTRIBUTION_MISSING_CHANNEL` / `LOOT_CONTRIBUTION_NONPOSITIVE_AMOUNT`,
+and `UNKNOWN_CHANNEL` - the exact mirror of `UNKNOWN_FACTOR`: a `Channel` nobody declared through
+`api.ContributionChannelRegistry` warns and echoes the declared set, then forwards anyway.
+FAIL-OPEN is absolute here; an undeclared channel must never block a station.
+
+**`LOOT_DUPLICATE_FACTOR` (INFO)** fires when ONE Roll references the same `(Factor, Param)` pair
+more than once across its `Conditions`, `Chance.AddFactors`, and `Ladder.Values` (case-folded,
+param-null-normalized). Keyed on the PAIR, never the bare factor id: every stat read carries factor
+id `"stat"`, so a ladder summing two different stat channels is a legitimate composition and must
+not fire. In practice only a param-less duplicate of a zero-arg engine factor
+(`rpgstations:cycle_count` twice) trips it. **What it deliberately does NOT catch**: a formula that
+sums an aggregate factor AND the underlying channels that aggregate is defined over. Those are
+different ids, so nothing here can tell them apart - "these two specific ids overlap" is knowledge
+only the factor family's OWNER has. That composition rule belongs in the owning mod's docs, or in a
+check that mod registers through the api `ValidationHookRegistry`, which exists precisely so a
+vocabulary's owner keeps its rules with the vocabulary. This engine holds no opinion about any
+foreign id.
+
+**The DECODE-TIME warn layer is a complement, not a replacement** (`../asset/CodecWarnValidators`,
+see `../asset/CLAUDE.md`): field-local range/blank invariants and exactly-one-of contracts report
+at the asset's own decode path/line during the fold, so a pack author sees them in the boot log
+immediately; this validator keeps every cross-asset, cross-layer, and semantic check, and no check
+here is retired because a codec validator or an Asset-Editor dropdown covers the same ground. The
+never-block posture is absolute at BOTH layers: an asset always loads.
+
+**Timing stays first-`PlayerReadyEvent`.** Moving the full pass to `AllWorldsLoadedEvent` is
+allowed only once an in-game re-run confirms the three known cross-layer false positives
+(`STAMP_UNKNOWN_POOL`, `LOOT_UNKNOWN_DROPLIST`, `MISSING_*_LANG`) do not recur under it - which a
+build or unit-test run cannot establish. See `runAndLog()`'s own javadoc.
 
 ## Landed fix history (still-true warnings only; condensed)
 

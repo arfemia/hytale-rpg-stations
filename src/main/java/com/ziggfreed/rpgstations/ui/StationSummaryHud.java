@@ -29,14 +29,12 @@ import com.ziggfreed.rpgstations.util.Log;
 
 /**
  * The standalone-rich end-of-session summary panel (design section 4.1's summary-panel split,
- * part (b): the generic panel itself; part (a), the {@code KeyedCustomHud} base, already lifted
- * to common in leg 1; part (c), the MMO-policy per-skill XP rows, is the MMO bridge's OWN {@code
- * StationSummaryEnricher} reached through the future api {@code SummaryEnricherRegistry} - NOT
- * built this leg, so this HUD renders title + crest + cycles line + the item ledger only).
- * Extends {@link KeyedCustomHud} DIRECTLY (RpgStations has no HUD base of its own, per that
- * class's javadoc).
+ * part (b): the generic panel itself; part (a), the {@code KeyedCustomHud} base, lives in common).
+ * It renders title + crest + cycles line + the item ledger, and NO channel-specific rows of its
+ * own: a listening mod adds its own through a registered {@code SummaryEnricher}. Extends
+ * {@link KeyedCustomHud} DIRECTLY (this mod has no HUD base of its own, per that class's javadoc).
  *
- * <p>Copies the MMO {@code SessionSummaryHud}'s proven layout rules verbatim (see {@code
+ * <p>The layout rules below are load-bearing (see {@code
  * Pages/RpgStationSummary.ui}'s header comment): outer/inner {@code Group} split (the
  * full-screen-dark fix - a HUD document's outermost element is an unanchored full-viewport
  * canvas, the real sized/backgrounded panel is a named child one level in), an EXPLICIT {@code
@@ -48,9 +46,9 @@ import com.ziggfreed.rpgstations.util.Log;
  * TTL pattern: a monotonic {@link #generation} counter stamped by every {@link #showSummary}
  * guards a stale scheduled hide from clearing a NEWER summary that re-armed in the meantime.
  *
- * <p><b>Neutral frame; leg 4 wires the theming hook.</b> The {@code .ui} uses the common {@code
- * ZigFrames.ui}'s {@code @ZigDecoratedFrame} (never the MMO's {@code @MmoDecoratedFrame} - this
- * mod has no MMO dependency); {@link #ROOT_SELECTOR} is the FROZEN api contract (critique m5,
+ * <p><b>Neutral frame, themeable from outside.</b> The {@code .ui} uses the common {@code
+ * ZigFrames.ui}'s {@code @ZigDecoratedFrame}, never another mod's frame set;
+ * {@link #ROOT_SELECTOR} is the FROZEN api contract (critique m5,
  * binding) a registered {@code SummaryEnricher.decorate} (via {@code
  * api.SummaryDecorateContext#rootSelector()}) writes theming commands against cross-jar - see
  * that class's javadoc.
@@ -159,7 +157,10 @@ public final class StationSummaryHud extends KeyedCustomHud {
         return UPDATE_INTERVAL_MS;
     }
 
-    /** Reads {@code RpgStationsSettingsAsset.SummaryHud.Position}/{@code OffsetY}; falls back to {@link #defaultPosition()}. */
+    /**
+     * Reads {@code RpgStationsSettingsAsset.SummaryHud.Position}/{@code OffsetX}/{@code OffsetY};
+     * falls back to {@link #defaultPosition()}.
+     */
     @Nonnull
     @Override
     protected HudPosition configuredPosition() {
@@ -167,8 +168,9 @@ public final class StationSummaryHud extends KeyedCustomHud {
         if (hud == null || hud.getPosition() == null) {
             return defaultPosition();
         }
+        int offsetX = hud.getOffsetX() != null ? hud.getOffsetX() : defaultPosition().getOffsetX();
         int offsetY = hud.getOffsetY() != null ? hud.getOffsetY() : defaultPosition().getOffsetY();
-        HudPosition parsed = HudPosition.parse(hud.getPosition(), 0, offsetY);
+        HudPosition parsed = HudPosition.parse(hud.getPosition(), offsetX, offsetY);
         return parsed != null ? parsed : defaultPosition();
     }
 
@@ -248,7 +250,7 @@ public final class StationSummaryHud extends KeyedCustomHud {
         // An ENHANCE row (design section 9.5, round-7 D-6 / critique m11) is NEVER recolored here:
         // a per-stat enhance line arrives pre-styled by its provider (per-stat school colors) and
         // the engine's own durability row bakes its accent at composition - so its Message renders
-        // verbatim. CONSUMED/LUCKY/PRODUCED/XP bake a per-kind color onto their line.
+        // verbatim. Every other kind bakes a per-kind color onto its line.
         if (row.kind == SummaryRow.Kind.ENHANCE) {
             return new SummaryRow(row.itemId, row.line, row.kind);
         }

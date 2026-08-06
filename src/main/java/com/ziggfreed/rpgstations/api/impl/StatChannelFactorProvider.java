@@ -21,16 +21,15 @@ import com.ziggfreed.rpgstations.util.Log;
 /**
  * The {@code "stat"} factor id (design section 4.1, gate decisions 37/19-cluster): reads the
  * acting player's EFFECTIVE value for a native stat channel named by {@code Param} directly off
- * the engine's own {@link EntityStatMap} - the SAME modifier-target read the MMO's own {@code
- * reward.StatModifierUtil#getStatMax} performs (folded {@code MAX}: base + every live modifier,
- * never the CURRENT value). Registered under the bare id {@code "stat"} (NOT {@code
- * rpgstations:stat} - the {@code Param} route carries the addressing, per gate decision 19's
- * {@code {"Factor":"stat","Param":"<StatId>"}} shape) alongside the other {@code rpgstations:}
- * built-ins in {@link FactorRegistryImpl#registerBuiltins()}. Mod-agnostic and RpgStations-CORE
- * by design: ANY mod that writes a native stat channel (a bridged per-stack enhancement, a native
- * weapon {@code StatModifiers}, a mastery-level mirror) participates in a loot/gate/cap formula
- * authoring {@code {"Factor":"stat","Param":"MMO_Luck"}} with zero extra bridge code - the whole
- * point of the loot-formula middle path.
+ * the engine's own {@link EntityStatMap} (folded {@code MAX}: base + every live modifier, never
+ * the CURRENT value). Registered under the bare id {@code "stat"} (NOT {@code rpgstations:stat} -
+ * the {@code Param} route carries the addressing, per gate decision 19's
+ * {@code {"Factor":"stat","Param":"<EntityStatType id>"}} shape) alongside the other
+ * {@code rpgstations:} built-ins in {@link FactorRegistryImpl#registerBuiltins()}. Mod-agnostic
+ * and RpgStations-CORE by design: ANY mod that writes a native stat channel (a bridged per-stack
+ * enhancement, a native weapon {@code StatModifiers}, a progression mirror) participates in a
+ * loot/gate/cap formula by authoring {@code {"Factor":"stat","Param":"<EntityStatType id>"}} with
+ * zero extra bridge code - the whole point of the loot-formula middle path.
  *
  * <p>Fail-closed throughout, per {@link StationFactorProvider}'s own contract:
  * <ul>
@@ -40,9 +39,8 @@ import com.ziggfreed.rpgstations.util.Log;
  *       {@code store}) resolves {@code 0.0} SILENTLY - a normal, expected evaluation shape, not
  *       an authoring mistake;</li>
  *   <li>an UNREGISTERED channel id resolves {@code 0.0} and warns ONCE per distinct id (a typo'd
- *       or never-registered {@code Param} IS an authoring mistake worth surfacing - the
- *       "register-before-items" explanation {@code stats.StatChannelAudit} already documents for
- *       the analogous MMO-side channel-presence guard).</li>
+ *       or never-registered {@code Param} IS an authoring mistake worth surfacing; a stat channel
+ *       must be registered before anything referencing it loads).</li>
  * </ul>
  */
 final class StatChannelFactorProvider implements StationFactorProvider {

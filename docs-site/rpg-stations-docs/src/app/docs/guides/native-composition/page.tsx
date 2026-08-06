@@ -58,7 +58,7 @@ export default function NativeCompositionPage() {
       </p>
 
       <H2 id="grants-droplist">Grants.DropList - native item drop tables</H2>
-      <pre><code>{`"Grants": { "DropList": "MMO_Station_Sawmill_T2" }`}</code></pre>
+      <pre><code>{`"Grants": { "DropList": "RPG_Station_Sawmill_T2" }`}</code></pre>
       <p>
         A Roll&apos;s (or a Ladder floor&apos;s) <code>DropList</code> names a native <code>ItemDropList</code>{' '}
         asset id, rolled through the engine&apos;s own drop-list roller - the exact same mechanism a mob loot

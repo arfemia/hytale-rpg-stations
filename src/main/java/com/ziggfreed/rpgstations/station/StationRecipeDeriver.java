@@ -23,9 +23,7 @@ import com.ziggfreed.rpgstations.util.Log;
 /**
  * Derives station Convert conversions from the LIVE native crafting recipes
  * ({@link StationAsset.FromCrafting}), so a station that refines a whole native category
- * needs ZERO hardcoded per-item conversions. Ported verbatim from the MMO's
- * {@code station.StationRecipeDeriver} (RPG Stations extraction leg 2), {@code SafeLog}
- * severed to RpgStations' own {@code util.Log}.
+ * needs ZERO hardcoded per-item conversions.
  *
  * <p><b>Two layers, one seam:</b> the PURE core ({@link #resolve} / {@link #deriveFromCrafting})
  * takes an injected {@link CraftingCandidate} collection so it is unit-testable without the
@@ -93,7 +91,7 @@ public final class StationRecipeDeriver {
                     continue;
                 }
                 out.add(c);
-                String ref = inputRef(c.getInput());
+                String ref = inputRef(c.primaryInput());
                 if (ref != null) {
                     authoredInputRefs.add(ref);
                 }
@@ -102,7 +100,7 @@ public final class StationRecipeDeriver {
         StationAsset.FromCrafting spec = recipe != null ? recipe.getFromCrafting() : null;
         if (spec != null) {
             for (StationAsset.Conversion derived : deriveFromCrafting(spec, candidates)) {
-                String ref = inputRef(derived.getInput());
+                String ref = inputRef(derived.primaryInput());
                 if (ref != null && authoredInputRefs.contains(ref)) {
                     continue; // an authored conversion with the same input ref wins
                 }
@@ -116,6 +114,11 @@ public final class StationRecipeDeriver {
      * Derive one Conversion per candidate that MATCHES the spec (category intersect OR bench-id
      * match, then filtered by the declared recipe kinds) and whose recipe has EXACTLY ONE input.
      * Deterministic order (sorted by output item id). Pure.
+     *
+     * <p><b>Multi-input (decision 73):</b> a native recipe's WHOLE {@code Input} array derives into
+     * the conversion's own {@code Ingredient[]} input, so a multi-material native recipe is a real
+     * derived conversion rather than a skipped candidate. A candidate is skipped only when it has NO
+     * inputs at all, or when one of them names neither an {@code ItemId} nor a {@code ResourceTypeId}.
      *
      * <p><b>Match rule (seam wave decision 51c):</b> a candidate matches when its
      * {@code categories} intersect the spec's {@code Categories} (case-insensitive) OR its
@@ -159,34 +162,44 @@ public final class StationRecipeDeriver {
             if (!typesMatch(cand.types, wantTypes)) {
                 continue;
             }
-            if (cand.inputs == null || cand.inputs.size() != 1) {
-                Log.fine("STATION FromCrafting skips '" + cand.itemId + "': native recipe has "
-                        + (cand.inputs == null ? 0 : cand.inputs.size()) + " inputs (need exactly 1)");
+            // Decision 73: a native recipe's WHOLE Input array derives (the single-input restriction
+            // is gone) - Conversion.Input is the same Ingredient[] shape, so "2 planks + 1 nail"
+            // derives as one multi-input conversion instead of being skipped.
+            if (cand.inputs == null || cand.inputs.isEmpty()) {
+                Log.fine("STATION FromCrafting skips '" + cand.itemId + "': native recipe has no inputs");
                 continue;
             }
-            Ingredient nativeInput = cand.inputs.get(0);
-            String ref = inputRef(nativeInput);
-            if (nativeInput == null || ref == null) {
-                Log.fine("STATION FromCrafting skips '" + cand.itemId
-                        + "': native input has neither ItemId nor ResourceTypeId");
+            List<Ingredient> inputs = new ArrayList<>(cand.inputs.size());
+            boolean everyInputUsable = true;
+            for (Ingredient nativeInput : cand.inputs) {
+                String ref = inputRef(nativeInput);
+                if (nativeInput == null || ref == null) {
+                    Log.fine("STATION FromCrafting skips '" + cand.itemId
+                            + "': a native input has neither ItemId nor ResourceTypeId");
+                    everyInputUsable = false;
+                    break;
+                }
+                int inQty = nativeInput.getQuantity() != null && nativeInput.getQuantity() > 0
+                        ? nativeInput.getQuantity() : 1;
+                boolean isResource = nativeInput.getResourceTypeId() != null
+                        && !nativeInput.getResourceTypeId().isBlank();
+                inputs.add(isResource
+                        ? Ingredient.resource(nativeInput.getResourceTypeId(), inQty)
+                        : Ingredient.item(nativeInput.getItemId(), inQty));
+            }
+            if (!everyInputUsable) {
                 continue;
             }
-            int inQty = nativeInput.getQuantity() != null && nativeInput.getQuantity() > 0
-                    ? nativeInput.getQuantity() : 1;
-            boolean isResource = nativeInput.getResourceTypeId() != null
-                    && !nativeInput.getResourceTypeId().isBlank();
-            Ingredient input = isResource
-                    ? Ingredient.resource(nativeInput.getResourceTypeId(), inQty)
-                    : Ingredient.item(nativeInput.getItemId(), inQty);
-            Ingredient output = Ingredient.item(cand.itemId, outputPerInput);
+            Ingredient[] output = {Ingredient.item(cand.itemId, outputPerInput)};
             Long durationMs = nativeDurationMs(nativeTime, cand.timeSeconds);
             // Selection wave (decision 56): stamp the derived conversion with its native source
             // category so a multi-output station can group the picker by it. The do-not-rework
             // guard on this deriver lifts for exactly this addition.
             String category = deriveSourceCategory(cand, wantCategories, wantBenches, catMatch);
-            derived.add(StationAsset.Conversion.of(input, output, durationMs, category));
+            derived.add(StationAsset.Conversion.of(inputs.toArray(new Ingredient[0]), output,
+                    durationMs, category));
         }
-        derived.sort(Comparator.comparing(c -> c.getOutput().getItemId(), String.CASE_INSENSITIVE_ORDER));
+        derived.sort(Comparator.comparing(c -> c.getOutput()[0].getItemId(), String.CASE_INSENSITIVE_ORDER));
         if (derived.isEmpty()) {
             Log.warn("STATION FromCrafting matched no craftable items for Categories "
                     + Arrays.toString(wantCategories) + " / Benches " + Arrays.toString(wantBenches)

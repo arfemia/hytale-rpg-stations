@@ -31,7 +31,7 @@ class LootEngineEffectGrantTest {
                 null                       // null entry - dropped
         });
 
-        LootEngine.applyGrants(grants, NULL_PLAYER, null, null, result, null, 0, 0, 0);
+        LootEngine.applyGrants(grants, NULL_PLAYER, null, null, result, null, 0, 0, 0, true);
 
         assertEquals(2, result.getEffectGrants().size(), "both non-blank effects surface");
         assertEquals("Root", result.getEffectGrants().get(0).getId());
@@ -43,7 +43,7 @@ class LootEngineEffectGrantTest {
     @Test
     void applyGrants_noEffects_collectsNothing() {
         LootEngine.GrantResult result = new LootEngine.GrantResult();
-        LootEngine.applyGrants(Roll.Grants.of(null, null, null), NULL_PLAYER, null, null, result, null, 0, 0, 0);
+        LootEngine.applyGrants(Roll.Grants.of(null, null, null), NULL_PLAYER, null, null, result, null, 0, 0, 0, true);
         assertTrue(result.getEffectGrants().isEmpty());
     }
 }

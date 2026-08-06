@@ -9,21 +9,19 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 
 /**
- * RpgStations-OWN start gate (design section 4.4.2), severing {@code StationAsset.Requires}
- * off the MMO's {@code content.gate.Requirements}: orthogonal nullable leaves, {@link
- * #permission} (a plain permission-node check) and {@link #conditions} (every entry must
- * pass - the shared {@link Condition} factor gate). Absent group = ungated.
+ * The station start gate (design section 4.4.2): orthogonal nullable leaves, {@link #permission}
+ * (a plain permission-node check) and {@link #conditions} (every entry must pass - the shared
+ * {@link Condition} factor gate). Absent group = ungated.
  *
  * <pre>{@code
  * "Requires": {
  *   "Permission": "myserver.stations.sawmill",
- *   "Conditions": [ { "Factor": "mmoskilltree:skill_level", "Param": "WOODCUTTING", "Min": 15 } ]
+ *   "Conditions": [ { "Factor": "yourmod:reputation", "Param": "guild", "Min": 15 } ]
  * }
  * }</pre>
  *
- * <p>The MMO's rich per-gate-type {@code ui.gate.locked_*} vocabulary is NOT reproduced (no
- * shipped station used it); a failing gate denies with the single {@code ui.station.locked}
- * toast, same as every other engage denial.
+ * <p>A failing gate denies with the single {@code ui.station.locked} toast, same as every other
+ * engage denial.
  */
 public final class Requires {
 

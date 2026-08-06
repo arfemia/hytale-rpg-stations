@@ -9,6 +9,7 @@ import javax.annotation.Nullable;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.assetstore.codec.AssetBuilderCodec;
+import com.hypixel.hytale.assetstore.codec.ContainedAssetCodec;
 import com.hypixel.hytale.assetstore.map.DefaultAssetMap;
 import com.hypixel.hytale.assetstore.map.JsonAssetWithMap;
 import com.hypixel.hytale.codec.Codec;
@@ -52,7 +53,7 @@ public final class ActionAsset implements JsonAssetWithMap<String, DefaultAssetM
             .append(new KeyedCodec<>("Name", Codec.STRING, false),
                     (a, name) -> { /* no-op - id already comes from the filename */ },
                     a -> a.id)
-            .add()
+            .documentation("Ignored - the action id comes from the asset filename, not this key. Kept as a schema field for editor display only.").add()
             .appendInherited(new KeyedCodec<>("Label", Codec.STRING, false),
                     (a, v) -> a.body.label = v, a -> a.body.label, (a, p) -> a.body.label = p.body.label)
             .documentation("An advisory localization key for admin/UI display of the action's name.").add()
@@ -103,8 +104,22 @@ public final class ActionAsset implements JsonAssetWithMap<String, DefaultAssetM
             .appendInherited(new KeyedCodec<>("Anchors",
                             new MapCodec<>(ActionDef.Anchor.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.body.anchors = v, a -> a.body.anchors, (a, p) -> a.body.anchors = p.body.anchors)
-            .documentation("Named multi-station anchor declarations (id -> {Station, MaxRadius}). [wave 3 discovery]").add()
+            .documentation("Named multi-station anchor declarations (id -> {Station, MaxRadiusMeters}); a step's At/Walk.To names one and the engine discovers + claims the nearest matching placed block within MaxRadiusMeters.").add()
             .build();
+
+    /**
+     * The engine's own contained-asset codec for this type: {@link ActionDef#getRef()} accepts EITHER
+     * a plain {@code "<actionAssetId>"} string reference OR an inline anonymous action body
+     * (registered as a generated child asset in this same store), including a nested
+     * {@code "Parent": "<actionAssetId>"} that inherits from a named action.
+     *
+     * <p>Unlike the two single-array asset types ({@link LootableAsset}/{@link RollPool}), an inline
+     * body here is a genuine delta authoring route: every {@code ActionAsset} leaf is
+     * {@code appendInherited}, so a {@code Parent} body inherits each group it does not author.
+     */
+    @Nonnull
+    public static final Codec<String> CHILD_ASSET_CODEC =
+            new ContainedAssetCodec<>(ActionAsset.class, CODEC);
 
     public ActionAsset() {
     }

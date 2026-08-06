@@ -6,6 +6,7 @@ import javax.annotation.Nullable;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.hypixel.hytale.codec.ExtraInfo;
 
 /**
  * The ONE item-quantity leaf (scope-2 design section 1.3, DRY principle 1): a native-shaped
@@ -37,7 +38,14 @@ public final class Ingredient {
             .documentation("A native Item.ResourceTypes family id (the 'any log' route); INPUT only. Exactly one of ItemId | ResourceTypeId.").add()
             .appendInherited(new KeyedCodec<>("Quantity", Codec.INTEGER, false),
                     (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity)
-            .documentation("The item count; reader-defaults to 1 when omitted or non-positive.").add()
+            .documentation("The item count; reader-defaults to 1 when omitted or non-positive.")
+            .addValidator(CodecWarnValidators.positive("Ingredient.Quantity should be positive; it reader-defaults to 1 otherwise.")).add()
+            .afterDecode((Ingredient ingredient, ExtraInfo extraInfo) -> {
+                if (!ingredient.hasExactlyOneRoute()) {
+                    extraInfo.getValidationResults().warn(
+                            "Ingredient should author exactly one of ItemId | ResourceTypeId, not both or neither.");
+                }
+            })
             .build();
 
     public Ingredient() {

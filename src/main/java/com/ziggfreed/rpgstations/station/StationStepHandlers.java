@@ -120,7 +120,7 @@ final class StationStepHandlers {
      * iteration only (its walk already completed); every later iteration runs its own walk again.
      *
      * <p>Each iteration also drives the ACTIVELY-WORKING block state
-     * ({@code asset.Custody.States.Working}): a {@link StationStep#isWorkingStep()} step lights its
+     * ({@code asset.Custody.States.Working}): a {@link StationStep#effectiveIsWork()} step lights its
      * {@code At} anchor once its walk (if any) has landed, anything else darkens whatever was lit.
      * A step's own SUCCESS deliberately does NOT darken - the next step's entry, or {@code stop()},
      * owns that - so a repeating single-step convert program never flickers between cycles. A
@@ -154,7 +154,7 @@ final class StationStepHandlers {
             // NOT cleared when the step SUCCEEDS: the next step (or stop()) owns the exit, so the
             // implicit convert program - one working step re-dispatched every cycle at the same
             // block - holds a steady look instead of flickering once per cycle.
-            if (step.isWorkingStep()) {
+            if (step.effectiveIsWork()) {
                 StationService.getInstance().enterWorkingState(s, step.getAt());
             } else {
                 StationService.getInstance().exitWorkingState(s);
@@ -361,28 +361,33 @@ final class StationStepHandlers {
     // ==================== Consume phase ====================
 
     /**
-     * Removes {@code Consume.Quantity} of the item/resource-type from the player's inventory
-     * (storage-first) or from the station's placed-input custody claim ({@code From:"Custody"}).
-     * Returns {@code null} on success (or no {@code Consume} phase authored - a no-op), or a
-     * {@link StationStepResult.Fail} the composite handler propagates.
+     * Removes EVERY {@code Consume.Items} entry from the player's inventory (storage-first) or from
+     * the station's placed-input custody claim ({@code From:"Custody"}) - the multi-item phase of
+     * decision 73. Returns {@code null} on success (or no/empty {@code Consume} phase - a no-op), or
+     * a {@link StationStepResult.Fail} the composite handler propagates.
+     *
+     * <p><b>All-or-nothing.</b> Availability is checked across every entry BEFORE anything is
+     * removed, so the common shortfall never leaves a partial consume behind. The residual case (an
+     * entry that passes the pre-check but throws mid-removal) is covered by the pre-existing
+     * ITERATION REFUND LEDGER: each removal is recorded into it as it lands, and the failing step
+     * fails the program, whose {@code stop()} refunds every recorded id
+     * ({@code StationService#refundIterationLedger}) unless a committed {@code Produce} cleared it.
      */
     @Nullable
     static StationStepResult consumePhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
         StationStep.Consume consume = step.getConsume();
-        if (consume == null) {
+        if (consume == null || consume.isEmpty()) {
             return null;
         }
-        int quantity = consume.effectiveQuantity();
-        String resourceTypeId = consume.getResourceTypeId();
-        boolean isResource = resourceTypeId != null && !resourceTypeId.isBlank();
-        String itemId = consume.getItemId();
-        String inputRef = isResource ? resourceTypeId : itemId;
-        if (inputRef == null || inputRef.isBlank()) {
-            return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                    "Consume step '" + step.getId() + "' has neither ItemId nor ResourceTypeId");
+        Ingredient[] items = consume.getItems();
+        for (Ingredient item : items) {
+            if (item == null || consumeRef(item) == null) {
+                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                        "Consume step '" + step.getId() + "' has an item with neither ItemId nor ResourceTypeId");
+            }
         }
         if (StationStep.Consume.FROM_CUSTODY.equalsIgnoreCase(consume.effectiveFrom())) {
-            return consumeFromCustody(ctx, step, isResource, resourceTypeId, itemId, quantity);
+            return consumeFromCustody(ctx, step, items);
         }
         if (!StationStep.Consume.FROM_INVENTORY.equalsIgnoreCase(consume.effectiveFrom())) {
             Log.warn("STATION Consume step '" + step.getId() + "' authors From '" + consume.effectiveFrom()
@@ -391,24 +396,54 @@ final class StationStepHandlers {
                     "Consume.From '" + consume.effectiveFrom() + "' is not implemented");
         }
         try {
-            if (isResource) {
-                ResourceQuantity resource = new ResourceQuantity(inputRef, quantity);
-                ResourceTransaction tx = InventoryAccess.storageOf(ctx.player).canRemoveResource(resource)
-                        ? InventoryAccess.storageOf(ctx.player).removeResource(resource)
-                        : InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeResource(resource);
-                StationService.tallyResourceConsumption(ctx.session, tx, inputRef);
-                // Iteration refund ledger (design 2.5/M1): record the REAL drained ids so a
-                // mid-iteration stop refunds them - unless a Produce.To:Custody clears the ledger.
-                StationService.recordIterationConsumedResource(ctx.session, tx, inputRef);
-            } else {
-                ItemStack input = new ItemStack(inputRef, quantity);
-                if (InventoryAccess.storageOf(ctx.player).canRemoveItemStack(input)) {
-                    InventoryAccess.storageOf(ctx.player).removeItemStack(input);
+            var combined = InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player);
+            boolean repeating = ctx.action.getWork() != null && ctx.action.getWork().effectiveLooping();
+            // The exact-item entries are checked as ONE batch (two entries naming the same item must
+            // not each pass against the same stack); resource-family entries have no batch API, so
+            // they are pre-summed per family and each family checked once with its total (two
+            // entries on the same family must not each pass against the same stock).
+            List<ItemStack> itemInputs = new ArrayList<>();
+            Map<String, Integer> resourceNeeds = new LinkedHashMap<>();
+            for (Ingredient item : items) {
+                if (isResourceRoute(item)) {
+                    resourceNeeds.merge(consumeRef(item), item.effectiveQuantity(), Integer::sum);
                 } else {
-                    InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeItemStack(input);
+                    itemInputs.add(new ItemStack(consumeRef(item), item.effectiveQuantity()));
                 }
-                ctx.session.consumedItems.merge(inputRef, quantity, Integer::sum);
-                StationService.recordIterationConsumedItem(ctx.session, inputRef, quantity);
+            }
+            for (Map.Entry<String, Integer> need : resourceNeeds.entrySet()) {
+                if (!combined.canRemoveResource(new ResourceQuantity(need.getKey(), need.getValue()))) {
+                    return StationStepResult.fail(StationService.shortInputStopReason(repeating),
+                            "Consume step '" + step.getId() + "' is short on '" + need.getKey()
+                                    + "' (needs " + need.getValue() + ")");
+                }
+            }
+            if (!itemInputs.isEmpty() && !combined.canRemoveItemStacks(itemInputs)) {
+                return StationStepResult.fail(StationService.shortInputStopReason(repeating),
+                        "Consume step '" + step.getId() + "' is short on its authored Items");
+            }
+            for (Ingredient item : items) {
+                String ref = consumeRef(item);
+                int quantity = item.effectiveQuantity();
+                if (isResourceRoute(item)) {
+                    ResourceQuantity resource = new ResourceQuantity(ref, quantity);
+                    ResourceTransaction tx = InventoryAccess.storageOf(ctx.player).canRemoveResource(resource)
+                            ? InventoryAccess.storageOf(ctx.player).removeResource(resource)
+                            : InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeResource(resource);
+                    StationService.tallyResourceConsumption(ctx.session, tx, ref);
+                    // Iteration refund ledger (design 2.5/M1): record the REAL drained ids so a
+                    // mid-iteration stop refunds them - unless a Produce.To:Custody clears the ledger.
+                    StationService.recordIterationConsumedResource(ctx.session, tx, ref);
+                } else {
+                    ItemStack input = new ItemStack(ref, quantity);
+                    if (InventoryAccess.storageOf(ctx.player).canRemoveItemStack(input)) {
+                        InventoryAccess.storageOf(ctx.player).removeItemStack(input);
+                    } else {
+                        InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeItemStack(input);
+                    }
+                    ctx.session.consumedItems.merge(ref, quantity, Integer::sum);
+                    StationService.recordIterationConsumedItem(ctx.session, ref, quantity);
+                }
             }
         } catch (Throwable t) {
             Log.warn("STATION Consume step failed for '" + ctx.session.stationId + "': " + t.getMessage());
@@ -417,27 +452,59 @@ final class StationStepHandlers {
         return null;
     }
 
+    /** PURE: an ingredient's live lookup ref - its ResourceTypeId family, else its exact ItemId; null when neither is authored. */
+    @Nullable
+    private static String consumeRef(@Nullable Ingredient item) {
+        if (item == null) {
+            return null;
+        }
+        String resource = item.getResourceTypeId();
+        if (resource != null && !resource.isBlank()) {
+            return resource;
+        }
+        String itemId = item.getItemId();
+        return itemId != null && !itemId.isBlank() ? itemId : null;
+    }
+
+    /** PURE: does this ingredient take the native resource-type FAMILY route rather than an exact item id? */
+    private static boolean isResourceRoute(@Nullable Ingredient item) {
+        return item != null && item.getResourceTypeId() != null && !item.getResourceTypeId().isBlank();
+    }
+
     /**
-     * Drains {@code quantity} of {@code itemId}/{@code resourceTypeId} from the block's live claim,
-     * tallying the REAL drained item ids into the session ledger. A short drain fails
-     * {@code OUT_OF_INPUTS}, the same reason an empty custody station denies at engage.
+     * Drains every {@code items} entry from the block's live claim, tallying the REAL drained item
+     * ids into the session ledger. Availability is PEEKED across every entry first (a short claim
+     * fails before any drain runs), so a multi-item custody consume is all-or-nothing too; a short
+     * drain fails {@code OUT_OF_INPUTS}/{@code INPUTS_EXHAUSTED}, the same reasons an empty custody
+     * station denies at engage.
      */
     @Nullable
     private static StationStepResult consumeFromCustody(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
-            boolean isResource, @Nullable String resourceTypeId, @Nullable String itemId, int quantity) {
+            @Nonnull Ingredient[] items) {
         // Custody drains from the step's At-anchor block (scope-2 wave 3, design 2.2) - the primary
         // block for a null/self At, a remote anchor's claim otherwise.
         StationCustodyClaim claim = StationService.getInstance().custodyClaimForAnchor(ctx.session, step.getAt());
+        for (Ingredient item : items) {
+            String ref = consumeRef(item);
+            boolean isResource = isResourceRoute(item);
+            int have = StationCustody.available(claim, isResource ? null : ref, isResource ? ref : null,
+                    StationService::liveResourceTypeIdsOf);
+            int need = item.effectiveQuantity();
+            if (have < need) {
+                // Design 2.4: a REPEATING program's shortage is the graceful natural end
+                // (INPUTS_EXHAUSTED); a non-repeating one keeps OUT_OF_INPUTS.
+                boolean repeating = ctx.action.getWork() != null && ctx.action.getWork().effectiveLooping();
+                return StationStepResult.fail(StationService.shortInputStopReason(repeating),
+                        "Consume step '" + step.getId() + "' custody ran short ("
+                                + have + "/" + need + " of '" + ref + "')");
+            }
+        }
         Map<String, Integer> drainedOut = new LinkedHashMap<>();
-        int drained = StationCustody.drain(claim, isResource ? null : itemId, isResource ? resourceTypeId : null,
-                quantity, StationService::liveResourceTypeIdsOf, drainedOut);
-        if (drained < quantity) {
-            // Design 2.4: a REPEATING program's shortage is the graceful natural end
-            // (INPUTS_EXHAUSTED); a non-repeating one keeps OUT_OF_INPUTS.
-            boolean repeating = ctx.action.getWork() != null && ctx.action.getWork().effectiveRepeat();
-            return StationStepResult.fail(StationService.shortInputStopReason(repeating),
-                    "Consume step '" + step.getId() + "' custody ran short ("
-                            + drained + "/" + quantity + " of '" + (isResource ? resourceTypeId : itemId) + "')");
+        for (Ingredient item : items) {
+            String ref = consumeRef(item);
+            boolean isResource = isResourceRoute(item);
+            StationCustody.drain(claim, isResource ? null : ref, isResource ? ref : null,
+                    item.effectiveQuantity(), StationService::liveResourceTypeIdsOf, drainedOut);
         }
         for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
             ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
@@ -459,30 +526,34 @@ final class StationStepHandlers {
     @Nullable
     static StationStepResult producePhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
         StationStep.Produce produce = step.getProduce();
-        if (produce == null) {
+        if (produce == null || produce.isEmpty()) {
             return null;
         }
-        if (produce.getItemId() == null || produce.getItemId().isBlank()) {
-            return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                    "Produce step '" + step.getId() + "' has no Produce.ItemId");
+        Ingredient[] items = produce.getItems();
+        for (Ingredient item : items) {
+            if (item == null || item.getItemId() == null || item.getItemId().isBlank()) {
+                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                        "Produce step '" + step.getId() + "' has an item with no ItemId");
+            }
         }
-        int quantity = produce.effectiveQuantity();
         String to = produce.effectiveTo();
 
-        // To:"Custody" (scope-2 wave 3, design 2.2): store the output into the step's At-anchor
+        // To:"Custody" (scope-2 wave 3, design 2.2): store the outputs into the step's At-anchor
         // custody claim (the primary block for a null/self At), then clear the iteration refund
-        // ledger (M1: the consumed inputs BECAME this custody item - refund + custody-return are
-        // mutually exclusive; returnCustody now hands the produced item back instead).
+        // ledger (M1: the consumed inputs BECAME these custody items - refund + custody-return are
+        // mutually exclusive; returnCustody now hands the produced items back instead).
         if (StationStep.Produce.TO_CUSTODY.equalsIgnoreCase(to)) {
             try {
-                boolean placed = StationService.getInstance().produceIntoCustody(ctx.session, ctx.commandBuffer,
-                        step.getAt(), produce.getItemId(), quantity);
-                if (!placed) {
-                    return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                            "Produce step '" + step.getId() + "' could not resolve its To:Custody anchor '"
-                                    + step.getAt() + "'");
+                for (Ingredient item : items) {
+                    boolean placed = StationService.getInstance().produceIntoCustody(ctx.session, ctx.commandBuffer,
+                            step.getAt(), item.getItemId(), item.effectiveQuantity());
+                    if (!placed) {
+                        return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                                "Produce step '" + step.getId() + "' could not resolve its To:Custody anchor '"
+                                        + step.getAt() + "'");
+                    }
+                    ctx.session.producedItems.merge(item.getItemId(), item.effectiveQuantity(), Integer::sum);
                 }
-                ctx.session.producedItems.merge(produce.getItemId(), quantity, Integer::sum);
                 StationService.clearIterationLedgerOnCommittedProduce(ctx.session);
             } catch (Throwable t) {
                 Log.warn("STATION Produce To:Custody step failed for '" + ctx.session.stationId + "': "
@@ -498,16 +569,21 @@ final class StationStepHandlers {
                     "Produce.To '" + to + "' is not implemented");
         }
         try {
-            ItemGrantUtil.grant(ctx.player, new ItemStack(produce.getItemId(), quantity), ctx.store,
-                    ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
-            ctx.session.producedItems.merge(produce.getItemId(), quantity, Integer::sum);
-            // M1 (review minor m1): the output is now committed to the inventory, so the consumed
-            // inputs are spent - clear the refund ledger, exactly as the To:Custody branch does, or a
-            // stop on a later Duration suspend in this same iteration would double-grant.
-            StationService.clearIterationLedgerOnCommittedProduce(ctx.session);
-            if (ctx.session.playerRef != null) {
-                StationService.notifyItemGain(ctx.session.playerRef, produce.getItemId(), quantity, false);
+            for (Ingredient item : items) {
+                int quantity = item.effectiveQuantity();
+                ItemGrantUtil.grant(ctx.player, new ItemStack(item.getItemId(), quantity), ctx.store,
+                        ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
+                ctx.session.producedItems.merge(item.getItemId(), quantity, Integer::sum);
+                if (ctx.session.playerRef != null) {
+                    StationService.notifyItemGain(ctx.session.playerRef, item.getItemId(), quantity, false);
+                }
             }
+            // M1 (review minor m1): the outputs are now committed to the inventory, so the consumed
+            // inputs are spent - clear the refund ledger, exactly as the To:Custody branch does, or a
+            // stop on a later Duration suspend in this same iteration would double-grant. Cleared
+            // ONCE after every item lands, so a mid-list grant failure still leaves the ledger able
+            // to refund the inputs.
+            StationService.clearIterationLedgerOnCommittedProduce(ctx.session);
         } catch (Throwable t) {
             Log.warn("STATION Produce step failed for '" + ctx.session.stationId + "': " + t.getMessage());
             return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL, t.getMessage());

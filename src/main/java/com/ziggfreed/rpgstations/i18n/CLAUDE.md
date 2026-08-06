@@ -4,8 +4,8 @@ Router for `i18n/`.
 
 - **[`RpgMsg`](RpgMsg.java)** - a prefix-free facade over `ziggfreed-common`'s mod-agnostic
   `i18n.Msg` (that class carries no fixed namespace so several consumer mods share it; a
-  consumer wanting a prefix-free call site wraps it, mirroring how the MMO's own `i18n.Msg`
-  reads). `RpgMsg.tr(key, args...)` resolves `"rpgstations." + key` against
+  consumer wanting a prefix-free call site wraps it, which is what this class is).
+  `RpgMsg.tr(key, args...)` resolves `"rpgstations." + key` against
   `Server/Languages/<bcp47>/rpgstations.lang`.
 - **[`RpgStationsLangKeys`](RpgStationsLangKeys.java)** - a hand-maintained `Set<String>` of every
   message id this mod authors in `rpgstations.lang`, backing `station.StationValidator`'s

@@ -13,7 +13,6 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
-import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 
 /**
@@ -32,7 +31,8 @@ public class ExtensionAssetCodecTest {
     }
 
     private static ExtensionAsset decodeAnon(String body) throws Exception {
-        return ExtensionAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body), new ExtraInfo());
+        return ExtensionAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body),
+                new AssetExtraInfo<>(new AssetExtraInfo.Data(ExtensionAsset.class, "fixture", null)));
     }
 
     // ==================== id + Target exactly-one-of ====================
@@ -71,16 +71,18 @@ public class ExtensionAssetCodecTest {
     @Test
     void stationTargetPayload_decodes() throws Exception {
         ExtensionAsset e = decodeAnon("{ \"Target\": { \"Station\": \"sawmill\" }, \"Priority\": 5,"
-                + " \"Xp\": [ { \"Skill\": \"WOODCUTTING\", \"PerCycle\": 12 } ],"
+                + " \"PerCycleContributions\": [ { \"Channel\": \"yourmod:test\", \"Param\": \"ALPHA\","
+                + "   \"Amount\": 12 } ],"
                 + " \"Loot\": { \"Lootables\": [\"sawmillluck\"] },"
-                + " \"Conversions\": [ { \"Input\": { \"ResourceTypeId\": \"Wood_Hardwood_Trunk\", \"Quantity\": 1 },"
-                + "   \"Output\": { \"ItemId\": \"Wood_Hardwood_Planks\", \"Quantity\": 2 } } ],"
+                + " \"Conversions\": [ { \"Input\": [{ \"ResourceTypeId\": \"Wood_Hardwood_Trunk\", \"Quantity\": 1 }],"
+                + "   \"Output\": [{ \"ItemId\": \"Wood_Hardwood_Planks\", \"Quantity\": 2 }] } ],"
                 + " \"Steps\": [ { \"Action\": \"work\", \"Anchor\": { \"After\": \"roll\" },"
                 + "   \"Insert\": [ { \"Id\": \"extra\", \"Commands\": [\"say hi\"] } ] } ] }");
         assertEquals(5, e.effectivePriority());
-        assertEquals("WOODCUTTING", e.getXp()[0].getSkill());
+        assertEquals("yourmod:test", e.getPerCycleContributions()[0].getChannel());
+        assertEquals("ALPHA", e.getPerCycleContributions()[0].getParam());
         assertEquals("sawmillluck", e.getLoot().getLootables()[0]);
-        assertEquals("Wood_Hardwood_Planks", e.getConversions()[0].getOutput().getItemId());
+        assertEquals("Wood_Hardwood_Planks", e.getConversions()[0].primaryOutput().getItemId());
         ExtensionAsset.StepInsertion ins = e.getSteps()[0];
         assertEquals("work", ins.getAction());
         assertEquals(ExtensionAsset.StepInsertion.Anchor.AFTER, ins.getAnchor().effectivePlacement());
@@ -90,14 +92,14 @@ public class ExtensionAssetCodecTest {
 
     @Test
     void payloadAllowedFor_matchesTheDesignTable() {
-        assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.STATION, ExtensionAsset.PAYLOAD_XP));
+        assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.STATION, ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS));
         assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.STATION, ExtensionAsset.PAYLOAD_ACTIONS));
         assertFalse(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.STATION, ExtensionAsset.PAYLOAD_ENTRIES));
         assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.LOOTABLE, ExtensionAsset.PAYLOAD_ROLLS));
-        assertFalse(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.LOOTABLE, ExtensionAsset.PAYLOAD_XP));
+        assertFalse(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.LOOTABLE, ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS));
         assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.ROLLPOOL, ExtensionAsset.PAYLOAD_ENTRIES));
         assertFalse(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.ACTION, ExtensionAsset.PAYLOAD_ACTIONS));
-        assertFalse(ExtensionAsset.payloadAllowedFor(null, ExtensionAsset.PAYLOAD_XP));
+        assertFalse(ExtensionAsset.payloadAllowedFor(null, ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS));
     }
 
     // ==================== StepInsertion.Anchor exactly-one-of + degrade ====================

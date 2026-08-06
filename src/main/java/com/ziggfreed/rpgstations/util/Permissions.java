@@ -5,9 +5,8 @@ import javax.annotation.Nullable;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 
 /**
- * RpgStations' own admin-permission check (a port of the MMO's {@code util.PermissionUtil}
- * shape, minus its {@code SkillConfig}-driven on/off toggle - RpgStations has no equivalent
- * config surface yet, so permission checking is always active): OP (or the wildcard
+ * RpgStations' own admin-permission check (always active - this mod ships no config toggle to
+ * disable permission checking): OP (or the wildcard
  * {@code "*"}) always passes; otherwise the caller must hold {@link #ADMIN_PERMISSION}.
  */
 public final class Permissions {

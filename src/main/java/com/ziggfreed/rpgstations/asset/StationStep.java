@@ -7,10 +7,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import com.hypixel.hytale.codec.Codec;
+import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
+import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 
 /**
  * ONE step of a multi-action station's step PROGRAM, reshaped for scope-2 (design section 2.1,
@@ -62,7 +64,7 @@ public final class StationStep {
     @Nullable protected LootRef roll;
     @Nullable protected String[] commands;
     @Nullable protected Stamp stamp;
-    @Nullable protected Boolean working;
+    @Nullable protected Boolean isWork;
 
     public static final BuilderCodec<StationStep> CODEC = BuilderCodec.builder(StationStep.class, StationStep::new)
             .appendInherited(new KeyedCodec<>("Id", Codec.STRING, false),
@@ -77,7 +79,7 @@ public final class StationStep {
             .documentation("What a failing Conditions check does: Skip (no-op continue) or Fail (default); Goto jumps to a step Id.").add()
             .appendInherited(new KeyedCodec<>("At", Codec.STRING, false),
                     (o, v) -> o.at = v, o -> o.at, (o, p) -> o.at = p.at)
-            .documentation("The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'self'. [wave 3]").add()
+            .documentation("The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'self'.").add()
             .appendInherited(new KeyedCodec<>("Repeat", Repeat.CODEC, false),
                     (o, v) -> o.repeat = v, o -> o.repeat, (o, p) -> o.repeat = p.repeat)
             .documentation("Per-step iteration count: a fixed Times, or Min/Max/AddFactors resolved once at step entry.").add()
@@ -92,13 +94,13 @@ public final class StationStep {
             .documentation("Per-step puppet override: a Clip played at iteration entry and/or a Prop swap for this beat.").add()
             .appendInherited(new KeyedCodec<>("Walk", Walk.CODEC, false),
                     (o, v) -> o.walk = v, o -> o.walk, (o, p) -> o.walk = p.walk)
-            .documentation("Move the puppet to an anchor (To) at SpeedMps. Requires Puppet enabled. [wave 3]").add()
+            .documentation("Move the puppet to an anchor (To) at SpeedMps; requires Puppet enabled (WALK_REQUIRES_PUPPET warns otherwise).").add()
             .appendInherited(new KeyedCodec<>("Consume", Consume.CODEC, false),
                     (o, v) -> o.consume = v, o -> o.consume, (o, p) -> o.consume = p.consume)
-            .documentation("Consume Quantity of ItemId|ResourceTypeId From Inventory (default) or Custody.").add()
+            .documentation("Consume every Items entry From Inventory (default) or Custody; all-or-nothing across the whole list.").add()
             .appendInherited(new KeyedCodec<>("Produce", Produce.CODEC, false),
                     (o, v) -> o.produce = v, o -> o.produce, (o, p) -> o.produce = p.produce)
-            .documentation("Produce Quantity of ItemId To Inventory (default). To Custody is [wave 3].").add()
+            .documentation("Produce every Items entry To Inventory (default) or Custody (the At-anchor's claim).").add()
             .appendInherited(new KeyedCodec<>("Roll", LootRef.CODEC, false),
                     (o, v) -> o.roll = v, o -> o.roll, (o, p) -> o.roll = p.roll)
             .documentation("Evaluate a loot pass through the shared LootRef (Lootables + inline Rolls) vocabulary.").add()
@@ -108,8 +110,8 @@ public final class StationStep {
             .appendInherited(new KeyedCodec<>("Stamp", Stamp.CODEC, false),
                     (o, v) -> o.stamp = v, o -> o.stamp, (o, p) -> o.stamp = p.stamp)
             .documentation("The enhance-commit phase (reagents + durability + stat rolls) - see Stamp.").add()
-            .appendInherited(new KeyedCodec<>("Working", Codec.BOOLEAN, false),
-                    (o, v) -> o.working = v, o -> o.working, (o, p) -> o.working = p.working)
+            .appendInherited(new KeyedCodec<>("IsWork", Codec.BOOLEAN, false),
+                    (o, v) -> o.isWork = v, o -> o.isWork, (o, p) -> o.isWork = p.isWork)
             .documentation("Does this step count as WORK at its At-anchor block (driving that block's Custody.States.Working look)? Default: true for a Consume+Produce convert step, false otherwise. Author true on a pure beat that IS the work (a cook hold), false to suppress.").add()
             .build();
 
@@ -151,16 +153,16 @@ public final class StationStep {
         return at;
     }
 
-    /** The raw authored {@code Working} opt-in/opt-out; {@code null} = use the derived default ({@link #isWorkingStep}). */
+    /** The raw authored {@code IsWork} opt-in/opt-out; {@code null} = use the derived default ({@link #effectiveIsWork}). */
     @Nullable
-    public Boolean getWorking() {
-        return working;
+    public Boolean getIsWork() {
+        return isWork;
     }
 
     /** Java-side setter for a procedurally-built program (mirrors the {@code with*} phase setters). */
     @Nonnull
-    public StationStep withWorking(@Nullable Boolean v) {
-        this.working = v;
+    public StationStep withIsWork(@Nullable Boolean v) {
+        this.isWork = v;
         return this;
     }
 
@@ -174,15 +176,15 @@ public final class StationStep {
      * single-step program and any authored convert step light their block for free with zero extra
      * authoring. Every other shape (a pure beat, a lone Consume, a lone Produce, a walk, a stamp)
      * defaults to NOT work, because those are the load/carry/unload beats around the work. An
-     * explicit {@code "Working": true} promotes a pure beat that genuinely IS the work (the fish
+     * explicit {@code "IsWork": true} promotes a pure beat that genuinely IS the work (the fish
      * exemplar's 2.5s cook hold at the fire anchor); an explicit {@code false} demotes a convert
      * that should not light its block.
      *
      * <p>Zero effect unless the block's resolved {@code Custody.States.Working} is authored - every
      * pre-knob station stays byte-identical.
      */
-    public boolean isWorkingStep() {
-        return working != null ? working : (consume != null && produce != null);
+    public boolean effectiveIsWork() {
+        return isWork != null ? isWork : (consume != null && produce != null);
     }
 
     @Nonnull
@@ -338,7 +340,8 @@ public final class StationStep {
                 BuilderCodec.builder(OnConditionFail.class, OnConditionFail::new)
                         .appendInherited(new KeyedCodec<>("Result", Codec.STRING, false),
                                 (o, v) -> o.result = v, o -> o.result, (o, p) -> o.result = p.result)
-                        .documentation("On a failing Conditions check: 'Skip' (treat as a no-op success and continue) or 'Fail' (default).").add()
+                        .documentation("On a failing Conditions check: 'Skip' (treat as a no-op success and continue) or 'Fail' (default).")
+                        .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:condition-fail-result"))).add()
                         .appendInherited(new KeyedCodec<>("Goto", Codec.STRING, false),
                                 (o, v) -> o.goto_ = v, o -> o.goto_, (o, p) -> o.goto_ = p.goto_)
                         .documentation("An authored step Id to jump to on a success-continuing result; null = classic linear advance.").add()
@@ -385,13 +388,16 @@ public final class StationStep {
         public static final BuilderCodec<Repeat> CODEC = BuilderCodec.builder(Repeat.class, Repeat::new)
                 .appendInherited(new KeyedCodec<>("Times", Codec.INTEGER, false),
                         (o, v) -> o.times = v, o -> o.times, (o, p) -> o.times = p.times)
-                .documentation("A fixed iteration count. Authored INSTEAD of Min/Max/AddFactors (the fixed route).").add()
+                .documentation("A fixed iteration count. Authored INSTEAD of Min/Max/AddFactors (the fixed route).")
+                .addValidator(CodecWarnValidators.positive("StationStep.Repeat.Times should be positive; it floors at 1 otherwise.")).add()
                 .appendInherited(new KeyedCodec<>("Min", Codec.INTEGER, false),
                         (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
-                .documentation("Lower bound of the factor-resolved iteration count (the ranged route).").add()
+                .documentation("Lower bound of the factor-resolved iteration count (the ranged route).")
+                .addValidator(CodecWarnValidators.positive("StationStep.Repeat.Min should be positive; it floors at 1 otherwise.")).add()
                 .appendInherited(new KeyedCodec<>("Max", Codec.INTEGER, false),
                         (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max)
-                .documentation("Upper bound of the factor-resolved iteration count (the ranged route).").add()
+                .documentation("Upper bound of the factor-resolved iteration count (the ranged route).")
+                .addValidator(CodecWarnValidators.positive("StationStep.Repeat.Max should be positive; a non-positive value floors to Min.")).add()
                 .appendInherited(new KeyedCodec<>("AddFactors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
                         (o, v) -> o.addFactors = v, o -> o.addFactors, (o, p) -> o.addFactors = p.addFactors)
                 .documentation("Weighted factor references summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max).").add()
@@ -467,7 +473,8 @@ public final class StationStep {
         public static final BuilderCodec<Duration> CODEC = BuilderCodec.builder(Duration.class, Duration::new)
                 .appendInherited(new KeyedCodec<>("Ms", Codec.LONG, false),
                         (o, v) -> o.ms = v, o -> o.ms, (o, p) -> o.ms = p.ms)
-                .documentation("The hold length in milliseconds for this iteration.").add()
+                .documentation("The hold length in milliseconds for this iteration.")
+                .addValidator(CodecWarnValidators.nonNegative("StationStep.Duration.Ms should not be negative (0 means no hold).")).add()
                 .build();
 
         @Nonnull
@@ -508,7 +515,8 @@ public final class StationStep {
                 .documentation("The anchor id to walk the puppet to (or the reserved 'self' = the primary station).").add()
                 .appendInherited(new KeyedCodec<>("SpeedMps", Codec.DOUBLE, false),
                         (o, v) -> o.speedMps = v, o -> o.speedMps, (o, p) -> o.speedMps = p.speedMps)
-                .documentation("Straight-line walk speed in meters per second (reader-defaults to 2.5).").add()
+                .documentation("Straight-line walk speed in meters per second (reader-defaults to 2.5).")
+                .addValidator(CodecWarnValidators.positive("StationStep.Walk.SpeedMps should be positive.")).add()
                 .build();
 
         @Nonnull
@@ -536,60 +544,53 @@ public final class StationStep {
     }
 
     /**
-     * Consume {@link #quantity} of {@link #itemId} or {@link #resourceTypeId} (the {@link Ingredient}
-     * exactly-one-of convention, flattened with a {@code From} discriminator per the design 2.1
-     * exemplar) {@link #from}. {@code From: "Inventory"} (default) and {@code From: "Custody"} (drains
-     * the block's placed-input claim) are BOTH executable this wave.
+     * Consume every entry of {@link #items} (each an {@link Ingredient}: exactly one of
+     * {@code ItemId}/{@code ResourceTypeId}, plus a {@code Quantity}) {@link #from} - the native
+     * {@code CraftingRecipe.Input} shape, so "2 planks + 1 nail" is ONE phase rather than a
+     * step split. {@code From: "Inventory"} (default) and {@code From: "Custody"} (drains the
+     * block's placed-input claim) are BOTH executable, and the route stays at GROUP level: a
+     * phase draws every item from the same place.
+     *
+     * <p>The phase is ALL-OR-NOTHING: the handler checks availability across every entry before
+     * mutating anything, so a shortfall on the last item never leaves the earlier ones consumed.
      */
     public static final class Consume {
         public static final String FROM_INVENTORY = "Inventory";
         public static final String FROM_CUSTODY = "Custody";
 
-        @Nullable protected String itemId;
-        @Nullable protected String resourceTypeId;
-        @Nullable protected Integer quantity;
+        @Nullable protected Ingredient[] items;
         @Nullable protected String from;
 
         public static final BuilderCodec<Consume> CODEC = BuilderCodec.builder(Consume.class, Consume::new)
-                .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
-                        (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId)
-                .documentation("Exact item id to consume (exactly one of ItemId | ResourceTypeId).").add()
-                .appendInherited(new KeyedCodec<>("ResourceTypeId", Codec.STRING, false),
-                        (o, v) -> o.resourceTypeId = v, o -> o.resourceTypeId,
-                        (o, p) -> o.resourceTypeId = p.resourceTypeId)
-                .documentation("A native resource-type family to consume (exactly one of ItemId | ResourceTypeId).").add()
-                .appendInherited(new KeyedCodec<>("Quantity", Codec.INTEGER, false),
-                        (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity)
-                .documentation("The count to consume (reader-defaults to 1).").add()
+                .appendInherited(new KeyedCodec<>("Items", new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
+                        (o, v) -> o.items = v, o -> o.items, (o, p) -> o.items = p.items)
+                .documentation("The items this phase consumes, each an Ingredient (exactly one of ItemId | ResourceTypeId, plus Quantity). All-or-nothing: a shortfall on any entry consumes none of them.")
+                .addValidator(CodecWarnValidators.nonEmptyIfAuthored("StationStep.Consume.Items is an empty array; author at least one entry or omit the group.")).add()
                 .appendInherited(new KeyedCodec<>("From", Codec.STRING, false),
                         (o, v) -> o.from = v, o -> o.from, (o, p) -> o.from = p.from)
-                .documentation("The source: 'Inventory' (default) or 'Custody' (the block's placed-input claim).").add()
+                .documentation("The source for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the block's placed-input claim).")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:consume-from"))).add()
                 .build();
 
         @Nonnull
-        public static Consume of(@Nullable String itemId, @Nullable String resourceTypeId,
-                @Nullable Integer quantity, @Nullable String from) {
+        public static Consume of(@Nullable Ingredient[] items, @Nullable String from) {
             Consume c = new Consume();
-            c.itemId = itemId;
-            c.resourceTypeId = resourceTypeId;
-            c.quantity = quantity;
+            c.items = items;
             c.from = from;
             return c;
         }
 
-        @Nullable
-        public String getItemId() {
-            return itemId;
+        /** Convenience for a single-item consume (the classic convert loop's shape). */
+        @Nonnull
+        public static Consume ofOne(@Nullable String itemId, @Nullable String resourceTypeId,
+                @Nullable Integer quantity, @Nullable String from) {
+            return of(new Ingredient[] {Ingredient.of(itemId, resourceTypeId, quantity)}, from);
         }
 
+        /** The items this phase consumes; null/empty = a no-op phase. */
         @Nullable
-        public String getResourceTypeId() {
-            return resourceTypeId;
-        }
-
-        @Nullable
-        public Integer getQuantity() {
-            return quantity;
+        public Ingredient[] getItems() {
+            return items;
         }
 
         @Nullable
@@ -597,9 +598,9 @@ public final class StationStep {
             return from;
         }
 
-        /** {@link #quantity}, reader-defaulted to 1 when null/non-positive. */
-        public int effectiveQuantity() {
-            return quantity != null && quantity > 0 ? quantity : 1;
+        /** True when no item is authored (the phase does nothing). */
+        public boolean isEmpty() {
+            return items == null || items.length == 0;
         }
 
         /** {@link #from}, reader-defaulted to {@link #FROM_INVENTORY} when null/blank. */
@@ -610,47 +611,48 @@ public final class StationStep {
     }
 
     /**
-     * Produce {@link #quantity} of {@link #itemId} {@link #to}. {@code To: "Inventory"} (default) is
-     * executed this wave; {@code "Custody"} decodes (the fish exemplar's cross-station output) and
-     * is [wave 3] - {@link StationStep#authorsWave3OnlyPhase()} flags it, engage denies gracefully.
+     * Produce every entry of {@link #items} (each an exact-{@code ItemId} {@link Ingredient})
+     * {@link #to} - the native {@code CraftingRecipe.Output} shape, so a recipe yielding a main
+     * output plus a byproduct is ONE phase. {@code To: "Inventory"} (default) and
+     * {@code To: "Custody"} (the anchor's placed-input claim) are both executable; the route stays
+     * at GROUP level, so a phase writes every item to the same destination.
      */
     public static final class Produce {
         public static final String TO_INVENTORY = "Inventory";
         public static final String TO_CUSTODY = "Custody";
 
-        @Nullable protected String itemId;
-        @Nullable protected Integer quantity;
+        @Nullable protected Ingredient[] items;
         @Nullable protected String to;
 
         public static final BuilderCodec<Produce> CODEC = BuilderCodec.builder(Produce.class, Produce::new)
-                .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
-                        (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId)
-                .documentation("The exact item id to produce.").add()
-                .appendInherited(new KeyedCodec<>("Quantity", Codec.INTEGER, false),
-                        (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity)
-                .documentation("The count to produce (reader-defaults to 1).").add()
+                .appendInherited(new KeyedCodec<>("Items", new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
+                        (o, v) -> o.items = v, o -> o.items, (o, p) -> o.items = p.items)
+                .documentation("The items this phase produces, each an exact-ItemId Ingredient plus Quantity (ResourceTypeId is an INPUT-only route).")
+                .addValidator(CodecWarnValidators.nonEmptyIfAuthored("StationStep.Produce.Items is an empty array; author at least one entry or omit the group.")).add()
                 .appendInherited(new KeyedCodec<>("To", Codec.STRING, false),
                         (o, v) -> o.to = v, o -> o.to, (o, p) -> o.to = p.to)
-                .documentation("The destination: 'Inventory' (default). 'Custody' is [wave 3].").add()
+                .documentation("The destination for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the At-anchor's claim).")
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:produce-to"))).add()
                 .build();
 
         @Nonnull
-        public static Produce of(@Nullable String itemId, @Nullable Integer quantity, @Nullable String to) {
+        public static Produce of(@Nullable Ingredient[] items, @Nullable String to) {
             Produce p = new Produce();
-            p.itemId = itemId;
-            p.quantity = quantity;
+            p.items = items;
             p.to = to;
             return p;
         }
 
-        @Nullable
-        public String getItemId() {
-            return itemId;
+        /** Convenience for a single-item produce (the classic convert loop's shape). */
+        @Nonnull
+        public static Produce ofOne(@Nullable String itemId, @Nullable Integer quantity, @Nullable String to) {
+            return of(new Ingredient[] {Ingredient.item(itemId, quantity)}, to);
         }
 
+        /** The items this phase produces; null/empty = a no-op phase. */
         @Nullable
-        public Integer getQuantity() {
-            return quantity;
+        public Ingredient[] getItems() {
+            return items;
         }
 
         @Nullable
@@ -658,9 +660,9 @@ public final class StationStep {
             return to;
         }
 
-        /** {@link #quantity}, reader-defaulted to 1 when null/non-positive. */
-        public int effectiveQuantity() {
-            return quantity != null && quantity > 0 ? quantity : 1;
+        /** True when no item is authored (the phase does nothing). */
+        public boolean isEmpty() {
+            return items == null || items.length == 0;
         }
 
         /** {@link #to}, reader-defaulted to {@link #TO_INVENTORY} when null/blank. */
@@ -685,10 +687,11 @@ public final class StationStep {
         public static final BuilderCodec<Stamp> CODEC = BuilderCodec.builder(Stamp.class, Stamp::new)
                 .appendInherited(new KeyedCodec<>("Reagents", new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
                         (o, v) -> o.reagents = v, o -> o.reagents, (o, p) -> o.reagents = p.reagents)
-                .documentation("Ingredient reagents consumed from the player's inventory at this step's commit.").add()
+                .documentation("Ingredient reagents consumed from the player's inventory at this step's commit.")
+                .addValidator(CodecWarnValidators.nonEmptyIfAuthored("Stamp.Reagents is an empty array; author at least one entry or omit the group (free stamp).")).add()
                 .appendInherited(new KeyedCodec<>("Durability", Durability.CODEC, false),
                         (o, v) -> o.durability = v, o -> o.durability, (o, p) -> o.durability = p.durability)
-                .documentation("RpgStations-native durability upgrade (AddMax). Real without any progression mod.").add()
+                .documentation("RpgStations-native durability upgrade (AddMax). Real with no other mod installed.").add()
                 .appendInherited(new KeyedCodec<>("Stats", Stats.CODEC, false),
                         (o, v) -> o.stats = v, o -> o.stats, (o, p) -> o.stats = p.stats)
                 .documentation("The composable stat-roll + cap model, delegated to the registered EnhanceStamper.").add()
@@ -730,7 +733,8 @@ public final class StationStep {
                     BuilderCodec.builder(Durability.class, Durability::new)
                             .appendInherited(new KeyedCodec<>("AddMax", Codec.DOUBLE, false),
                                     (o, v) -> o.addMax = v, o -> o.addMax, (o, p) -> o.addMax = p.addMax)
-                            .documentation("The amount added to the stack's MaxDurability (and its current durability).").add()
+                            .documentation("The amount added to the stack's MaxDurability (and its current durability).")
+                            .addValidator(CodecWarnValidators.positive("Stamp.Durability.AddMax should be positive.")).add()
                             .build();
 
             @Nonnull
@@ -760,9 +764,13 @@ public final class StationStep {
             @Nullable protected Caps caps;
 
             public static final BuilderCodec<Stats> CODEC = BuilderCodec.builder(Stats.class, Stats::new)
-                    .appendInherited(new KeyedCodec<>("Pool", Codec.STRING, false),
+                    .appendInherited(new KeyedCodec<>("Pool", RollPool.CHILD_ASSET_CODEC, false),
                             (o, v) -> o.pool = v, o -> o.pool, (o, p) -> o.pool = p.pool)
-                    .documentation("A reusable RollPool asset id to pick stat entries from (alternative/addition to inline Entries).").add()
+                    .documentation("A reusable RollPool asset id to pick stat entries from (alternative/addition to inline "
+                            + "Entries). May also be an INLINE roll-pool body, optionally with its own Parent - but a "
+                            + "RollPool's single Entries array REPLACES the parent's wholesale, it never appends to it, so "
+                            + "use an ExtensionAsset (or the sibling inline Entries leaf here) to ADD entries to a shared pool.")
+                    .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:rollpools"))).add()
                     .appendInherited(new KeyedCodec<>("Entries", new ArrayCodec<>(StatRollEntry.CODEC, StatRollEntry[]::new), false),
                             (o, v) -> o.entries = v, o -> o.entries, (o, p) -> o.entries = p.entries)
                     .documentation("Inline candidate stat-roll entries (shares the StatRollEntry shape with RollPool).").add()
@@ -822,10 +830,12 @@ public final class StationStep {
                 public static final BuilderCodec<Picks> CODEC = BuilderCodec.builder(Picks.class, Picks::new)
                         .appendInherited(new KeyedCodec<>("Min", Codec.INTEGER, false),
                                 (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
-                        .documentation("The minimum number of weighted picks (reader-defaults to 1).").add()
+                        .documentation("The minimum number of weighted picks (reader-defaults to 1).")
+                        .addValidator(CodecWarnValidators.positive("Stamp.Stats.Picks.Min should be positive; it floors at 1 otherwise.")).add()
                         .appendInherited(new KeyedCodec<>("Max", Codec.INTEGER, false),
                                 (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max)
-                        .documentation("The maximum number of weighted picks (reader-defaults to Min).").add()
+                        .documentation("The maximum number of weighted picks (reader-defaults to Min).")
+                        .addValidator(CodecWarnValidators.positive("Stamp.Stats.Picks.Max should be positive; a value below Min floors to Min.")).add()
                         .build();
 
                 @Nonnull
@@ -862,8 +872,7 @@ public final class StationStep {
              * The cap model, re-shaped for scope-2 (design 3.8, decision 20). Every leaf is nullable
              * and independently composable.
              *
-             * <p><b>{@link #budgets}</b> replaces the old {@code PerItemBudget} + {@code
-             * SkillScaledBudget} pair: a list of total-budget entries, each EITHER a flat
+             * <p><b>{@link #budgets}</b> is a list of total-budget entries, each EITHER a flat
              * {@code {Points}} or a factor-scaled {@code {PointsPer, Factors[]}}
              * ({@code PointsPer * sum(resolve(f) * f.Weight)}). <b>M2's binding rule (unchanged):</b>
              * the EFFECTIVE total budget is the MIN over every authored {@link Budget} entry.
@@ -936,6 +945,12 @@ public final class StationStep {
                         .appendInherited(new KeyedCodec<>("Factors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
                                 (o, v) -> o.factors = v, o -> o.factors, (o, p) -> o.factors = p.factors)
                         .documentation("Weighted factor references summed and multiplied by PointsPer: PointsPer * sum(resolve*Weight).").add()
+                        .afterDecode((Budget budget, ExtraInfo extraInfo) -> {
+                            if (!budget.hasExactlyOneRoute()) {
+                                extraInfo.getValidationResults().warn(
+                                        "Stamp.Stats.Caps.Budget should author exactly one of Points | PointsPer+Factors, not both or neither.");
+                            }
+                        })
                         .build();
 
                 @Nonnull
@@ -997,7 +1012,8 @@ public final class StationStep {
                                 .appendInherited(new KeyedCodec<>("RepeatCostMultiplier", Codec.DOUBLE, false),
                                         (o, v) -> o.repeatCostMultiplier = v, o -> o.repeatCostMultiplier,
                                         (o, p) -> o.repeatCostMultiplier = p.repeatCostMultiplier)
-                                .documentation("Scales reagent cost per prior stamp count: ceil(base * (1 + mult * stampCount)).").add()
+                                .documentation("Scales reagent cost per prior stamp count: ceil(base * (1 + mult * stampCount)).")
+                                .addValidator(CodecWarnValidators.nonNegative("Stamp.Stats.Caps.Economics.RepeatCostMultiplier should not be negative.")).add()
                                 .build();
 
                 @Nonnull

@@ -19,8 +19,8 @@ import com.ziggfreed.rpgstations.api.EnhanceLine;
  *
  * <p>{@link #before}/{@link #after} are immutable {@code ItemStack} copies (the "copy-of-item"
  * report); {@link #lines} is the provider's own opaque-stat report (the "enhancements-metadata"
- * report) rendered VERBATIM - RpgStations never interprets either, keeping the engine free of MMO
- * stat vocabulary. {@link #durabilityAdded} is the station's own authored {@code Durability.AddMax}
+ * report) rendered VERBATIM - this engine never interprets either, so no foreign stat vocabulary
+ * reaches it. {@link #durabilityAdded} is the station's own authored {@code Durability.AddMax}
  * delta, which RpgStations DOES own (durability is native, real without any stamper).
  */
 record StationEnhanceOutcome(@Nonnull String itemId, @Nonnull ItemStack before, @Nonnull ItemStack after,

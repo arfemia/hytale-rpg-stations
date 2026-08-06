@@ -4,8 +4,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 /**
- * One content-validation result. Ported verbatim from the MMO's {@code validation.Finding}
- * mini-core (RPG Stations extraction leg 2). Diagnostic messages are raw English by
+ * One content-validation result. Diagnostic messages are raw English by
  * convention (admin/log surface).
  */
 public record Finding(@Nonnull Severity severity, @Nonnull String domain, @Nonnull String code,

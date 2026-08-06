@@ -4,13 +4,12 @@ Router for `interaction/`. Two registered types: one backs every station block i
 pack, the other backs every placed-input display entity's own press-F retrieval.
 
 - **[`StationUseInteraction`](StationUseInteraction.java)** - `extends SimpleInstantInteraction`,
-  registered type name **`rpg_station_use`** (the MMO's pre-extraction copy was `mmo_station_use`;
-  the two never coexisted post-leg-5, but the rename is why an old dev-world block placed under the
-  MMO's engine no longer resolves - see the mod-root `CLAUDE.md`'s shared-block-id story). A
+  registered type name **`rpg_station_use`** (namespaced to this mod, so a station block's chain
+  can never collide with another mod's interaction type). A
   station block's `RootInteraction` JSON references it in the OBJECT form,
   `{ "Type": "rpg_station_use", "Station": "<id>" }`, so ONE Java interaction type backs any
-  number of station blocks with zero extra Java per station (mirrors the MMO's bounty-board /
-  token-shop object-form-param pattern). Pressing F calls `station.StationService#toggle`: starts a
+  number of station blocks with zero extra Java per station (the first-party object-form-param
+  pattern). Pressing F calls `station.StationService#toggle`: starts a
   session (every denial a localized toast) or stops the player's running one. Every exit path sets
   `ctx.getState().state`; a user-initiated denial is `Finished`, never `Failed`.
 - **[`StationRetrieveInteraction`](StationRetrieveInteraction.java)** (new feature, 2026-07-22 fix

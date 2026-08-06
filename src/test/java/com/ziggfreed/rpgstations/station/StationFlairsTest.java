@@ -101,7 +101,7 @@ public class StationFlairsTest {
 
         assertNotNull(result);
         assertEquals("SFX_Golden", result.getSound());
-        assertEquals("Particles_Base", result.getParticles());
+        assertEquals("Particles_Base", result.getParticles()[0].getSystemId());
     }
 
     // ==================== Add onto a null base ====================
@@ -116,7 +116,7 @@ public class StationFlairsTest {
 
         assertNotNull(result);
         assertEquals("SFX_Golden", result.getSound());
-        assertEquals("Particles_Golden", result.getParticles());
+        assertEquals("Particles_Golden", result.getParticles()[0].getSystemId());
     }
 
     // ==================== Multi-flair sorted-id stacking ====================
@@ -132,7 +132,7 @@ public class StationFlairsTest {
 
         assertNotNull(result);
         assertEquals("SFX_Zulu", result.getSound());
-        assertEquals("Particles_Alpha", result.getParticles());
+        assertEquals("Particles_Alpha", result.getParticles()[0].getSystemId());
     }
 
     // ==================== Unlocked id absent from the effective map ====================
@@ -219,7 +219,7 @@ public class StationFlairsTest {
 
         assertNotNull(result);
         assertEquals("SFX_Golden_Rare", result.getSound());
-        assertEquals("Particles_Golden_Rare", result.getParticles());
+        assertEquals("Particles_Golden_Rare", result.getParticles()[0].getSystemId());
     }
 
     // ==================== COMPLETION moment ====================
@@ -267,7 +267,7 @@ public class StationFlairsTest {
 
         assertNotNull(result);
         assertEquals("SFX_Golden_Complete", result.getSound());
-        assertEquals("Particles_Golden_Complete", result.getParticles());
+        assertEquals("Particles_Golden_Complete", result.getParticles()[0].getSystemId());
     }
 
     // ==================== IMPACT moment (new this leg - split off SWING) ====================
@@ -332,7 +332,7 @@ public class StationFlairsTest {
 
         assertNotNull(result);
         assertEquals("SFX_Zulu", result.getSound());
-        assertEquals("Particles_Alpha", result.getParticles());
+        assertEquals("Particles_Alpha", result.getParticles()[0].getSystemId());
     }
 
     @Test

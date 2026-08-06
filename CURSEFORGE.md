@@ -17,9 +17,9 @@ every content type, ships alongside this mod's release.
 ## Required dependency: ZiggfreedCommon
 
 RPG Stations has exactly **one hard dependency**: **ZiggfreedCommon `>=1.4.0`**. Install it first -
-the server loads it before RPG Stations. There is **no dependency on any progression mod** - RPG
+the server loads it before RPG Stations. That is the whole list - **no other mod is required**. RPG
 Stations is a complete, standalone reward loop (conditional loot, command rewards, enhancement) on
-its own. See [Integrations](#integrations) below for the optional MMO Skill Tree pairing.
+its own. See [Integrations](#integrations) below for how an add-on hooks it.
 
 ## Features
 
@@ -61,14 +61,14 @@ exactly where the animation calls for them.
 
 Every station can roll bonus rewards on top of its normal output: extra copies of the result, a
 chance-gated drop table, a floor ladder that scales with any stat your server tracks (tool power,
-skill luck, whatever a progression mod writes) - composed from a small, weighted vocabulary shared
-across every loot site in the mod.
+session length, whatever another installed mod writes) - composed from a small, weighted vocabulary
+shared across every loot site in the mod.
 
 ### Enhancement stamping
 
 The Anvil's flagship ritual: place a weapon, strike it, and roll stats onto it from a configurable
 pool, capped by a composable budget model (a flat ceiling, a stat-scaled ceiling, or both at once -
-the tighter one wins). Durability upgrades land even with no progression mod installed at all.
+the tighter one wins). Durability upgrades land with no other mod installed at all.
 
 ### Flairs
 
@@ -79,8 +79,8 @@ station without touching that station's own file.
 ### An extension surface for pack authors
 
 A fourth-party pack can additively extend another pack's station, action, loot table, or roll pool
-- append a new skill's XP grant, a new loot reference, an extra ritual step - without owning or
-replacing the original file. See the Extending Other Packs guide in the full docs.
+- append a contribution on a new channel, a new loot reference, an extra ritual step - without
+owning or replacing the original file. See the Extending Other Packs guide in the full docs.
 
 ## The Player Experience
 
@@ -133,17 +133,22 @@ session-summary HUD tuning, layered like any other asset - there is no separate 
 
 ## Integrations
 
-RPG Stations exposes a small, typed extension surface (native events plus a registry) any
-progression mod can hook to turn completed work cycles into its own rewards, without RPG Stations
-ever depending on that mod. No installed listener, and every station still runs its full standalone
-loot/command reward loop with zero XP granted.
+RPG Stations exposes a small, typed extension surface (native events plus typed registries) any mod
+can hook to turn completed work cycles into its own rewards, without RPG Stations ever depending on
+that mod. With no listener installed, every station still runs its full standalone loot and command
+reward loop.
 
-**MMO Skill Tree** is the first mod to pair with it: install both, and each completed work cycle
-forwards its declared XP asks to the MMO's skill system, station loot formulas can read any of the
-MMO's stat channels (luck, skill level, and more), and the session summary panel gains XP rows
-alongside RPG Stations' own totals. Neither mod hard-depends on the other - RPG Stations runs a
-complete standalone experience without MMO Skill Tree installed, and MMO Skill Tree runs unaffected
-without RPG Stations installed.
+It works in two directions, one shape each. An add-on registers **factors** - namespaced ids a
+station's loot, gate, and budget formulas read a number from - and declares **channels**, namespaced
+ids a station posts amounts to on every completed cycle and on a rare find. RPG Stations resolves
+nothing on the write side: it forwards each `{Channel, Param, Amount}` verbatim and lets the
+channel's owner decide what it means. An add-on can also add rows to the session-summary panel,
+answer which cosmetic flairs a player has unlocked, encode how enhancement points are written onto
+an item, and register its own content checks that run inside RPG Stations' validate pass.
+
+Known integrations: **MMO Skill Tree**. See the Extension Channels and Add-ons & Integrations pages
+in the full docs for the contract, a complete worked example, and the presence-check idiom a
+consumer needs.
 
 ## Changelog
 

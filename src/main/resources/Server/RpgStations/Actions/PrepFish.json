@@ -1,5 +1,5 @@
 {
-  "$Comment": "The flagship multi-station fish exemplar, attached to Server/RpgStations/Stations/CuttingBoard.json via {\"Ref\":\"prepfish\"}. Custody.Input is authored explicitly (ResourceTypeId 'Fish', the native family every caught-fish item shares via Template_Fish_Item.json) because this action has no Recipe.Conversions for the usual zero-extra-authoring fallback to derive from - it is a Steps program. Fish scaling is split into two steps deliberately: 'load' is a one-shot Consume (Repeat absent) and 'scale' is a pure Duration beat with no Consume phase (Repeat:{Times:3}) - a Consume inside a Repeat would re-execute the consume every iteration and over-drain custody, so the load and the repeated animation beat are kept separate. Tool gate = the Daggers weapon family, authored onto Tags.Family: vanilla weapons carry native Tags {Type:['Weapon'],Family:['Dagger']} on their shared Template_Weapon_Daggers.json parent, inherited to every material tier at decode time (appendInherited) - Tags.Family:['Dagger'] is an any-of match every Daggers tier satisfies with zero per-tier enumeration (a future dagger tier just works, matching the Anvil's own preference for native-category composition over a hand-maintained id list; runtime read is Item.getData().getRawTags()). Anchors.fire targets the 'cookingfire' station (Server/RpgStations/Stations/CookingFire.json) within a 12-block radius. Work.Repeat:true plus the engine's StopReason.INPUTS_EXHAUSTED is 'repeats while fish remain' with zero mode flags - the loop stops gracefully once no more Fish custody remains at the next 'load' step's Consume. Sound/particle/emote ids are all real, already-shipped-elsewhere ids, never invented placeholders: Smoke_Black (Deco_Campfire_Off.json's own particle), SFX_Player_Drop_Item (the vanilla generic item-place sound), RPG_Emote_Knife (this jar's own Server/Emote/RPG_Emote_Knife.json). Every added id is likewise real and one-shot (never a Looping SoundEvent: nothing in the protocol can stop a playing sound, so a looping id fired through a step Presentation would never end): 'scale' uses SFX_Daggers_T1_Slash_Impact (the dagger's own blade-lands impact - the knife swing is already carried visually by the RPG_Emote_Knife clip, so the audio beat is the chop landing) plus Block_Hit_Wood chips (the vanilla wood-hit chip+dust system - a knife biting into the wooden board); both re-fire on each of the 3 scale beats since StationStepHandlers#emitEntryCues runs inside the per-iteration loop, so a Repeat:{Times:3} step cues three times with zero engine change. 'cook' authors Working:true (a pure Duration beat is not a Consume+Produce convert, so it must opt in explicitly) which is what puts the fire into its Lit state for exactly this beat, plus SFX_Flame_Ignite as the sizzle one-shot at beat entry (Sounds/Items/Torch/Torch_On.ogg - the flare of food meeting hot coals). 'harvest' gets a deliberately silent steam puff (Block_Break_Dust: a bounded 2-particle Smoke_Cartoon burst rendered BlendAdd, so it reads bright/white and dissipates in about 0.5s) - the one visually-approximate id in this action, since the shared source ships no standalone steam/vapor particle system at all (the only vapour in the game is a Vapor_Water spawner nested inside Workbench_Cooking_On, not referenceable as a standalone SystemId). Custody.Display renders the placed fish following the sawmill's own display conventions (Offset/Rotation are facing-relative to the placed block's yaw, so a Y-only offset stays orientation-safe at any block rotation; the sawmill uses Offset.Y -0.1 / Scale 0.4, the cooking fire Offset.Y 0.4 / Scale 1.0). Offset.Y 0.05 (a fish laid just above the board's top face) and Scale 0.5 (a fish item is small next to a log) are provisional - in-game tuning is expected, exactly as the sawmill's and anvil's own values were tuned in-game.",
+  "$Comment": "The flagship multi-station fish exemplar, attached to Server/RpgStations/Stations/CuttingBoard.json via {\"Ref\":\"prepfish\"}. Custody.Input is authored explicitly (ResourceTypeId 'Fish', the native family every caught-fish item shares via Template_Fish_Item.json) because this action has no Recipe.Conversions for the usual zero-extra-authoring fallback to derive from - it is a Steps program. Fish scaling is split into two steps deliberately: 'load' is a one-shot Consume (Repeat absent) and 'scale' is a pure Duration beat with no Consume phase (Repeat:{Times:3}) - a Consume inside a Repeat would re-execute the consume every iteration and over-drain custody, so the load and the repeated animation beat are kept separate. Tool gate = the Daggers weapon family, authored onto Tags.Family: vanilla weapons carry native Tags {Type:['Weapon'],Family:['Dagger']} on their shared Template_Weapon_Daggers.json parent, inherited to every material tier at decode time (appendInherited) - Tags.Family:['Dagger'] is an any-of match every Daggers tier satisfies with zero per-tier enumeration (a future dagger tier just works, matching the Anvil's own preference for native-category composition over a hand-maintained id list; runtime read is Item.getData().getRawTags()). Anchors.fire targets the 'cookingfire' station (Server/RpgStations/Stations/CookingFire.json) within a 12-metre radius (MaxRadiusMeters). Work.Looping:true plus the engine's StopReason.INPUTS_EXHAUSTED is 'repeats while fish remain' with zero mode flags - the loop stops gracefully once no more Fish custody remains at the next 'load' step's Consume. Sound/particle/emote ids are all real, already-shipped-elsewhere ids, never invented placeholders: Smoke_Black (Deco_Campfire_Off.json's own particle), SFX_Player_Drop_Item (the vanilla generic item-place sound), RPG_Emote_Knife (this jar's own Server/Emote/RPG_Emote_Knife.json). Every added id is likewise real and one-shot (never a Looping SoundEvent: nothing in the protocol can stop a playing sound, so a looping id fired through a step Presentation would never end): 'scale' uses SFX_Daggers_T1_Slash_Impact (the dagger's own blade-lands impact - the knife swing is already carried visually by the RPG_Emote_Knife clip, so the audio beat is the chop landing) plus Block_Hit_Wood chips (the vanilla wood-hit chip+dust system - a knife biting into the wooden board); both re-fire on each of the 3 scale beats since StationStepHandlers#emitEntryCues runs inside the per-iteration loop, so a Repeat:{Times:3} step cues three times with zero engine change. 'cook' authors IsWork:true (a pure Duration beat is not a Consume+Produce convert, so it must opt in explicitly) which is what puts the fire into its Lit state for exactly this beat, plus SFX_Flame_Ignite as the sizzle one-shot at beat entry (Sounds/Items/Torch/Torch_On.ogg - the flare of food meeting hot coals). 'harvest' gets a deliberately silent steam puff (Block_Break_Dust: a bounded 2-particle Smoke_Cartoon burst rendered BlendAdd, so it reads bright/white and dissipates in about 0.5s) - the one visually-approximate id in this action, since the shared source ships no standalone steam/vapor particle system at all (the only vapour in the game is a Vapor_Water spawner nested inside Workbench_Cooking_On, not referenceable as a standalone SystemId). Custody.Display renders the placed fish following the sawmill's own display conventions (Offset/Rotation are facing-relative to the placed block's yaw, so a Y-only offset stays orientation-safe at any block rotation; the sawmill uses Offset.Y -0.1 / Scale 0.4, the cooking fire Offset.Y 0.4 / Scale 1.0). Offset.Y 0.05 (a fish laid just above the board's top face) and Scale 0.5 (a fish item is small next to a log) are provisional - in-game tuning is expected, exactly as the sawmill's and anvil's own values were tuned in-game.",
   "Label": "rpgstations.action.prepfish.label",
   "Custody": {
     "MaxQuantity": 100,
@@ -14,22 +14,22 @@
     "CycleMs": 500,
     "MaxDurationMs": 600000,
     "Exclusive": true,
-    "Repeat": true
+    "Looping": true
   },
   "Anchors": {
-    "fire": { "Station": "cookingfire", "MaxRadius": 12 }
+    "fire": { "Station": "cookingfire", "MaxRadiusMeters": 12 }
   },
   "Steps": [
     {
       "Id": "load",
-      "Consume": { "ResourceTypeId": "Fish", "Quantity": 1, "From": "Custody" }
+      "Consume": { "Items": [{ "ResourceTypeId": "Fish", "Quantity": 1 }], "From": "Custody" }
     },
     {
       "Id": "scale",
       "Repeat": { "Times": 3 },
       "Duration": { "Ms": 600 },
       "Puppet": { "Clip": "RPG_Emote_Knife" },
-      "Presentation": { "Sound": "SFX_Daggers_T1_Slash_Impact", "Particles": "Block_Hit_Wood" }
+      "Presentation": { "Sound": "SFX_Daggers_T1_Slash_Impact", "Particles": [ { "SystemId": "Block_Hit_Wood" } ] }
     },
     {
       "Id": "walkout",
@@ -39,22 +39,22 @@
     {
       "Id": "placeraw",
       "At": "fire",
-      "Produce": { "ItemId": "Food_Fish_Raw", "Quantity": 1, "To": "Custody" },
+      "Produce": { "Items": [{ "ItemId": "Food_Fish_Raw", "Quantity": 1 }], "To": "Custody" },
       "Duration": { "Ms": 400 }
     },
     {
       "Id": "cook",
       "At": "fire",
-      "Working": true,
+      "IsWork": true,
       "Duration": { "Ms": 2500 },
-      "Presentation": { "Sound": "SFX_Flame_Ignite", "Particles": "Smoke_Black" }
+      "Presentation": { "Sound": "SFX_Flame_Ignite", "Particles": [ { "SystemId": "Smoke_Black" } ] }
     },
     {
       "Id": "harvest",
       "At": "fire",
-      "Consume": { "ItemId": "Food_Fish_Raw", "Quantity": 1, "From": "Custody" },
+      "Consume": { "Items": [{ "ItemId": "Food_Fish_Raw", "Quantity": 1 }], "From": "Custody" },
       "Duration": { "Ms": 400 },
-      "Presentation": { "Particles": "Block_Break_Dust" }
+      "Presentation": { "Particles": [ { "SystemId": "Block_Break_Dust" } ] }
     },
     {
       "Id": "walkback",
@@ -63,7 +63,7 @@
     },
     {
       "Id": "deposit",
-      "Produce": { "ItemId": "Food_Fish_Grilled", "Quantity": 1, "To": "Custody" },
+      "Produce": { "Items": [{ "ItemId": "Food_Fish_Grilled", "Quantity": 1 }], "To": "Custody" },
       "Duration": { "Ms": 300 },
       "Presentation": { "Sound": "SFX_Player_Drop_Item" }
     }

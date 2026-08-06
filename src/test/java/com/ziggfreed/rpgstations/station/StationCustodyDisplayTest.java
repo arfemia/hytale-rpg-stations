@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.common.codec.Rotation;
+import com.ziggfreed.common.codec.Vec3;
 
 /**
  * Pure tests for {@link StationCustodyDisplay}'s unit-JVM-safe composition cores -
@@ -43,7 +45,7 @@ class StationCustodyDisplayTest {
     void resolveWorldOffset_defaultFacing_isIdentity() {
         // yaw 0 (default placement): the authored X/Z pass through unchanged, exactly the pre-round-8
         // world-space behavior - existing packs render byte-identically.
-        Custody.Display.Offset offset = Custody.Display.Offset.of(0.3, 0.55, -0.2);
+        Vec3 offset = Vec3.of(0.3, 0.55, -0.2);
         Custody.Display display = Custody.Display.of(offset, null, null);
         assertArrayEquals(new double[] {0.3, 0.55, -0.2},
                 StationCustodyDisplay.resolveWorldOffset(display, 0.0));
@@ -53,7 +55,7 @@ class StationCustodyDisplayTest {
     void resolveWorldOffset_xOffset_rotatesThroughFourFacings() {
         // Authored Offset.X = 0.3 (a pure +X shift) rotated by each block facing. Matches the engine's
         // Rotation.rotateY on (0.3, y, 0): None (0.3,0), Ninety (0,-0.3), OneEighty (-0.3,0), TwoSeventy (0,0.3).
-        Custody.Display.Offset offset = Custody.Display.Offset.of(0.3, 0.0, 0.0);
+        Vec3 offset = Vec3.of(0.3, 0.0, 0.0);
         Custody.Display display = Custody.Display.of(offset, null, null);
         assertArrayEquals(new double[] {0.3, 0.0, 0.0},
                 StationCustodyDisplay.resolveWorldOffset(display, 0.0), 1e-9);
@@ -69,7 +71,7 @@ class StationCustodyDisplayTest {
     void resolveWorldOffset_zOffset_rotatesThroughFourFacings() {
         // Authored Offset.Z = 0.3 (a pure +Z shift) rotated by each block facing. Matches the engine's
         // Rotation.rotateY on (0, y, 0.3): None (0,0.3), Ninety (0.3,0), OneEighty (0,-0.3), TwoSeventy (-0.3,0).
-        Custody.Display.Offset offset = Custody.Display.Offset.of(0.0, 0.0, 0.3);
+        Vec3 offset = Vec3.of(0.0, 0.0, 0.3);
         Custody.Display display = Custody.Display.of(offset, null, null);
         assertArrayEquals(new double[] {0.0, 0.0, 0.3},
                 StationCustodyDisplay.resolveWorldOffset(display, 0.0), 1e-9);
@@ -85,7 +87,7 @@ class StationCustodyDisplayTest {
     void resolveWorldOffset_mixedOffset_rotatesBothAxes() {
         // Offset (X=1, Z=2) at yaw 90: worldX = 1*cos + 2*sin = 2, worldZ = -1*sin + 2*cos = -1;
         // matches Rotation.rotateY(Ninety) on (1, y, 2) = (2, y, -1). Y is untouched (vertical).
-        Custody.Display.Offset offset = Custody.Display.Offset.of(1.0, 0.5, 2.0);
+        Vec3 offset = Vec3.of(1.0, 0.5, 2.0);
         Custody.Display display = Custody.Display.of(offset, null, null);
         assertArrayEquals(new double[] {2.0, 0.5, -1.0},
                 StationCustodyDisplay.resolveWorldOffset(display, YAW_90), 1e-9);
@@ -94,7 +96,7 @@ class StationCustodyDisplayTest {
     @Test
     void resolveWorldOffset_yStaysVertical_neverRotated() {
         // Only Y authored: it stays put at every facing (Y is the vertical axis, never rotated).
-        Custody.Display.Offset offset = Custody.Display.Offset.of(null, 0.55, null);
+        Vec3 offset = Vec3.of(null, 0.55, null);
         Custody.Display display = Custody.Display.of(offset, null, null);
         for (double yaw : new double[] {0.0, YAW_90, YAW_180, YAW_270}) {
             assertArrayEquals(new double[] {0.0, 0.55, 0.0},
@@ -104,7 +106,7 @@ class StationCustodyDisplayTest {
 
     @Test
     void resolveWorldOffset_partiallyAuthored_missingLeavesDefaultToZero() {
-        Custody.Display.Offset offset = Custody.Display.Offset.of(1.0, null, null);
+        Vec3 offset = Vec3.of(1.0, null, null);
         Custody.Display display = Custody.Display.of(offset, null, null);
         assertArrayEquals(new double[] {1.0, 0.0, 0.0},
                 StationCustodyDisplay.resolveWorldOffset(display, 0.0), 1e-9);
@@ -128,7 +130,7 @@ class StationCustodyDisplayTest {
     @Test
     void resolvePosition_authoredOffset_defaultFacing_shiftsEachAxis() {
         // yaw 0: identical to the pre-round-8 world-space behavior (exact, cos 0 = 1 / sin 0 = 0).
-        Custody.Display.Offset offset = Custody.Display.Offset.of(0.0, 0.55, 0.2);
+        Vec3 offset = Vec3.of(0.0, 0.55, 0.2);
         Custody.Display display = Custody.Display.of(offset, null, null);
         assertArrayEquals(new double[] {10.5, 65.05, -3.3},
                 StationCustodyDisplay.resolvePosition(display, 10, 64, -4, 0.0));
@@ -137,7 +139,7 @@ class StationCustodyDisplayTest {
     @Test
     void resolvePosition_authoredOffset_rotatedFacing_shiftsRelativeToBlock() {
         // Offset.X = 1 at yaw 90 -> world (0, 0, -1): block center (10.5, 64.5, -3.5) + (0, 0, -1).
-        Custody.Display.Offset offset = Custody.Display.Offset.of(1.0, 0.0, 0.0);
+        Vec3 offset = Vec3.of(1.0, 0.0, 0.0);
         Custody.Display display = Custody.Display.of(offset, null, null);
         assertArrayEquals(new double[] {10.5, 64.5, -4.5},
                 StationCustodyDisplay.resolvePosition(display, 10, 64, -4, YAW_90), 1e-9);
@@ -145,7 +147,7 @@ class StationCustodyDisplayTest {
 
     @Test
     void resolvePosition_partiallyAuthoredOffset_missingLeavesDefaultToZero() {
-        Custody.Display.Offset offset = Custody.Display.Offset.of(1.0, null, null);
+        Vec3 offset = Vec3.of(1.0, null, null);
         Custody.Display display = Custody.Display.of(offset, null, null);
         assertArrayEquals(new double[] {11.5, 64.5, -3.5},
                 StationCustodyDisplay.resolvePosition(display, 10, 64, -4, 0.0));
@@ -165,23 +167,23 @@ class StationCustodyDisplayTest {
     }
 
     @Test
-    void resolveRotationRadians_yawOnly_defaultFacing_convertsYToRadians() {
-        Custody.Display display = Custody.Display.of(null, null, Custody.Display.Rotation.of(null, 180.0, null));
+    void resolveRotationRadians_yawOnly_defaultFacing_convertsYawToRadians() {
+        Custody.Display display = Custody.Display.of(null, null, Rotation.of(180.0, null, null));
         assertArrayEquals(new float[] {0f, (float) Math.PI, 0f},
                 StationCustodyDisplay.resolveRotationRadians(display, 0.0), 1e-5f);
     }
 
     @Test
-    void resolveRotationRadians_pitchOnly_defaultFacing_convertsXToRadians() {
-        // The reported anvil defect's fix: X (pitch) = 90 lays the weapon flat.
-        Custody.Display display = Custody.Display.of(null, null, Custody.Display.Rotation.of(90.0, null, null));
+    void resolveRotationRadians_pitchOnly_defaultFacing_convertsPitchToRadians() {
+        // The reported anvil defect's fix: Pitch = 90 lays the weapon flat.
+        Custody.Display display = Custody.Display.of(null, null, Rotation.of(null, 90.0, null));
         assertArrayEquals(new float[] {(float) (Math.PI / 2.0), 0f, 0f},
                 StationCustodyDisplay.resolveRotationRadians(display, 0.0), 1e-5f);
     }
 
     @Test
-    void resolveRotationRadians_fullXYZ_defaultFacing_convertsEachAxisInOrder() {
-        Custody.Display display = Custody.Display.of(null, null, Custody.Display.Rotation.of(90.0, 180.0, 45.0));
+    void resolveRotationRadians_fullTriple_defaultFacing_convertsEachAxisInOrder() {
+        Custody.Display display = Custody.Display.of(null, null, Rotation.of(180.0, 90.0, 45.0));
         assertArrayEquals(
                 new float[] {(float) Math.toRadians(90.0), (float) Math.toRadians(180.0), (float) Math.toRadians(45.0)},
                 StationCustodyDisplay.resolveRotationRadians(display, 0.0), 1e-5f);
@@ -189,16 +191,16 @@ class StationCustodyDisplayTest {
 
     @Test
     void resolveRotationRadians_partialGroup_defaultFacing_missingLeavesDefaultToZero() {
-        Custody.Display display = Custody.Display.of(null, null, Custody.Display.Rotation.of(null, null, 90.0));
+        Custody.Display display = Custody.Display.of(null, null, Rotation.of(null, null, 90.0));
         assertArrayEquals(new float[] {0f, 0f, (float) (Math.PI / 2.0)},
                 StationCustodyDisplay.resolveRotationRadians(display, 0.0), 1e-5f);
     }
 
     @Test
     void resolveRotationRadians_blockYawAddedIntoYaw_pitchRollUnchanged() {
-        // Authored Y=45deg with the block placed at 90deg -> yaw = PI/4 + PI/2 = 3PI/4;
-        // X (pitch) and Z (roll) ride the block facing unchanged.
-        Custody.Display display = Custody.Display.of(null, null, Custody.Display.Rotation.of(90.0, 45.0, 20.0));
+        // Authored Yaw=45deg with the block placed at 90deg -> yaw = PI/4 + PI/2 = 3PI/4;
+        // Pitch and Roll ride the block facing unchanged.
+        Custody.Display display = Custody.Display.of(null, null, Rotation.of(45.0, 90.0, 20.0));
         assertArrayEquals(
                 new float[] {(float) Math.toRadians(90.0), (float) (Math.toRadians(45.0) + YAW_90),
                         (float) Math.toRadians(20.0)},
@@ -207,9 +209,9 @@ class StationCustodyDisplayTest {
 
     @Test
     void resolveRotationRadians_noAuthoredYaw_blockFacingBecomesYaw() {
-        // The anvil enhance case: authored X=90 (pitch), no Y. At a 180deg placement the prop's yaw
+        // The anvil enhance case: authored Pitch=90, no Yaw. At a 180deg placement the prop's yaw
         // is purely the block facing (PI); pitch stays PI/2, roll 0.
-        Custody.Display display = Custody.Display.of(null, null, Custody.Display.Rotation.of(90.0, null, null));
+        Custody.Display display = Custody.Display.of(null, null, Rotation.of(null, 90.0, null));
         assertArrayEquals(new float[] {(float) (Math.PI / 2.0), (float) Math.PI, 0f},
                 StationCustodyDisplay.resolveRotationRadians(display, YAW_180), 1e-5f);
     }

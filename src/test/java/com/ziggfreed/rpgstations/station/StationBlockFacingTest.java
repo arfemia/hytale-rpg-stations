@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Pure tests for {@link StationBlockFacing#rotateOffset} - the ONE facing-relative horizontal
  * rotation core both {@link StationCustodyDisplay} (round-8 {@code Custody.Display}) and
- * {@link StationPuppetController} (round-3 smoke, {@code Puppet.Offset}) compose against. Its
+ * {@link StationPuppetController} (round-3 smoke, {@code Puppet.Offset} (a shared {@code Vec3})) compose against. Its
  * sibling {@code yawRadians} reads a live {@code World}/{@code CommandBuffer} and has NO unit
  * coverage, matching {@link StationCustodyDisplayTest}'s own precedent.
  *

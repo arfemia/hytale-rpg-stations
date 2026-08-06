@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
-import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 
 /**
@@ -22,7 +21,8 @@ import com.hypixel.hytale.codec.util.RawJsonReader;
 public class FlairAssetCodecTest {
 
     private static FlairAsset decodeAsset(String body) throws Exception {
-        return FlairAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body), new ExtraInfo());
+        return FlairAsset.CODEC.decodeJson(RawJsonReader.fromJsonString(body),
+                new AssetExtraInfo<>(new AssetExtraInfo.Data(FlairAsset.class, "fixture", null)));
     }
 
     private static FlairAsset decodeWithParent(String body, FlairAsset parent, String key, String parentKey)
@@ -43,11 +43,11 @@ public class FlairAssetCodecTest {
     @Test
     void decodesStationsAndMoments() throws Exception {
         FlairAsset a = decodeAsset("{ \"Stations\": [\"sawmill\"], \"Moments\": { \"swing\": "
-                + "{ \"Particles\": \"Petal_Burst\" }, \"step:enhance:stamp\": { \"Sound\": \"SFX_Choir_Hit\" } } }");
+                + "{ \"Particles\": [ { \"SystemId\": \"Petal_Burst\" } ] }, \"step:enhance:stamp\": { \"Sound\": \"SFX_Choir_Hit\" } } }");
         assertArrayEquals(new String[]{"sawmill"}, a.getStations());
         assertNotNull(a.getMoments());
         assertEquals(2, a.getMoments().size());
-        assertEquals("Petal_Burst", a.getMoments().get("swing").getParticles());
+        assertEquals("Petal_Burst", a.getMoments().get("swing").getParticles()[0].getSystemId());
         assertEquals("SFX_Choir_Hit", a.getMoments().get("step:enhance:stamp").getSound());
     }
 
