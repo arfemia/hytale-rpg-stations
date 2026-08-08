@@ -1663,7 +1663,7 @@ public final class StationValidator {
      *
      * <p><b>Keyed on the PAIR, deliberately, and that is load-bearing.</b> Keying on the factor id
      * alone would fire on correct content by construction: every stat read carries the same
-     * {@code "stat"} factor id, so a ladder composing two different stat channels (the documented
+     * {@code "hytale:stat"} factor id, so a ladder composing two different stat channels (the documented
      * equal-weight composition shape) would emit a spurious note at every boot. Only a genuinely
      * repeated pair fires, which in practice means a param-less zero-arg engine factor named twice
      * (e.g. {@code rpgstations:cycle_count} in both a Condition and a Chance.AddFactors entry).

@@ -242,8 +242,8 @@ rolls only the remainder (`exactQuantity` exposes the pre-roll number so a calle
 authored intent without consuming a roll); the roll is an injected `DoubleSupplier`, the same seam
 `RollEvaluator` takes, and `cycleOutput` reuses the ALREADY-ROLLED primary quantity rather than
 re-resolving, so a bonus copy can never disagree with the stack it copies. The three tool factors
-that make a ladder authorable (`rpgstations:tool_quality`, `rpgstations:tool_item_level`,
-`rpgstations:tool_power`) are read by `StationService#resolveHeldToolQuality`/
+that make a ladder authorable (`hytale:tool_quality`, `hytale:tool_item_level`,
+`rpgstations:tool_power` - the namespaces differ deliberately, see `FactorRegistryImpl`) are read by `StationService#resolveHeldToolQuality`/
 `#resolveHeldToolItemLevel`/`#resolveHeldToolPower`; the quality one is an asset-map index resolve,
 not a raw index compare - see its javadoc.
 
@@ -667,7 +667,7 @@ FAIL-OPEN is absolute here; an undeclared channel must never block a station.
 **`LOOT_DUPLICATE_FACTOR` (INFO)** fires when ONE Roll references the same `(Factor, Param)` pair
 more than once across its `Conditions`, `Chance.AddFactors`, and `Ladder.Values` (case-folded,
 param-null-normalized). Keyed on the PAIR, never the bare factor id: every stat read carries factor
-id `"stat"`, so a ladder summing two different stat channels is a legitimate composition and must
+id `"hytale:stat"`, so a ladder summing two different stat channels is a legitimate composition and must
 not fire. In practice only a param-less duplicate of a zero-arg engine factor
 (`rpgstations:cycle_count` twice) trips it. **What it deliberately does NOT catch**: a formula that
 sums an aggregate factor AND the underlying channels that aggregate is defined over. Those are

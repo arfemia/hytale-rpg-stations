@@ -19,16 +19,20 @@ import com.ziggfreed.rpgstations.api.StationFactorProvider;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * The {@code "stat"} factor id (design section 4.1, gate decisions 37/19-cluster): reads the
+ * The {@code "hytale:stat"} factor id (design section 4.1, gate decisions 37/19-cluster): reads the
  * acting player's EFFECTIVE value for a native stat channel named by {@code Param} directly off
  * the engine's own {@link EntityStatMap} (folded {@code MAX}: base + every live modifier, never
- * the CURRENT value). Registered under the bare id {@code "stat"} (NOT {@code rpgstations:stat} -
- * the {@code Param} route carries the addressing, per gate decision 19's
- * {@code {"Factor":"stat","Param":"<EntityStatType id>"}} shape) alongside the other
- * {@code rpgstations:} built-ins in {@link FactorRegistryImpl#registerBuiltins()}. Mod-agnostic
+ * the CURRENT value). Namespaced {@code hytale:} rather than {@code rpgstations:} because the
+ * vocabulary it addresses is the ENGINE's, not this mod's: the number is a native
+ * {@code EntityStatType}'s value, identical at every station and meaningful with no station
+ * involved, so the namespace names the data's owner rather than whoever happened to register the
+ * provider (see {@link FactorRegistryImpl#registerBuiltins()} for the full namespacing rule and why
+ * {@code rpgstations:tool_power} stays on the other side of it). Addressing lives entirely in
+ * {@code Param}, per gate decision 19's
+ * {@code {"Factor":"hytale:stat","Param":"<EntityStatType id>"}} shape. Mod-agnostic
  * and RpgStations-CORE by design: ANY mod that writes a native stat channel (a bridged per-stack
  * enhancement, a native weapon {@code StatModifiers}, a progression mirror) participates in a
- * loot/gate/cap formula by authoring {@code {"Factor":"stat","Param":"<EntityStatType id>"}} with
+ * loot/gate/cap formula by authoring that shape with
  * zero extra bridge code - the whole point of the loot-formula middle path.
  *
  * <p>Fail-closed throughout, per {@link StationFactorProvider}'s own contract:

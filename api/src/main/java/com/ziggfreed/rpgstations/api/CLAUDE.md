@@ -70,8 +70,9 @@ is the exact inverse of a permanently-opaque channel.
   evaluates over. `register(factorId, provider)` is last-write-wins, id lowercased.
   `StationFactorProvider.resolve(ctx, param)` runs synchronously on the world thread and must not
   retain `ctx`. RpgStations registers its own built-ins under the `rpgstations:` namespace
-  (`session_seconds`/`cycle_count`/`tool_power`/`tool_durability_percent`/`tool_quality`/
-  `tool_item_level`) plus the mod-agnostic
+  (`rpgstations:session_seconds`/`rpgstations:cycle_count`/`rpgstations:tool_power`) plus the
+  native-vocabulary ones (`hytale:tool_quality`/`hytale:tool_item_level`/
+  `hytale:tool_durability_percent`) and the mod-agnostic
   `stat` factor, whose `Param` addresses any registered native `EntityStatType`; an external id is
   namespace-prefixed by convention (`yourmod:reputation`). An unknown factor at runtime fails a
   `Condition` CLOSED (roll does not fire) and resolves a `Chance`/`Ladder` value to 0, each with a

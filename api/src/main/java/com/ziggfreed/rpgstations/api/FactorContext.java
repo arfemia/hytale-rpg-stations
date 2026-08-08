@@ -115,14 +115,14 @@ public final class FactorContext {
         return toolPower;
     }
 
-    /** The held tool's durability percent [0,100] ({@code rpgstations:tool_durability_percent}); 100 when no durability tracked or none held. */
+    /** The held tool's durability percent [0,100] ({@code hytale:tool_durability_percent}); 100 when no durability tracked or none held. */
     public double toolDurabilityPercent() {
         return toolDurabilityPercent;
     }
 
     /**
      * The held tool's RARITY as the native {@code ItemQuality.QualityValue} that quality asset
-     * authors ({@code rpgstations:tool_quality}); {@code 0} when nothing is held or the item names
+     * authors ({@code hytale:tool_quality}); {@code 0} when nothing is held or the item names
      * no quality. Deliberately the AUTHORED number rather than an engine-side tier enum: the value
      * is what orders qualities (0 = lowest), it comes straight off the referenced quality asset, and
      * a pack that ships its own quality tier therefore orders itself with no engine change.
@@ -138,7 +138,7 @@ public final class FactorContext {
     }
 
     /**
-     * The held tool's native {@code ItemLevel} ({@code rpgstations:tool_item_level}); {@code 0} when
+     * The held tool's native {@code ItemLevel} ({@code hytale:tool_item_level}); {@code 0} when
      * nothing is held. The THIRD tool axis, and it exists because the other two genuinely cannot
      * separate every rung of a tool family: two tools can share both a quality tier AND an identical
      * gather power and still be different upgrades, in which case item level is what distinguishes

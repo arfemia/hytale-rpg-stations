@@ -18,9 +18,9 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  *
  * <p>This is the ADD/scale sibling of {@link Condition}: {@link Condition} is a factor reference
  * PLUS gate bounds ({@code Min}/{@code Max}); {@code FactorRef} is a factor reference PLUS a
- * {@code Weight}. {@link #factor} is a namespaced id (e.g. {@code "stat"},
+ * {@code Weight}. {@link #factor} is a namespaced id (e.g. {@code "hytale:stat"},
  * {@code "rpgstations:tool_power"}, {@code "yourmod:crop_quality"}); {@link #param} is an optional
- * argument the provider interprets (for {@code "stat"} it is a registered {@code EntityStatType}
+ * argument the provider interprets (for {@code "hytale:stat"} it is a registered {@code EntityStatType}
  * channel id). An unregistered factor id resolves to 0 (fail-closed), never a throw.
  */
 public final class FactorRef {
@@ -62,10 +62,10 @@ public final class FactorRef {
         return of(factor, param, null);
     }
 
-    /** Convenience: a {@code stat}-channel reference ({@code {Factor:"stat", Param:<statId>}}). */
+    /** Convenience: a {@code stat}-channel reference ({@code {Factor:"hytale:stat", Param:<statId>}}). */
     @Nonnull
     public static FactorRef stat(@Nullable String statId) {
-        return of("stat", statId, null);
+        return of("hytale:stat", statId, null);
     }
 
     @Nullable

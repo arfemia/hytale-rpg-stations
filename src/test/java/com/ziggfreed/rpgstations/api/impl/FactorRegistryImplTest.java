@@ -39,7 +39,7 @@ public class FactorRegistryImplTest {
         assertTrue(FactorRegistryImpl.getInstance().isKnown("rpgstations:session_seconds"));
         assertTrue(FactorRegistryImpl.getInstance().isKnown("rpgstations:cycle_count"));
         assertTrue(FactorRegistryImpl.getInstance().isKnown("rpgstations:tool_power"));
-        assertTrue(FactorRegistryImpl.getInstance().isKnown("rpgstations:tool_durability_percent"));
+        assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:tool_durability_percent"));
     }
 
     @Test
@@ -49,7 +49,7 @@ public class FactorRegistryImplTest {
         assertEquals(120.0, FactorRegistryImpl.getInstance().resolve("rpgstations:session_seconds", null, c));
         assertEquals(7.0, FactorRegistryImpl.getInstance().resolve("rpgstations:cycle_count", null, c));
         assertEquals(0.35, FactorRegistryImpl.getInstance().resolve("rpgstations:tool_power", null, c));
-        assertEquals(88.0, FactorRegistryImpl.getInstance().resolve("rpgstations:tool_durability_percent", null, c));
+        assertEquals(88.0, FactorRegistryImpl.getInstance().resolve("hytale:tool_durability_percent", null, c));
     }
 
     @Test

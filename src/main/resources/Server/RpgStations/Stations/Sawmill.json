@@ -16,8 +16,8 @@
       "Base": 1,
       "Bonus": {
         "Values": [
-          { "Factor": "rpgstations:tool_quality", "Weight": 10.0 },
-          { "Factor": "rpgstations:tool_item_level", "Weight": 0.1 },
+          { "Factor": "hytale:tool_quality", "Weight": 10.0 },
+          { "Factor": "hytale:tool_item_level", "Weight": 0.1 },
           { "Factor": "rpgstations:tool_power", "Weight": 1.0 }
         ],
         "Floors": [

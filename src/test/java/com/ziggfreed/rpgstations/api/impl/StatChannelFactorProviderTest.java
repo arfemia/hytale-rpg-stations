@@ -30,9 +30,11 @@ class StatChannelFactorProviderTest {
     }
 
     @Test
-    void registeredUnderTheBareIdStat() {
+    void registeredUnderTheNativeNamespacedId() {
         FactorRegistryImpl.getInstance().registerBuiltins();
-        assertTrue(FactorRegistryImpl.getInstance().isKnown("stat"));
+        // hytale:, not rpgstations: - the id names the vocabulary's OWNER (a native EntityStatType),
+        // not whoever registered the provider. See FactorRegistryImpl#registerBuiltins.
+        assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:stat"));
     }
 
     @Test
@@ -59,7 +61,7 @@ class StatChannelFactorProviderTest {
         FactorContext ctx = bareCtx();
         // Routed through the registry (its own throw-guard applies too) - just must not throw and
         // must resolve to a non-null Double for a known factor id with a degenerate context.
-        Double result = FactorRegistryImpl.getInstance().resolve("stat", "MMO_Luck", ctx);
+        Double result = FactorRegistryImpl.getInstance().resolve("hytale:stat", "MMO_Luck", ctx);
         assertEquals(0.0, result);
     }
 }

@@ -687,7 +687,8 @@ public final class StationAsset
      * vocabulary a loot {@code Roll.Ladder} uses ({@code Values} is a {@link FactorRef} array summed
      * as {@code sum(resolve(Factor,Param) * Weight)}, then looked up against {@code Floors} by
      * descending {@code Min}), so a yield bonus can key off ANY registered factor - the built-in
-     * {@code rpgstations:tool_power} and {@code rpgstations:tool_quality} for a "better tools yield
+     * {@code rpgstations:tool_power} plus {@code hytale:tool_quality} /
+     * {@code hytale:tool_item_level} for a "better tools yield
      * more" curve, a {@code stat} channel, or a fourth party's own {@code yourmod:} factor. Summing
      * power AND quality is the intended shape for a tool ladder: gather power saturates across a
      * family's upper tiers while quality keeps separating them, so neither alone ranks a full ladder.

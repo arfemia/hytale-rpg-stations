@@ -34,7 +34,7 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  *   "Chance":    { "BasePercent": 0, "AddFactors": [ { "Factor": "yourmod:fortune" } ],
  *                  "CapPercent": 90 },
  *   "Ladder":    { "Values": [ { "Factor": "yourmod:fortune" },
- *                              { "Factor": "stat", "Param": "<EntityStatType id>", "Weight": 0.5 } ],
+ *                              { "Factor": "hytale:stat", "Param": "<EntityStatType id>", "Weight": 0.5 } ],
  *                  "Floors": [ { "Min": 50,  "Grants": { "DropList": "SawmillFinds_T1" } },
  *                              { "Min": 100, "Grants": { "DropList": "SawmillFinds_T2" },
  *                                "Presentation": { "Sound": "SFX_Coins_Land" } } ] },

@@ -1676,7 +1676,7 @@ public final class StationService {
 
     /**
      * The active hotbar item's RARITY as the native {@code ItemQuality.QualityValue} the referenced
-     * quality asset authors ({@code rpgstations:tool_quality}); 0 when nothing is held or the item
+     * quality asset authors ({@code hytale:tool_quality}); 0 when nothing is held or the item
      * names no quality.
      *
      * <p>Two indirections, both deliberate. {@code Item#getQualityIndex()} returns an ASSET-MAP
@@ -1705,7 +1705,7 @@ public final class StationService {
     }
 
     /**
-     * The active hotbar item's native {@code ItemLevel} ({@code rpgstations:tool_item_level}); 0 when
+     * The active hotbar item's native {@code ItemLevel} ({@code hytale:tool_item_level}); 0 when
      * nothing is held. The fine-grained third tool axis - see {@code FactorContext#toolItemLevel()}
      * for why it is a tiebreaker rather than a primary one. Try-guarded like its two siblings.
      */

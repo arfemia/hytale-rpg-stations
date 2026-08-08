@@ -36,7 +36,7 @@ See `../station/CLAUDE.md`'s boundary section for the engine half.
   `StationStep.Stamp.Stats.Caps.Budgets[].Factors`, `StationStep.Repeat.AddFactors`.
   Composition at every site is a flat weighted sum, `sum(resolve(Factor,Param) * Weight)` - no
   expression nesting (standing directive 3's boundary). `FactorRef.stat(statId)` is the
-  convenience for the `{"Factor":"stat","Param":"<StatId>"}` shape the loot-formula middle path
+  convenience for the `{"Factor":"hytale:stat","Param":"<StatId>"}` shape the loot-formula middle path
   uses (the `stat` factor provider itself is `loot/`'s scope, registered by `RpgStationsPlugin`).
   `FactorRef` is the ADD/scale sibling of [`Condition`](Condition.java) (below): `Condition` is a
   factor reference PLUS gate bounds (`Min`/`Max`); `FactorRef` is a factor reference PLUS a

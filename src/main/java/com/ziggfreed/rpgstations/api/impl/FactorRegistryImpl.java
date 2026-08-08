@@ -47,23 +47,40 @@ public final class FactorRegistryImpl implements FactorRegistry {
     }
 
     /**
-     * Register RpgStations' own built-in factors ({@code rpgstations:session_seconds}/{@code
-     * rpgstations:cycle_count}/{@code rpgstations:tool_power}/{@code
-     * rpgstations:tool_durability_percent}/{@code rpgstations:tool_quality}/{@code
-     * rpgstations:tool_item_level}, plus the mod-agnostic bare-id {@code "stat"} factor
-     * - design section 4.1, gate decision 37: {@code {"Factor":"stat","Param":"<StatId>"}} reads
-     * ANY registered native stat channel's effective value, so a mod that writes native stats
-     * participates in loot/gate/cap formulas with zero extra bridge code) - called once from
-     * {@code RpgStationsPlugin#setup()}. Idempotent (re-registering is harmless).
+     * Register the built-in factors - called once from {@code RpgStationsPlugin#setup()},
+     * idempotent (re-registering is harmless).
+     *
+     * <p><b>A factor's namespace names the VOCABULARY's owner, not whoever registered the
+     * provider.</b> This engine registers all of the below, but only some of the numbers are its
+     * own idea:
+     * <ul>
+     *   <li>{@code rpgstations:session_seconds} / {@code rpgstations:cycle_count} - concepts that
+     *       exist only because a station SESSION exists. Genuinely this mod's vocabulary.</li>
+     *   <li>{@code rpgstations:tool_power} - stays in this namespace despite reading a native
+     *       {@code ItemToolSpec} power, because WHICH power it reads is chosen by the station: it
+     *       resolves against the station's own {@code Tool.Gather.GatherType}, so the same held item
+     *       answers differently at two stations. The parameterization is this mod's.</li>
+     *   <li>{@code hytale:tool_quality} / {@code hytale:tool_item_level} /
+     *       {@code hytale:tool_durability_percent} - straight reads of native item data
+     *       ({@code ItemQuality.QualityValue}, {@code ItemLevel}, durability), identical at every
+     *       station and meaningful with no station involved at all.</li>
+     *   <li>{@code hytale:stat} - reads ANY registered native {@code EntityStatType}'s effective
+     *       value ({@code {"Factor":"hytale:stat","Param":"<StatId>"}}), so a mod that writes native
+     *       stats participates in loot/gate/cap formulas with zero bridge code (design section 4.1,
+     *       gate decision 37).</li>
+     * </ul>
+     * The practical payoff: a `hytale:`-namespaced id means the same thing to every mod that reads
+     * native data, so two mods converging on it is agreement rather than a collision, and an author
+     * can tell from the id alone whether a factor is portable or station-specific.
      */
     public void registerBuiltins() {
         register("rpgstations:session_seconds", (ctx, param) -> (double) ctx.sessionSeconds());
         register("rpgstations:cycle_count", (ctx, param) -> (double) ctx.cycleIndex());
         register("rpgstations:tool_power", (ctx, param) -> ctx.toolPower());
-        register("rpgstations:tool_durability_percent", (ctx, param) -> ctx.toolDurabilityPercent());
-        register("rpgstations:tool_quality", (ctx, param) -> ctx.toolQuality());
-        register("rpgstations:tool_item_level", (ctx, param) -> ctx.toolItemLevel());
-        register("stat", new StatChannelFactorProvider());
+        register("hytale:tool_durability_percent", (ctx, param) -> ctx.toolDurabilityPercent());
+        register("hytale:tool_quality", (ctx, param) -> ctx.toolQuality());
+        register("hytale:tool_item_level", (ctx, param) -> ctx.toolItemLevel());
+        register("hytale:stat", new StatChannelFactorProvider());
     }
 
     /**

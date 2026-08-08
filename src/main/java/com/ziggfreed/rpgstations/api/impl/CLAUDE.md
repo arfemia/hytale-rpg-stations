@@ -13,8 +13,14 @@ is used.
   `StationValidator`'s known-factor check).
 - **[`FactorRegistryImpl`](FactorRegistryImpl.java)** - `ConcurrentHashMap<String,
   StationFactorProvider>`, last-write-wins, id lowercased. `registerBuiltins()` (called once from
-  `RpgStationsPlugin#setup()`) registers the `rpgstations:` built-ins plus the mod-agnostic `stat`
-  factor - RpgStations dogfoods its OWN registry rather than special-casing its built-ins.
+  `RpgStationsPlugin#setup()`) registers every built-in - RpgStations dogfoods its OWN registry
+  rather than special-casing them. **A factor's NAMESPACE names the vocabulary's owner, not the
+  registrant**: `rpgstations:session_seconds`/`cycle_count` are session concepts, and
+  `rpgstations:tool_power` stays this mod's because WHICH power it reads is chosen by the station's
+  own `Tool.Gather.GatherType`, while `hytale:tool_quality`/`tool_item_level`/
+  `tool_durability_percent`/`stat` are straight native reads that mean the same thing with no station
+  involved. So two mods converging on a `hytale:` id is agreement, not a collision, and an author can
+  tell portability from the id alone. See `registerBuiltins()`'s javadoc for the full rule.
   `resolve(...)` swallows a throwing provider (FINE log, returns `null`) - a bad third-party factor
   provider must never crash a loot roll or a station gate check.
 - **[`ContributionChannelRegistryImpl`](ContributionChannelRegistryImpl.java)** - the WRITE-side
