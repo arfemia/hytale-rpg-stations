@@ -243,7 +243,7 @@ authored intent without consuming a roll); the roll is an injected `DoubleSuppli
 `RollEvaluator` takes, and `cycleOutput` reuses the ALREADY-ROLLED primary quantity rather than
 re-resolving, so a bonus copy can never disagree with the stack it copies. The three tool factors
 that make a ladder authorable (`hytale:tool_quality`, `hytale:tool_item_level`,
-`rpgstations:tool_power` - the namespaces differ deliberately, see `FactorRegistryImpl`) are read by `StationService#resolveHeldToolQuality`/
+`hytale:tool_power`) are read by `StationService#resolveHeldToolQuality`/
 `#resolveHeldToolItemLevel`/`#resolveHeldToolPower`; the quality one is an asset-map index resolve,
 not a raw index compare - see its javadoc.
 

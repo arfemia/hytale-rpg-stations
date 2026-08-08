@@ -27,7 +27,7 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@code EntityStatType}'s value, identical at every station and meaningful with no station
  * involved, so the namespace names the data's owner rather than whoever happened to register the
  * provider (see {@link FactorRegistryImpl#registerBuiltins()} for the full namespacing rule and why
- * {@code rpgstations:tool_power} stays on the other side of it). Addressing lives entirely in
+ * {@code hytale:tool_power} stays on the other side of it). Addressing lives entirely in
  * {@code Param}, per gate decision 19's
  * {@code {"Factor":"hytale:stat","Param":"<EntityStatType id>"}} shape. Mod-agnostic
  * and RpgStations-CORE by design: ANY mod that writes a native stat channel (a bridged per-stack

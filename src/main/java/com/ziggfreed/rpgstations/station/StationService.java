@@ -1615,6 +1615,7 @@ public final class StationService {
                 .cycleIndex(cycleIndex)
                 .toolPower(resolveHeldToolPower(player, asset.getTool()))
                 .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
+                .toolPowers(resolveHeldToolPowers(player))
                 .toolQuality(resolveHeldToolQuality(player))
                 .toolItemLevel(resolveHeldToolItemLevel(player))
                 .contributions(contributionParams(asset))
@@ -1648,6 +1649,7 @@ public final class StationService {
                 .cycleIndex(cycleIndex)
                 .toolPower(resolveHeldToolPower(player, action.getTool()))
                 .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
+                .toolPowers(resolveHeldToolPowers(player))
                 .toolQuality(resolveHeldToolQuality(player))
                 .toolItemLevel(resolveHeldToolItemLevel(player))
                 .contributions(contributionParams(action.getWork()))
@@ -1657,7 +1659,7 @@ public final class StationService {
     /**
      * The held tool's power for the station's effective gather type ({@code Tool.Gather.GatherType}
      * only - unlike {@link #resolveToolMultiplier}, this reads regardless of whether {@code
-     * Tool.PowerScale} is authored, since {@code rpgstations:tool_power} is a general-purpose
+     * Tool.PowerScale} is authored, since {@code hytale:tool_power} is a general-purpose
      * factor, not a contribution multiplier). 0 when no gather type resolves or no matching spec
      * is held.
      */
@@ -2085,6 +2087,37 @@ public final class StationService {
         ItemToolSpec[] specs = itemTool != null ? itemTool.getSpecs() : null;
         double heldPower = StationToolScaling.heldPowerFor(toolPowers(specs), gatherType);
         return StationToolScaling.multiplier(heldPower, scale);
+    }
+
+    /**
+     * Every native {@code GatherType} the active hotbar item has a tool spec for, mapped to that
+     * spec's power - backs the ADDRESSED {@code hytale:tool_power} read
+     * ({@code {"Factor":"hytale:tool_power","Param":"<GatherType>"}}). Pre-resolved into the
+     * {@code FactorContext} rather than read live at resolve time, so the pre-session
+     * {@code Requires} gate (which builds a context with no live {@code Store}) still answers
+     * correctly instead of degrading to 0. Try-guarded like its sibling reads.
+     */
+    @Nonnull
+    private static Map<String, Double> resolveHeldToolPowers(@Nonnull Player player) {
+        try {
+            ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+            Item item = held != null ? held.getItem() : null;
+            ItemTool itemTool = item != null ? item.getTool() : null;
+            ItemToolSpec[] specs = itemTool != null ? itemTool.getSpecs() : null;
+            if (specs == null || specs.length == 0) {
+                return Map.of();
+            }
+            Map<String, Double> out = new LinkedHashMap<>(specs.length);
+            for (ItemToolSpec spec : specs) {
+                if (spec != null && spec.getGatherType() != null && !spec.getGatherType().isBlank()) {
+                    out.put(spec.getGatherType(), (double) spec.getPower());
+                }
+            }
+            return out;
+        } catch (Throwable t) {
+            Log.fine("STATION could not resolve the held tool's gather powers: " + t.getMessage());
+            return Map.of();
+        }
     }
 
     /** Adapts live {@code ItemToolSpec}s to the pure {@code StationToolScaling.ToolPower} shape. */

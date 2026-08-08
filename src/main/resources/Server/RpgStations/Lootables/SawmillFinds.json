@@ -5,7 +5,7 @@
       "Trigger": "Cycle",
       "Chance": {
         "BasePercent": 2,
-        "AddFactors": [ { "Factor": "rpgstations:tool_power" } ],
+        "AddFactors": [ { "Factor": "hytale:tool_power" } ],
         "CapPercent": 25
       },
       "Grants": { "BonusOutputCopies": 1 }

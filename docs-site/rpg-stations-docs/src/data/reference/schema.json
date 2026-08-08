@@ -2699,13 +2699,13 @@
         {
           "key": "Factor",
           "required": false,
-          "documentation": "The namespaced factor channel id (e.g. 'stat', 'rpgstations:tool_power'). Unregistered = resolves to 0 (fail-closed).",
+          "documentation": "The namespaced factor channel id (e.g. 'hytale:stat', 'hytale:tool_power'). Unregistered = resolves to 0 (fail-closed).",
           "type": "string"
         },
         {
           "key": "Param",
           "required": false,
-          "documentation": "Optional provider-interpreted argument, opaque to this engine (for the built-in 'stat' factor, a registered EntityStatType channel id; for a third-party factor, whatever that provider documents).",
+          "documentation": "Optional provider-interpreted argument, opaque to this engine (for the built-in 'hytale:stat' factor, a registered EntityStatType channel id; for a third-party factor, whatever that provider documents).",
           "type": "string"
         },
         {
@@ -3020,7 +3020,7 @@
         {
           "key": "Param",
           "required": false,
-          "documentation": "Optional provider-interpreted argument, opaque to this engine (for the built-in 'stat' factor, a registered EntityStatType channel id; for a third-party factor, whatever that provider documents).",
+          "documentation": "Optional provider-interpreted argument, opaque to this engine (for the built-in 'hytale:stat' factor, a registered EntityStatType channel id; for a third-party factor, whatever that provider documents).",
           "type": "string"
         },
         {

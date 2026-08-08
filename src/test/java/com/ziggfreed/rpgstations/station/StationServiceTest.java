@@ -249,7 +249,7 @@ public class StationServiceTest {
 
     @Test
     void conditionPasses_unregisteredFactor_failsClosed() {
-        Condition c = Condition.of("rpgstations:tool_power", null, null, null);
+        Condition c = Condition.of("hytale:tool_power", null, null, null);
         assertFalse(StationService.conditionPasses(c, (factorId, param) -> null));
     }
 

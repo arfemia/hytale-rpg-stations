@@ -79,8 +79,8 @@ public class RollEvaluatorTest {
 
     @Test
     void chancePasses_sumsEveryAddFactorEntry() {
-        Map<String, Double> values = Map.of("rpgstations:tool_power", 5.0, "rpgstations:cycle_count", 3.0);
-        Roll.Chance chance = Roll.Chance.of(2.0, refs("rpgstations:tool_power", "rpgstations:cycle_count"), 100.0);
+        Map<String, Double> values = Map.of("hytale:tool_power", 5.0, "rpgstations:cycle_count", 3.0);
+        Roll.Chance chance = Roll.Chance.of(2.0, refs("hytale:tool_power", "rpgstations:cycle_count"), 100.0);
         assertTrue(RollEvaluator.chancePasses(chance, lookup(values), fixedRoll(9.999)));
         assertFalse(RollEvaluator.chancePasses(chance, lookup(values), fixedRoll(10.0)));
     }
@@ -187,7 +187,7 @@ public class RollEvaluatorTest {
     @Test
     void sawmillShapedFixture_bonusCopyRoll_andGatedLadderRoll() {
         Roll bonusCopyRoll = Roll.of("Cycle", null,
-                Roll.Chance.of(2.0, refs("rpgstations:tool_power"), 25.0),
+                Roll.Chance.of(2.0, refs("hytale:tool_power"), 25.0),
                 null, Roll.Grants.of(1, null, null));
 
         Roll.Grants t1 = Roll.Grants.of(null, "RPG_Station_Sawmill_T1", null);
@@ -202,7 +202,7 @@ public class RollEvaluatorTest {
                 Roll.Chance.of(15.0, null, 100.0), ladder, null);
 
         Map<String, Double> earlySession = new HashMap<>();
-        earlySession.put("rpgstations:tool_power", 0.5);
+        earlySession.put("hytale:tool_power", 0.5);
         earlySession.put("rpgstations:cycle_count", 3.0);
 
         RollEvaluator.Outcome bonusHit = RollEvaluator.evaluate(bonusCopyRoll, lookup(earlySession), fixedRoll(2.0));

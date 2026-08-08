@@ -52,21 +52,21 @@ to recompile against a later release rather than treat these types as stable.
 - Adds three tool-describing built-in factors so a "better tools yield more" curve is authorable
   with no code: `hytale:tool_quality` (the native `ItemQuality.QualityValue`) and
   `hytale:tool_item_level` (the native `ItemLevel`) beside the existing
-  `rpgstations:tool_power`. Summing all three is the intended shape, because no two of them can rank
+  `hytale:tool_power`. Summing all three is the intended shape, because no two of them can rank
   a full tool family alone: gather power saturates across the upper tiers, quality cannot separate
   tools that share a tier, and item level does not track rarity at all. The shipped Sawmill uses
   exactly that curve to pay for its milling time, running from one plank per log on a starter
   hatchet up to four on the best.
 - A factor's NAMESPACE names the vocabulary's owner rather than whoever registered the provider.
   A straight native read is `hytale:` and therefore portable, meaning the same thing to any mod that
-  reads native data (`hytale:tool_quality`, `hytale:tool_item_level`,
-  `hytale:tool_durability_percent`, and `hytale:stat` for any registered `EntityStatType`), so two
-  mods converging on one of those ids is agreement rather than a collision. `rpgstations:` is
-  reserved for vocabulary this engine actually owns: `session_seconds` and `cycle_count` exist only
-  because a station session does, and `tool_power` stays here despite reading native tool data
-  because the station's own `Tool.Gather.GatherType` decides WHICH power is read, so the same held
-  item answers differently at two stations.
-  Ships the standalone default Sawmill (native ids, jar-shipped) alongside the standalone
+  reads native data: `hytale:tool_power` (an `ItemToolSpec` power, its native `GatherType` given as
+  the `Param` so the addressing is explicit, defaulting to the station's own when omitted),
+  `hytale:tool_quality`, `hytale:tool_item_level`, `hytale:tool_durability_percent`, and
+  `hytale:stat` for any registered `EntityStatType`. Two mods converging on one of those ids is
+  agreement rather than a collision, and an author can tell from an id alone whether a factor
+  travels. `rpgstations:` is reserved for vocabulary this engine actually owns, which is exactly
+  `session_seconds` and `cycle_count` - they exist only because a station session does.
+- Ships the standalone default Sawmill (native ids, jar-shipped) alongside the standalone
   `loot/` layer: conditional lootable rolls over native `ItemDropList`s gated/weighted by an
   extensible condition system (session length, tool durability/power, and similar session-derived
   factors, via a `FactorRegistry` other mods can extend), plus command rewards, so any third party

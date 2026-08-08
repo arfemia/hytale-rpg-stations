@@ -321,7 +321,7 @@ public class StationValidatorTest {
     @Test
     void yieldBonusValuesWithoutFloors_flagged() {
         StationAsset.Yield.Bonus bonus = StationAsset.Yield.Bonus.of(
-                new FactorRef[]{FactorRef.of("rpgstations:tool_power", null, null)}, null);
+                new FactorRef[]{FactorRef.of("hytale:tool_power", null, null)}, null);
         assertTrue(codes(validate(yieldStation("nofloors", StationAsset.Yield.of(2, null, bonus, null, null))))
                 .contains("YIELD_BONUS_VALUES_WITHOUT_FLOORS"));
     }
@@ -641,7 +641,7 @@ public class StationValidatorTest {
                 null, oakRecipe(),
                 null, null, null, null, null, null,
                 loot(Roll.of("Cycle", null,
-                        Roll.Chance.of(2.0, new FactorRef[]{FactorRef.of("rpgstations:tool_power", null)}, 25.0),
+                        Roll.Chance.of(2.0, new FactorRef[]{FactorRef.of("hytale:tool_power", null)}, 25.0),
                         null, Roll.Grants.of(1, null, null))));
         assertTrue(validate(a).isEmpty(), "a fully valid Loot roll is clean, got: " + codes(validate(a)));
     }
@@ -717,7 +717,7 @@ public class StationValidatorTest {
     void validateLootables_validRolls_producesNoFindings() {
         com.ziggfreed.rpgstations.asset.LootableAsset table = com.ziggfreed.rpgstations.asset.LootableAsset.of(
                 "sawmillfinds", new Roll[]{Roll.of("Cycle", null,
-                        Roll.Chance.of(2.0, new FactorRef[]{FactorRef.of("rpgstations:tool_power", null)}, 25.0),
+                        Roll.Chance.of(2.0, new FactorRef[]{FactorRef.of("hytale:tool_power", null)}, 25.0),
                         null, Roll.Grants.of(1, null, null))});
         assertTrue(StationValidator.validateLootables(List.of(table), ANY_DROP, ANY_FACTOR).isEmpty());
     }

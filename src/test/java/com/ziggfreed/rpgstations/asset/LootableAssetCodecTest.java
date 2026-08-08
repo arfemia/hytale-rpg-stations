@@ -38,7 +38,7 @@ public class LootableAssetCodecTest {
     @Test
     void decodesRolls() throws Exception {
         LootableAsset a = decodeAsset("{ \"Rolls\": [ { \"Trigger\": \"Cycle\","
-                + " \"Chance\": { \"BasePercent\": 2, \"AddFactors\": [ { \"Factor\": \"rpgstations:tool_power\" } ] },"
+                + " \"Chance\": { \"BasePercent\": 2, \"AddFactors\": [ { \"Factor\": \"hytale:tool_power\" } ] },"
                 + " \"Grants\": { \"BonusOutputCopies\": 1 } } ] }");
         assertNotNull(a.getRolls());
         assertEquals(1, a.getRolls().length);

@@ -39,6 +39,7 @@ public final class FactorContext {
     private final int cycleIndex;
     private final double toolPower;
     private final double toolDurabilityPercent;
+    @Nonnull private final Map<String, Double> toolPowersByGatherType;
     private final double toolQuality;
     private final double toolItemLevel;
     @Nonnull private final Map<String, List<String>> contributionParams;
@@ -53,9 +54,25 @@ public final class FactorContext {
         this.cycleIndex = b.cycleIndex;
         this.toolPower = b.toolPower;
         this.toolDurabilityPercent = b.toolDurabilityPercent;
+        this.toolPowersByGatherType = copyPowerMap(b.toolPowersByGatherType);
         this.toolQuality = b.toolQuality;
         this.toolItemLevel = b.toolItemLevel;
         this.contributionParams = copyChannelMap(b.contributionParams);
+    }
+
+    @Nonnull
+    private static Map<String, Double> copyPowerMap(@Nullable Map<String, Double> src) {
+        if (src == null || src.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Double> out = new LinkedHashMap<>(src.size());
+        for (Map.Entry<String, Double> e : src.entrySet()) {
+            if (e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
+                continue;
+            }
+            out.put(e.getKey().toLowerCase(Locale.ROOT), e.getValue());
+        }
+        return Collections.unmodifiableMap(out);
     }
 
     @Nonnull
@@ -110,9 +127,29 @@ public final class FactorContext {
         return cycleIndex;
     }
 
-    /** The held tool's resolved gather power for the station's effective gather type ({@code rpgstations:tool_power}); 0 when none. */
+    /** The held tool's resolved gather power for the station's effective gather type ({@code hytale:tool_power}); 0 when none. */
     public double toolPower() {
         return toolPower;
+    }
+
+    /**
+     * The held tool's gather power for an EXPLICIT native {@code GatherType}
+     * ({@code {"Factor":"hytale:tool_power","Param":"<GatherType>"}}); {@code 0} when the held item
+     * has no spec for that type, or nothing is held. Case-insensitive.
+     *
+     * <p>This is what makes {@code hytale:tool_power} a portable NATIVE read rather than a
+     * station-flavoured one: the addressing lives in {@code Param}, exactly as it does for
+     * {@code hytale:stat}, so a formula can ask for any gather type it likes. Omitting {@code Param}
+     * falls back to {@link #toolPower()} - the station's OWN effective gather type - which is both
+     * the overwhelmingly common case and the reason no authored content had to change when the
+     * addressed form was added.
+     */
+    public double toolPowerFor(@Nullable String gatherType) {
+        if (gatherType == null || gatherType.isBlank()) {
+            return toolPower;
+        }
+        Double v = toolPowersByGatherType.get(gatherType.toLowerCase(Locale.ROOT));
+        return v != null ? v : 0.0;
     }
 
     /** The held tool's durability percent [0,100] ({@code hytale:tool_durability_percent}); 100 when no durability tracked or none held. */
@@ -188,6 +225,7 @@ public final class FactorContext {
         private int cycleIndex;
         private double toolPower;
         private double toolDurabilityPercent = 100.0;
+        @Nullable private Map<String, Double> toolPowersByGatherType;
         private double toolQuality;
         private double toolItemLevel;
         @Nullable private Map<String, List<String>> contributionParams;
@@ -253,6 +291,16 @@ public final class FactorContext {
         @Nonnull
         public Builder toolQuality(double toolQuality) {
             this.toolQuality = toolQuality;
+            return this;
+        }
+
+        /**
+         * Every gather type the held tool has a spec for, mapped to its power - backs the ADDRESSED
+         * {@link FactorContext#toolPowerFor(String)} read. Keys are lowercased on copy.
+         */
+        @Nonnull
+        public Builder toolPowers(@Nullable Map<String, Double> toolPowersByGatherType) {
+            this.toolPowersByGatherType = toolPowersByGatherType;
             return this;
         }
 

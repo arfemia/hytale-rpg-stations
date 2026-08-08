@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -34,12 +35,35 @@ public class FactorRegistryImplTest {
     }
 
     @Test
-    void registerBuiltins_registersTheFourRpgstationsFactors() {
+    void registerBuiltins_registersEveryBuiltinUnderItsOwnersNamespace() {
         FactorRegistryImpl.getInstance().registerBuiltins();
+        // rpgstations: = vocabulary this engine owns (it exists only because a session does).
         assertTrue(FactorRegistryImpl.getInstance().isKnown("rpgstations:session_seconds"));
         assertTrue(FactorRegistryImpl.getInstance().isKnown("rpgstations:cycle_count"));
-        assertTrue(FactorRegistryImpl.getInstance().isKnown("rpgstations:tool_power"));
+        // hytale: = straight native reads, portable across mods.
+        assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:tool_power"));
         assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:tool_durability_percent"));
+        assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:tool_quality"));
+        assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:tool_item_level"));
+        assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:stat"));
+    }
+
+    @Test
+    void toolPower_paramNamesTheGatherType_andOmittingItFallsBackToTheStationsOwn() {
+        FactorRegistryImpl.getInstance().registerBuiltins();
+        FactorContext c = FactorContext.builder()
+                .playerId(PLAYER)
+                .stationId("test_station")
+                .toolPower(0.5)
+                .toolPowers(Map.of("Woods", 0.5, "Rocks", 0.05))
+                .build();
+        // Omitted Param = the station's own effective gather type (the pre-existing behavior).
+        assertEquals(0.5, FactorRegistryImpl.getInstance().resolve("hytale:tool_power", null, c));
+        // An explicit Param addresses any native GatherType, case-insensitively.
+        assertEquals(0.05, FactorRegistryImpl.getInstance().resolve("hytale:tool_power", "Rocks", c));
+        assertEquals(0.05, FactorRegistryImpl.getInstance().resolve("hytale:tool_power", "rocks", c));
+        // A gather type the held tool has no spec for is 0, never the station default.
+        assertEquals(0.0, FactorRegistryImpl.getInstance().resolve("hytale:tool_power", "OreMithril", c));
     }
 
     @Test
@@ -48,7 +72,7 @@ public class FactorRegistryImplTest {
         FactorContext c = ctx(120L, 7, 0.35, 88.0);
         assertEquals(120.0, FactorRegistryImpl.getInstance().resolve("rpgstations:session_seconds", null, c));
         assertEquals(7.0, FactorRegistryImpl.getInstance().resolve("rpgstations:cycle_count", null, c));
-        assertEquals(0.35, FactorRegistryImpl.getInstance().resolve("rpgstations:tool_power", null, c));
+        assertEquals(0.35, FactorRegistryImpl.getInstance().resolve("hytale:tool_power", null, c));
         assertEquals(88.0, FactorRegistryImpl.getInstance().resolve("hytale:tool_durability_percent", null, c));
     }
 

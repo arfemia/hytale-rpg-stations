@@ -56,14 +56,15 @@ public final class FactorRegistryImpl implements FactorRegistry {
      * <ul>
      *   <li>{@code rpgstations:session_seconds} / {@code rpgstations:cycle_count} - concepts that
      *       exist only because a station SESSION exists. Genuinely this mod's vocabulary.</li>
-     *   <li>{@code rpgstations:tool_power} - stays in this namespace despite reading a native
-     *       {@code ItemToolSpec} power, because WHICH power it reads is chosen by the station: it
-     *       resolves against the station's own {@code Tool.Gather.GatherType}, so the same held item
-     *       answers differently at two stations. The parameterization is this mod's.</li>
-     *   <li>{@code hytale:tool_quality} / {@code hytale:tool_item_level} /
-     *       {@code hytale:tool_durability_percent} - straight reads of native item data
-     *       ({@code ItemQuality.QualityValue}, {@code ItemLevel}, durability), identical at every
-     *       station and meaningful with no station involved at all.</li>
+     *   <li>{@code hytale:tool_power} / {@code hytale:tool_quality} /
+     *       {@code hytale:tool_item_level} / {@code hytale:tool_durability_percent} - straight reads
+     *       of native item data ({@code ItemToolSpec} power for a native {@code GatherType},
+     *       {@code ItemQuality.QualityValue}, {@code ItemLevel}, durability), meaningful with no
+     *       station involved at all. {@code tool_power} takes the gather type as its {@code Param}
+     *       exactly as {@code stat} takes a stat id, so the addressing is explicit and the factor is
+     *       portable; omitting {@code Param} falls back to the station's own effective gather type,
+     *       which is the common case and why no authored content changed when the addressed form
+     *       arrived.</li>
      *   <li>{@code hytale:stat} - reads ANY registered native {@code EntityStatType}'s effective
      *       value ({@code {"Factor":"hytale:stat","Param":"<StatId>"}}), so a mod that writes native
      *       stats participates in loot/gate/cap formulas with zero bridge code (design section 4.1,
@@ -76,7 +77,7 @@ public final class FactorRegistryImpl implements FactorRegistry {
     public void registerBuiltins() {
         register("rpgstations:session_seconds", (ctx, param) -> (double) ctx.sessionSeconds());
         register("rpgstations:cycle_count", (ctx, param) -> (double) ctx.cycleIndex());
-        register("rpgstations:tool_power", (ctx, param) -> ctx.toolPower());
+        register("hytale:tool_power", (ctx, param) -> ctx.toolPowerFor(param));
         register("hytale:tool_durability_percent", (ctx, param) -> ctx.toolDurabilityPercent());
         register("hytale:tool_quality", (ctx, param) -> ctx.toolQuality());
         register("hytale:tool_item_level", (ctx, param) -> ctx.toolItemLevel());

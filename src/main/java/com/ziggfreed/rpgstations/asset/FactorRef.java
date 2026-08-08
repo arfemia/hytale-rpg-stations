@@ -19,7 +19,7 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  * <p>This is the ADD/scale sibling of {@link Condition}: {@link Condition} is a factor reference
  * PLUS gate bounds ({@code Min}/{@code Max}); {@code FactorRef} is a factor reference PLUS a
  * {@code Weight}. {@link #factor} is a namespaced id (e.g. {@code "hytale:stat"},
- * {@code "rpgstations:tool_power"}, {@code "yourmod:crop_quality"}); {@link #param} is an optional
+ * {@code "hytale:tool_power"}, {@code "yourmod:crop_quality"}); {@link #param} is an optional
  * argument the provider interprets (for {@code "hytale:stat"} it is a registered {@code EntityStatType}
  * channel id). An unregistered factor id resolves to 0 (fail-closed), never a throw.
  */
@@ -32,11 +32,11 @@ public final class FactorRef {
     public static final BuilderCodec<FactorRef> CODEC = BuilderCodec.builder(FactorRef.class, FactorRef::new)
             .appendInherited(new KeyedCodec<>("Factor", Codec.STRING, false),
                     (o, v) -> o.factor = v, o -> o.factor, (o, p) -> o.factor = p.factor)
-            .documentation("The namespaced factor channel id (e.g. 'stat', 'rpgstations:tool_power'). Unregistered = resolves to 0 (fail-closed).")
+            .documentation("The namespaced factor channel id (e.g. 'hytale:stat', 'hytale:tool_power'). Unregistered = resolves to 0 (fail-closed).")
             .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:factors"))).add()
             .appendInherited(new KeyedCodec<>("Param", Codec.STRING, false),
                     (o, v) -> o.param = v, o -> o.param, (o, p) -> o.param = p.param)
-            .documentation("Optional provider-interpreted argument, opaque to this engine (for the built-in 'stat' "
+            .documentation("Optional provider-interpreted argument, opaque to this engine (for the built-in 'hytale:stat' "
                     + "factor, a registered EntityStatType channel id; for a third-party factor, whatever that "
                     + "provider documents).").add()
             .appendInherited(new KeyedCodec<>("Weight", Codec.DOUBLE, false),

@@ -18,7 +18,7 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  * wherever a factor value is SUMMED instead. ONE codec each, DRY, per the root convention against
  * a redundant second shape.
  *
- * <p>{@link #factor} is a namespaced id (e.g. {@code "rpgstations:tool_power"},
+ * <p>{@link #factor} is a namespaced id (e.g. {@code "hytale:tool_power"},
  * {@code "yourmod:reputation"}); {@link #param} is an optional argument the factor provider
  * interprets. {@link #min}/{@link #max} bound the resolved value
  * (either or both may be authored; a factor that resolves outside the bound fails the
@@ -39,7 +39,7 @@ public final class Condition {
             .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:factors"))).add()
             .appendInherited(new KeyedCodec<>("Param", Codec.STRING, false),
                     (o, v) -> o.param = v, o -> o.param, (o, p) -> o.param = p.param)
-            .documentation("Optional provider-interpreted argument, opaque to this engine (for the built-in 'stat' "
+            .documentation("Optional provider-interpreted argument, opaque to this engine (for the built-in 'hytale:stat' "
                     + "factor, a registered EntityStatType channel id; for a third-party factor, whatever that "
                     + "provider documents).").add()
             .appendInherited(new KeyedCodec<>("Min", Codec.DOUBLE, false),

@@ -70,8 +70,8 @@ is the exact inverse of a permanently-opaque channel.
   evaluates over. `register(factorId, provider)` is last-write-wins, id lowercased.
   `StationFactorProvider.resolve(ctx, param)` runs synchronously on the world thread and must not
   retain `ctx`. RpgStations registers its own built-ins under the `rpgstations:` namespace
-  (`rpgstations:session_seconds`/`rpgstations:cycle_count`/`rpgstations:tool_power`) plus the
-  native-vocabulary ones (`hytale:tool_quality`/`hytale:tool_item_level`/
+  (`rpgstations:session_seconds`/`rpgstations:cycle_count`) plus the native-vocabulary ones
+  (`hytale:tool_power`/`hytale:tool_quality`/`hytale:tool_item_level`/
   `hytale:tool_durability_percent`) and the mod-agnostic
   `stat` factor, whose `Param` addresses any registered native `EntityStatType`; an external id is
   namespace-prefixed by convention (`yourmod:reputation`). An unknown factor at runtime fails a
@@ -79,8 +79,8 @@ is the exact inverse of a permanently-opaque channel.
   one-time warn.
   **The three TOOL factors are deliberately three, not one.** None of them subsumes another, and a
   formula ranking a full tool family generally wants all three summed with different weights:
-  `tool_power` is the FUNCTIONAL read (the resolved gather power for the station's own gather type)
-  but it SATURATES across a family's upper tiers, so it cannot separate the top rungs; `tool_quality`
+  `tool_power` is the FUNCTIONAL read (an `ItemToolSpec` power for a native `GatherType`, named by
+  the `Param`, defaulting to the station's own) but it SATURATES across a family's upper tiers, so it cannot separate the top rungs; `tool_quality`
   is the native `ItemQuality.QualityValue`, the authored number that ORDERS quality tiers (so a pack
   shipping its own tier participates with no engine change), but it cannot separate two tools inside
   one tier; `tool_item_level` is the native `ItemLevel`, which separates same-tier tools but does NOT
