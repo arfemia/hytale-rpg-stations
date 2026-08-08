@@ -70,15 +70,22 @@ is the exact inverse of a permanently-opaque channel.
   evaluates over. `register(factorId, provider)` is last-write-wins, id lowercased.
   `StationFactorProvider.resolve(ctx, param)` runs synchronously on the world thread and must not
   retain `ctx`. RpgStations registers its own built-ins under the `rpgstations:` namespace
-  (`session_seconds`/`cycle_count`/`tool_power`/`tool_durability_percent`/`tool_quality` - the last
-  being the held item's native `ItemQuality.QualityValue`, the AUTHORED number that orders quality
-  tiers, so a pack shipping its own tier participates with no engine change; it is orthogonal to
-  `tool_power` and a tool ladder wants BOTH summed, because gather power saturates across a family's
-  upper tiers while quality keeps separating them) plus the mod-agnostic
+  (`session_seconds`/`cycle_count`/`tool_power`/`tool_durability_percent`/`tool_quality`/
+  `tool_item_level`) plus the mod-agnostic
   `stat` factor, whose `Param` addresses any registered native `EntityStatType`; an external id is
   namespace-prefixed by convention (`yourmod:reputation`). An unknown factor at runtime fails a
   `Condition` CLOSED (roll does not fire) and resolves a `Chance`/`Ladder` value to 0, each with a
   one-time warn.
+  **The three TOOL factors are deliberately three, not one.** None of them subsumes another, and a
+  formula ranking a full tool family generally wants all three summed with different weights:
+  `tool_power` is the FUNCTIONAL read (the resolved gather power for the station's own gather type)
+  but it SATURATES across a family's upper tiers, so it cannot separate the top rungs; `tool_quality`
+  is the native `ItemQuality.QualityValue`, the authored number that ORDERS quality tiers (so a pack
+  shipping its own tier participates with no engine change), but it cannot separate two tools inside
+  one tier; `tool_item_level` is the native `ItemLevel`, which separates same-tier tools but does NOT
+  track rarity (a vanilla item can be top-rarity at a very low level), so it belongs as a small
+  tiebreaker term and never as the leading one. Weighting them is the author's call; the engine holds
+  no opinion.
 - **[`ContributionChannelRegistry`](ContributionChannelRegistry.java)** / **[`StationContribution`](StationContribution.java)**
   - the write side. `declare(channelId)` is DECLARATION-ONLY: there is no `resolve`, because the
   engine forwards a contribution verbatim and interprets nothing. Declaring buys two things and

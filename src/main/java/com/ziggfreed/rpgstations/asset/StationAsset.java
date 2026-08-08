@@ -669,9 +669,19 @@ public final class StationAsset
      *
      * <p><b>Resolution order</b> (all four leaves independent and composable, no mode):
      * {@code Base} (or the conversion's own authored quantity when {@code Base} is absent) is scaled
-     * by {@code Scale}, then {@code Bonus}'s reached floor adds its flat {@code Add}, then the result
+     * by {@code Scale}, then {@code Bonus}'s reached floor adds its {@code Add}, then the result
      * is clamped into {@code [Min, Max]}. A floor of 1 output is ALWAYS enforced underneath - a
      * conversion that consumed its inputs and produced nothing is item loss, never a balance choice.
+     *
+     * <p><b>FRACTIONAL yields are real, and land as a STOCHASTIC REMAINDER.</b> {@code Scale} and a
+     * floor's {@code Add} are both doubles, so an effective yield of {@code 2.5} is authorable and
+     * means "two items every cycle, plus a third on a 50% roll" - the whole part is paid out always
+     * and only the remainder is rolled, so the long-run average is exactly the authored number.
+     * This exists because whole-number-only yields force every tool tier onto a shared step: a
+     * mid-ladder tool that should sit BETWEEN two yields would otherwise have to be rounded onto one
+     * of its neighbours, collapsing a rung. The roll is stateless by design (no per-session carry to
+     * persist, lose on a crash, or reason about across a relog), and it draws from the same RNG seam
+     * the loot rolls use, injected so the decision core stays pure.
      *
      * <p><b>{@code Bonus} is where the tool ladder lives.</b> It is the same weighted-factor
      * vocabulary a loot {@code Roll.Ladder} uses ({@code Values} is a {@link FactorRef} array summed
@@ -796,22 +806,27 @@ public final class StationAsset
             }
         }
 
-        /** One yield-bonus threshold: at or above {@code Min} on the summed value, add {@code Add} items. */
+        /**
+         * One yield-bonus threshold: at or above {@code Min} on the summed value, add {@code Add}
+         * items. {@code Add} is FRACTIONAL on purpose - see {@link Yield}'s own javadoc for how a
+         * remainder is paid out, which is what lets a mid-tier tool sit genuinely between two whole
+         * yields instead of being rounded onto one of its neighbours.
+         */
         public static final class Floor {
             @Nullable protected Double min;
-            @Nullable protected Integer add;
+            @Nullable protected Double add;
 
             public static final BuilderCodec<Floor> CODEC = BuilderCodec.builder(Floor.class, Floor::new)
                     .appendInherited(new KeyedCodec<>("Min", Codec.DOUBLE, false),
                             (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
                     .documentation("The summed factor value at or above which this floor applies; reader-defaults to 0.").add()
-                    .appendInherited(new KeyedCodec<>("Add", Codec.INTEGER, false),
+                    .appendInherited(new KeyedCodec<>("Add", Codec.DOUBLE, false),
                             (o, v) -> o.add = v, o -> o.add, (o, p) -> o.add = p.add)
-                    .documentation("Extra whole items added to the cycle's output when this floor is the reached one; reader-defaults to 0.").add()
+                    .documentation("Extra items added when this floor is the reached one; may be fractional (2.5 = two always plus a 50% chance of a third). Reader-defaults to 0.").add()
                     .build();
 
             @Nonnull
-            public static Floor of(@Nullable Double min, @Nullable Integer add) {
+            public static Floor of(@Nullable Double min, @Nullable Double add) {
                 Floor f = new Floor();
                 f.min = min;
                 f.add = add;
@@ -823,9 +838,9 @@ public final class StationAsset
                 return min != null && Double.isFinite(min) ? min : 0.0;
             }
 
-            /** Reader-defaulted addend (0 when absent). */
-            public int effectiveAdd() {
-                return add != null ? add : 0;
+            /** Reader-defaulted addend (0 when absent or non-finite). */
+            public double effectiveAdd() {
+                return add != null && Double.isFinite(add) ? add : 0.0;
             }
 
             @Nullable
@@ -834,7 +849,7 @@ public final class StationAsset
             }
 
             @Nullable
-            public Integer getAdd() {
+            public Double getAdd() {
                 return add;
             }
         }

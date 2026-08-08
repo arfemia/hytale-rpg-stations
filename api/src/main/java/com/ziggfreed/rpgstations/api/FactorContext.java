@@ -40,6 +40,7 @@ public final class FactorContext {
     private final double toolPower;
     private final double toolDurabilityPercent;
     private final double toolQuality;
+    private final double toolItemLevel;
     @Nonnull private final Map<String, List<String>> contributionParams;
 
     private FactorContext(@Nonnull Builder b) {
@@ -53,6 +54,7 @@ public final class FactorContext {
         this.toolPower = b.toolPower;
         this.toolDurabilityPercent = b.toolDurabilityPercent;
         this.toolQuality = b.toolQuality;
+        this.toolItemLevel = b.toolItemLevel;
         this.contributionParams = copyChannelMap(b.contributionParams);
     }
 
@@ -136,6 +138,19 @@ public final class FactorContext {
     }
 
     /**
+     * The held tool's native {@code ItemLevel} ({@code rpgstations:tool_item_level}); {@code 0} when
+     * nothing is held. The THIRD tool axis, and it exists because the other two genuinely cannot
+     * separate every rung of a tool family: two tools can share both a quality tier AND an identical
+     * gather power and still be different upgrades, in which case item level is what distinguishes
+     * them. Treat it as a fine-grained tiebreaker rather than a primary axis - it is authored
+     * per-item and a given item's level need not track its quality tier at all, so a formula that
+     * leans on it alone can rank a high-rarity item below a common one.
+     */
+    public double toolItemLevel() {
+        return toolItemLevel;
+    }
+
+    /**
      * Every contribution channel the resolved action posts to, lowercased - a provider's cheap
      * "does this station have anything to do with me" test.
      */
@@ -174,6 +189,7 @@ public final class FactorContext {
         private double toolPower;
         private double toolDurabilityPercent = 100.0;
         private double toolQuality;
+        private double toolItemLevel;
         @Nullable private Map<String, List<String>> contributionParams;
 
         private Builder() {
@@ -237,6 +253,13 @@ public final class FactorContext {
         @Nonnull
         public Builder toolQuality(double toolQuality) {
             this.toolQuality = toolQuality;
+            return this;
+        }
+
+        /** The held tool's native {@code ItemLevel}; see {@link FactorContext#toolItemLevel()}. */
+        @Nonnull
+        public Builder toolItemLevel(double toolItemLevel) {
+            this.toolItemLevel = toolItemLevel;
             return this;
         }
 

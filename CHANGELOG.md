@@ -45,12 +45,18 @@ to recompile against a later release rather than treat these types as stable.
 - Adds `Recipe.Yield`, the per-cycle output-quantity transform that applies to authored and derived
   conversions alike: a flat `Base`, a `Scale` multiplier, `Min`/`Max` clamps, and a `Bonus` ladder
   whose `Values` are the same weighted `FactorRef` sum every other formula site uses, so a yield
-  bonus can key off any registered factor. Two new built-in factors make a tool ladder authorable
-  out of the box, `rpgstations:tool_quality` (the native `ItemQuality.QualityValue`) beside the
-  existing `rpgstations:tool_power`; summing both is the intended shape, since gather power
-  saturates across a tool family's upper tiers while quality keeps separating them. This is how the
-  shipped Sawmill pays for the time it takes: two planks per log against the hand-craft's one, and
-  three for a top-rarity hatchet.
+  bonus can key off any registered factor. Yields may be FRACTIONAL: an effective `2.5` pays two
+  items every cycle and a third on a 50% roll, so the long-run average is exactly the authored
+  number and a mid-ladder tool can sit genuinely between two whole yields instead of being rounded
+  onto a neighbour.
+- Adds three tool-describing built-in factors so a "better tools yield more" curve is authorable
+  with no code: `rpgstations:tool_quality` (the native `ItemQuality.QualityValue`) and
+  `rpgstations:tool_item_level` (the native `ItemLevel`) beside the existing
+  `rpgstations:tool_power`. Summing all three is the intended shape, because no two of them can rank
+  a full tool family alone: gather power saturates across the upper tiers, quality cannot separate
+  tools that share a tier, and item level does not track rarity at all. The shipped Sawmill uses
+  exactly that curve to pay for its milling time, running from one plank per log on a starter
+  hatchet up to four on the best.
   Ships the standalone default Sawmill (native ids, jar-shipped) alongside the standalone
   `loot/` layer: conditional lootable rolls over native `ItemDropList`s gated/weighted by an
   extensible condition system (session length, tool durability/power, and similar session-derived

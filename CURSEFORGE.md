@@ -8,10 +8,12 @@ real time, and results come out.
 
 **0.1.0 ships one station, the Sawmill:** load logs onto the bench, press `F`, and your character
 saws them into that wood family's planks one cycle at a time, with a held-tool gate, a tool-power
-loot ladder, and a session summary when you stop. The bench pays for the time it takes: two planks
-per log where crafting them by hand gives one, and three if you are working with a top-rarity
-hatchet. Every number in that curve is an ordinary content leaf, so a server can retune what better
-tools are worth, or key the bonus off something else entirely.
+loot ladder, and a session summary when you stop. The bench pays for the time it takes, and it pays
+by the tool you bring: a starter hatchet mills one plank per log, a copper two, and the best in the
+game four. Mid-ladder tools land on fractional yields (two planks and often a third), so every
+upgrade is felt instead of only the big jumps. Every number in that curve is an ordinary content
+leaf, so a server can retune what better tools are worth, or key the bonus off something else
+entirely.
 
 The engine underneath is the full thing, not a Sawmill special case - multi-action stations, step
 programs, multi-station walks, placed-input custody and props, the puppet performer, conditional

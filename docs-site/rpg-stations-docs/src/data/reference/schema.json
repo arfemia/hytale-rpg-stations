@@ -330,8 +330,8 @@
                           {
                             "key": "Add",
                             "required": false,
-                            "documentation": "Extra whole items added to the cycle's output when this floor is the reached one; reader-defaults to 0.",
-                            "type": "integer"
+                            "documentation": "Extra items added when this floor is the reached one; may be fractional (2.5 = two always plus a 50% chance of a third). Reader-defaults to 0.",
+                            "type": "double"
                           }
                         ]
                       }
@@ -1108,8 +1108,8 @@
                           {
                             "key": "Add",
                             "required": false,
-                            "documentation": "Extra whole items added to the cycle's output when this floor is the reached one; reader-defaults to 0.",
-                            "type": "integer"
+                            "documentation": "Extra items added when this floor is the reached one; may be fractional (2.5 = two always plus a 50% chance of a third). Reader-defaults to 0.",
+                            "type": "double"
                           }
                         ]
                       }
@@ -1846,8 +1846,8 @@
                           {
                             "key": "Add",
                             "required": false,
-                            "documentation": "Extra whole items added to the cycle's output when this floor is the reached one; reader-defaults to 0.",
-                            "type": "integer"
+                            "documentation": "Extra items added when this floor is the reached one; may be fractional (2.5 = two always plus a 50% chance of a third). Reader-defaults to 0.",
+                            "type": "double"
                           }
                         ]
                       }

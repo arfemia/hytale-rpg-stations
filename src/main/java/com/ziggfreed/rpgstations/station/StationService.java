@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.DoubleSupplier;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -1028,7 +1030,12 @@ public final class StationService {
         FactorSnapshot snapshot = new FactorSnapshot(
                 buildFactorContext(s, store, player, action, attemptCycleIndex));
         double yieldLadder = StationYield.ladderValue(yield, snapshot::resolve);
-        Ingredient[] yieldedOutputs = StationYield.applyToOutputs(yield, check.outputs, yieldLadder);
+        // A fractional yield pays its whole part always and rolls only the remainder, so 2.5 averages
+        // exactly 2.5 over many cycles. Same injected-DoubleSupplier seam LootEngine uses for a
+        // Chance roll, so the decision core stays pure and testable.
+        DoubleSupplier remainderRoll = () -> ThreadLocalRandom.current().nextDouble();
+        Ingredient[] yieldedOutputs = StationYield.applyToOutputs(yield, check.outputs, yieldLadder,
+                remainderRoll);
         StationStep.Produce produceStep = StationStep.Produce.of(yieldedOutputs,
                 StationStep.Produce.TO_INVENTORY);
         // Scope-2 (design 1.8): fold Station/Action-targeted ExtensionAsset Loot into the cycle's
@@ -1042,11 +1049,14 @@ public final class StationService {
         List<StationStep> steps = ImplicitProgram.build(consumeStep, produceStep, resolvedRolls,
                 action.getPresentation());
         // Roll.Grants.BonusOutputCopies duplicates the cycle's PRIMARY output (the first authored
-        // one) - a multi-output conversion's byproducts are not bonus-copied. It reads the YIELDED
-        // quantity, not the conversion's authored one: a bonus copy duplicates the whole produced
-        // stack, so sourcing it pre-yield would hand out a smaller copy than the cycle just produced.
+        // one) - a multi-output conversion's byproducts are not bonus-copied. It reads the quantity
+        // the produce phase above ALREADY resolved rather than re-resolving it: a bonus copy
+        // duplicates the whole produced stack, so sourcing it pre-yield would hand out a smaller copy
+        // than the cycle produced, and re-rolling a FRACTIONAL yield here would let the copy disagree
+        // with the stack it is supposed to be a copy of.
         ItemStack cycleOutput = new ItemStack(check.primaryOutputItem(),
-                StationYield.resolveQuantity(yield, check.primaryOutputCount(), yieldLadder));
+                yieldedOutputs.length > 0 && yieldedOutputs[0] != null
+                        ? yieldedOutputs[0].effectiveQuantity() : check.primaryOutputCount());
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, cycleOutput,
                 attemptCycleIndex, 0, false, snapshot);
     }
@@ -1606,6 +1616,7 @@ public final class StationService {
                 .toolPower(resolveHeldToolPower(player, asset.getTool()))
                 .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
                 .toolQuality(resolveHeldToolQuality(player))
+                .toolItemLevel(resolveHeldToolItemLevel(player))
                 .contributions(contributionParams(asset))
                 .build();
     }
@@ -1638,6 +1649,7 @@ public final class StationService {
                 .toolPower(resolveHeldToolPower(player, action.getTool()))
                 .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
                 .toolQuality(resolveHeldToolQuality(player))
+                .toolItemLevel(resolveHeldToolItemLevel(player))
                 .contributions(contributionParams(action.getWork()))
                 .build();
     }
@@ -1688,6 +1700,22 @@ public final class StationService {
             return quality == null ? 0.0 : Math.max(0.0, quality.getQualityValue());
         } catch (Throwable t) {
             Log.fine("STATION could not resolve the held tool's quality: " + t.getMessage());
+            return 0.0;
+        }
+    }
+
+    /**
+     * The active hotbar item's native {@code ItemLevel} ({@code rpgstations:tool_item_level}); 0 when
+     * nothing is held. The fine-grained third tool axis - see {@code FactorContext#toolItemLevel()}
+     * for why it is a tiebreaker rather than a primary one. Try-guarded like its two siblings.
+     */
+    private static double resolveHeldToolItemLevel(@Nonnull Player player) {
+        try {
+            ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+            Item item = held != null ? held.getItem() : null;
+            return item == null ? 0.0 : Math.max(0.0, item.getItemLevel());
+        } catch (Throwable t) {
+            Log.fine("STATION could not resolve the held tool's item level: " + t.getMessage());
             return 0.0;
         }
     }

@@ -1,6 +1,7 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.util.function.BiFunction;
+import java.util.function.DoubleSupplier;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -46,18 +47,18 @@ public final class StationYield {
     }
 
     /**
-     * The extra whole items {@code yield}'s bonus ladder contributes at {@code ladderValue}: the
-     * HIGHEST floor whose {@code Min} is reached wins (floors are NOT cumulative - authoring
-     * {@code [{Min:5,Add:1},{Min:9,Add:2}]} means "+1 from 5, +2 from 9", never +3). 0 when no
-     * bonus/floors are authored or no floor is reached.
+     * The extra items {@code yield}'s bonus ladder contributes at {@code ladderValue}: the HIGHEST
+     * floor whose {@code Min} is reached wins (floors are NOT cumulative - authoring
+     * {@code [{Min:5,Add:1},{Min:9,Add:2}]} means "+1 from 5, +2 from 9", never +3). May be
+     * FRACTIONAL; 0 when no bonus/floors are authored or no floor is reached.
      */
-    public static int bonusAdd(@Nullable StationAsset.Yield yield, double ladderValue) {
+    public static double bonusAdd(@Nullable StationAsset.Yield yield, double ladderValue) {
         StationAsset.Yield.Bonus bonus = yield != null ? yield.getBonus() : null;
         StationAsset.Yield.Floor[] floors = bonus != null ? bonus.getFloors() : null;
         if (floors == null || floors.length == 0) {
-            return 0;
+            return 0.0;
         }
-        int add = 0;
+        double add = 0.0;
         double bestMin = Double.NEGATIVE_INFINITY;
         for (StationAsset.Yield.Floor floor : floors) {
             if (floor == null) {
@@ -73,25 +74,21 @@ public final class StationYield {
     }
 
     /**
-     * The final produced quantity for ONE output: {@code clamp(round(base * Scale) + bonusAdd, Min,
-     * Max)} with the {@link StationAsset.Yield#ABSOLUTE_MIN} floor underneath, where {@code base} is
-     * the authored {@code Yield.Base} when present and {@code authoredQuantity} (the conversion's
-     * own output quantity) otherwise. A null {@code yield} returns {@code authoredQuantity}
-     * untouched, so a station authoring no {@code Yield} group is byte-identical to pre-knob
-     * behavior.
+     * The EXACT (possibly fractional) quantity for one output before the remainder is resolved:
+     * {@code clamp(base * Scale + bonusAdd, Min, Max)} with the
+     * {@link StationAsset.Yield#ABSOLUTE_MIN} floor underneath, where {@code base} is the authored
+     * {@code Yield.Base} when present and {@code authoredQuantity} (the conversion's own output
+     * quantity) otherwise. Exposed separately from {@link #resolveQuantity} so a caller (and a test)
+     * can read the authored intent without consuming a roll.
      */
-    public static int resolveQuantity(@Nullable StationAsset.Yield yield, int authoredQuantity,
+    public static double exactQuantity(@Nonnull StationAsset.Yield yield, int authoredQuantity,
             double ladderValue) {
-        if (yield == null) {
-            return authoredQuantity;
-        }
         Integer authoredBase = yield.getBase();
         int base = authoredBase != null && authoredBase > 0 ? authoredBase : authoredQuantity;
-        long scaled = Math.round(base * yield.effectiveScale());
-        long total = scaled + bonusAdd(yield, ladderValue);
+        double total = base * yield.effectiveScale() + bonusAdd(yield, ladderValue);
 
         Integer min = yield.getMin();
-        long floor = min != null ? Math.max(StationAsset.Yield.ABSOLUTE_MIN, min)
+        double floor = min != null ? Math.max(StationAsset.Yield.ABSOLUTE_MIN, min)
                 : StationAsset.Yield.ABSOLUTE_MIN;
         if (total < floor) {
             total = floor;
@@ -100,7 +97,34 @@ public final class StationYield {
         if (max != null && max >= StationAsset.Yield.ABSOLUTE_MIN && total > max) {
             total = max;
         }
-        return (int) Math.min(Integer.MAX_VALUE, total);
+        return total;
+    }
+
+    /**
+     * The final whole-item quantity for ONE output: {@link #exactQuantity}'s whole part, plus one
+     * more item when its FRACTIONAL remainder wins a roll from {@code remainderRoll} (a
+     * {@code [0,1)} supplier - {@code 2.5} pays 2 always and a 3rd half the time, so the long-run
+     * average is exactly the authored number). A null {@code yield} returns {@code authoredQuantity}
+     * untouched and consumes NO roll, so a station authoring no {@code Yield} group is
+     * byte-identical to pre-knob behavior; an exact whole number consumes no roll either.
+     */
+    public static int resolveQuantity(@Nullable StationAsset.Yield yield, int authoredQuantity,
+            double ladderValue, @Nonnull DoubleSupplier remainderRoll) {
+        if (yield == null) {
+            return authoredQuantity;
+        }
+        double exact = exactQuantity(yield, authoredQuantity, ladderValue);
+        long whole = (long) Math.floor(exact);
+        double remainder = exact - whole;
+        if (remainder > 0.0 && remainderRoll.getAsDouble() < remainder) {
+            whole++;
+        }
+        // The absolute floor is re-asserted AFTER the roll: a sub-1 exact value (e.g. Scale 0.4)
+        // floors to 0 whole items and can lose its remainder roll, which would be item loss.
+        if (whole < StationAsset.Yield.ABSOLUTE_MIN) {
+            whole = StationAsset.Yield.ABSOLUTE_MIN;
+        }
+        return (int) Math.min(Integer.MAX_VALUE, whole);
     }
 
     /**
@@ -108,10 +132,12 @@ public final class StationYield {
      * array instance when {@code yield} is null (identity on the no-knob path, so the zero-authoring
      * case allocates nothing). Applies to EVERY output of a multi-output conversion, deliberately:
      * a recipe yielding a main product plus a byproduct scales as one recipe, not one favoured item.
+     * Each output rolls its OWN remainder, so a fractional yield does not correlate a byproduct's
+     * extra item with the main product's.
      */
     @Nonnull
     public static Ingredient[] applyToOutputs(@Nullable StationAsset.Yield yield,
-            @Nonnull Ingredient[] outputs, double ladderValue) {
+            @Nonnull Ingredient[] outputs, double ladderValue, @Nonnull DoubleSupplier remainderRoll) {
         if (yield == null) {
             return outputs;
         }
@@ -123,7 +149,7 @@ public final class StationYield {
                 continue;
             }
             out[i] = Ingredient.item(in.getItemId(),
-                    resolveQuantity(yield, in.effectiveQuantity(), ladderValue));
+                    resolveQuantity(yield, in.effectiveQuantity(), ladderValue, remainderRoll));
         }
         return out;
     }

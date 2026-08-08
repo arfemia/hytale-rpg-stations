@@ -235,12 +235,17 @@ rolls read the identical resolved factor numbers ("one aggregation, two consumer
 snapshot per cycle would quietly break that. The transform also feeds `cycleOutput`, the
 `Roll.Grants.BonusOutputCopies` source, since a bonus copy duplicates the WHOLE produced stack and
 sourcing it pre-yield would hand out a smaller copy than the cycle just produced. `StationYield`
-itself is pure (`ladderValue`/`bonusAdd`/`resolveQuantity`/`applyToOutputs`, unit-tested with
-authored fixtures) and is IDENTITY on a null `Yield`, so a station authoring none is byte-identical
-to pre-knob behavior. The built-in `rpgstations:tool_quality` factor that makes a tool ladder
-authorable reads the held item's native `ItemQuality.QualityValue` via
-`StationService#resolveHeldToolQuality` (an asset-map index resolve, not a raw index compare - see
-its javadoc).
+itself is pure (`ladderValue`/`bonusAdd`/`exactQuantity`/`resolveQuantity`/`applyToOutputs`,
+unit-tested with authored fixtures) and is IDENTITY on a null `Yield`, so a station authoring none is
+byte-identical to pre-knob behavior. A FRACTIONAL effective yield pays its whole part every cycle and
+rolls only the remainder (`exactQuantity` exposes the pre-roll number so a caller or test can read
+authored intent without consuming a roll); the roll is an injected `DoubleSupplier`, the same seam
+`RollEvaluator` takes, and `cycleOutput` reuses the ALREADY-ROLLED primary quantity rather than
+re-resolving, so a bonus copy can never disagree with the stack it copies. The three tool factors
+that make a ladder authorable (`rpgstations:tool_quality`, `rpgstations:tool_item_level`,
+`rpgstations:tool_power`) are read by `StationService#resolveHeldToolQuality`/
+`#resolveHeldToolItemLevel`/`#resolveHeldToolPower`; the quality one is an asset-map index resolve,
+not a raw index compare - see its javadoc.
 
 ## Cadence + the `emitMoment` choke point (unchanged)
 

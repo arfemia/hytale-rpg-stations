@@ -157,6 +157,12 @@ See `../station/CLAUDE.md`'s boundary section for the engine half.
   yield bonus keys off any registered factor and an author learns one vocabulary, not two. Floors are
   NOT cumulative (the highest reached wins), and a 1-item floor is enforced under every path because
   a conversion that consumed its inputs and produced nothing is item loss, not a tuning outcome.
+  **`Scale` and a floor's `Add` are DOUBLES, and a fractional yield is paid as a STOCHASTIC
+  REMAINDER**: an effective `2.5` pays 2 every cycle and a 3rd on a 50% roll, so the long-run average
+  is exactly the authored number. That exists so a mid-ladder tool can sit BETWEEN two whole yields
+  instead of being rounded onto a neighbour and collapsing a rung. The roll is stateless by design
+  (no per-session carry to persist, lose on a crash, or reason about across a relog) and draws from
+  the same injected-`DoubleSupplier` seam the loot `Chance` rolls use.
   **It resolves PER CYCLE** (`station.StationYield`, off the same `FactorSnapshot` the cycle's loot
   rolls use), which is exactly why the retired `FromCrafting.OutputPerInput` scalar could not do this
   job - it baked one number in at asset-fold time, and a yield keyed off the worker's held tool has

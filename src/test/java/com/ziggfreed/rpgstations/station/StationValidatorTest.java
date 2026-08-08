@@ -313,7 +313,7 @@ public class StationValidatorTest {
     @Test
     void yieldBonusFloorsWithoutValues_flagged() {
         StationAsset.Yield.Bonus bonus = StationAsset.Yield.Bonus.of(null,
-                new StationAsset.Yield.Floor[]{StationAsset.Yield.Floor.of(5.0, 1)});
+                new StationAsset.Yield.Floor[]{StationAsset.Yield.Floor.of(5.0, 1.0)});
         assertTrue(codes(validate(yieldStation("nofactors", StationAsset.Yield.of(2, null, bonus, null, null))))
                 .contains("YIELD_BONUS_FLOORS_WITHOUT_VALUES"));
     }
@@ -330,7 +330,7 @@ public class StationValidatorTest {
     void yieldBonusUnknownFactor_flagged() {
         StationAsset.Yield.Bonus bonus = StationAsset.Yield.Bonus.of(
                 new FactorRef[]{FactorRef.of("nosuchmod:nosuchfactor", null, null)},
-                new StationAsset.Yield.Floor[]{StationAsset.Yield.Floor.of(5.0, 1)});
+                new StationAsset.Yield.Floor[]{StationAsset.Yield.Floor.of(5.0, 1.0)});
         StationAsset a = yieldStation("badfactor", StationAsset.Yield.of(2, null, bonus, null, null));
         assertTrue(codes(StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, NO_FACTOR))
                 .contains("YIELD_BONUS_UNKNOWN_FACTOR"));
