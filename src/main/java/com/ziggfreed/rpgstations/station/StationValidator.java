@@ -604,7 +604,7 @@ public final class StationValidator {
             String label = "Station '" + id + "'";
 
             checkIdentity(a, id, label, langKeyKnown, out);
-            checkRecipe(a, id, label, out);
+            checkRecipe(a, id, label, factorKnown, out);
             checkWork(a, id, label, out);
             checkTool(a, id, label, out);
             checkLoot(a, id, label, dropListKnown, factorKnown, lootableKnown, out);
@@ -1898,7 +1898,7 @@ public final class StationValidator {
     }
 
     private static void checkRecipe(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
-                                    @Nonnull List<Finding> out) {
+                                    @Nonnull Predicate<String> factorKnown, @Nonnull List<Finding> out) {
         StationAsset.Recipe recipe = a.getRecipe();
         StationAsset.Conversion[] conversions = recipe != null ? recipe.getConversions() : null;
         StationAsset.FromCrafting fromCrafting = recipe != null ? recipe.getFromCrafting() : null;
@@ -1916,6 +1916,69 @@ public final class StationValidator {
         }
         if (hasConversions) {
             checkConversions(conversions, id, label, out);
+        }
+        if (recipe != null && recipe.getYield() != null) {
+            checkYield(recipe.getYield(), id, label, factorKnown, out);
+        }
+    }
+
+    /**
+     * {@code Recipe.Yield} coverage - every finding warn-or-info, per this validator's never-block
+     * posture: a nonsensical yield still loads and the engine's own reader defaults absorb it.
+     */
+    private static void checkYield(@Nonnull StationAsset.Yield y, @Nonnull String id,
+                                   @Nonnull String label, @Nonnull Predicate<String> factorKnown,
+                                   @Nonnull List<Finding> out) {
+        if (y.getBase() != null && y.getBase() <= 0) {
+            out.add(Finding.warning(DOMAIN, "YIELD_NONPOSITIVE_BASE",
+                    label + " Recipe.Yield.Base is not positive - it is ignored and each conversion's"
+                            + " own authored output quantity is used instead", id));
+        }
+        if (y.getScale() != null && (!Double.isFinite(y.getScale()) || y.getScale() <= 0.0)) {
+            out.add(Finding.warning(DOMAIN, "YIELD_NONPOSITIVE_SCALE",
+                    label + " Recipe.Yield.Scale is not a positive finite number - it reader-defaults to 1.0", id));
+        }
+        if (y.getMin() != null && y.getMax() != null && y.getMin() > y.getMax()) {
+            out.add(Finding.warning(DOMAIN, "YIELD_MIN_ABOVE_MAX",
+                    label + " Recipe.Yield.Min (" + y.getMin() + ") exceeds Max (" + y.getMax()
+                            + ") - Max wins, so every cycle produces exactly Max", id));
+        }
+        StationAsset.Yield.Bonus bonus = y.getBonus();
+        if (bonus == null) {
+            return;
+        }
+        boolean hasFloors = bonus.getFloors() != null && bonus.getFloors().length > 0;
+        boolean hasValues = bonus.getValues() != null && bonus.getValues().length > 0;
+        if (hasFloors && !hasValues) {
+            out.add(Finding.warning(DOMAIN, "YIELD_BONUS_FLOORS_WITHOUT_VALUES",
+                    label + " Recipe.Yield.Bonus authors Floors but no Values - the ladder value is a"
+                            + " constant 0, so only a Min<=0 floor can ever be reached", id));
+        }
+        if (hasValues && !hasFloors) {
+            out.add(Finding.warning(DOMAIN, "YIELD_BONUS_VALUES_WITHOUT_FLOORS",
+                    label + " Recipe.Yield.Bonus authors Values but no Floors - nothing consumes the"
+                            + " summed value, so the bonus can never add anything", id));
+        }
+        if (bonus.getValues() != null) {
+            for (FactorRef ref : bonus.getValues()) {
+                if (ref == null || ref.getFactor() == null || ref.getFactor().isBlank()) {
+                    out.add(Finding.warning(DOMAIN, "YIELD_BONUS_BLANK_FACTOR",
+                            label + " Recipe.Yield.Bonus.Values has an entry with no Factor id - it contributes 0", id));
+                } else if (!factorKnown.test(ref.getFactor())) {
+                    out.add(Finding.warning(DOMAIN, "YIELD_BONUS_UNKNOWN_FACTOR",
+                            label + " Recipe.Yield.Bonus.Values references unregistered factor '"
+                                    + ref.getFactor() + "' - it resolves to 0 (fail-closed)", id));
+                }
+            }
+        }
+        if (bonus.getFloors() != null) {
+            for (StationAsset.Yield.Floor floor : bonus.getFloors()) {
+                if (floor != null && floor.effectiveAdd() == 0) {
+                    out.add(Finding.info(DOMAIN, "YIELD_BONUS_FLOOR_ADDS_NOTHING",
+                            label + " Recipe.Yield.Bonus has a floor at Min " + floor.effectiveMin()
+                                    + " whose Add is 0 - reaching it changes nothing", id));
+                }
+            }
         }
     }
 
@@ -1968,10 +2031,6 @@ public final class StationValidator {
         if (!hasCategories && !hasBenches) {
             out.add(Finding.error(DOMAIN, "FROMCRAFTING_NO_CATEGORIES",
                     label + " Recipe.FromCrafting has neither non-blank Categories nor Benches - it can derive nothing", id));
-        }
-        if (fc.getOutputPerInput() != null && fc.getOutputPerInput() <= 0) {
-            out.add(Finding.warning(DOMAIN, "NONPOSITIVE_OUTPUT_PER_INPUT",
-                    label + " Recipe.FromCrafting has a nonpositive OutputPerInput (the deriver defaults it to 1)", id));
         }
         if (fc.getBenches() != null) {
             for (String bench : fc.getBenches()) {

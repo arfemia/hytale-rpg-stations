@@ -225,7 +225,7 @@ public class StationValidatorTest {
         StationAsset a = StationAsset.of("crafter",
                 StationAsset.Identity.of("rpgstations.station.crafter.name", null, null),
                 null,
-                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"WoodPlanks"}, null)),
+                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"WoodPlanks"})),
                 null, null, null, null, null, null);
         List<Finding> findings = validate(a);
         assertFalse(codes(findings).contains("EMPTY_CONVERSIONS"));
@@ -237,7 +237,7 @@ public class StationValidatorTest {
         StationAsset a = StationAsset.of("nocats",
                 StationAsset.Identity.of("rpgstations.station.nocats.name", null, null),
                 null,
-                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"  "}, null)),
+                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"  "})),
                 null, null, null, null, null, null);
         Set<String> codes = codes(validate(a));
         assertTrue(codes.contains("FROMCRAFTING_NO_CATEGORIES"));
@@ -254,7 +254,7 @@ public class StationValidatorTest {
         StationAsset a = StationAsset.of("benchesonly",
                 StationAsset.Identity.of("rpgstations.station.benchesonly.name", null, null),
                 null,
-                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(null, null,
+                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(null,
                         new String[]{"Campfire"}, new String[]{"Processing"}, null)),
                 null, null, null, null, null, null);
         Set<String> codes = codes(validate(a));
@@ -268,7 +268,7 @@ public class StationValidatorTest {
         StationAsset a = StationAsset.of("badtype",
                 StationAsset.Identity.of("rpgstations.station.badtype.name", null, null),
                 null,
-                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"WoodPlanks"}, null,
+                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"WoodPlanks"},
                         null, new String[]{"Bogus"}, null)),
                 null, null, null, null, null, null);
         assertTrue(codes(validate(a)).contains("FROMCRAFTING_UNKNOWN_TYPE"));
@@ -279,20 +279,61 @@ public class StationValidatorTest {
         StationAsset a = StationAsset.of("badscale",
                 StationAsset.Identity.of("rpgstations.station.badscale.name", null, null),
                 null,
-                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"WoodPlanks"}, null,
+                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"WoodPlanks"},
                         null, null, StationAsset.FromCrafting.NativeTime.of(0.0, null))),
                 null, null, null, null, null, null);
         assertTrue(codes(validate(a)).contains("FROMCRAFTING_NATIVETIME_NONPOSITIVE_SCALE"));
     }
 
-    @Test
-    void fromCraftingNonpositiveOutputPerInput_flagged() {
-        StationAsset a = StationAsset.of("badmult",
-                StationAsset.Identity.of("rpgstations.station.badmult.name", null, null),
+    // ==================== Recipe.Yield ====================
+
+    /** A station whose Recipe carries {@code yield}, otherwise minimal. */
+    private static StationAsset yieldStation(String id, StationAsset.Yield yield) {
+        return StationAsset.of(id,
+                StationAsset.Identity.of("rpgstations.station." + id + ".name", null, null),
                 null,
-                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"WoodPlanks"}, 0)),
+                StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[]{"WoodPlanks"}), yield),
                 null, null, null, null, null, null);
-        assertTrue(codes(validate(a)).contains("NONPOSITIVE_OUTPUT_PER_INPUT"));
+    }
+
+    @Test
+    void yieldNonpositiveBaseAndScale_flagged() {
+        StationAsset a = yieldStation("badyield", StationAsset.Yield.of(0, 0.0, null, null, null));
+        java.util.Set<String> codes = codes(validate(a));
+        assertTrue(codes.contains("YIELD_NONPOSITIVE_BASE"));
+        assertTrue(codes.contains("YIELD_NONPOSITIVE_SCALE"));
+    }
+
+    @Test
+    void yieldMinAboveMax_flagged() {
+        StationAsset a = yieldStation("badclamp", StationAsset.Yield.of(2, null, null, 9, 3));
+        assertTrue(codes(validate(a)).contains("YIELD_MIN_ABOVE_MAX"));
+    }
+
+    @Test
+    void yieldBonusFloorsWithoutValues_flagged() {
+        StationAsset.Yield.Bonus bonus = StationAsset.Yield.Bonus.of(null,
+                new StationAsset.Yield.Floor[]{StationAsset.Yield.Floor.of(5.0, 1)});
+        assertTrue(codes(validate(yieldStation("nofactors", StationAsset.Yield.of(2, null, bonus, null, null))))
+                .contains("YIELD_BONUS_FLOORS_WITHOUT_VALUES"));
+    }
+
+    @Test
+    void yieldBonusValuesWithoutFloors_flagged() {
+        StationAsset.Yield.Bonus bonus = StationAsset.Yield.Bonus.of(
+                new FactorRef[]{FactorRef.of("rpgstations:tool_power", null, null)}, null);
+        assertTrue(codes(validate(yieldStation("nofloors", StationAsset.Yield.of(2, null, bonus, null, null))))
+                .contains("YIELD_BONUS_VALUES_WITHOUT_FLOORS"));
+    }
+
+    @Test
+    void yieldBonusUnknownFactor_flagged() {
+        StationAsset.Yield.Bonus bonus = StationAsset.Yield.Bonus.of(
+                new FactorRef[]{FactorRef.of("nosuchmod:nosuchfactor", null, null)},
+                new StationAsset.Yield.Floor[]{StationAsset.Yield.Floor.of(5.0, 1)});
+        StationAsset a = yieldStation("badfactor", StationAsset.Yield.of(2, null, bonus, null, null));
+        assertTrue(codes(StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, NO_FACTOR))
+                .contains("YIELD_BONUS_UNKNOWN_FACTOR"));
     }
 
     @Test

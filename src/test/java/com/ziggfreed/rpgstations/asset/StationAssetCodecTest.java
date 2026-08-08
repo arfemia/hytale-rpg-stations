@@ -178,7 +178,7 @@ public class StationAssetCodecTest {
     @Test
     void fromCrafting_parentInheritsWholesaleOnOmit() throws Exception {
         String parentJson = "{ \"Recipe\": { \"FromCrafting\": { \"Categories\": [\"WoodPlanks\", \"StonePlanks\"],"
-                + "   \"OutputPerInput\": 2 } } }";
+                + "   \"Types\": [\"Crafting\"] } } }";
         StationAsset parent = decodeWithParent(parentJson, null, "craft_parent", null);
         assertNull(parent.getRecipe().getConversions());
         assertEquals("WoodPlanks", parent.getRecipe().getFromCrafting().getCategories()[0]);
@@ -187,7 +187,7 @@ public class StationAssetCodecTest {
         assertNotNull(child.getRecipe());
         assertNotNull(child.getRecipe().getFromCrafting());
         assertEquals("WoodPlanks", child.getRecipe().getFromCrafting().getCategories()[0]);
-        assertEquals(2, child.getRecipe().getFromCrafting().getOutputPerInput());
+        assertEquals("Crafting", child.getRecipe().getFromCrafting().getTypes()[0]);
     }
 
     // ==================== Loot (leg 3, REPLACES the MMO's Luck group) ====================
@@ -686,12 +686,11 @@ public class StationAssetCodecTest {
     @Test
     void fromCrafting_benchesTypesNativeTime_decode() throws Exception {
         StationAsset a = decodeAsset("{ \"Recipe\": { \"FromCrafting\": {"
-                + " \"Categories\": [\"WoodPlanks\"], \"OutputPerInput\": 2,"
+                + " \"Categories\": [\"WoodPlanks\"],"
                 + " \"Benches\": [\"RPG_Bench_Sawmill\"], \"Types\": [\"Crafting\", \"Processing\"],"
                 + " \"NativeTime\": { \"Scale\": 3.0, \"OffsetMs\": 1500 } } } }");
         StationAsset.FromCrafting fc = a.getRecipe().getFromCrafting();
         assertEquals("WoodPlanks", fc.getCategories()[0]);
-        assertEquals(2, fc.getOutputPerInput());
         assertEquals("RPG_Bench_Sawmill", fc.getBenches()[0]);
         assertEquals(StationAsset.FromCrafting.TYPE_CRAFTING, fc.getTypes()[0]);
         assertEquals(StationAsset.FromCrafting.TYPE_PROCESSING, fc.getTypes()[1]);

@@ -1,7 +1,5 @@
 # RPG Stations
 
-_DRAFT: first-release notes, pending final maintainer sign-off before the release train ships._
-
 **Diegetic work stations - place, press F, watch your character work.**
 
 RPG Stations adds interactive work stations to your Hytale server. No menus, no instant
@@ -10,7 +8,10 @@ real time, and results come out.
 
 **0.1.0 ships one station, the Sawmill:** load logs onto the bench, press `F`, and your character
 saws them into that wood family's planks one cycle at a time, with a held-tool gate, a tool-power
-loot ladder, and a session summary when you stop.
+loot ladder, and a session summary when you stop. The bench pays for the time it takes: two planks
+per log where crafting them by hand gives one, and three if you are working with a top-rarity
+hatchet. Every number in that curve is an ordinary content leaf, so a server can retune what better
+tools are worth, or key the bonus off something else entirely.
 
 The engine underneath is the full thing, not a Sawmill special case - multi-action stations, step
 programs, multi-station walks, placed-input custody and props, the puppet performer, conditional

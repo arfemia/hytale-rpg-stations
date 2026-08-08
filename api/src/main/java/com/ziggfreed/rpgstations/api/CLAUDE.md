@@ -70,7 +70,11 @@ is the exact inverse of a permanently-opaque channel.
   evaluates over. `register(factorId, provider)` is last-write-wins, id lowercased.
   `StationFactorProvider.resolve(ctx, param)` runs synchronously on the world thread and must not
   retain `ctx`. RpgStations registers its own built-ins under the `rpgstations:` namespace
-  (`session_seconds`/`cycle_count`/`tool_power`/`tool_durability_percent`) plus the mod-agnostic
+  (`session_seconds`/`cycle_count`/`tool_power`/`tool_durability_percent`/`tool_quality` - the last
+  being the held item's native `ItemQuality.QualityValue`, the AUTHORED number that orders quality
+  tiers, so a pack shipping its own tier participates with no engine change; it is orthogonal to
+  `tool_power` and a tool ladder wants BOTH summed, because gather power saturates across a family's
+  upper tiers while quality keeps separating them) plus the mod-agnostic
   `stat` factor, whose `Param` addresses any registered native `EntityStatType`; an external id is
   namespace-prefixed by convention (`yourmod:reputation`). An unknown factor at runtime fails a
   `Condition` CLOSED (roll does not fire) and resolves a `Chance`/`Ladder` value to 0, each with a

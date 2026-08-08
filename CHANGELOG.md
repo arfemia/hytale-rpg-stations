@@ -2,10 +2,8 @@
 
 Developer changelog for RPG Stations. No em-dashes.
 
-**DRAFT: 0.1.0 is RPG Stations' first public release.** Everything below shipped into this one
-version; there is no prior public release to diff against, so every entry is additive by
-definition. This file (and `CURSEFORGE.md`) are drafts pending final maintainer sign-off before
-the version train ships.
+**0.1.0 is RPG Stations' first public release.** Everything below shipped into this one version;
+there is no prior public release to diff against, so every entry is additive by definition.
 
 ## 0.1.0 (first public release)
 
@@ -44,6 +42,15 @@ to recompile against a later release rather than treat these types as stable.
   scaling (`Tool.PowerScale`), and
   recipe derivation either authored (`Recipe.Conversions`) or derived from native crafting recipes
   (`Recipe.FromCrafting`), zero hand-authored conversions for a station like the Sawmill.
+- Adds `Recipe.Yield`, the per-cycle output-quantity transform that applies to authored and derived
+  conversions alike: a flat `Base`, a `Scale` multiplier, `Min`/`Max` clamps, and a `Bonus` ladder
+  whose `Values` are the same weighted `FactorRef` sum every other formula site uses, so a yield
+  bonus can key off any registered factor. Two new built-in factors make a tool ladder authorable
+  out of the box, `rpgstations:tool_quality` (the native `ItemQuality.QualityValue`) beside the
+  existing `rpgstations:tool_power`; summing both is the intended shape, since gather power
+  saturates across a tool family's upper tiers while quality keeps separating them. This is how the
+  shipped Sawmill pays for the time it takes: two planks per log against the hand-craft's one, and
+  three for a top-rarity hatchet.
   Ships the standalone default Sawmill (native ids, jar-shipped) alongside the standalone
   `loot/` layer: conditional lootable rolls over native `ItemDropList`s gated/weighted by an
   extensible condition system (session length, tool durability/power, and similar session-derived

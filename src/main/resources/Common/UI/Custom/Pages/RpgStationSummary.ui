@@ -68,6 +68,11 @@ $F = "../Common/ZigFrames.ui";
 
 @LedgerRowStyle = (FontSize: 15, TextColor: #eef3fa, VerticalAlignment: Center, Wrap: true);
 
+// The subordinate SECOND line of a ledger row (a factor breakdown behind a number, a caption).
+// Deliberately its own smaller-font style rather than a "\n" inside the row's own line: the native
+// rich-text markup set has no font-size tag, so a second line only renders smaller as its own Label.
+@LedgerSubStyle = (FontSize: 13, TextColor: #9fb0c4, VerticalAlignment: Center, Wrap: true);
+
 @LedgerMoreStyle = (FontSize: 12, TextColor: #9fb0c4, HorizontalAlignment: Center, VerticalAlignment: Center);
 
 Group #RpgStationSummaryHudCanvas {
@@ -114,57 +119,95 @@ Group #RpgStationSummaryHudCanvas {
         // Fixed ledger row slots (never appended); StationSummaryHud.renderLedger populates +
         // shows/hides them. Capped at MAX_LEDGER_ROWS (6, #RpgStationSummaryItem0..5) plus one
         // keyed "+N more" overflow row.
+        //
+        // ROW SHAPE: icon + a FlexWeight:1 vertical text column holding the headline #Name and an
+        // optional smaller #Sub second line (the row's own Anchor therefore omits Height and sizes
+        // to content, so a row shrinks back to one line whenever #Sub is hidden - which is every
+        // row the renderer paints without a SummaryRow.subText). The column is FlexWeight rather
+        // than a fixed Width, and its Labels carry no Width of their own, matching the vanilla
+        // icon-plus-text-stack convention; the panel still cannot grow past its Width because the
+        // row Group above them keeps the explicit 492 cap.
         Group #RpgStationSummaryLedger {
           Anchor: (Top: 8);
           LayoutMode: Top;
 
           Group #RpgStationSummaryItem0 {
-            Anchor: (Height: 28, Top: 4, Width: 492);
+            Anchor: (Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
             Group { Anchor: (Width: 8); }
-            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
           }
           Group #RpgStationSummaryItem1 {
-            Anchor: (Height: 28, Top: 4, Width: 492);
+            Anchor: (Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
             Group { Anchor: (Width: 8); }
-            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
           }
           Group #RpgStationSummaryItem2 {
-            Anchor: (Height: 28, Top: 4, Width: 492);
+            Anchor: (Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
             Group { Anchor: (Width: 8); }
-            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
           }
           Group #RpgStationSummaryItem3 {
-            Anchor: (Height: 28, Top: 4, Width: 492);
+            Anchor: (Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
             Group { Anchor: (Width: 8); }
-            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
           }
           Group #RpgStationSummaryItem4 {
-            Anchor: (Height: 28, Top: 4, Width: 492);
+            Anchor: (Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
             Group { Anchor: (Width: 8); }
-            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
           }
           Group #RpgStationSummaryItem5 {
-            Anchor: (Height: 28, Top: 4, Width: 492);
+            Anchor: (Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;
             ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
             Group { Anchor: (Width: 8); }
-            Label #Name { Text: ""; FlexWeight: 1; Style: @LedgerRowStyle; }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
           }
 
           Label #RpgStationSummaryItemMore {

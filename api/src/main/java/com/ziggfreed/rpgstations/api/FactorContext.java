@@ -39,6 +39,7 @@ public final class FactorContext {
     private final int cycleIndex;
     private final double toolPower;
     private final double toolDurabilityPercent;
+    private final double toolQuality;
     @Nonnull private final Map<String, List<String>> contributionParams;
 
     private FactorContext(@Nonnull Builder b) {
@@ -51,6 +52,7 @@ public final class FactorContext {
         this.cycleIndex = b.cycleIndex;
         this.toolPower = b.toolPower;
         this.toolDurabilityPercent = b.toolDurabilityPercent;
+        this.toolQuality = b.toolQuality;
         this.contributionParams = copyChannelMap(b.contributionParams);
     }
 
@@ -117,6 +119,23 @@ public final class FactorContext {
     }
 
     /**
+     * The held tool's RARITY as the native {@code ItemQuality.QualityValue} that quality asset
+     * authors ({@code rpgstations:tool_quality}); {@code 0} when nothing is held or the item names
+     * no quality. Deliberately the AUTHORED number rather than an engine-side tier enum: the value
+     * is what orders qualities (0 = lowest), it comes straight off the referenced quality asset, and
+     * a pack that ships its own quality tier therefore orders itself with no engine change.
+     *
+     * <p>ORTHOGONAL to {@link #toolPower()}, and both are needed for a rarity-aware formula because
+     * they answer different questions and neither subsumes the other: gather power SATURATES across
+     * a tool family's upper tiers (every vanilla hatchet from the mid ladder up shares one Woods
+     * power), so power alone cannot separate the top tiers, while quality alone ignores how
+     * effective the tool actually is. A weighted sum of the two ranks a full tool ladder.
+     */
+    public double toolQuality() {
+        return toolQuality;
+    }
+
+    /**
      * Every contribution channel the resolved action posts to, lowercased - a provider's cheap
      * "does this station have anything to do with me" test.
      */
@@ -154,6 +173,7 @@ public final class FactorContext {
         private int cycleIndex;
         private double toolPower;
         private double toolDurabilityPercent = 100.0;
+        private double toolQuality;
         @Nullable private Map<String, List<String>> contributionParams;
 
         private Builder() {
@@ -210,6 +230,13 @@ public final class FactorContext {
         @Nonnull
         public Builder toolDurabilityPercent(double toolDurabilityPercent) {
             this.toolDurabilityPercent = toolDurabilityPercent;
+            return this;
+        }
+
+        /** The held tool's native {@code ItemQuality.QualityValue}; see {@link FactorContext#toolQuality()}. */
+        @Nonnull
+        public Builder toolQuality(double toolQuality) {
+            this.toolQuality = toolQuality;
             return this;
         }
 

@@ -505,7 +505,7 @@ public class StationServiceTest {
     /** The shipped multi-category sawmill shape: 3 derived output categories, WoodPlanks authored first. */
     private static StationAsset.FromCrafting sawmillFromCrafting() {
         return StationAsset.FromCrafting.of(
-                new String[]{"WoodPlanks", "DecorativePlanks", "OrnatePlanks"}, null);
+                new String[]{"WoodPlanks", "DecorativePlanks", "OrnatePlanks"});
     }
 
     /** Derived conversions arrive alphabetically by output id (Decorative < Ornate < Planks). */
@@ -528,7 +528,7 @@ public class StationServiceTest {
     void effectiveCategory_singleCategoryNoChoice_returnsNull_byteIdenticalAllPass() {
         StationAsset.Conversion[] all = {conv("Oak_Planks", "WoodPlanks"),
                 conv("Birch_Planks", "woodplanks")};
-        StationAsset.FromCrafting fc = StationAsset.FromCrafting.of(new String[]{"WoodPlanks"}, null);
+        StationAsset.FromCrafting fc = StationAsset.FromCrafting.of(new String[]{"WoodPlanks"});
         assertNull(StationService.effectiveCategory(null, fc, all));
         // The all-pass stays byte-identical: the same array reference flows through unchanged.
         assertSame(all, StationService.conversionsForCategory(all,
@@ -564,7 +564,7 @@ public class StationServiceTest {
         // "Empty" is authored first but derived no conversion; the default is the first authored
         // category actually PRESENT in the derived set, so a dead first entry cannot blank the loop.
         StationAsset.FromCrafting fc = StationAsset.FromCrafting.of(
-                new String[]{"Empty", "WoodPlanks", "DecorativePlanks"}, null);
+                new String[]{"Empty", "WoodPlanks", "DecorativePlanks"});
         assertEquals("WoodPlanks", StationService.effectiveCategory(null, fc, sawmillConversions()));
     }
 

@@ -235,12 +235,6 @@
                   }
                 },
                 {
-                  "key": "OutputPerInput",
-                  "required": false,
-                  "documentation": "Optional yield multiplier applied to each derived recipe's output (reader-defaults to 1).",
-                  "type": "integer"
-                },
-                {
                   "key": "Benches",
                   "required": false,
                   "documentation": "Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match).",
@@ -278,6 +272,83 @@
                       "type": "long"
                     }
                   ]
+                }
+              ]
+            },
+            {
+              "key": "Yield",
+              "required": false,
+              "documentation": "Per-cycle output-quantity transform applied to whichever conversion runs (authored or derived); null = each conversion's own authored quantity, unchanged.",
+              "type": "object",
+              "nestedType": "Yield",
+              "fields": [
+                {
+                  "key": "Base",
+                  "required": false,
+                  "documentation": "Flat output quantity per conversion BEFORE Scale/Bonus; null = use each conversion's own authored output quantity.",
+                  "type": "integer"
+                },
+                {
+                  "key": "Scale",
+                  "required": false,
+                  "documentation": "Multiplier on the base quantity, rounded to the nearest whole item; reader-defaults to 1.0 (no scaling).",
+                  "type": "double"
+                },
+                {
+                  "key": "Bonus",
+                  "required": false,
+                  "documentation": "Optional factor-driven bonus ladder adding extra output (e.g. a better tool yields more); null = no bonus.",
+                  "type": "object",
+                  "nestedType": "Bonus",
+                  "fields": [
+                    {
+                      "key": "Values",
+                      "required": false,
+                      "documentation": "Weighted factor references summed into the ladder value (e.g. tool power plus tool quality); empty = a constant 0.",
+                      "type": "array",
+                      "of": {
+                        "type": "object",
+                        "nestedType": "FactorRef",
+                        "ref": "FactorRef"
+                      }
+                    },
+                    {
+                      "key": "Floors",
+                      "required": false,
+                      "documentation": "Thresholds over the summed value; the HIGHEST floor whose Min is reached contributes its Add. Empty = no bonus.",
+                      "type": "array",
+                      "of": {
+                        "type": "object",
+                        "nestedType": "Floor",
+                        "fields": [
+                          {
+                            "key": "Min",
+                            "required": false,
+                            "documentation": "The summed factor value at or above which this floor applies; reader-defaults to 0.",
+                            "type": "double"
+                          },
+                          {
+                            "key": "Add",
+                            "required": false,
+                            "documentation": "Extra whole items added to the cycle's output when this floor is the reached one; reader-defaults to 0.",
+                            "type": "integer"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "key": "Min",
+                  "required": false,
+                  "documentation": "Lower clamp on the final quantity; null = the engine's own 1-item floor.",
+                  "type": "integer"
+                },
+                {
+                  "key": "Max",
+                  "required": false,
+                  "documentation": "Upper clamp on the final quantity; null = uncapped.",
+                  "type": "integer"
                 }
               ]
             }
@@ -942,12 +1013,6 @@
                   }
                 },
                 {
-                  "key": "OutputPerInput",
-                  "required": false,
-                  "documentation": "Optional yield multiplier applied to each derived recipe's output (reader-defaults to 1).",
-                  "type": "integer"
-                },
-                {
                   "key": "Benches",
                   "required": false,
                   "documentation": "Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match).",
@@ -985,6 +1050,83 @@
                       "type": "long"
                     }
                   ]
+                }
+              ]
+            },
+            {
+              "key": "Yield",
+              "required": false,
+              "documentation": "Per-cycle output-quantity transform applied to whichever conversion runs (authored or derived); null = each conversion's own authored quantity, unchanged.",
+              "type": "object",
+              "nestedType": "Yield",
+              "fields": [
+                {
+                  "key": "Base",
+                  "required": false,
+                  "documentation": "Flat output quantity per conversion BEFORE Scale/Bonus; null = use each conversion's own authored output quantity.",
+                  "type": "integer"
+                },
+                {
+                  "key": "Scale",
+                  "required": false,
+                  "documentation": "Multiplier on the base quantity, rounded to the nearest whole item; reader-defaults to 1.0 (no scaling).",
+                  "type": "double"
+                },
+                {
+                  "key": "Bonus",
+                  "required": false,
+                  "documentation": "Optional factor-driven bonus ladder adding extra output (e.g. a better tool yields more); null = no bonus.",
+                  "type": "object",
+                  "nestedType": "Bonus",
+                  "fields": [
+                    {
+                      "key": "Values",
+                      "required": false,
+                      "documentation": "Weighted factor references summed into the ladder value (e.g. tool power plus tool quality); empty = a constant 0.",
+                      "type": "array",
+                      "of": {
+                        "type": "object",
+                        "nestedType": "FactorRef",
+                        "ref": "FactorRef"
+                      }
+                    },
+                    {
+                      "key": "Floors",
+                      "required": false,
+                      "documentation": "Thresholds over the summed value; the HIGHEST floor whose Min is reached contributes its Add. Empty = no bonus.",
+                      "type": "array",
+                      "of": {
+                        "type": "object",
+                        "nestedType": "Floor",
+                        "fields": [
+                          {
+                            "key": "Min",
+                            "required": false,
+                            "documentation": "The summed factor value at or above which this floor applies; reader-defaults to 0.",
+                            "type": "double"
+                          },
+                          {
+                            "key": "Add",
+                            "required": false,
+                            "documentation": "Extra whole items added to the cycle's output when this floor is the reached one; reader-defaults to 0.",
+                            "type": "integer"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "key": "Min",
+                  "required": false,
+                  "documentation": "Lower clamp on the final quantity; null = the engine's own 1-item floor.",
+                  "type": "integer"
+                },
+                {
+                  "key": "Max",
+                  "required": false,
+                  "documentation": "Upper clamp on the final quantity; null = uncapped.",
+                  "type": "integer"
                 }
               ]
             }
@@ -1609,12 +1751,6 @@
                   }
                 },
                 {
-                  "key": "OutputPerInput",
-                  "required": false,
-                  "documentation": "Optional yield multiplier applied to each derived recipe's output (reader-defaults to 1).",
-                  "type": "integer"
-                },
-                {
                   "key": "Benches",
                   "required": false,
                   "documentation": "Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match).",
@@ -1652,6 +1788,83 @@
                       "type": "long"
                     }
                   ]
+                }
+              ]
+            },
+            {
+              "key": "Yield",
+              "required": false,
+              "documentation": "Per-cycle output-quantity transform applied to whichever conversion runs (authored or derived); null = each conversion's own authored quantity, unchanged.",
+              "type": "object",
+              "nestedType": "Yield",
+              "fields": [
+                {
+                  "key": "Base",
+                  "required": false,
+                  "documentation": "Flat output quantity per conversion BEFORE Scale/Bonus; null = use each conversion's own authored output quantity.",
+                  "type": "integer"
+                },
+                {
+                  "key": "Scale",
+                  "required": false,
+                  "documentation": "Multiplier on the base quantity, rounded to the nearest whole item; reader-defaults to 1.0 (no scaling).",
+                  "type": "double"
+                },
+                {
+                  "key": "Bonus",
+                  "required": false,
+                  "documentation": "Optional factor-driven bonus ladder adding extra output (e.g. a better tool yields more); null = no bonus.",
+                  "type": "object",
+                  "nestedType": "Bonus",
+                  "fields": [
+                    {
+                      "key": "Values",
+                      "required": false,
+                      "documentation": "Weighted factor references summed into the ladder value (e.g. tool power plus tool quality); empty = a constant 0.",
+                      "type": "array",
+                      "of": {
+                        "type": "object",
+                        "nestedType": "FactorRef",
+                        "ref": "FactorRef"
+                      }
+                    },
+                    {
+                      "key": "Floors",
+                      "required": false,
+                      "documentation": "Thresholds over the summed value; the HIGHEST floor whose Min is reached contributes its Add. Empty = no bonus.",
+                      "type": "array",
+                      "of": {
+                        "type": "object",
+                        "nestedType": "Floor",
+                        "fields": [
+                          {
+                            "key": "Min",
+                            "required": false,
+                            "documentation": "The summed factor value at or above which this floor applies; reader-defaults to 0.",
+                            "type": "double"
+                          },
+                          {
+                            "key": "Add",
+                            "required": false,
+                            "documentation": "Extra whole items added to the cycle's output when this floor is the reached one; reader-defaults to 0.",
+                            "type": "integer"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "key": "Min",
+                  "required": false,
+                  "documentation": "Lower clamp on the final quantity; null = the engine's own 1-item floor.",
+                  "type": "integer"
+                },
+                {
+                  "key": "Max",
+                  "required": false,
+                  "documentation": "Upper clamp on the final quantity; null = uncapped.",
+                  "type": "integer"
                 }
               ]
             }

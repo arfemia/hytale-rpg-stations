@@ -32,6 +32,7 @@ import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.asset.type.entityeffect.config.OverlapBehavior;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemArmor;
+import com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemTool;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemToolSpec;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemWeapon;
@@ -1017,7 +1018,18 @@ public final class StationService {
         // Decision 73: the chosen conversion's FULL Ingredient arrays drive the implicit program, so
         // a multi-input recipe stays ONE atomic Consume/Produce step pair.
         StationStep.Consume consumeStep = StationStep.Consume.of(check.inputs, consumeFrom);
-        StationStep.Produce produceStep = StationStep.Produce.of(check.outputs,
+        // Recipe.Yield: the per-cycle output-quantity transform (StationYield). Resolved HERE, at the
+        // one point a chosen conversion becomes a live produce phase, because a yield keyed off the
+        // worker's held tool cannot be baked into the derived conversion at asset-fold time. ONE
+        // snapshot serves both this and the cycle's loot rolls (passed into dispatchProgram below), so
+        // a Yield ladder and a Roll ladder reading the same factor can never disagree.
+        StationAsset.Recipe effectiveRecipe = action.getRecipe();
+        StationAsset.Yield yield = effectiveRecipe != null ? effectiveRecipe.getYield() : null;
+        FactorSnapshot snapshot = new FactorSnapshot(
+                buildFactorContext(s, store, player, action, attemptCycleIndex));
+        double yieldLadder = StationYield.ladderValue(yield, snapshot::resolve);
+        Ingredient[] yieldedOutputs = StationYield.applyToOutputs(yield, check.outputs, yieldLadder);
+        StationStep.Produce produceStep = StationStep.Produce.of(yieldedOutputs,
                 StationStep.Produce.TO_INVENTORY);
         // Scope-2 (design 1.8): fold Station/Action-targeted ExtensionAsset Loot into the cycle's
         // effective loot refs (a pack extension's appended lootables and rolls land here).
@@ -1030,10 +1042,13 @@ public final class StationService {
         List<StationStep> steps = ImplicitProgram.build(consumeStep, produceStep, resolvedRolls,
                 action.getPresentation());
         // Roll.Grants.BonusOutputCopies duplicates the cycle's PRIMARY output (the first authored
-        // one) - a multi-output conversion's byproducts are not bonus-copied.
-        ItemStack cycleOutput = new ItemStack(check.primaryOutputItem(), check.primaryOutputCount());
+        // one) - a multi-output conversion's byproducts are not bonus-copied. It reads the YIELDED
+        // quantity, not the conversion's authored one: a bonus copy duplicates the whole produced
+        // stack, so sourcing it pre-yield would hand out a smaller copy than the cycle just produced.
+        ItemStack cycleOutput = new ItemStack(check.primaryOutputItem(),
+                StationYield.resolveQuantity(yield, check.primaryOutputCount(), yieldLadder));
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, cycleOutput,
-                attemptCycleIndex, 0, false);
+                attemptCycleIndex, 0, false, snapshot);
     }
 
     /**
@@ -1122,6 +1137,22 @@ public final class StationService {
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
             @Nullable ItemStack cycleOutput, int attemptCycleIndex, int startIndex, boolean resuming) {
+        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, cycleOutput,
+                attemptCycleIndex, startIndex, resuming, null);
+    }
+
+    /**
+     * As above, with an optional PRE-BUILT {@code presetSnapshot} the caller already resolved
+     * factors against. {@link #runRealCycle} passes its own so the {@code Recipe.Yield} transform and
+     * this cycle's loot rolls read the IDENTICAL resolved factor numbers - the "one aggregation, two
+     * consumers" invariant {@code FactorSnapshot} exists for, which a second snapshot per cycle would
+     * quietly break (a factor is free to vary between two resolutions within one cycle).
+     */
+    private boolean dispatchProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
+            @Nullable ItemStack cycleOutput, int attemptCycleIndex, int startIndex, boolean resuming,
+            @Nullable FactorSnapshot presetSnapshot) {
         if (!resuming) {
             // A FRESH cycle attempt explicitly zeroes the suspend deadline AND the per-step
             // iteration counter before the walk starts, so a fresh program's very first Duration
@@ -1130,7 +1161,8 @@ public final class StationService {
             s.stepDeadlineMs = 0L;
             s.stepIteration = 0;
         }
-        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, action, attemptCycleIndex));
+        FactorSnapshot snapshot = presetSnapshot != null ? presetSnapshot
+                : new FactorSnapshot(buildFactorContext(s, store, player, action, attemptCycleIndex));
         StationStepContext ctx = new StationStepContext(s, store, commandBuffer, player, asset, action, snapshot,
                 steps, attemptCycleIndex, cycleOutput);
 
@@ -1573,6 +1605,7 @@ public final class StationService {
                 .cycleIndex(cycleIndex)
                 .toolPower(resolveHeldToolPower(player, asset.getTool()))
                 .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
+                .toolQuality(resolveHeldToolQuality(player))
                 .contributions(contributionParams(asset))
                 .build();
     }
@@ -1604,6 +1637,7 @@ public final class StationService {
                 .cycleIndex(cycleIndex)
                 .toolPower(resolveHeldToolPower(player, action.getTool()))
                 .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
+                .toolQuality(resolveHeldToolQuality(player))
                 .contributions(contributionParams(action.getWork()))
                 .build();
     }
@@ -1626,6 +1660,36 @@ public final class StationService {
         ItemTool itemTool = item != null ? item.getTool() : null;
         ItemToolSpec[] specs = itemTool != null ? itemTool.getSpecs() : null;
         return StationToolScaling.heldPowerFor(toolPowers(specs), gatherType);
+    }
+
+    /**
+     * The active hotbar item's RARITY as the native {@code ItemQuality.QualityValue} the referenced
+     * quality asset authors ({@code rpgstations:tool_quality}); 0 when nothing is held or the item
+     * names no quality.
+     *
+     * <p>Two indirections, both deliberate. {@code Item#getQualityIndex()} returns an ASSET-MAP
+     * INDEX, not the ordering value, so the index is resolved back through
+     * {@code ItemQuality.getAssetMap()} to read the authored {@code QualityValue} - the number that
+     * actually orders qualities (0 = lowest) and the only one a pack-added tier participates in. The
+     * engine's own {@code DEFAULT_ITEM_QUALITY} authors {@code -1}, which is floored to 0 here so an
+     * unqualified item can never drag a weighted formula below an authored {@code Junk} tier.
+     *
+     * <p>Fully try-guarded: this runs per cycle on the world thread, and a quality lookup is never
+     * worth failing a work cycle over.
+     */
+    private static double resolveHeldToolQuality(@Nonnull Player player) {
+        try {
+            ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+            Item item = held != null ? held.getItem() : null;
+            if (item == null) {
+                return 0.0;
+            }
+            ItemQuality quality = ItemQuality.getAssetMap().getAsset(item.getQualityIndex());
+            return quality == null ? 0.0 : Math.max(0.0, quality.getQualityValue());
+        } catch (Throwable t) {
+            Log.fine("STATION could not resolve the held tool's quality: " + t.getMessage());
+            return 0.0;
+        }
     }
 
     /** The active hotbar item's durability percent [0,100]; 100 when no item held or it tracks no durability. */

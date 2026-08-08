@@ -39,36 +39,26 @@ public class StationRecipeDeriverTest {
                 List.of(Ingredient.resource(resourceTypeId, qty)));
     }
 
-    private static StationAsset.FromCrafting spec(Integer outputPerInput, String... categories) {
-        return StationAsset.FromCrafting.of(categories, outputPerInput);
+    private static StationAsset.FromCrafting spec(String... categories) {
+        return StationAsset.FromCrafting.of(categories);
     }
 
     // ==================== Match + yield ====================
 
     @Test
-    void omittedOutputPerInput_yieldsTheNativeOnePerCraft() {
+    void derivedConversion_carriesTheNativeOnePerCraft() {
         List<CraftingCandidate> candidates = List.of(
                 resourceCandidate("Wood_Hardwood_Planks", "WoodPlanks", "Wood_Hardwood_Trunk", 1));
         List<StationAsset.Conversion> derived =
-                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
+                StationRecipeDeriver.deriveFromCrafting(spec("WoodPlanks"), candidates);
         assertEquals(1, derived.size());
         StationAsset.Conversion c = derived.get(0);
         assertEquals("Wood_Hardwood_Trunk", c.primaryInput().getResourceTypeId());
         assertNull(c.primaryInput().getItemId());
         assertEquals(1, c.primaryInput().getQuantity());
         assertEquals("Wood_Hardwood_Planks", c.primaryOutput().getItemId());
+        // Yield retuning is Recipe.Yield's job (per cycle), never the deriver's - see StationYield.
         assertEquals(1, c.primaryOutput().getQuantity());
-    }
-
-    @Test
-    void explicitOutputPerInput_scalesTheYield() {
-        List<CraftingCandidate> candidates = List.of(
-                resourceCandidate("Wood_Hardwood_Planks", "WoodPlanks", "Wood_Hardwood_Trunk", 1));
-        List<StationAsset.Conversion> derived =
-                StationRecipeDeriver.deriveFromCrafting(spec(3, "WoodPlanks"), candidates);
-        assertEquals(1, derived.size());
-        assertEquals(1, derived.get(0).primaryInput().getQuantity());
-        assertEquals(3, derived.get(0).primaryOutput().getQuantity());
     }
 
     @Test
@@ -76,7 +66,7 @@ public class StationRecipeDeriverTest {
         CraftingCandidate itemInput = new CraftingCandidate("Some_Modded_Plank", List.of("WoodPlanks"),
                 List.of(Ingredient.item("Some_Modded_Log", 2)));
         List<StationAsset.Conversion> derived =
-                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), List.of(itemInput));
+                StationRecipeDeriver.deriveFromCrafting(spec("WoodPlanks"), List.of(itemInput));
         assertEquals(1, derived.size());
         assertEquals("Some_Modded_Log", derived.get(0).primaryInput().getItemId());
         assertNull(derived.get(0).primaryInput().getResourceTypeId());
@@ -97,7 +87,7 @@ public class StationRecipeDeriverTest {
                         Ingredient.item("Rock", 3))),
                 new CraftingCandidate("Empty_Recipe", List.of("WoodPlanks"), List.of()));
         List<StationAsset.Conversion> derived =
-                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
+                StationRecipeDeriver.deriveFromCrafting(spec("WoodPlanks"), candidates);
         assertEquals(List.of("Bench_Builders", "Wood_Hardwood_Planks"),
                 derived.stream().map(c -> c.primaryOutput().getItemId()).toList());
     }
@@ -111,7 +101,7 @@ public class StationRecipeDeriverTest {
                         Ingredient.resource("Wood_Trunk", 6),
                         Ingredient.item("Rock", 3))));
         List<StationAsset.Conversion> derived =
-                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
+                StationRecipeDeriver.deriveFromCrafting(spec("WoodPlanks"), candidates);
         assertEquals(1, derived.size());
         Ingredient[] inputs = derived.get(0).getInput();
         assertEquals(2, inputs.length);
@@ -126,7 +116,7 @@ public class StationRecipeDeriverTest {
         List<CraftingCandidate> candidates = List.of(
                 resourceCandidate("Wood_Hardwood_Planks", "woodplanks", "Wood_Hardwood_Trunk", 1));
         List<StationAsset.Conversion> derived =
-                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
+                StationRecipeDeriver.deriveFromCrafting(spec("WoodPlanks"), candidates);
         assertEquals(1, derived.size());
     }
 
@@ -139,7 +129,7 @@ public class StationRecipeDeriverTest {
                 resourceCandidate("Wood_Hardwood_Planks", "WoodPlanks", "Wood_Hardwood_Trunk", 1),
                 resourceCandidate("Wood_Blackwood_Planks", "WoodPlanks", "Wood_Blackwood_Trunk", 1));
         List<StationAsset.Conversion> derived =
-                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
+                StationRecipeDeriver.deriveFromCrafting(spec("WoodPlanks"), candidates);
         assertEquals(List.of("Wood_Blackwood_Planks", "Wood_Hardwood_Planks", "Wood_Softwood_Planks"),
                 derived.stream().map(c -> c.primaryOutput().getItemId()).toList());
     }
@@ -153,7 +143,7 @@ public class StationRecipeDeriverTest {
                 Ingredient.item("Custom_Beam", 4));
         StationAsset.Recipe recipe = StationAsset.Recipe.of(
                 new StationAsset.Conversion[]{authored},
-                spec(null, "WoodPlanks"));
+                spec("WoodPlanks"));
         List<CraftingCandidate> candidates = List.of(
                 resourceCandidate("Wood_Hardwood_Planks", "WoodPlanks", "Wood_Hardwood_Trunk", 1),
                 resourceCandidate("Wood_Softwood_Planks", "WoodPlanks", "Wood_Softwood_Trunk", 1));
@@ -165,7 +155,7 @@ public class StationRecipeDeriverTest {
 
     @Test
     void resolve_fromCraftingOnly_derivesEverything() {
-        StationAsset.Recipe recipe = StationAsset.Recipe.of(null, spec(null, "WoodPlanks"));
+        StationAsset.Recipe recipe = StationAsset.Recipe.of(null, spec("WoodPlanks"));
         List<CraftingCandidate> candidates = List.of(
                 resourceCandidate("Wood_Hardwood_Planks", "WoodPlanks", "Wood_Hardwood_Trunk", 1),
                 resourceCandidate("Wood_Softwood_Planks", "WoodPlanks", "Wood_Softwood_Trunk", 1));
@@ -185,7 +175,7 @@ public class StationRecipeDeriverTest {
                 Ingredient.item("Rock", 3))));
 
         List<StationAsset.Conversion> derived =
-                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
+                StationRecipeDeriver.deriveFromCrafting(spec("WoodPlanks"), candidates);
         assertEquals(11, derived.size());
         for (StationAsset.Conversion c : derived) {
             assertEquals(1, c.primaryInput().getQuantity());
@@ -205,9 +195,9 @@ public class StationRecipeDeriverTest {
                 List.of(Ingredient.resource(resourceTypeId, qty)));
     }
 
-    private static StationAsset.FromCrafting spec(Integer outputPerInput, String[] categories,
+    private static StationAsset.FromCrafting spec(String[] categories,
             String[] benches, String[] types, StationAsset.FromCrafting.NativeTime nativeTime) {
-        return StationAsset.FromCrafting.of(categories, outputPerInput, benches, types, nativeTime);
+        return StationAsset.FromCrafting.of(categories, benches, types, nativeTime);
     }
 
     @Test
@@ -217,7 +207,7 @@ public class StationRecipeDeriverTest {
         CraftingCandidate cand = fullCandidate("Food_Fish_Grilled", List.of("Processing_Cook"),
                 List.of("Campfire"), List.of("Processing"), 2f, "Fish", 1);
         List<StationAsset.Conversion> derived = StationRecipeDeriver.deriveFromCrafting(
-                spec(null, new String[]{"WoodPlanks"}, new String[]{"Campfire"}, null, null), List.of(cand));
+                spec(new String[]{"WoodPlanks"}, new String[]{"Campfire"}, null, null), List.of(cand));
         assertEquals(1, derived.size());
         assertEquals("Food_Fish_Grilled", derived.get(0).primaryOutput().getItemId());
     }
@@ -227,7 +217,7 @@ public class StationRecipeDeriverTest {
         CraftingCandidate cand = fullCandidate("Food_Fish_Grilled", List.of("Processing_Cook"),
                 List.of("Tannery"), List.of("Processing"), 2f, "Fish", 1);
         List<StationAsset.Conversion> derived = StationRecipeDeriver.deriveFromCrafting(
-                spec(null, null, new String[]{"Campfire"}, null, null), List.of(cand));
+                spec(null, new String[]{"Campfire"}, null, null), List.of(cand));
         assertEquals(0, derived.size());
     }
 
@@ -237,7 +227,7 @@ public class StationRecipeDeriverTest {
         CraftingCandidate cand = fullCandidate("Some_Craft", List.of("WoodPlanks"),
                 List.of("Campfire"), List.of("Crafting"), 1f, "Wood_Trunk", 1);
         List<StationAsset.Conversion> derived = StationRecipeDeriver.deriveFromCrafting(
-                spec(null, new String[]{"WoodPlanks"}, null, new String[]{"Processing"}, null), List.of(cand));
+                spec(new String[]{"WoodPlanks"}, null, new String[]{"Processing"}, null), List.of(cand));
         assertEquals(0, derived.size());
     }
 
@@ -248,7 +238,7 @@ public class StationRecipeDeriverTest {
         CraftingCandidate processing = fullCandidate("B_Plank", List.of("WoodPlanks"),
                 List.of("Bench"), List.of("Processing"), 1f, "Wood_B_Trunk", 1);
         List<StationAsset.Conversion> derived = StationRecipeDeriver.deriveFromCrafting(
-                spec(null, new String[]{"WoodPlanks"}, null, null, null), List.of(crafting, processing));
+                spec(new String[]{"WoodPlanks"}, null, null, null), List.of(crafting, processing));
         assertEquals(2, derived.size());
     }
 
@@ -259,7 +249,7 @@ public class StationRecipeDeriverTest {
         CraftingCandidate cand = fullCandidate("Wood_Hardwood_Planks", List.of("WoodPlanks"),
                 List.of("Sawbench"), List.of("Processing"), 3f, "Wood_Hardwood_Trunk", 1);
         List<StationAsset.Conversion> derived = StationRecipeDeriver.deriveFromCrafting(
-                spec(null, new String[]{"WoodPlanks"}, null, null, nt), List.of(cand));
+                spec(new String[]{"WoodPlanks"}, null, null, nt), List.of(cand));
         assertEquals(1, derived.size());
         assertEquals(Long.valueOf(6500L), derived.get(0).getDurationMs());
     }
@@ -269,7 +259,7 @@ public class StationRecipeDeriverTest {
         CraftingCandidate cand = fullCandidate("Wood_Hardwood_Planks", List.of("WoodPlanks"),
                 List.of("Sawbench"), List.of("Processing"), 3f, "Wood_Hardwood_Trunk", 1);
         List<StationAsset.Conversion> derived = StationRecipeDeriver.deriveFromCrafting(
-                spec(null, new String[]{"WoodPlanks"}, null, null, null), List.of(cand));
+                spec(new String[]{"WoodPlanks"}, null, null, null), List.of(cand));
         assertEquals(1, derived.size());
         assertNull(derived.get(0).getDurationMs());
     }
@@ -302,7 +292,7 @@ public class StationRecipeDeriverTest {
         List<CraftingCandidate> candidates = List.of(
                 resourceCandidate("Wood_Hardwood_Planks", "WoodPlanks", "Wood_Hardwood_Trunk", 1));
         List<StationAsset.Conversion> derived =
-                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
+                StationRecipeDeriver.deriveFromCrafting(spec("WoodPlanks"), candidates);
         assertEquals(1, derived.size());
         assertEquals("WoodPlanks", derived.get(0).getCategory());
     }
@@ -314,7 +304,7 @@ public class StationRecipeDeriverTest {
         List<CraftingCandidate> candidates = List.of(
                 resourceCandidate("Wood_Hardwood_Planks", "woodplanks", "Wood_Hardwood_Trunk", 1));
         List<StationAsset.Conversion> derived =
-                StationRecipeDeriver.deriveFromCrafting(spec(null, "WoodPlanks"), candidates);
+                StationRecipeDeriver.deriveFromCrafting(spec("WoodPlanks"), candidates);
         assertEquals(1, derived.size());
         assertEquals("woodplanks", derived.get(0).getCategory());
     }
@@ -326,7 +316,7 @@ public class StationRecipeDeriverTest {
         CraftingCandidate cand = new CraftingCandidate("Food_Fish_Grilled", List.of(),
                 List.of("Campfire"), List.of("Processing"), 2f, List.of(Ingredient.resource("Fish", 1)));
         List<StationAsset.Conversion> derived = StationRecipeDeriver.deriveFromCrafting(
-                spec(null, null, new String[]{"Campfire"}, null, null), List.of(cand));
+                spec(null, new String[]{"Campfire"}, null, null), List.of(cand));
         assertEquals(1, derived.size());
         assertEquals("Campfire", derived.get(0).getCategory());
     }
@@ -338,7 +328,7 @@ public class StationRecipeDeriverTest {
         CraftingCandidate cand = fullCandidate("Food_Fish_Grilled", List.of("Processing_Cook"),
                 List.of("Campfire"), List.of("Processing"), 2f, "Fish", 1);
         List<StationAsset.Conversion> derived = StationRecipeDeriver.deriveFromCrafting(
-                spec(null, new String[]{"WoodPlanks"}, new String[]{"Campfire"}, null, null), List.of(cand));
+                spec(new String[]{"WoodPlanks"}, new String[]{"Campfire"}, null, null), List.of(cand));
         assertEquals(1, derived.size());
         assertEquals("Processing_Cook", derived.get(0).getCategory());
     }

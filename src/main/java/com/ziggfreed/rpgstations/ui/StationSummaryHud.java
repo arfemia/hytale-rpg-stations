@@ -79,6 +79,14 @@ public final class StationSummaryHud extends KeyedCustomHud {
     /** Row slots the {@code .ui} pre-declares ({@code #RpgStationSummaryItem0..5}); the rest overflow. */
     private static final int MAX_LEDGER_ROWS = 6;
 
+    /**
+     * The smaller SECOND Label every row slot declares, painted from a row's optional {@code
+     * SummaryRow.subText} and hidden on a row that has none. Naming it to the renderer is what
+     * opts these slots into two-line rows; the {@code .ui} must keep declaring it in EVERY slot,
+     * since a command against a selector the document does not declare crashes the client.
+     */
+    private static final String SUB_LABEL_ID = "#Sub";
+
     private static final Color LUCKY_ROW_COLOR = Color.decode("#ffd24a");
     private static final Color CONSUMED_ROW_COLOR = Color.decode("#e08a8a");
     private static final Color PRODUCED_ROW_COLOR = Color.decode("#8fd18a");
@@ -220,6 +228,12 @@ public final class StationSummaryHud extends KeyedCustomHud {
      * order. Each row's color is baked into its {@link Message} via {@link Message#color} (never
      * a separate style command) - the rich-text convention every other ledger surface in this
      * codebase follows.
+     *
+     * <p>Rows are rendered in the TWO-LINE form ({@link #SUB_LABEL_ID}): a row carrying a {@code
+     * SummaryRow.subText} shows it beneath its headline at the smaller {@code @LedgerSubStyle},
+     * and a row without one collapses back to a single line. This mod's own item rows never set a
+     * second line; an enricher's rows may (a contribution channel's breakdown belongs to whichever
+     * mod owns that channel's vocabulary, so what a second line SAYS is never decided here).
      */
     private static void renderLedger(@Nonnull UICommandBuilder cmd, @Nonnull List<SummaryRow> extraRows,
             @Nonnull List<LedgerRow> ledgerRows) {
@@ -228,7 +242,8 @@ public final class StationSummaryHud extends KeyedCustomHud {
         for (LedgerRow row : ledgerRows) {
             summaryRows.add(buildItemRow(row));
         }
-        int overflow = SummaryRowRenderer.render(cmd, "#RpgStationSummaryItem", MAX_LEDGER_ROWS, summaryRows);
+        int overflow = SummaryRowRenderer.render(cmd, "#RpgStationSummaryItem", MAX_LEDGER_ROWS, summaryRows,
+                SUB_LABEL_ID);
         cmd.set(ITEM_MORE_SEL + ".Visible", overflow > 0);
         if (overflow > 0) {
             cmd.set(ITEM_MORE_SEL + ".TextSpans",

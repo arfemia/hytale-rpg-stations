@@ -147,7 +147,20 @@ See `../station/CLAUDE.md`'s boundary section for the engine half.
   {Scale, OffsetMs}` (the decision-52 linear `y = Scale*x + OffsetMs` transform over a derived
   recipe's `TimeSeconds`, defaults intentionally slower than vanilla); `Recipe.Conversion` gains a
   nullable `DurationMs`. Per-cycle time precedence (engine-side): authored `Conversion.DurationMs`
-  &gt; `FromCrafting.NativeTime` linear transform &gt; `Work.CycleMs`. See
+  &gt; `FromCrafting.NativeTime` linear transform &gt; `Work.CycleMs`. **`Recipe.Yield`** is the
+  QUANTITY counterpart of that time transform, and sits on `Recipe` rather than inside
+  `FromCrafting` on purpose: what a station yields is a property of the recipe, not of how the recipe
+  was discovered, so it applies to authored `Conversions` and derived ones alike. Leaves:
+  `Base` (flat quantity; absent = each conversion's own authored quantity), `Scale` (multiplier,
+  rounded to whole items, reader-default 1.0), `Min`/`Max` clamps, and `Bonus {Values: FactorRef[],
+  Floors: [{Min, Add}]}` - the SAME weighted-sum-then-floor-lookup shape `Roll.Ladder` uses, so a
+  yield bonus keys off any registered factor and an author learns one vocabulary, not two. Floors are
+  NOT cumulative (the highest reached wins), and a 1-item floor is enforced under every path because
+  a conversion that consumed its inputs and produced nothing is item loss, not a tuning outcome.
+  **It resolves PER CYCLE** (`station.StationYield`, off the same `FactorSnapshot` the cycle's loot
+  rolls use), which is exactly why the retired `FromCrafting.OutputPerInput` scalar could not do this
+  job - it baked one number in at asset-fold time, and a yield keyed off the worker's held tool has
+  to be re-read every cycle. See
   `../station/CLAUDE.md` for how every group drives the engine (`station.ActionResolver` is the
   resolution choke point).
 - **[`ActionDef`](ActionDef.java)** - one `Actions` map entry: nullable whole-group overrides of

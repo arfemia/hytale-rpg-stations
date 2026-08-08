@@ -607,6 +607,7 @@ public final class StationAsset
     public static final class Recipe {
         @Nullable protected Conversion[] conversions;
         @Nullable protected FromCrafting fromCrafting;
+        @Nullable protected Yield yield;
 
         public static final BuilderCodec<Recipe> CODEC = BuilderCodec.builder(Recipe.class, Recipe::new)
                 .appendInherited(new KeyedCodec<>("Conversions",
@@ -618,6 +619,9 @@ public final class StationAsset
                         (o, v) -> o.fromCrafting = v, o -> o.fromCrafting,
                         (o, p) -> o.fromCrafting = p.fromCrafting)
                 .documentation("Derive additional Conversions from the engine's own native crafting/processing recipes; null = no derivation.").add()
+                .appendInherited(new KeyedCodec<>("Yield", Yield.CODEC, false),
+                        (o, v) -> o.yield = v, o -> o.yield, (o, p) -> o.yield = p.yield)
+                .documentation("Per-cycle output-quantity transform applied to whichever conversion runs (authored or derived); null = each conversion's own authored quantity, unchanged.").add()
                 .build();
 
         @Nonnull
@@ -627,9 +631,16 @@ public final class StationAsset
 
         @Nonnull
         public static Recipe of(@Nullable Conversion[] conversions, @Nullable FromCrafting fromCrafting) {
+            return of(conversions, fromCrafting, null);
+        }
+
+        @Nonnull
+        public static Recipe of(@Nullable Conversion[] conversions, @Nullable FromCrafting fromCrafting,
+                @Nullable Yield yield) {
             Recipe r = new Recipe();
             r.conversions = conversions;
             r.fromCrafting = fromCrafting;
+            r.yield = yield;
             return r;
         }
 
@@ -642,6 +653,191 @@ public final class StationAsset
         public FromCrafting getFromCrafting() {
             return fromCrafting;
         }
+
+        /** The per-cycle output-quantity transform; null = no transform (authored quantities stand). */
+        @Nullable
+        public Yield getYield() {
+            return yield;
+        }
+    }
+
+    /**
+     * The per-cycle OUTPUT-QUANTITY transform, applied to whichever conversion a real cycle runs -
+     * authored {@code Conversions} and {@code FromCrafting}-derived ones alike, which is exactly why
+     * it sits on {@link Recipe} rather than inside {@link FromCrafting}: what a station YIELDS is a
+     * property of the recipe, not of how that recipe was discovered.
+     *
+     * <p><b>Resolution order</b> (all four leaves independent and composable, no mode):
+     * {@code Base} (or the conversion's own authored quantity when {@code Base} is absent) is scaled
+     * by {@code Scale}, then {@code Bonus}'s reached floor adds its flat {@code Add}, then the result
+     * is clamped into {@code [Min, Max]}. A floor of 1 output is ALWAYS enforced underneath - a
+     * conversion that consumed its inputs and produced nothing is item loss, never a balance choice.
+     *
+     * <p><b>{@code Bonus} is where the tool ladder lives.</b> It is the same weighted-factor
+     * vocabulary a loot {@code Roll.Ladder} uses ({@code Values} is a {@link FactorRef} array summed
+     * as {@code sum(resolve(Factor,Param) * Weight)}, then looked up against {@code Floors} by
+     * descending {@code Min}), so a yield bonus can key off ANY registered factor - the built-in
+     * {@code rpgstations:tool_power} and {@code rpgstations:tool_quality} for a "better tools yield
+     * more" curve, a {@code stat} channel, or a fourth party's own {@code yourmod:} factor. Summing
+     * power AND quality is the intended shape for a tool ladder: gather power saturates across a
+     * family's upper tiers while quality keeps separating them, so neither alone ranks a full ladder.
+     */
+    public static final class Yield {
+        @Nullable protected Integer base;
+        @Nullable protected Double scale;
+        @Nullable protected Bonus bonus;
+        @Nullable protected Integer min;
+        @Nullable protected Integer max;
+
+        /** The absolute floor on a produced quantity - see this class's javadoc (item-loss guard, not a knob). */
+        public static final int ABSOLUTE_MIN = 1;
+
+        public static final BuilderCodec<Yield> CODEC = BuilderCodec.builder(Yield.class, Yield::new)
+                .appendInherited(new KeyedCodec<>("Base", Codec.INTEGER, false),
+                        (o, v) -> o.base = v, o -> o.base, (o, p) -> o.base = p.base)
+                .documentation("Flat output quantity per conversion BEFORE Scale/Bonus; null = use each conversion's own authored output quantity.").add()
+                .appendInherited(new KeyedCodec<>("Scale", Codec.DOUBLE, false),
+                        (o, v) -> o.scale = v, o -> o.scale, (o, p) -> o.scale = p.scale)
+                .documentation("Multiplier on the base quantity, rounded to the nearest whole item; reader-defaults to 1.0 (no scaling).").add()
+                .appendInherited(new KeyedCodec<>("Bonus", Bonus.CODEC, false),
+                        (o, v) -> o.bonus = v, o -> o.bonus, (o, p) -> o.bonus = p.bonus)
+                .documentation("Optional factor-driven bonus ladder adding extra output (e.g. a better tool yields more); null = no bonus.").add()
+                .appendInherited(new KeyedCodec<>("Min", Codec.INTEGER, false),
+                        (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
+                .documentation("Lower clamp on the final quantity; null = the engine's own 1-item floor.").add()
+                .appendInherited(new KeyedCodec<>("Max", Codec.INTEGER, false),
+                        (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max)
+                .documentation("Upper clamp on the final quantity; null = uncapped.").add()
+                .build();
+
+        @Nonnull
+        public static Yield of(@Nullable Integer base, @Nullable Double scale, @Nullable Bonus bonus,
+                @Nullable Integer min, @Nullable Integer max) {
+            Yield y = new Yield();
+            y.base = base;
+            y.scale = scale;
+            y.bonus = bonus;
+            y.min = min;
+            y.max = max;
+            return y;
+        }
+
+        /** Flat per-conversion base quantity; null = defer to the conversion's own authored quantity. */
+        @Nullable
+        public Integer getBase() {
+            return base;
+        }
+
+        /** Multiplier on the base quantity; null = the neutral {@code 1.0}. */
+        @Nullable
+        public Double getScale() {
+            return scale;
+        }
+
+        /** Reader-defaulted {@link #getScale()} (neutral 1.0 when absent or non-finite/non-positive). */
+        public double effectiveScale() {
+            return scale != null && Double.isFinite(scale) && scale > 0.0 ? scale : 1.0;
+        }
+
+        /** The factor-driven bonus ladder; null = no bonus. */
+        @Nullable
+        public Bonus getBonus() {
+            return bonus;
+        }
+
+        @Nullable
+        public Integer getMin() {
+            return min;
+        }
+
+        @Nullable
+        public Integer getMax() {
+            return max;
+        }
+
+        /**
+         * The factor-driven yield bonus: sum {@code Values} (a weighted {@link FactorRef} sum, the
+         * SAME composition every other factor site uses), then add the reached {@code Floors} entry's
+         * {@code Add}. Deliberately the {@code Roll.Ladder} shape rather than a new one - a yield
+         * bonus and a loot ladder ask the identical question ("where on this curve is the player") and
+         * must not drift into two vocabularies an author has to learn twice.
+         */
+        public static final class Bonus {
+            @Nullable protected FactorRef[] values;
+            @Nullable protected Floor[] floors;
+
+            public static final BuilderCodec<Bonus> CODEC = BuilderCodec.builder(Bonus.class, Bonus::new)
+                    .appendInherited(new KeyedCodec<>("Values",
+                                    new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
+                            (o, v) -> o.values = v, o -> o.values, (o, p) -> o.values = p.values)
+                    .documentation("Weighted factor references summed into the ladder value (e.g. tool power plus tool quality); empty = a constant 0.").add()
+                    .appendInherited(new KeyedCodec<>("Floors",
+                                    new ArrayCodec<>(Floor.CODEC, Floor[]::new), false),
+                            (o, v) -> o.floors = v, o -> o.floors, (o, p) -> o.floors = p.floors)
+                    .documentation("Thresholds over the summed value; the HIGHEST floor whose Min is reached contributes its Add. Empty = no bonus.").add()
+                    .build();
+
+            @Nonnull
+            public static Bonus of(@Nullable FactorRef[] values, @Nullable Floor[] floors) {
+                Bonus b = new Bonus();
+                b.values = values;
+                b.floors = floors;
+                return b;
+            }
+
+            @Nullable
+            public FactorRef[] getValues() {
+                return values;
+            }
+
+            @Nullable
+            public Floor[] getFloors() {
+                return floors;
+            }
+        }
+
+        /** One yield-bonus threshold: at or above {@code Min} on the summed value, add {@code Add} items. */
+        public static final class Floor {
+            @Nullable protected Double min;
+            @Nullable protected Integer add;
+
+            public static final BuilderCodec<Floor> CODEC = BuilderCodec.builder(Floor.class, Floor::new)
+                    .appendInherited(new KeyedCodec<>("Min", Codec.DOUBLE, false),
+                            (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
+                    .documentation("The summed factor value at or above which this floor applies; reader-defaults to 0.").add()
+                    .appendInherited(new KeyedCodec<>("Add", Codec.INTEGER, false),
+                            (o, v) -> o.add = v, o -> o.add, (o, p) -> o.add = p.add)
+                    .documentation("Extra whole items added to the cycle's output when this floor is the reached one; reader-defaults to 0.").add()
+                    .build();
+
+            @Nonnull
+            public static Floor of(@Nullable Double min, @Nullable Integer add) {
+                Floor f = new Floor();
+                f.min = min;
+                f.add = add;
+                return f;
+            }
+
+            /** Reader-defaulted threshold (0 when absent). */
+            public double effectiveMin() {
+                return min != null && Double.isFinite(min) ? min : 0.0;
+            }
+
+            /** Reader-defaulted addend (0 when absent). */
+            public int effectiveAdd() {
+                return add != null ? add : 0;
+            }
+
+            @Nullable
+            public Double getMin() {
+                return min;
+            }
+
+            @Nullable
+            public Integer getAdd() {
+                return add;
+            }
+        }
     }
 
     /**
@@ -649,7 +845,8 @@ public final class StationAsset
      * derived from the engine's OWN recipe truth by reference. A recipe is selected when it scopes to
      * one of this station's {@link #benches} (native {@code BenchRequirement} id match) AND its
      * category intersects {@link #categories} AND its declared {@link #types} include the recipe's
-     * kind; the yield honours {@link #outputPerInput} (default 1).
+     * kind; a derived conversion carries the native recipe's own one-per-craft output, and
+     * {@link Recipe#getYield()} is where a station retunes that yield.
      *
      * <p><b>Native-time pacing ({@link #nativeTime}, decision 52):</b> native recipes drive WHAT is
      * produced, but a STATION owns the PACE - vanilla planks craft instantly, the sawmill's slower
@@ -667,7 +864,6 @@ public final class StationAsset
         public static final String TYPE_PROCESSING = "Processing";
 
         @Nullable protected String[] categories;
-        @Nullable protected Integer outputPerInput;
         @Nullable protected String[] benches;
         @Nullable protected String[] types;
         @Nullable protected NativeTime nativeTime;
@@ -676,10 +872,6 @@ public final class StationAsset
                 .appendInherited(new KeyedCodec<>("Categories", new ArrayCodec<>(Codec.STRING, String[]::new), false),
                         (o, v) -> o.categories = v, o -> o.categories, (o, p) -> o.categories = p.categories)
                 .documentation("Native recipe categories to derive Conversions from (e.g. 'WoodPlanks'); a pack-added category in the set just works.").add()
-                .appendInherited(new KeyedCodec<>("OutputPerInput", Codec.INTEGER, false),
-                        (o, v) -> o.outputPerInput = v, o -> o.outputPerInput,
-                        (o, p) -> o.outputPerInput = p.outputPerInput)
-                .documentation("Optional yield multiplier applied to each derived recipe's output (reader-defaults to 1).").add()
                 .appendInherited(new KeyedCodec<>("Benches", new ArrayCodec<>(Codec.STRING, String[]::new), false),
                         (o, v) -> o.benches = v, o -> o.benches, (o, p) -> o.benches = p.benches)
                 .documentation("Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match).").add()
@@ -692,16 +884,15 @@ public final class StationAsset
                 .build();
 
         @Nonnull
-        public static FromCrafting of(@Nullable String[] categories, @Nullable Integer outputPerInput) {
-            return of(categories, outputPerInput, null, null, null);
+        public static FromCrafting of(@Nullable String[] categories) {
+            return of(categories, null, null, null);
         }
 
         @Nonnull
-        public static FromCrafting of(@Nullable String[] categories, @Nullable Integer outputPerInput,
+        public static FromCrafting of(@Nullable String[] categories,
                 @Nullable String[] benches, @Nullable String[] types, @Nullable NativeTime nativeTime) {
             FromCrafting f = new FromCrafting();
             f.categories = categories;
-            f.outputPerInput = outputPerInput;
             f.benches = benches;
             f.types = types;
             f.nativeTime = nativeTime;
@@ -711,11 +902,6 @@ public final class StationAsset
         @Nullable
         public String[] getCategories() {
             return categories;
-        }
-
-        @Nullable
-        public Integer getOutputPerInput() {
-            return outputPerInput;
         }
 
         /** Native BenchRequirement bench ids this station's derived recipes scope to (id-ref-only); null = none. */

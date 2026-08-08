@@ -30,11 +30,22 @@ import com.ziggfreed.rpgstations.util.Log;
  * live {@code Item} asset map; the thin live adapter ({@link #liveCandidates}) walks
  * {@code Item.getAssetMap()} once.
  *
- * <p><b>OutputQuantity caveat:</b> the native {@code CraftingRecipe.primaryOutputQuantity} is
- * inaccessible to a plugin and is verified to be 1 for the wood-plank families, so
- * {@code OutputPerInput} IS the derived output quantity.
+ * <p><b>OutputQuantity caveat:</b> the native {@code CraftingRecipe.primaryOutputQuantity} is a
+ * protected field with no public getter and is absent from the recipe's network packet, so it cannot
+ * be read at this seam. A derived conversion therefore carries a quantity of 1, which is the verified
+ * native yield for every wood plank/decorative/ornate recipe (all 11 species). Retuning a station's
+ * yield is {@code Recipe.Yield}'s job ({@link StationYield}), NOT this deriver's: a yield that keys
+ * off the worker's held tool has to resolve per cycle, and the retired {@code FromCrafting
+ * .OutputPerInput} leaf could only bake one number in at fold time.
  */
 public final class StationRecipeDeriver {
+
+    /**
+     * The output quantity a derived conversion carries. The native per-recipe quantity is unreadable
+     * at this seam (see the class javadoc), and 1 is its verified value for every recipe family the
+     * shipped content derives; a station retunes yield through {@code Recipe.Yield} instead.
+     */
+    static final int NATIVE_OUTPUT_QUANTITY = 1;
 
     private StationRecipeDeriver() {
     }
@@ -146,8 +157,6 @@ public final class StationRecipeDeriver {
             return List.of();
         }
         String[] wantTypes = spec.getTypes();
-        int outputPerInput = spec.getOutputPerInput() != null && spec.getOutputPerInput() > 0
-                ? spec.getOutputPerInput() : 1;
         StationAsset.FromCrafting.NativeTime nativeTime = spec.getNativeTime();
         List<StationAsset.Conversion> derived = new ArrayList<>();
         for (CraftingCandidate cand : candidates) {
@@ -190,7 +199,7 @@ public final class StationRecipeDeriver {
             if (!everyInputUsable) {
                 continue;
             }
-            Ingredient[] output = {Ingredient.item(cand.itemId, outputPerInput)};
+            Ingredient[] output = {Ingredient.item(cand.itemId, NATIVE_OUTPUT_QUANTITY)};
             Long durationMs = nativeDurationMs(nativeTime, cand.timeSeconds);
             // Selection wave (decision 56): stamp the derived conversion with its native source
             // category so a multi-output station can group the picker by it. The do-not-rework

@@ -219,9 +219,28 @@ path). `Roll.Grants.BonusOutputCopies` duplicates the PRIMARY output only.
 `Conversion` per LIVE `Item` whose native `Recipe.BenchRequirement[].Categories` intersects the
 authored `Categories`, carrying that recipe's WHOLE native `Input` array (a multi-material recipe
 derives rather than being skipped; only a recipe with no inputs at all, or one whose input names
-neither an item nor a resource type, is skipped), zero hardcoding (the shipped Sawmill is just
-`{"FromCrafting":{"Categories":["WoodPlanks"]}}`). The PURE core (`resolve`/`deriveFromCrafting`)
-takes injected `CraftingCandidate`s, unit-tested without a live item map.
+neither an item nor a resource type, is skipped), zero hardcoding. The PURE core (`resolve`/`deriveFromCrafting`)
+takes injected `CraftingCandidate`s, unit-tested without a live item map. A derived conversion
+carries a quantity of 1: the native `CraftingRecipe.primaryOutputQuantity` is a protected field with
+no getter and is absent from the recipe packet, so it is unreadable at that seam (and is verified 1
+for every recipe family the shipped content derives).
+
+**Yield is [`StationYield`](StationYield.java)'s job, not the deriver's.** `Recipe.Yield`
+(`../asset/CLAUDE.md`) is resolved PER CYCLE at the one point a chosen conversion becomes a live
+produce phase (`StationService#runRealCycle`), because a yield keyed off the worker's held tool
+cannot be baked in at asset-fold time - the tool is re-read every cycle and the tool gate only
+guarantees it still MATCHES, not that it is the same item. That call site builds the cycle's
+`FactorSnapshot` ONCE and passes it into `dispatchProgram`, so the yield ladder and the cycle's loot
+rolls read the identical resolved factor numbers ("one aggregation, two consumers"); a second
+snapshot per cycle would quietly break that. The transform also feeds `cycleOutput`, the
+`Roll.Grants.BonusOutputCopies` source, since a bonus copy duplicates the WHOLE produced stack and
+sourcing it pre-yield would hand out a smaller copy than the cycle just produced. `StationYield`
+itself is pure (`ladderValue`/`bonusAdd`/`resolveQuantity`/`applyToOutputs`, unit-tested with
+authored fixtures) and is IDENTITY on a null `Yield`, so a station authoring none is byte-identical
+to pre-knob behavior. The built-in `rpgstations:tool_quality` factor that makes a tool ladder
+authorable reads the held item's native `ItemQuality.QualityValue` via
+`StationService#resolveHeldToolQuality` (an asset-map index resolve, not a raw index compare - see
+its javadoc).
 
 ## Cadence + the `emitMoment` choke point (unchanged)
 
