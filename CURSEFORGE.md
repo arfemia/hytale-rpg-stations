@@ -1,15 +1,22 @@
 # RPG Stations
 
-_DRAFT: first-public-release notes, pending final maintainer sign-off before the 1.6.0 release
-train ships._
+_DRAFT: first-release notes, pending final maintainer sign-off before the release train ships._
 
 **Diegetic work stations - place, press F, watch your character work.**
 
-RPG Stations adds interactive work stations to your Hytale server: a Sawmill that saws logs into
-planks one cycle at a time, an Anvil that sharpens bars and rolls stats onto your gear, a
-fish-preparation counter that walks your character over to a nearby fire and back. No menus, no
-instant conversions - materials go in, your character (or a stand-in performer) visibly does the
-work over real time, and results come out.
+RPG Stations adds interactive work stations to your Hytale server. No menus, no instant
+conversions - materials go in, your character (or a stand-in performer) visibly does the work over
+real time, and results come out.
+
+**0.1.0 ships one station, the Sawmill:** load logs onto the bench, press `F`, and your character
+saws them into that wood family's planks one cycle at a time, with a held-tool gate, a tool-power
+loot ladder, and a session summary when you stop.
+
+The engine underneath is the full thing, not a Sawmill special case - multi-action stations, step
+programs, multi-station walks, placed-input custody and props, the puppet performer, conditional
+loot, and enhancement stamping are all live and all authorable. Every one of them is driven from
+ordinary content assets, so a pack (or your own server-side assets) can add stations this release
+does not ship. Later releases will grow the shipped default set.
 
 Full documentation, including a page-by-page authoring guide and the complete schema reference for
 every content type, ships alongside this mod's release.
@@ -33,8 +40,10 @@ gets the exact same authoring surface RPG Stations' own default content ships th
 ### Multi-action stations
 
 One station block can offer several distinct jobs, picked diegetically by what you're holding - no
-dropdown, no menu. The Anvil is the flagship example: hold a metal bar and it sharpens it, hold a
-weapon and it opens the enhancement ritual instead.
+dropdown, no menu. Hold a raw material and the block converts it; hold a finished item and the same
+block can open an entirely different job instead. The shipped Sawmill uses the lighter form of this:
+sneak and press `F` to pick which cut you want from the log you're holding (planks, decorative, or
+ornate) rather than accepting the default.
 
 ### Step programs and multi-station walks
 
@@ -48,8 +57,7 @@ press on the primary block.
 
 Load materials directly into a station by pressing `F` while holding them - the whole stack loads
 in, a repeat press tops it up. Loaded materials can render as a real placed prop at the block (logs
-stacked on the sawmill, a bar or weapon resting on the anvil), retrievable with a press of `F`
-straight off the display.
+stacked on the sawmill bench), retrievable with a press of `F` straight off the display.
 
 ### The puppet
 
@@ -66,9 +74,11 @@ shared across every loot site in the mod.
 
 ### Enhancement stamping
 
-The Anvil's flagship ritual: place a weapon, strike it, and roll stats onto it from a configurable
-pool, capped by a composable budget model (a flat ceiling, a stat-scaled ceiling, or both at once -
-the tighter one wins). Durability upgrades land with no other mod installed at all.
+An authorable ritual for gear: place a weapon at a station, strike it, and roll stats onto it from a
+configurable pool, capped by a composable budget model (a flat ceiling, a stat-scaled ceiling, or
+both at once - the tighter one wins). Durability upgrades land with no other mod installed at all.
+The engine ships this capability; 0.1.0 ships no default station that uses it, so it is here for
+pack authors to build on.
 
 ### Flairs
 

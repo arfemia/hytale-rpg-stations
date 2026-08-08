@@ -100,6 +100,31 @@ adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-20
 adopted fixes binding). Origin plan: `../../.claude/plans/interactive-stations.md` +
 `../../.claude/plans/work-stations-mod-extraction-prompt.md`.
 
+## 0.1.0 release scope (maintainer ruling, 2026-08-06) - READ BEFORE TOUCHING SHIPPED CONTENT
+
+**The first public release is `0.1.0`, not `1.0.0`, and ships exactly ONE station: the Sawmill.**
+The ENGINE is unchanged and complete; only the shipped default CONTENT set was narrowed.
+
+- **Held back, not deleted:** `Stations/CookingFire.json`, `Stations/CuttingBoard.json` (+
+  `Actions/PrepFish.json`, `Emote/RPG_Emote_Knife.json`), `Stations/MountSpike.json`, and
+  `NPC/Roles/RPG_Performer_Spike.json`, each with its own Item + RootInteraction, all moved with
+  `git mv` into **`unreleased/`** (a byte-exact mirror of `src/main/resources`, outside every
+  Gradle resource root). `unreleased/restore.ps1` moves any group or all of it back in one command;
+  `unreleased/README.md` is the full inventory + rationale. **Do not re-create any of this content
+  from scratch - restore it.**
+- **Every `.lang` key STAYED shipped** in all 9 locales (an unreferenced key is invisible at
+  runtime, and holding them back would have risked translation work). `i18n/RpgStationsLangKeys`
+  and `LangFileIntegrityTest` therefore needed no change in either direction.
+- **`/rpgstations npcspike` is unwired** (the field, dispatch case, and method were removed from
+  `command/RpgStationsCommand`); `command/NpcPerformerSpike.java` stays in git, unreferenced.
+- **The `api` artifact is NOT frozen.** The freeze was always scoped to a 1.0.0 release, so at
+  0.1.0 the extension surface may still change. Anywhere this router or the code says
+  "frozen once 1.0.0 releases", that condition has NOT been met yet.
+- **The sibling `content-packs/skill-stations-pack` moved in lockstep** (also renumbered to
+  `0.1.0`, manifest floor `"Ziggfreed:RpgStations": ">=0.1.0"`): its Anvil, `AnvilWeaponPool`,
+  `CookingProgression`, and the `Smithing`/`Cooking` custom skills are under its own `unreleased/`.
+  Its `CookingProgression` targets THIS jar's `cookingfire`, so the two sides restore together.
+
 ## Build
 
 ```powershell
@@ -107,8 +132,9 @@ cd 'D:\dev\business\hyMMO\additional-mods\rpg-stations'; .\build.ps1
 .\build.ps1 -Install:$false     # build only
 .\build.ps1 -ModsDir <path>     # explicit install target (else $env:HYTALE_MODS_DIR)
 ```
-Produces `build/libs/RpgStations-<version>.jar` (version stays `1.0.0` until first release, the
-repo-wide no-churn rule) and copies the runtime jar into the Hytale `Mods/` folder. `.\gradlew.bat
+Produces `build/libs/RpgStations-<version>.jar` (**version is `0.1.0`** - the maintainer-set first
+public release, a deliberate Sawmill-only scope; see the "0.1.0 release scope" section below) and
+copies the runtime jar into the Hytale `Mods/` folder. `.\gradlew.bat
 build`/`test` work too. The root hyMMO `rebuild.ps1 -Mods` (or `-Jar -Mods -Packs` for the full
 stack) drives this mod's own `build.ps1` alongside every other `additional-mods/` sibling,
 dependency-ordered (`ziggfreed-common` first).
@@ -125,8 +151,8 @@ would reverse that arrow is the failure this rule exists to prevent.
 
 ```
 settings.gradle / gradle.properties / build.gradle   RpgStations root module + the api submodule
-build.ps1                                             build + auto-install (self-locating, pins RpgStations-1.0.0.jar)
-api/                                                   the FROZEN-ONCE-1.0.0-releases extension-surface
+build.ps1                                             build + auto-install (self-locating, pins RpgStations-<version>.jar from gradle.properties)
+api/                                                   the extension-surface (freeze lands at 1.0.0; NOT frozen at 0.1.0)
   build.gradle                                         java-library, archivesName 'rpg-stations-api', BUNDLED into
                                                         the runtime jar AND builds standalone as
                                                         rpg-stations-api-<version>.jar for a consumer's compileOnly link
@@ -251,7 +277,7 @@ the block item id. See `interaction/CLAUDE.md` for the `rpg_station_use` interac
 
 ## The extension surface (api/, live)
 
-Package `com.ziggfreed.rpgstations.api` (+ `.api.event`), the FROZEN-once-1.0.0-releases contract
+Package `com.ziggfreed.rpgstations.api` (+ `.api.event`), the freeze-at-1.0.0 (so NOT yet frozen) contract
 between this engine and any mod that wants to hook it. Split by shape, per the native-events rule:
 **observe-only moments are native Hytale events** (`StationSessionStartedEvent`/
 `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`, POJOs

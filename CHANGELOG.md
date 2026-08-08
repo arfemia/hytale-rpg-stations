@@ -2,12 +2,12 @@
 
 Developer changelog for RPG Stations. No em-dashes.
 
-**DRAFT: 1.0.0 is RPG Stations' first public release.** Everything below shipped into this one
+**DRAFT: 0.1.0 is RPG Stations' first public release.** Everything below shipped into this one
 version; there is no prior public release to diff against, so every entry is additive by
 definition. This file (and `CURSEFORGE.md`) are drafts pending final maintainer sign-off before
 the version train ships.
 
-## 1.0.0 (first public release)
+## 0.1.0 (first public release)
 
 A standalone, richly self-sufficient diegetic interactive work-station engine: with RPG Stations
 alone installed, a station runs its full work loop (camera/hold/mount, tool gating, recipe
@@ -16,6 +16,21 @@ in through a soft extension surface (native events + typed registries, `api/`): 
 factors a station's formulas read, and receives the contributions a station posts on each completed
 cycle. Neither side hard-depends on the other. See `CLAUDE.md` for the full package-by-package
 reference.
+
+**Release scope: the engine is complete, the shipped default content is the Sawmill alone.** The
+engine entries below all ship in full. What 0.1.0 deliberately does NOT ship is three finished
+default stations held back for a later release: the two-station fish-prep exemplar (`CuttingBoard`
+plus `CookingFire`, the multi-station claimed-anchor walk) and the `MountSpike` standing-mount
+experiment, whose Entity-surface mount is still in-game unverified. They live, complete and
+restorable in one command, under `unreleased/` (see `unreleased/README.md`); their lang keys stay
+shipped in all 9 locales. The throwaway `/rpgstations npcspike` dev harness is unwired for the same
+reason, with `NpcPerformerSpike.java` kept in git. Capabilities those stations demonstrated
+(multi-station walks, the Entity mount surface, step programs) are engine features and remain fully
+authorable by any pack.
+
+**The `api` extension surface is NOT frozen at 0.1.0.** The freeze was always scoped to a 1.0.0
+release; shipping 0.1.0 means the contract may still change before then. Integrators should expect
+to recompile against a later release rather than treat these types as stable.
 
 ### Phase 1: extraction + the engine
 
@@ -37,7 +52,7 @@ reference.
 - Adds validation (`StationValidator`, warn-only, never blocks) and a session-summary panel
   (`ui/StationSummaryHud`) showing cycles and items consumed/produced, plus whatever extra rows a
   listening mod adds via a registered `SummaryEnricher`.
-- Adds the `api` extension-surface artifact (frozen once 1.0.0 releases): native Hytale events for
+- Adds the `api` extension-surface artifact (still unfrozen at 0.1.0; the freeze lands at 1.0.0): native Hytale events for
   observe-only moments (session started/cycle completed/session completed/tool broke) and typed
   registries for request/response points (`FactorRegistry`, `ContributionChannelRegistry`,
   `FlairUnlockRegistry`, `SummaryEnricherRegistry`, `ValidationHookRegistry`), the mechanism an
@@ -268,9 +283,10 @@ outcome; the sibling toast-stacking defects land in the consumer mod's own repo)
   separately-placed station nearby and `Produce.To: "Custody"` to deposit its output straight into
   that station's placed-input slot instead of a player's backpack. `ActionDef.Anchors` discovers and
   claims the nearby station, a refund ledger returns any in-flight materials if the walk is
-  interrupted, and a walk timeout clears a stuck walking state. Ships a fish-preparation exemplar: a
-  station that walks a character to a nearby fire and back to finish the job, all from one `F` press
-  on the primary block.
+  interrupted, and a walk timeout clears a stuck walking state. The fish-preparation exemplar built
+  on this seam (a cutting board that walks a character to a nearby fire and back to finish the job,
+  all from one `F` press on the primary block) is complete but HELD BACK from 0.1.0 under
+  `unreleased/`; the seam itself ships and any pack can author against it.
 
 ### Scope 3: native composition, performer contract, and the sneak+F recipe picker (2026-07-24 to 2026-07-29)
 
