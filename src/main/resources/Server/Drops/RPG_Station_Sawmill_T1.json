@@ -1,4 +1,5 @@
 {
+  "$Comment": "The sawmill's early-session find table (cycles 10 to 24 of SawmillFinds' ladder): a 10 percent chance of 1 to 2 life essence shaken loose from the milled logs, else nothing. A find is deliberately a DIFFERENT item from the cycle's own planks - extra planks are the station's Grants.OutputItems concern, never a drop table's.",
   "Container": {
     "Type": "Choice",
     "RollsMin": 1,
@@ -6,7 +7,7 @@
     "Containers": [
       { "Type": "Empty", "Weight": 90 },
       { "Type": "Single", "Weight": 10,
-        "Item": { "ItemId": "Wood_Hardwood_Planks", "QuantityMin": 1, "QuantityMax": 2 } }
+        "Item": { "ItemId": "Ingredient_Life_Essence", "QuantityMin": 1, "QuantityMax": 2 } }
     ]
   }
 }

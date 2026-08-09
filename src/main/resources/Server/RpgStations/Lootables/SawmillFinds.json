@@ -1,18 +1,22 @@
 {
-  "$Comment": "A Roll grants what ELSE a cycle handed over. How MUCH of the thing you made is the action's own Recipe.Yield, which is purely deterministic; a Roll can only ever ADD to it (Grants.OutputItems, whole extra items of that same output), never multiply it. This table is purely the cycle-count find ladder, so it grants drop lists rather than output items. Ladder.Factors is a FactorRef[] summed before the floor lookup; a single-factor ladder authors a one-element array. Grants.DropLists is a plural array, so a floor can roll a guaranteed common table plus a rare one as two independent entries; each entry rolls once through the native ItemModule.getRandomItemDrops. Floors resolve through the one shared ladder core every other ladder in this schema uses: the highest reached Min wins, a Min of 0 is reachable, and two floors sharing a Min is a validator warning because only the last authored one could ever grant.",
+  "$Comment": "The sawmill's session-loyalty find table, referenced from the station's Bonus.Lootables. A Roll grants what ELSE a cycle handed over: how MUCH of the thing you made is the action's own Recipe.Yield plus its OutputItems rolls, and a find can only ever ADD something different, never multiply that. This table grants drop lists rather than output items because a find IS a different thing - life essence shaken loose from the milled logs, not more planks.",
   "Rolls": [
     {
+      "$Comment": "Read left to right: Trigger Cycle evaluates once per completed milling cycle. Conditions gates the whole Roll on rpgstations:cycle_count 10 or higher, so the first nine cycles of a session never even roll - finds reward staying at the bench, not tapping it. Chance then passes 15 percent of those cycles. Ladder sums its Factors (a FactorRef[] summed before the floor lookup; a single-factor ladder authors a one-element array) and takes the HIGHEST floor the sum reaches, never both: cycles 10 to 24 grant the T1 table, cycle 25 onward the T2 table plus the coin sound and spark burst on that floor's own Presentation. The referenced tables are this jar's own Server/Drops assets, each with its own internal empty weight (T1: 10 percent for 1 to 2 life essence; T2: 20 percent for 1 to 3), so the combined odds per cycle are about 1.5 percent for a T1 find and 3 percent for a T2 find. Grants.DropLists is a plural array - a floor could roll a guaranteed common table plus a rare one as two independent entries, each rolled once through the native ItemModule.getRandomItemDrops. Floors resolve through the one shared ladder core every ladder in this schema uses: highest reached Min wins, a Min of 0 is reachable, and two floors sharing a Min is a validator warning because only the last authored one could ever grant.",
       "Trigger": "Cycle",
-      "Conditions": [ { "Factor": "rpgstations:cycle_count", "Min": 10 } ],
+      "Conditions": [{ "Factor": "rpgstations:cycle_count", "Min": 10 }],
       "Chance": { "BasePercent": 15 },
       "Ladder": {
-        "Factors": [ { "Factor": "rpgstations:cycle_count" } ],
+        "Factors": [{ "Factor": "rpgstations:cycle_count" }],
         "Floors": [
           { "Min": 10, "Grants": { "DropLists": ["RPG_Station_Sawmill_T1"] } },
           {
             "Min": 25,
             "Grants": { "DropLists": ["RPG_Station_Sawmill_T2"] },
-            "Presentation": { "Sounds": ["SFX_Coins_Land"], "Particles": [ { "SystemId": "Block_Gem_Sparks" } ] }
+            "Presentation": {
+              "Sounds": ["SFX_Coins_Land"],
+              "Particles": [{ "SystemId": "Block_Gem_Sparks" }]
+            }
           }
         ]
       }
