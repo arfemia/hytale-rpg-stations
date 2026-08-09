@@ -43,7 +43,7 @@
         "Lootables": ["SawmillFinds"],
         "Rolls": [
           {
-            "$Comment": "The tool ladder that pays for the milling time: a starter hatchet earns nothing extra and every upgrade is felt. Factors sum THREE tool axes because no two can rank the vanilla hatchet ladder alone: quality (the native ItemQuality.QualityValue - Junk 0, Common 1, Uncommon 2, Rare 3, Epic 4, Legendary 5) at weight 10.0 dominates, item level at 0.1 breaks ties inside a quality tier, and gather power at 1.0 rewards the genuinely better cutter. Quality alone cannot separate Wood/Crude from Copper (all three are Common); power alone cannot either (Wood and Copper share an identical 0.2 Woods power, and power SATURATES at 0.5 from the mid ladder up); item level separates them but must stay a small term because it does not track rarity (Onyxium is Epic at item level 4, so a level-led formula would rank it below a copper hatchet). The curve over the vanilla hatchets, counted on top of Recipe.Yield's one plank: Wood 10.6 and Crude 10.55 reach no floor (1 plank per cycle); Copper 11.3 reaches the 11 floor (2); Iron 22.3 reaches the 22 floor, whose FRACTIONAL 1.5 pays one plank always plus a second half the time, so Iron averages 2.5 rather than rounding onto a neighbouring tier and collapsing a rung; Thorium 33.5, Cobalt 34.0 and Adamantite 34.5 reach the 33 floor (3); Onyxium 40.9 and Mithril 45.5 reach the 40 floor (4). A fractional floor value is the general route for any half-step tier, a modded one included: author it on the floor that earns it and it composes with every rung above and below, which a roll banded to one quality tier beside the ladder cannot do (a modded tool matching that tier while reaching a higher floor would collect both). Floors are NOT cumulative - the highest reached Min wins, and two floors sharing a Min is a validator warning since only the last authored one could ever be reached. Reweight Factors to change what the curve rewards, move a floor Min to change which tier earns which step, or append a floor for a modded tier above Epic.",
+            "$Comment": "The tool ladder that pays for the milling time: a starter hatchet earns nothing extra and every upgrade is felt. Factors sum THREE tool axes because no two can rank the vanilla hatchet ladder alone: quality (the native ItemQuality.QualityValue - Junk 0, Common 1, Uncommon 2, Rare 3, Epic 4, Legendary 5) at weight 10.0 dominates, item level at 0.1 breaks ties inside a quality tier, and gather power at 1.0 rewards the genuinely better cutter. Quality alone cannot separate Wood/Crude from Copper (all three are Common); power alone cannot either (Wood and Copper share an identical 0.2 Woods power, and power SATURATES at 0.5 from the mid ladder up); item level separates them but must stay a small term because it does not track rarity (Onyxium is Epic at item level 4, so a level-led formula would rank it below a copper hatchet). The curve over the vanilla hatchets, counted on top of Recipe.Yield's one plank: Wood 10.6 and Crude 10.55 reach no floor (1 plank per cycle); Copper 11.3 reaches the 11 floor (2); Iron 22.3 reaches the 22 floor, whose FRACTIONAL 1.5 pays one plank always plus a second half the time, so Iron averages 2.5 rather than rounding onto a neighbouring tier and collapsing a rung; Thorium 33.5, Cobalt 34.0 and Adamantite 34.5 reach the 33 floor (3); Onyxium 40.9 and Mithril 45.5 reach the 40 floor (4); and the 50 floor (5 planks) is beyond every forgeable tool - only the sawmill's own drop-only Sawmiller's Hatchet (Legendary, scoring 55.55) or a better modded tool reaches it, making the trophy the bench's one endgame upgrade. A fractional floor value is the general route for any half-step tier, a modded one included: author it on the floor that earns it and it composes with every rung above and below, which a roll banded to one quality tier beside the ladder cannot do (a modded tool matching that tier while reaching a higher floor would collect both). Floors are NOT cumulative - the highest reached Min wins, and two floors sharing a Min is a validator warning since only the last authored one could ever be reached. Reweight Factors to change what the curve rewards, move a floor Min to change which tier earns which step, or append a floor for a modded tier above Epic.",
             "Trigger": "Cycle",
             "Ladder": {
               "Factors": [
@@ -55,7 +55,8 @@
                 { "Min": 11.0, "Grants": { "OutputItems": 1 } },
                 { "Min": 22.0, "Grants": { "OutputItems": 1.5 } },
                 { "Min": 33.0, "Grants": { "OutputItems": 2 } },
-                { "Min": 40.0, "Grants": { "OutputItems": 3 } }
+                { "Min": 40.0, "Grants": { "OutputItems": 3 } },
+                { "Min": 50.0, "Grants": { "OutputItems": 4 } }
               ]
             }
           },
@@ -72,7 +73,7 @@
         ]
       },
       "ContributionScale": {
-        "$Comment": "Not loot: this ladder scales the action's per-cycle CONTRIBUTIONS - the namespaced amounts a listening mod attaches to this action (this jar attaches none itself; its content is progression-free by design, so the scale sits ready for whichever mod adds them). Same three factors and the same 11/22/33/40 crossings as the plank ladder above, so a tool that doubles your planks also doubles the attached amounts: below 11 the amount forwards unscaled, Copper-tier x2.0, Iron-tier x2.5, Cobalt-tier x3.0, Mithril-tier x4.0. The ENGINE pre-scales before the cycle event dispatches and reports the multiplier for display only, so a listener grants the forwarded amount verbatim and can neither forget the curve nor apply it twice.",
+        "$Comment": "Not loot: this ladder scales the action's per-cycle CONTRIBUTIONS - the namespaced amounts a listening mod attaches to this action (this jar attaches none itself; its content is progression-free by design, so the scale sits ready for whichever mod adds them). Same three factors and the same 11/22/33/40 crossings as the plank ladder above, so a tool that doubles your planks also doubles the attached amounts: below 11 the amount forwards unscaled, Copper-tier x2.0, Iron-tier x2.5, Cobalt-tier x3.0, Mithril-tier x4.0, and x5.0 at the 50 floor only the drop-only Sawmiller's Hatchet reaches - the contribution curve tracks the plank curve at every rung including the trophy's. The ENGINE pre-scales before the cycle event dispatches and reports the multiplier for display only, so a listener grants the forwarded amount verbatim and can neither forget the curve nor apply it twice.",
         "Factors": [
           { "Factor": "hytale:tool_quality", "Weight": 10.0 },
           { "Factor": "hytale:tool_item_level", "Weight": 0.1 },
@@ -82,7 +83,8 @@
           { "Min": 11.0, "Scale": 2.0 },
           { "Min": 22.0, "Scale": 2.5 },
           { "Min": 33.0, "Scale": 3.0 },
-          { "Min": 40.0, "Scale": 4.0 }
+          { "Min": 40.0, "Scale": 4.0 },
+          { "Min": 50.0, "Scale": 5.0 }
         ]
       },
       "Worker": {

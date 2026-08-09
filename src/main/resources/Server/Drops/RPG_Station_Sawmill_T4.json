@@ -1,0 +1,14 @@
+{
+  "$Comment": "The sawmill's trophy-wielder find table (SawmillFinds' fourth tier, reachable only with the Sawmiller's Hatchet or a better modded tool in hand): a winning roll ALWAYS pays - 90 percent for 3 to 5 life essence, 10 percent for 1 to 2 CONCENTRATED life essence. No empty entry: the tool that took a 1 in 2500 chase to earn never comes up dry on a find. The per-cycle cadence lives on the referencing Roll's own 15 percent chance. A find is deliberately a DIFFERENT item from the cycle's own planks - extra planks are the station's Grants.OutputItems concern, never a drop table's.",
+  "Container": {
+    "Type": "Choice",
+    "RollsMin": 1,
+    "RollsMax": 1,
+    "Containers": [
+      { "Type": "Single", "Weight": 90,
+        "Item": { "ItemId": "Ingredient_Life_Essence", "QuantityMin": 3, "QuantityMax": 5 } },
+      { "Type": "Single", "Weight": 10,
+        "Item": { "ItemId": "Ingredient_Life_Essence_Concentrated", "QuantityMin": 1, "QuantityMax": 2 } }
+    ]
+  }
+}
