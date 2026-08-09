@@ -4,7 +4,7 @@ Diegetic interactive work stations for Hytale - place a block, press `F`, and wa
 (or a stand-in performer) do the work over real time instead of an instant menu conversion.
 
 A standalone server mod, package root `com.ziggfreed.rpgstations`. It ships its own minimal
-jar-default content (a Sawmill and a fish-preparation exemplar) so it is playable with no content
+jar-default content (a Sawmill, craftable at a tier 2 Workbench) so it is playable with no content
 pack at all, and its engine underneath - multi-action stations, step programs, multi-station walks,
 placed-input custody and props, the puppet performer, conditional loot, and enhancement stamping - is
 the full thing, all driven from ordinary content assets a pack (or a server's own assets) can extend.

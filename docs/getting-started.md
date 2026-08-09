@@ -34,6 +34,18 @@ Confirm the mod loaded by checking the boot log for a Station asset layer fold l
 station id (for example `sawmill`), and no `Asset validation FAILED` entries. Run
 `/rpgstations validate` in-game (or from console) at any time to re-check the full content audit.
 
+## Getting the Sawmill in-game
+
+On a bare install the Sawmill block is **craftable at a tier 2 Workbench** (the Crafting tab,
+beside the vanilla benches): one crude hatchet, any one log, and any four planks - the hatchet
+becomes part of the bench, and a tier 1 workbench does not offer the recipe yet. Admins can always
+`/give` the block directly (`RPG_Station_Sawmill`).
+
+That craftability is deliberately a property of the jar's own block item. A content pack that ships
+its own block under the same id overrides the whole item by load order, so a pack that authors no
+`Recipe` on its copy removes the standalone craftability and owns acquisition its own way (a shop,
+a quest, a progression gate - whatever that pack's economy wants).
+
 ## Enabling
 
 RPG Stations has no traditional on/off config file toggle - it is governed by an ordinary content
