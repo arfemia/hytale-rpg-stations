@@ -14,3 +14,6 @@ RPG_Station_CookingFire.name = Fuego de Cocina
 RPG_Station_CookingFire.description = Un fuego de campamento que asa peces crudos. Pulsa usar para empezar a trabajar.
 RPG_Station_CookingFire.hint.empty = Pulsa [{key}] para cargar peces crudos
 RPG_Station_CookingFire.hint.loaded = Pulsa [{key}] para trabajar
+
+RPG_Tool_Hatchet_Sawmiller.name = Hacha del Aserrador
+RPG_Tool_Hatchet_Sawmiller.description = Un hacha de mitril magistral, equilibrada por incontables horas en el aserradero. Más afilada y resistente que la original de forja.

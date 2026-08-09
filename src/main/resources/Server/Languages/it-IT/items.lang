@@ -14,3 +14,6 @@ RPG_Station_CookingFire.name = Fuoco da Cucina
 RPG_Station_CookingFire.description = Un fuoco da campo che griglia il pesce crudo. Premi uso per iniziare a lavorare.
 RPG_Station_CookingFire.hint.empty = Premi [{key}] per caricare il pesce crudo
 RPG_Station_CookingFire.hint.loaded = Premi [{key}] per lavorare
+
+RPG_Tool_Hatchet_Sawmiller.name = Ascia del Segantino
+RPG_Tool_Hatchet_Sawmiller.description = Un'ascia di mithril magistrale, bilanciata da innumerevoli ore alla segheria. Più affilata e robusta dell'originale di forgia.

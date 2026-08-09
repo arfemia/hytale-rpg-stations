@@ -1,0 +1,13 @@
+{
+  "$Comment": "The sawmill's trophy table: a 1 in 100 roll for the Sawmiller's Hatchet (the Legendary masterwork copy of the Mithril hatchet), else nothing. Referenced by SawmillFinds' trophy Roll, which already gates on a deep session (cycle 25 onward) and a Mithril-grade held tool - so an eligible worker sees roughly one trophy per hundred eligible cycles, about a coin flip across one full ten-minute session. Retune the weights here to move the drop rate without touching the roll's gates.",
+  "Container": {
+    "Type": "Choice",
+    "RollsMin": 1,
+    "RollsMax": 1,
+    "Containers": [
+      { "Type": "Empty", "Weight": 99 },
+      { "Type": "Single", "Weight": 1,
+        "Item": { "ItemId": "RPG_Tool_Hatchet_Sawmiller", "QuantityMin": 1, "QuantityMax": 1 } }
+    ]
+  }
+}

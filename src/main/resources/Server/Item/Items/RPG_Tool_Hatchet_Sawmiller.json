@@ -1,0 +1,105 @@
+{
+  "$Comment": "The Sawmiller's Hatchet, the sawmill's drop-only trophy tool: a masterwork copy of the vanilla Mithril hatchet, upgraded to Legendary quality, MaxDurability 500 (the original carries 400), and a Woods gather power of 0.55 (the original's 0.5, the highest any vanilla hatchet reaches). Every other field is copied from the vanilla Mithril/Crude hatchet chain verbatim so the tool swings, sounds and repairs exactly like its forge sibling. Deliberately authored STANDALONE with no Parent and no Recipe: a Parent off the vanilla Mithril hatchet would inherit its crafting recipe and make the trophy forgeable, and this item exists only as the sawmill's deep-session find (Drops/RPG_Station_Sawmill_Trophy, referenced from Lootables/SawmillFinds). Tags.Family Hatchet is authored explicitly (vanilla gathering tools do not carry a Family tag yet), so the station's tag gate route recognizes it beside the functional Woods gather route.",
+  "TranslationProperties": {
+    "Name": "items.RPG_Tool_Hatchet_Sawmiller.name",
+    "Description": "items.RPG_Tool_Hatchet_Sawmiller.description"
+  },
+  "Categories": [
+    "Items.Tools"
+  ],
+  "Set": "Tool_Stone",
+  "Icon": "Icons/ItemsGenerated/Tool_Hatchet_Mithril.png",
+  "Model": "Items/Tools/Hatchet/Mithril.blockymodel",
+  "Texture": "Items/Tools/Hatchet/Mithril_Texture.png",
+  "Quality": "Legendary",
+  "ItemLevel": 50,
+  "Tool": {
+    "Specs": [
+      { "Power": 1, "GatherType": "SoftBlocks" },
+      { "Power": 0.05, "GatherType": "Soils" },
+      { "Power": 0.55, "GatherType": "Woods" },
+      { "Power": 0.05, "GatherType": "Rocks" },
+      { "Power": 0.5, "GatherType": "Benches" },
+      { "Power": 0.017, "GatherType": "VolcanicRocks" },
+      { "Power": 0.048, "GatherType": "OreCopper" },
+      { "Power": 0.048, "GatherType": "OreIron" },
+      { "Power": 0.048, "GatherType": "OreSilver" },
+      { "Power": 0.048, "GatherType": "OreGold" },
+      { "Power": 0.046, "GatherType": "OreThorium" },
+      { "Power": 0.046, "GatherType": "OreCobalt" },
+      { "Power": 0.046, "GatherType": "OreAdamantite" },
+      { "Power": 0.042, "GatherType": "OreMithril" }
+    ],
+    "DurabilityLossBlockTypes": [
+      {
+        "BlockSets": [
+          "Stone",
+          "Rock",
+          "Ores",
+          "Soil",
+          "Wood"
+        ],
+        "DurabilityLossOnHit": 0.25
+      }
+    ]
+  },
+  "PlayerAnimationsId": "Hatchet",
+  "Utility": {
+    "Compatible": true
+  },
+  "Interactions": {
+    "Primary": "Hatchet_Attack"
+  },
+  "InteractionVars": {
+    "Hatchet_Chop_Effect": {
+      "Interactions": [
+        {
+          "Parent": "Hatchet_Chop_Effect",
+          "Effects": {
+            "WorldSoundEventId": "SFX_Tool_T1_Swing",
+            "LocalSoundEventId": "SFX_Hatchet_T1_Swing_RL_Local"
+          }
+        }
+      ]
+    },
+    "Hatchet_Chop_Damage": {
+      "Interactions": [
+        {
+          "Parent": "Hatchet_Chop_Damage",
+          "DamageCalculator": {
+            "Type": "Dps",
+            "BaseDamage": {
+              "Physical": 5
+            }
+          },
+          "DamageEffects": {
+            "WorldSoundEventId": "SFX_Light_Melee_T1_Impact"
+          }
+        }
+      ]
+    }
+  },
+  "IconProperties": {
+    "Scale": 0.5,
+    "Translation": [
+      18,
+      -15
+    ],
+    "Rotation": [
+      45,
+      270,
+      0
+    ]
+  },
+  "DroppedItemAnimation": "Items/Animations/Dropped/Dropped_Diagonal_Left.blockyanim",
+  "MaxDurability": 500,
+  "Tags": {
+    "Type": [
+      "Tool"
+    ],
+    "Family": [
+      "Hatchet"
+    ]
+  },
+  "ItemSoundSetId": "ISS_Weapons_Wood"
+}

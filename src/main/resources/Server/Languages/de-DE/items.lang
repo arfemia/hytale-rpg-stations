@@ -14,3 +14,6 @@ RPG_Station_CookingFire.name = Lagerfeuer
 RPG_Station_CookingFire.description = Ein Lagerfeuer, das rohe Fische grillt. Drücke die Benutzen-Taste, um zu arbeiten.
 RPG_Station_CookingFire.hint.empty = Drücke [{key}] zum Laden von rohen Fischen
 RPG_Station_CookingFire.hint.loaded = Drücke [{key}] zum Arbeiten
+
+RPG_Tool_Hatchet_Sawmiller.name = Sägewerker-Axt
+RPG_Tool_Hatchet_Sawmiller.description = Eine meisterhafte Mithril-Axt, ausbalanciert durch ungezählte Stunden am Sägewerk. Schärfer und robuster als das Original aus der Schmiede.

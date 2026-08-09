@@ -14,3 +14,6 @@ RPG_Station_CookingFire.name = Főzőtűz
 RPG_Station_CookingFire.description = Munkaállomás, amely nyers halakat grill. Nyomd meg a használat gombot a munka megkezdéséhez.
 RPG_Station_CookingFire.hint.empty = Nyomd meg a [{key}] gombot a nyers halak betöltéséhez
 RPG_Station_CookingFire.hint.loaded = Nyomd meg a [{key}] gombot a munkához
+
+RPG_Tool_Hatchet_Sawmiller.name = Fűrészmalmi balta
+RPG_Tool_Hatchet_Sawmiller.description = Mesteri mithril balta, számtalan fűrészmalmi óra csiszolta egyensúlyát. Élesebb és strapabíróbb, mint a kovácsolt eredeti.

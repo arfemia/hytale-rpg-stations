@@ -14,3 +14,6 @@ RPG_Station_CookingFire.name = Костёр для готовки
 RPG_Station_CookingFire.description = Костёр, который жарит сырую рыбу. Нажмите использование, чтобы начать работу.
 RPG_Station_CookingFire.hint.empty = Нажмите [{key}], чтобы загрузить сырую рыбу
 RPG_Station_CookingFire.hint.loaded = Нажмите [{key}], чтобы работать
+
+RPG_Tool_Hatchet_Sawmiller.name = Топор лесопильщика
+RPG_Tool_Hatchet_Sawmiller.description = Мастерский мифриловый топор, отточенный бесчисленными часами на лесопилке. Острее и прочнее кузнечного оригинала.

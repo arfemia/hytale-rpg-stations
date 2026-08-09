@@ -14,3 +14,6 @@ RPG_Station_CookingFire.name = Fogo de Cozinha
 RPG_Station_CookingFire.description = Uma fogueira que grelha peixes crus. Pressione usar para começar a trabalhar.
 RPG_Station_CookingFire.hint.empty = Pressione [{key}] para carregar peixes crus
 RPG_Station_CookingFire.hint.loaded = Pressione [{key}] para trabalhar
+
+RPG_Tool_Hatchet_Sawmiller.name = Machado do Serrador
+RPG_Tool_Hatchet_Sawmiller.description = Um machado de mithril magistral, equilibrado por incontáveis horas na serraria. Mais afiado e resistente que o original da forja.

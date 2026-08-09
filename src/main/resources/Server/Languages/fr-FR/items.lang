@@ -14,3 +14,6 @@ RPG_Station_CookingFire.name = Feu de Cuisson
 RPG_Station_CookingFire.description = Un feu de camp qui grille les poissons crus. Appuyez sur utiliser pour commencer à travailler.
 RPG_Station_CookingFire.hint.empty = Appuyez sur [{key}] pour charger les poissons crus
 RPG_Station_CookingFire.hint.loaded = Appuyez sur [{key}] pour travailler
+
+RPG_Tool_Hatchet_Sawmiller.name = Hache du Scieur
+RPG_Tool_Hatchet_Sawmiller.description = Une hache en mithril d'exception, équilibrée par d'innombrables heures à la scierie. Plus affûtée et plus robuste que l'originale de forge.
