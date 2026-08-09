@@ -238,10 +238,10 @@ resolution section for the engine half.
     because a yield keyed off the worker's held tool cannot be baked in at asset-fold time.
     **Everything conditional or probabilistic is a `Roll` in the action's `Bonus` group instead**:
     a Roll already carries the richer vocabulary (`Trigger`, `Conditions`, `Chance`, `Ladder`,
-    `Grants`), and its `Grants.OutputItems` grants N ADDITIVE items of the cycle's own primary
-    output (see the `Roll` bullet below). So "a better tool yields more" and "sometimes you get an
-    extra" are both authored as visible rolls beside the deterministic number, rather than hidden
-    inside it. A null `Yield` is the IDENTITY (the conversion's own authored quantity, untouched).
+    `Grants`), and its `Grants.OutputItems` grants ADDITIVE items of the cycle's own primary
+    output, fractionally (see the `Roll` bullet below). So "a better tool yields more" and
+    "sometimes you get an extra" are both authored as visible rolls beside the deterministic number,
+    rather than hidden inside it. A null `Yield` is the IDENTITY (the conversion's own authored quantity, untouched).
   - **`ContributionScale`** - a factor ladder (`{Factors[], Floors[]}`, the SAME
     `loot.FactorLadder` core `Roll.Ladder` uses) multiplying every `Work.PerCycleContributions`
     amount before it is forwarded. **The engine PRE-SCALES**: the resolved multiplier is applied
@@ -431,10 +431,18 @@ resolution section for the engine half.
   `Conditions`/`Chance`/`Ladder`. Binding evaluation rules: a `Ladder.Floor` has no direct
   drop-list leaf (every floor routes through its own `Grants`); top-level `Grants` AND the reached
   floor's `Grants` both apply; a failing `Chance` means the `Ladder` never evaluates.
-  **`Grants.OutputItems` is ALL probabilistic output**: an `Integer`, N ADDITIVE items of the
+  **`Grants.OutputItems` is ALL probabilistic output**: a `Double`, ADDITIVE items of the
   cycle's own primary output, handed over on top of the deterministic `Recipe.Yield` quantity -
   additive, never a multiplier on the produced stack, so this number and the `Yield` number stay
-  directly comparable even though they are authored in different groups. Meaningful only under a
+  directly comparable even though they are authored in different groups. **FRACTIONAL** (maintainer
+  ruling): the whole part is granted every time and the leftover fraction is the chance of ONE more,
+  so `1.5` pays one item always plus a second half the time and averages exactly 1.5. That is what
+  makes a half-step ladder rung authorable ON the floor that earns it - the alternative (a roll
+  banded to one quality tier beside the ladder) does not compose, since a modded tool matching the
+  band while reaching a HIGHER floor would collect both. Everything a cycle grants is SUMMED first
+  and resolved to whole items exactly once (`loot.OutputItemResolver`, called from
+  `StationService#grantBonusOutputItems` with `ThreadLocalRandom`), so two rolls paying `0.5` each
+  average one whole item rather than rounding twice. Meaningful only under a
   `Cycle` trigger (`LOOT_OUTPUT_ITEMS_WRONG_TRIGGER` warns and the engine drops it on a
   `Completion` roll, which fires from inside `stop()` with no cycle output left to add to). `Yield`
   owns "how much of the thing you made" end to end; a Roll decides only what ELSE a cycle handed

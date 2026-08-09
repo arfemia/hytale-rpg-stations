@@ -117,14 +117,15 @@ class StationCycleBonusTest {
 
     @Test
     void outputItems_underAnAuthoredProgram_grantNothing() {
-        // The pass now genuinely reaches the grant side with a tallied count, and an authored
-        // program has no cycle output to add copies of - so this must fail quietly rather than
-        // grab a stale item id (LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT warns at authoring time).
+        // The pass now genuinely reaches the grant side with a tallied amount, and an authored
+        // program has no cycle output to add items to - so this must fail quietly rather than
+        // grab a stale item id (LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT warns at authoring time). A whole
+        // fixture amount keeps the case deterministic: it resolves to items with no roll involved.
         StationSession s = new StationSession();
         s.stationId = "fixtureritual";
         s.cycleOutputItemId = null;
 
-        StationService.grantBonusOutputItems(s, NULL_STORE, NULL_PLAYER, 3);
+        StationService.grantBonusOutputItems(s, NULL_STORE, NULL_PLAYER, 3.0);
 
         assertTrue(s.producedItems.isEmpty(), "nothing is produced when there is no cycle output");
         assertTrue(s.producedYield.isEmpty(), "and no yield-breakdown row is invented for it");
@@ -132,17 +133,18 @@ class StationCycleBonusTest {
 
     @Test
     void outputItemsTally_isStillCollectedForACycleTriggerRoll() {
-        // The tally itself is unchanged: the roll reports a count and the caller decides. This is
-        // what makes the no-op above the ONLY thing standing between the count and a wrong grant.
+        // The tally itself is unchanged: the roll reports a fractional amount and the caller
+        // resolves and grants it. This is what makes the no-op above the ONLY thing standing
+        // between the tally and a wrong grant.
         StationAsset station = ritualStation(LootRef.of(null, new Roll[] {
-                Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2))}));
+                Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0))}));
 
         List<Roll> rolls = StationService.effectiveBonusRolls(station,
                 ActionResolver.resolve(station, "Enhance"));
         LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, snapshot(),
                 NULL_PLAYER, null, "fixtureritual", "Enhance", 1, NULL_STORE, 0, 0, 0);
 
-        assertEquals(2, result.getOutputItems());
+        assertEquals(2.0, result.getOutputItems());
         assertFalse(result.getDropListItems().containsKey("Fixture_Plank"),
                 "the count is reported, never granted here");
     }

@@ -9,8 +9,8 @@ leaf), top-level AND per-floor `Grants` both fire, and `Chance` gates the WHOLE 
 `Ladder`.
 
 **Concern boundary (the one rule to read first):** a `Roll` grants what ELSE a cycle handed over -
-`DropLists`, `Commands`, `Effects`, `Contributions`, and `Grants.OutputItems` (N ADDITIVE items of
-the cycle's own primary output). It never touches HOW MUCH of the cycle's own output was produced
+`DropLists`, `Commands`, `Effects`, `Contributions`, and `Grants.OutputItems` (ADDITIVE items of
+the cycle's own primary output, fractional). It never touches HOW MUCH of the cycle's own output was produced
 by the conversion itself; that lives end to end in `ActionDef.Recipe.Yield`, which is now purely
 DETERMINISTIC (`Base`/`Scale`/`Min`/`Max`, no ladder, no roll, zero factor involvement - see
 `../asset/CLAUDE.md` and `../station/CLAUDE.md`'s `StationYield` bullet). The retired
@@ -19,6 +19,13 @@ stack, so a station whose yield already paid 4 planks silently handed out 4 more
 read as "+1", with the two numbers living in different files under different concept names. The
 leaf is deleted, not renamed; `Grants.OutputItems` is its ADDITIVE, single-item replacement,
 directly comparable to `Yield`'s own number because both count the same output item.
+
+**`Grants.OutputItems` is FRACTIONAL** (maintainer ruling): the whole part is granted every time and
+the leftover fraction is the chance of exactly one more, so `1.5` pays one item always plus a second
+half the time and averages exactly 1.5. A half-step tier is therefore authorable ON the ladder floor
+that earns it, which a roll banded to one quality tier beside the ladder could never be - that shape
+double-pays a modded tool matching the band while reaching a higher floor. The tally rides through
+the engine UNROUNDED and resolves once per cycle (`OutputItemResolver`, below).
 
 - **[`RollEvaluator`](RollEvaluator.java)** - the PURE decision core (conditions / chance roll /
   ladder floor pick), unit-tested with an injected roll source + factor lookup, zero store access.
@@ -52,13 +59,21 @@ directly comparable to `Yield`'s own number because both count the same output i
   `Grants.OutputItems` both tally on `GrantResult` (`getDropListItems()`/`getOutputItems()`) so the
   caller (`station.StationService`) folds them into its own session item ledger and fires the
   item-specific GOLD "what you gained" notification (`StationService#notifyItemGain`,
-  `lucky=true`); `StationService#grantBonusOutputItems` grants `getOutputItems()` copies of the
-  cycle's own resolved primary output id (`s.cycleOutputItemId`), through the SAME
-  `ItemGrantUtil` seam every other grant uses. `Grants.DropLists` is a plural ARRAY, each entry
+  `lucky=true`); `StationService#grantBonusOutputItems` resolves the `getOutputItems()` tally to
+  whole items and grants that many of the cycle's own resolved primary output id
+  (`s.cycleOutputItemId`), through the SAME `ItemGrantUtil` seam every other grant uses. `Grants.DropLists` is a plural ARRAY, each entry
   rolled independently in authored order, so "a guaranteed common table plus a rare one" is two
   entries rather than a synthetic merged asset or two whole duplicated `Roll`s. This class stays
   presentation-agnostic - it reports WHAT reward landed; `StationService` plays it through its OWN
   `emitMoment` choke point (see `../station/CLAUDE.md`), never a second playback path here.
+- **[`OutputItemResolver`](OutputItemResolver.java)** - the PURE fractional-to-whole-items
+  resolution behind `Grants.OutputItems`: `floor(tally)` items always, plus ONE more when an
+  injected `[0,1)` sample lands under the leftover fraction (the same injected-randomness seam
+  `RollEvaluator` and `station.StampCapEngine` use, so it unit-tests deterministically; production
+  passes `ThreadLocalRandom`). Called ONCE PER CYCLE over the SUMMED tally, never per roll - that is
+  the whole reason the tally rides through `GrantResult` as a raw `double`: two rolls paying `0.5`
+  each must average one whole item, which rounding each roll separately cannot do. A whole-number
+  tally never consults the sample at all, so a deterministic ladder floor stays deterministic.
 - **[`LootableCatalog`](LootableCatalog.java)** - the folded `asset.LootableAsset` store
   (`Server/RpgStations/Lootables/*.json`), `defaults < pack`, referenced by ANY `LootRef.Lootables`
   entry (an action's `Bonus`, a `StationStep.Roll` phase, or an `ExtensionAsset`'s `Bonus`

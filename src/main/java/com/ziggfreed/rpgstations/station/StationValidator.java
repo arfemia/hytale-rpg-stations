@@ -1999,7 +1999,7 @@ public final class StationValidator {
     /**
      * {@code noCycleOutput}: does the action this roll belongs to run an authored {@code Steps}
      * program? Such a program has no single "cycle output" for a {@code Grants.OutputItems} to add
-     * copies OF, so the engine drops the grant - see
+     * items TO, so the engine drops the grant - see
      * {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT} below. {@code false} at every site with no action
      * context (a lootable table, a standalone extension payload): those are checked where they are
      * REFERENCED from an action instead, since the same table can be shared by both action shapes.
@@ -2032,8 +2032,9 @@ public final class StationValidator {
             }
         }
         // OutputItems adds to the CYCLE's own output, which only a Cycle trigger has - the same
-        // shape (and the same reason) as the Contributions check below.
-        if (grants.effectiveOutputItems() > 0 && !Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
+        // shape (and the same reason) as the Contributions check below. The amount is fractional, so
+        // both checks read the reader-defaulted "grants anything at all" test rather than a count.
+        if (grants.effectiveOutputItems() > 0.0 && !Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
             out.add(Finding.warning(DOMAIN, "LOOT_OUTPUT_ITEMS_WRONG_TRIGGER",
                     label + " authors Grants.OutputItems under a non-Cycle Trigger ('" + trigger
                             + "') - there is no cycle output to add items to, so the grant is dropped", id));
@@ -2042,11 +2043,11 @@ public final class StationValidator {
         // to add to: the action runs an authored Steps program, whose phases produce whatever they
         // individually author rather than one recipe-driven output. The roll still evaluates, it
         // just has nothing to multiply - so without this the content is dead with no diagnostic.
-        if (grants.effectiveOutputItems() > 0 && noCycleOutput
+        if (grants.effectiveOutputItems() > 0.0 && noCycleOutput
                 && Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
             out.add(Finding.warning(DOMAIN, "LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT",
                     label + " authors Grants.OutputItems on an action that runs an authored Steps"
-                            + " program - such a program has no single cycle output to add copies of,"
+                            + " program - such a program has no single cycle output to add items to,"
                             + " so the grant is dropped; author a Produce phase or a Grants.DropLists"
                             + " entry instead", id));
         }

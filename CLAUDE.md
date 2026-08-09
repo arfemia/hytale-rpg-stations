@@ -103,7 +103,9 @@ used to share a station-level default now share by REFERENCE (`Ref` to the same 
 an action authors AT MOST ONE `Recipe`, gated by that action's own `Tool`; two variants that used
 to be two `Recipes[]` entries are now two `ActionDef`s, since the diegetic `Select` match already
 IS the "try this, else that" chain one level up. `Roll.Grants.BonusOutputCopies` is deleted;
-`Roll.Grants.OutputItems` (an `Integer`, additive extra units of the cycle's own primary output)
+`Roll.Grants.OutputItems` (a `Double`, additive extra units of the cycle's own primary output;
+FRACTIONAL by maintainer ruling - the whole part every time plus the leftover fraction as the chance
+of one more, summed across the cycle and resolved once by `loot.OutputItemResolver`)
 is now the ONLY probabilistic-output leaf, and `Recipe.Yield` is purely deterministic
 (`Base`/`Scale`/`Min`/`Max`, no ladder, no roll). A new `ActionDef.ContributionScale` group (a
 factor ladder over the SAME `loot.FactorLadder` core `Roll.Ladder` uses) pre-scales

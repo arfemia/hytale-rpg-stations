@@ -630,10 +630,11 @@ public class StationServiceTest {
         assertEquals(1, breakdown.cycles);
         assertFalse(breakdown.changed, "nothing moved the number yet, so the summary line stays hidden");
 
-        // A Bonus roll's Grants.OutputItems hands over extra copies - the case the breakdown line
+        // A Bonus roll's Grants.OutputItems hands over extra items - the case the breakdown line
         // exists to explain. Without the recorded entry above there was nothing for it to land on.
+        // The breakdown records the RESOLVED whole-item count, which is what the player received.
         breakdown.addBonus(3);
-        assertTrue(breakdown.changed, "bonus copies alone must be enough to render the breakdown line");
+        assertTrue(breakdown.changed, "a bonus alone must be enough to render the breakdown line");
         assertEquals(3.0, breakdown.bonusPerCycle(), 1e-9);
     }
 

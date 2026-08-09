@@ -32,9 +32,11 @@ those two numbers in separate groups is deliberate, so neither can silently mult
                  "Floors": [ { "Min": 50,  "Grants": { "DropLists": ["SawmillFinds_T1"] } },
                              { "Min": 100, "Grants": { "DropLists": ["SawmillFinds_T2"] },
                                "Presentation": { "Sounds": ["SFX_Coins_Land"] } } ] },
-  "Grants":    { "OutputItems": 1 }
+  "Grants":    { "OutputItems": 1.5 }
 }
 ```
+
+`OutputItems` is fractional: `1.5` hands over one item every time plus a second half the time.
 
 - `Trigger` - `Cycle` (default, once per completed work cycle) or `Completion` (once, at session
   stop). `Cycle` means THE action's cycle-completed moment whatever program shape it runs: an
@@ -56,7 +58,7 @@ those two numbers in separate groups is deliberate, so neither can silently mult
 
 | Field | What it grants |
 |---|---|
-| `OutputItems` | N ADDITIVE items of THIS cycle's own primary output, on top of the deterministic `Yield` quantity - additive, never a multiplier, so the two numbers stay directly comparable. Only meaningful on a `Cycle` trigger (the validator warns otherwise, and the engine drops it); silently skipped if the inventory is full. |
+| `OutputItems` | ADDITIVE items of THIS cycle's own primary output, on top of the deterministic `Yield` quantity - additive, never a multiplier, so the two numbers stay directly comparable. **Fractional**: the whole part is granted every time and the fraction left over is the chance of one more, so `1.5` pays one item always plus a second half the time and averages exactly 1.5 per cycle (a half-step tool tier is therefore authorable on the ladder floor that earns it). Everything the cycle grants is summed before that single resolution, so two rolls paying `0.5` each average one whole item. Only meaningful on a `Cycle` trigger (the validator warns otherwise, and the engine drops it); a stack that cannot fit drops at the station block rather than vanishing. |
 | `DropLists` | Native `ItemDropList` asset ids, each rolled independently in authored order through the engine's own drop-list roller. See [Native Composition](native-composition.md). |
 | `Commands` | Console commands, with `{player}`/`{uuid}`/`{station}`/`{action}`/`{cycles}` placeholders substituted. |
 | `Effects` | Native EntityEffects applied to the player, id-ref-only. See [Native Composition](native-composition.md). |

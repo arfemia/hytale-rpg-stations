@@ -107,6 +107,7 @@ import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.FactorSnapshot;
 import com.ziggfreed.rpgstations.loot.LootEngine;
+import com.ziggfreed.rpgstations.loot.OutputItemResolver;
 import com.ziggfreed.rpgstations.ui.StationSummaryHud;
 import com.ziggfreed.rpgstations.pages.PickerCategories;
 import com.ziggfreed.rpgstations.pages.RpgStationPickerPage;
@@ -1063,8 +1064,9 @@ public final class StationService {
                 buildFactorContext(s, store, player, action, attemptCycleIndex));
         Ingredient[] yieldedOutputs = StationYield.applyToOutputs(yield, check.outputs);
         recordYieldBreakdown(s, check.outputs, yieldedOutputs);
-        // A Bonus roll's Grants.OutputItems adds whole EXTRA items of this cycle's own primary
-        // output; the roll phase reports the count and applyGrantResult grants that many of this id.
+        // A Bonus roll's Grants.OutputItems adds EXTRA items of this cycle's own primary output; the
+        // roll phase reports the fractional tally and applyGrantResult resolves it to whole items of
+        // this id, once for the whole cycle.
         Ingredient primaryOutput = yieldedOutputs.length > 0 ? yieldedOutputs[0] : null;
         s.cycleOutputItemId = primaryOutput != null ? primaryOutput.getItemId() : null;
         StationStep.Produce produceStep = StationStep.Produce.of(yieldedOutputs,
@@ -1310,7 +1312,7 @@ public final class StationService {
      * starter tool producing exactly the conversion's own quantity leaves the breakdown line
      * hidden. A recipe with NO {@code Yield} group is still recorded (every cycle contributing
      * {@code changed = false}), because {@code Yield} is not the only thing that can move the
-     * number: a Bonus roll's {@code Grants.OutputItems} adds bonus copies to a recipe that authors
+     * number: a Bonus roll's {@code Grants.OutputItems} adds bonus items to a recipe that authors
      * no {@code Yield} at all, and skipping the record here left {@link StationSession.YieldBreakdown
      * #addBonus} with no entry to fill - so exactly the case the breakdown line exists to explain
      * ("your tool is earning you extra") was the one case it never rendered.
@@ -1569,7 +1571,7 @@ public final class StationService {
      * <p>Same snapshot, same {@link #applyGrantResult} handoff, and the same effective
      * {@link #effectiveBonusRolls} the other two routes read. {@code Grants.OutputItems} is the one
      * thing that still lands nowhere here: an authored program has no single cycle output to add
-     * copies of ({@code s.cycleOutputItemId} stays null and
+     * items to ({@code s.cycleOutputItemId} stays null and
      * {@link #grantBonusOutputItems} no-ops), which is exactly what the
      * {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT} validator warning tells the author at authoring
      * time. Every OTHER grant kind - droplists, commands, effects, contributions, the reached
@@ -1673,10 +1675,16 @@ public final class StationService {
     }
 
     /**
-     * Grants {@code count} ADDITIVE items of THIS cycle's primary output (a Bonus roll's
-     * {@code Grants.OutputItems}), through the same {@code util.ItemGrantUtil} seam every other
-     * station grant uses, and folds them into BOTH the produced ledger and the produced row's
+     * Grants the ADDITIVE items of THIS cycle's primary output a Bonus roll's
+     * {@code Grants.OutputItems} handed over, through the same {@code util.ItemGrantUtil} seam every
+     * other station grant uses, and folds them into BOTH the produced ledger and the produced row's
      * yield breakdown - so the summary reads "deterministic yield plus what the rolls added".
+     *
+     * <p>{@code tally} is the cycle's FRACTIONAL sum across every roll that granted, resolved to
+     * whole items HERE, once ({@link OutputItemResolver}: the whole part always, plus one more at
+     * the leftover fraction's probability). One resolution per cycle rather than one per roll is
+     * what makes two rolls paying {@code 0.5} each average a whole item; the produced row records
+     * the RESOLVED count, since that is what the player actually received.
      *
      * <p>Deliberately SILENT: these are more of the item the cycle was already producing, and the
      * produce phase's own gain notification already fired for it - a second toast per cycle would be
@@ -1686,11 +1694,12 @@ public final class StationService {
      * "cycle output" is undefined - {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT} flags that authoring)
      * or when nothing was granted. That no-op is load-bearing rather than defensive: an authored
      * program's completed pass DOES run the action's {@code Cycle}-trigger Bonus rolls, so an
-     * {@code OutputItems} count genuinely reaches here with no item id to spend it on, and must
+     * {@code OutputItems} amount genuinely reaches here with no item id to spend it on, and must
      * fail quietly instead of grabbing a stale one.
      */
     static void grantBonusOutputItems(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
-            @Nullable Player player, int count) {
+            @Nullable Player player, double tally) {
+        int count = OutputItemResolver.resolve(tally, () -> ThreadLocalRandom.current().nextDouble());
         if (count <= 0) {
             return;
         }

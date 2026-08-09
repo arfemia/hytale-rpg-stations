@@ -35,9 +35,10 @@ import com.ziggfreed.rpgstations.util.Log;
  * inside the pure evaluator.
  *
  * <p><b>Concern boundary:</b> a Roll grants what ELSE a cycle handed over - including
- * {@code Grants.OutputItems}, N ADDITIVE items of the cycle's own primary output. Additive is the
- * load-bearing word: the deterministic {@code Yield} number and this one are directly comparable, so
- * no file can silently MULTIPLY a quantity authored in another.
+ * {@code Grants.OutputItems}, ADDITIVE items of the cycle's own primary output (fractional, see
+ * {@link OutputItemResolver}). Additive is the load-bearing word: the deterministic {@code Yield}
+ * number and this one are directly comparable, so no file can silently MULTIPLY a quantity authored
+ * in another.
  *
  * <p>Every grant routes through the shared {@code util.ItemGrantUtil} seam (round-5, hotbar-first
  * then backpack storage then drop-at-block - see that class's javadoc for the historic
@@ -64,7 +65,7 @@ public final class LootEngine {
         private final List<EffectRef> effectGrants = new ArrayList<>();
         private final List<Contribution> contributions = new ArrayList<>();
         private int commandsRun;
-        private int outputItems;
+        private double outputItems;
 
         /** {@code ItemDropList}-derived items granted this pass (item id -> total quantity). */
         @Nonnull
@@ -110,20 +111,25 @@ public final class LootEngine {
         }
 
         /**
-         * Extra items of the CYCLE's own primary output this pass granted (top-level AND per-floor
-         * {@code Grants.OutputItems}, summed). ADDITIVE, never a multiplier on the produced stack.
-         * Collected ONLY for a {@code Cycle}-trigger pass - a Completion roll has no cycle output to
-         * add to, so its count is dropped here rather than misapplied (the validator warns at author
-         * time). Reported rather than applied, the same split {@link #getEffectGrants} uses: the
-         * caller knows which item id the cycle produced and grants that many of it.
+         * The FRACTIONAL tally of extra items of the CYCLE's own primary output this pass granted
+         * (top-level AND per-floor {@code Grants.OutputItems}, summed). ADDITIVE, never a multiplier
+         * on the produced stack. Collected ONLY for a {@code Cycle}-trigger pass - a Completion roll
+         * has no cycle output to add to, so its amount is dropped here rather than misapplied (the
+         * validator warns at author time).
+         *
+         * <p>Deliberately reported as the raw SUM, unresolved: the whole pass's tally resolves to
+         * whole items exactly once ({@link OutputItemResolver}, at the caller), so two rolls paying
+         * {@code 0.5} each average one item instead of rounding twice. Reported rather than applied,
+         * the same split {@link #getEffectGrants} uses: the caller knows which item id the cycle
+         * produced and grants that many of it.
          */
-        public int getOutputItems() {
+        public double getOutputItems() {
             return outputItems;
         }
 
         public boolean anyGranted() {
             return !dropListItems.isEmpty() || !floorPresentations.isEmpty() || !effectGrants.isEmpty()
-                    || !contributions.isEmpty() || commandsRun > 0 || outputItems > 0;
+                    || !contributions.isEmpty() || commandsRun > 0 || outputItems > 0.0;
         }
     }
 
@@ -235,7 +241,9 @@ public final class LootEngine {
             return;
         }
         // Grants.OutputItems: TALLY the additive extra items of the cycle's own primary output for
-        // the caller to grant (it owns the item id). Skipped entirely outside a Cycle trigger.
+        // the caller to grant (it owns the item id). Summed as a FRACTIONAL amount and resolved to
+        // whole items once per cycle at the caller, never rounded per roll. Skipped entirely outside
+        // a Cycle trigger.
         if (cycleTrigger) {
             result.outputItems += grants.effectiveOutputItems();
         }

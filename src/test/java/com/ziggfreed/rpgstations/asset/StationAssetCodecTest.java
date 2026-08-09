@@ -393,30 +393,34 @@ public class StationAssetCodecTest {
         Roll roll = bonus.getRolls()[0];
         assertEquals("Cycle", roll.effectiveTrigger());
         assertEquals(25.0, roll.getChance().getBasePercent());
-        assertEquals(2, roll.getGrants().effectiveOutputItems());
+        assertEquals(2.0, roll.getGrants().effectiveOutputItems());
         assertEquals("Fixture_T1", roll.getGrants().getDropLists()[0]);
     }
 
     @Test
     void grantsOutputItems_readerDefaultsToZeroAndCountsTowardEmptiness() {
-        assertEquals(0, Roll.Grants.of(null, null).effectiveOutputItems());
-        assertEquals(0, Roll.Grants.ofOutputItems(-3).effectiveOutputItems());
+        assertEquals(0.0, Roll.Grants.of(null, null).effectiveOutputItems());
+        assertEquals(0.0, Roll.Grants.ofOutputItems(-3.0).effectiveOutputItems());
         assertTrue(Roll.Grants.of(null, null).isEmpty());
-        assertFalse(Roll.Grants.ofOutputItems(1).isEmpty(),
+        assertFalse(Roll.Grants.ofOutputItems(1.0).isEmpty(),
                 "an OutputItems-only Grants group genuinely grants something");
+        assertFalse(Roll.Grants.ofOutputItems(0.5).isEmpty(),
+                "a fraction-only amount grants an item some of the time, so it is not empty");
     }
 
+    /** The amount is FRACTIONAL: a half-step tier is authorable on the floor that earns it. */
     @Test
     void bonus_ladderFloorGrantsOutputItems() throws Exception {
         StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Bonus\": { \"Rolls\": [ {"
                 + " \"Ladder\": { \"Factors\": [ { \"Factor\": \"hytale:tool_quality\", \"Weight\": 10.0 } ],"
                 + "   \"Floors\": [ { \"Min\": 11, \"Grants\": { \"OutputItems\": 1 } },"
-                + "                 { \"Min\": 33, \"Grants\": { \"OutputItems\": 2 } } ] } } ] } } ] }");
+                + "                 { \"Min\": 33, \"Grants\": { \"OutputItems\": 2.5 } } ] } } ] } } ] }");
         Roll.Ladder ladder = a.getActions()[0].getBonus().getRolls()[0].getLadder();
         assertEquals("hytale:tool_quality", ladder.getFactors()[0].getFactor());
         assertEquals(10.0, ladder.getFactors()[0].effectiveWeight());
-        assertEquals(1, ladder.getFloors()[0].getGrants().effectiveOutputItems());
-        assertEquals(2, ladder.getFloors()[1].getGrants().effectiveOutputItems());
+        assertEquals(1.0, ladder.getFloors()[0].getGrants().effectiveOutputItems());
+        assertEquals(2.5, ladder.getFloors()[1].getGrants().effectiveOutputItems(),
+                "a whole-number floor and a fractional one decode through the same leaf");
     }
 
     // ==================== ContributionScale ====================

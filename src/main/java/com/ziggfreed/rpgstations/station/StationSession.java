@@ -369,8 +369,10 @@ final class StationSession {
 
         /**
          * Extra items a {@code Roll.Grants.OutputItems} handed over on top of this cycle's
-         * deterministic quantity. Always recorded AFTER {@link #add} for the same cycle (the roll
-         * phase runs after the produce phase), so it lands on the cycle it belongs to.
+         * deterministic quantity - the RESOLVED whole-item count the player actually received, not
+         * the fractional tally it came from, since the breakdown line reports what landed. Always
+         * recorded AFTER {@link #add} for the same cycle (the roll phase runs after the produce
+         * phase), so it lands on the cycle it belongs to.
          */
         void addBonus(double bonus) {
             if (bonus > 0.0) {
@@ -401,8 +403,8 @@ final class StationSession {
 
     /**
      * The item id of the CURRENT cycle's primary output, set by the real-convert path just before
-     * the program dispatches and read by a {@code Roll.Grants.OutputItems} grant (which adds whole
-     * extra items of that same output). {@code null} for an authored Steps program, whose "primary
+     * the program dispatches and read by a {@code Roll.Grants.OutputItems} grant (which adds extra
+     * items of that same output). {@code null} for an authored Steps program, whose "primary
      * output" is undefined - an OutputItems grant there is dropped with a fine log. Session-scoped,
      * never persisted.
      */

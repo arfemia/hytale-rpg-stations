@@ -45,9 +45,10 @@ the WHOLE set executes:
   an ADDITIVE `Extensions/*.json` (below) rather than a full-file override. **The jar Sawmill
   declares NO `Work.PerCycleContributions` at all** - jar-layer content is progression-free by
   design, so a pack OWNS the sawmill's contributions outright and there is no base entry for an
-  extension to collide with. The station's tool ladder lives where its EFFECT is visible: THREE
+  extension to collide with. The station's tool ladder lives where its EFFECT is visible: TWO
   `Bonus.Rolls` (a `Ladder` over three weighted tool factors granting `Grants.OutputItems` per
-  floor, a mid-tier `Chance`-gated half-plank roll, and a small flat windfall `Chance`) plus a
+  floor - the mid rung's `1.5` is the FRACTIONAL half-step, one plank always plus a second half the
+  time - and a small flat windfall `Chance`) plus a
   parallel `ContributionScale` ladder describing the identical tool curve for whichever mod adds
   contributions - rather than in a separate baked curve
   - see `../../../../../../CONTENT_PACKS.md`'s Station authoring section for the authoring guide
@@ -387,9 +388,14 @@ quantity, untouched). **Everything probabilistic moved to the loot layer**: a `R
 action's own `Bonus` (evaluated by `loot.LootEngine`/`RollEvaluator` off the SAME per-cycle
 `FactorSnapshot` `runRealCycle` builds once for the whole cycle - "one aggregation, several
 consumers") tallies `Grants.OutputItems`, and `StationService#grantBonusOutputItems` hands out
-that many additional units of `s.cycleOutputItemId` (the cycle's own resolved primary output,
+additional units of `s.cycleOutputItemId` (the cycle's own resolved primary output,
 captured right after `StationYield.applyToOutputs` runs) through the same `util.ItemGrantUtil`
-seam every other grant uses. An authored `Steps` program has no single "cycle output" for
+seam every other grant uses. **That tally is FRACTIONAL and resolves ONCE PER CYCLE**
+(`loot.OutputItemResolver` with `ThreadLocalRandom`: the whole part always, plus one more at the
+leftover fraction's probability), so a `1.5` ladder floor pays one item always plus a second half
+the time, and two rolls paying `0.5` each average a whole item instead of rounding twice; the
+produced row's breakdown records the RESOLVED count, since that is what the player received. An
+authored `Steps` program has no single "cycle output" for
 `OutputItems` to add to (`s.cycleOutputItemId` stays null, and `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT`
 warns on an action authoring `OutputItems` there - on its own `Bonus` or on a step's `Roll` phase
 alike). The three tool factors that make a `Bonus`/`ContributionScale`
@@ -418,7 +424,7 @@ program has no such phase, so `dispatchProgram` runs the pass itself on a COMPLE
 It fires BEFORE `onCycleCompleted`, so a `Grants.Contributions` find rides that same cycle's event
 on either route. Exactly one moment per completed pass: a suspend/resume pair is still ONE pass, and
 an idle-practice cycle rolls no loot at all by design. The one grant kind that still lands nowhere
-under an authored program is `Grants.OutputItems` - there is no single cycle output to add copies of
+under an authored program is `Grants.OutputItems` - there is no single cycle output to add items to
 (`s.cycleOutputItemId` stays null and `grantBonusOutputItems` no-ops), which is what
 `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` warns about at authoring time; every other kind (droplists,
 commands, effects, contributions, the reached floor's presentation) applies.

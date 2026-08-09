@@ -36,22 +36,19 @@ to recompile against a later release rather than treat these types as stable.
   (native `Parent` inheritance, every leaf `appendInherited`), a per-player session state machine
   (`StationService`/`StationSession`), packet-camera third-person pull with a curated recipe
   vocabulary (`Camera.Recipe`, an admin-iterable preset switch for the free-camera-vs-locked-body
-  hunt), an effect-mode movement lock, and native block-mount seating (`Hold.Seat`) as the crowned
-  answer for a held/facing worker.
-- Adds tool gating (native `Tags`/`Gather`/`Ids` routes) with optional tool-power contribution
-  scaling (`Tool.PowerScale`), and
-  recipe derivation either authored (`Recipe.Conversions`) or derived from native crafting recipes
-  (`Recipe.FromCrafting`), zero hand-authored conversions for a station like the Sawmill.
+  hunt), an effect-mode movement lock, and native block-mount seating (`Hold.Mount` with
+  `Surface: "Block"`) as the crowned answer for a held/facing worker.
+- Adds tool gating (native `Tags`/`Gather`/`Ids` routes), and recipe derivation either authored
+  (`Recipe.Conversions`) or derived from native crafting recipes (`Recipe.FromCrafting`), zero
+  hand-authored conversions for a station like the Sawmill.
 - Adds `Recipe.Yield`, the per-cycle output-quantity transform that applies to authored and derived
-  conversions alike: a flat `Base`, a `Scale` multiplier, `Min`/`Max` clamps, and a `Bonus` ladder
-  whose `Values` are the same weighted `FactorRef` sum every other formula site uses, so a yield
-  bonus can key off any registered factor. Yields may be FRACTIONAL: an effective `2.5` pays two
-  items every cycle and a third on a 50% roll, so the long-run average is exactly the authored
-  number and a mid-ladder tool can sit genuinely between two whole yields instead of being rounded
-  onto a neighbour.
+  conversions alike and is purely DETERMINISTIC: a flat `Base`, a `Scale` multiplier, and `Min`/`Max`
+  clamps, resolved per cycle over a 1-item floor so a conversion can never eat its inputs and produce
+  nothing. Reading the group tells an author exactly how much one cycle makes; everything conditional
+  or probabilistic about output is a `Roll` in the action's `Bonus` group instead.
 - Adds three tool-describing built-in factors so a "better tools yield more" curve is authorable
   with no code: `hytale:tool_quality` (the native `ItemQuality.QualityValue`) and
-  `hytale:tool_item_level` (the native `ItemLevel`) beside the existing
+  `hytale:tool_item_level` (the native `ItemLevel`) beside
   `hytale:tool_power`. Summing all three is the intended shape, because no two of them can rank
   a full tool family alone: gather power saturates across the upper tiers, quality cannot separate
   tools that share a tier, and item level does not track rarity at all. The shipped Sawmill uses
@@ -86,15 +83,14 @@ to recompile against a later release rather than treat these types as stable.
 
 ### Phase 2: multi-action stations, placed-input custody, the Mount family, the anvil arc
 
-- Adds multi-action stations: a `StationAsset.Actions` map lets one station block host several
-  distinct actions (each a whole-group override of the station's own Work/Hold/Camera/Animation/
-  Tool/Custody/Requires groups, native `Parent` inherits the whole map), diegetically selected by
-  what the player is holding or has placed. An action is a STEP PROGRAM (`StationStep`, a
-  `Type`-discriminated union: `Consume`/`Produce`/`Wait`/`Roll`/`Command`/`Stamp`/`Mount`) run
-  through one production step-dispatch kernel (`StationStepKernel`, built on the lifted
-  `ziggfreed-common` `cast.step` kernel); the classic single-action convert loop is the implicit
-  four-step program every station with no `Actions` map gets for free, so the shipped Sawmill
-  authors nothing new.
+- Adds multi-action stations: a station's ORDERED `StationAsset.Actions[]` array lets one station
+  block host several distinct, fully self-contained actions (each carrying its own Work/Tool/Recipe/
+  Custody/Requires/Worker groups, nothing inherited from the station), diegetically selected by what
+  the player is holding or has placed - the first entry whose `Select` matches the context wins. An
+  action is a STEP PROGRAM (`StationStep`) run through one production step-dispatch kernel
+  (`StationStepKernel`, built on the lifted `ziggfreed-common` `cast.step` kernel); an action that
+  authors no `Steps` gets the classic convert loop as an implicit program built from its own
+  `Recipe`, so the shipped Sawmill authors none.
 - Adds session-scoped placed-input custody: a state-dependent single F/use interaction where an
   empty station accepts a held (or inventory-matched) stack, a repeat press tops it up, and a
   loaded station works the placed pouch instead of draining the backpack per cycle. Unconsumed
@@ -108,14 +104,15 @@ to recompile against a later release rather than treat these types as stable.
   rendering whatever is currently placed (a real block-shaped entity for a block item like logs, a
   bare dropped-item-style prop otherwise); the display entity is never persisted, so it never
   survives a restart, matching custody's own crash-loses-it lifecycle by construction.
-- Adds the `Hold.Mount` knob family: `Surface: "Block"` (the existing seat mount, refactored behind
-  the new group with zero behavior change) or `Surface: "Entity"` (a new standing work mount for a
+- Adds the `Hold.Mount` knob family: `Surface: "Block"` (the native seat mount, the default arm on
+  an authored group) or `Surface: "Entity"` (a standing work mount for a
   station that wants its worker on their feet, with a steerable/dismount-on-move knob pair).
-- Adds the open flair/moment vocabulary: the old fixed 4-slot `Slot` enum is retired for an open
-  string moment id (well-known constants plus a per-step `step:<actionId>:<stepId>` id a `Present`
-  step resolves against), and a new standalone `FlairAsset` Pattern A type lets ANY installed mod
-  or pack ship a cosmetic flair layer for a station without touching that station's own JSON.
-- Adds the anvil arc's `Stamp` step: a composable roll+cap engine for rolling stat entries onto a
+- Adds the open flair/moment vocabulary: a moment is an open string id (the well-known
+  cycle/swing/impact/rare_find/completion constants plus a per-step `step:<actionId>:<stepId>` id
+  any step's own `Presentation` resolves against), and a standalone `FlairAsset` Pattern A type lets
+  ANY installed mod or pack ship a cosmetic flair layer for a station without touching that
+  station's own JSON.
+- Adds the anvil arc's `Stamp` phase: a composable roll+cap engine for rolling stat entries onto a
   placed item (`RollPool` Pattern A store, a shared `StatRollEntry` codec, weighted-pick/unique
   selection, and a composable cap model - weighted `Budgets` entries, per-stat caps, and repeat-cost
   economics, all independently authorable) plus a registered `EnhanceStamper` api contract
@@ -136,11 +133,11 @@ defects, all fixed with no design change:
   settings singleton) collided with another loaded plugin's asset class of the same simple name
   (the id key is the CLASS SIMPLE NAME, not the fully-qualified name). Renamed to
   `RpgStationsSettingsAsset` throughout (class, codec, tests, docs).
-- Fixes a false `EMPTY_CONVERSIONS` validator ERROR on a multi-action station whose station-level
-  `Recipe` is absent but every action supplies its OWN recipe/program source (the anvil's
-  `enhance` action runs entirely off a `Stamp`-step ritual, no `Recipe` at all) - the check is now
-  action-aware, erroring only when NEITHER the station level NOR any authored action can ever run
-  a cycle.
+- Fixes a false runnability validator ERROR on a multi-action station whose actions each supply
+  their OWN recipe or step program (the anvil's `enhance` action runs entirely off a `Stamp`
+  ritual, no `Recipe` at all): the check is action-aware, erroring only when a station authors no
+  actions at all (`STATION_NO_ACTIONS`) and warning per action that authors neither `Ref`, `Recipe`,
+  nor `Steps` (`ACTION_NO_BODY`).
 - Fixes validation-ordering false positives (`STAMP_UNKNOWN_POOL`/`LOOT_UNKNOWN_DROPLIST`/
   `MISSING_*_LANG`): the per-fold validator ran before a LATER asset layer (RollPool/Drops/lang)
   had folded the very reference it was checking. `StationValidator` now runs two passes: a
@@ -185,7 +182,7 @@ engine pieces lifted to `ziggfreed-common` per the root lift paradigm (this mod 
 policy):
 
 - Adds a hotbar-first-if-space, then-backpack-storage GRANT ordering for every item this mod hands
-  a player: placed-input custody retrieval/return, a per-cycle produced output, a luck bonus-copy
+  a player: placed-input custody retrieval/return, a per-cycle produced output, a bonus output-item
   grant, and a rare-find/tier `ItemDropList` grant all route through a new `util.ItemGrantUtil`
   seam, itself a thin policy wrapper (the drop-at-block fallback target only) over
   `ziggfreed-common`'s new generic `inventory.InventoryGrant` ordering primitive. Deliberately
@@ -199,9 +196,9 @@ policy):
   `ziggfreed-common`'s new `feedback.PickupMimic` primitive (which delegates straight to the
   engine's own pickup-notify method for byte-exact parity) - replacing the old generic "materials
   retrieved" toast.
-- Adds live item-gain notifications while working: a produced material and a lucky drop (bonus
-  copy or rare-find) each show WHAT was gained, with the item's own icon and name; a lucky drop
-  renders in GOLD text, replacing the old generic "Lucky!"/"You find something extra!" toasts.
+- Adds live item-gain notifications while working: a produced material and a lucky drop (a bonus
+  output item or a rare find) each show WHAT was gained, with the item's own icon and name; a lucky
+  drop renders in GOLD text, replacing the old generic "Lucky!"/"You find something extra!" toasts.
   New key `ui.station.gain.produced` (9 locales).
 
 ### Round-7: maintainer in-game smoke fixes (2026-07-23)
@@ -265,7 +262,7 @@ outcome; the sibling toast-stacking defects land in the consumer mod's own repo)
   `Work.CycleMs` - a ritual runs once, so the pre-delay was pure latency; a repeating program is
   unaffected), the explicit `dispatchProgram` `resuming` flag with fresh-dispatch `stepDeadlineMs`
   zeroing, and the generic per-step Presentation emission (any step's own authored `Presentation`
-  plays once when it begins executing, not just the dedicated `Present` step's).
+  plays once when it begins executing, not only a step whose whole job is the cue).
 
 ### Round-8b: Stamp reagents in the session-summary consumed ledger (2026-07-23)
 
@@ -284,13 +281,12 @@ outcome; the sibling toast-stacking defects land in the consumer mod's own repo)
 
 ### Scope 2: from-scratch authoring surface, unified factor vocabulary, multi-station seam (2026-07-24)
 
-- Adds the orthogonal-phase `StationStep` reshape: the old `Type`-discriminated union (`Consume`/
-  `Produce`/`Wait`/`Roll`/`Command`/`Stamp`) is replaced by a step record that composes any
-  combination of nullable `Walk`/`Consume`/`Stamp`/`Produce`/`Roll`/`Commands` phases in one fixed
-  order, so a single step can carry several effects at once instead of needing one step per effect
-  (a phase-free step is a pure timed beat).
-- Adds a unified `LootRef` (`{Lootables[], Rolls[]}`) that `StationAsset.Loot`, `ActionDef.Loot`,
-  and a step's `Roll` phase all share, and reshapes the Stamp step's stat-roll caps onto a weighted
+- Adds the orthogonal-phase `StationStep`: one step record composes any combination of nullable
+  `Walk`/`Consume`/`Stamp`/`Produce`/`Roll`/`Commands` phases in one fixed order, so a single step
+  carries several effects at once instead of needing one step per effect, and a phase-free step with
+  a `Duration` is a pure timed beat.
+- Adds a unified `LootRef` (`{Lootables[], Rolls[]}`) that an action's own `Bonus` group and a
+  step's `Roll` phase both share, and expresses the Stamp phase's stat-roll caps as a weighted
   `FactorRef` budget vocabulary (`Budgets[]`) that also drives loot chances and roll magnitudes -
   one factor vocabulary composes everywhere a number needs to scale off tool power, a native stat,
   or any other registered signal.
@@ -358,11 +354,9 @@ schema is pre-release, so the renames below are hard breaks with no aliases.
 - Adds tunable particle bursts. A `Presentation.Particles` entry is a `ModelParticle`-shaped group
   (`SystemId` plus optional `Scale`, `DurationSeconds`, `RotationOffset` in degrees, and a
   facing-relative `PositionOffset`) and the leaf is an ARRAY, matching native
-  `InteractionEffects.Particles`, so a moment can layer bursts. Unauthored knobs reproduce the
-  previous playback exactly (scale 1, a 4-second client-playback cap, no rotation or offset); the
+  `InteractionEffects.Particles`, so a moment can layer bursts. Unauthored knobs land on plain
+  playback (scale 1, a 4-second client-playback cap, no rotation or offset); the
   duration cap is authorable per burst but stays a leak guard against unbounded-spawner systems.
-  The sibling `Presentation.Camera` leaf is spelled `CameraEffect`, matching native
-  `InteractionEffects` and disambiguating it from the station-level `Camera` group.
 - Adds ref-or-inline authoring on the three leaves that reference one of this mod's own asset
   types: `LootRef.Lootables[]`, `StationStep.Stamp.Stats.Pool`, and `ActionDef.Ref` each accept an
   inline anonymous body (optionally with its own `Parent`) in place of an id, through the engine's
@@ -370,11 +364,12 @@ schema is pre-release, so the renames below are hard breaks with no aliases.
   reference instead of an untyped string. References to NATIVE assets stay id-only.
 - Adds four authoring knobs: `Roll.Grants.Contributions[]` (one-shot amounts posted on a
   conditional-lootable find, forwarded on their own unscaled list so a find is worth the same
-  whatever tool the worker holds, and restricted to a `Cycle` trigger), `Tool.MinDurabilityPercent`
-  (refuse to start work with a tool worn below a threshold; a session already running still ends at
+  whatever tool the worker holds, and restricted to a `Cycle` trigger),
+  `Tool.Durability.MinStartPercent` (refuse to start work with a tool worn below a threshold; a
+  session already running still ends at
   breakage, not at the threshold), `Custody.SingleFamily` (lock a claim to the first-placed item's
   resource family, so a station holds 50 oak or 50 pine but never 100 mixed), and
-  `SummaryHud.OffsetX` beside the existing `OffsetY`.
+  `SummaryHud.OffsetX` beside its `OffsetY` sibling.
 - Renames the two keys that were spelled the same at two altitudes with two different types.
   `Work.Repeat` (a boolean) becomes `Work.Looping`, freeing `Repeat` for the iteration COUNT it
   means natively and one level down on `StationStep.Repeat`; `StationStep.Working` (a boolean)
@@ -395,12 +390,12 @@ schema is pre-release, so the renames below are hard breaks with no aliases.
   engine-owned, re-applied per heartbeat, so an authored duration would be inert or would defeat
   the release safety net) and `Presentation.Shake.EffectId` (a camera effect whose duration lives
   inside the referenced asset with no per-use override on the engine's fire-and-forget path).
-- Documents every codec leaf. All 309 authorable leaves across the seven content types carry a
-  description of what they do and what they default to, and a coverage test fails the build on a
+- Documents every codec leaf. Every authorable leaf across the seven content types carries a
+  description of what it does and what it defaults to, and a coverage test fails the build on a
   blank one, so the generated schema reference and the in-game Asset Editor both show real help
   text on every field.
 - Adds in-game Asset Editor support to the content types: collapsible section headings over each
-  top-level group, pick lists on 19 value vocabularies (this mod's live station / action /
+  top-level group, pick lists on the value vocabularies (this mod's live station / action /
   lootable / roll-pool / factor ids, plus every closed union discriminator such as mount surface,
   camera preset, puppet hide route, and consume/produce route), localization-key fields on
   `Identity.NameKey`/`DescKey` and an action `Label`, and an icon picker on `Identity.Icon`. The
@@ -414,7 +409,7 @@ schema is pre-release, so the renames below are hard breaks with no aliases.
   never-block posture, and none of them can drop content. Three new validator checks land beside
   them: a duplicate `(Channel, Param)` contribution between an extension and the station or action
   it targets (or between two extensions targeting the same thing, which sum rather than override), a
-  `Tool.MinDurabilityPercent` authored outside `(0, 100]`, and a redundant `Custody.SingleFamily`
+  `Tool.Durability.MinStartPercent` authored outside `(0, 100]`, and a redundant `Custody.SingleFamily`
   on a claim whose capacity already holds one item.
 - Adds `RpgStationsApi.apiVersion()` plus non-throwing `isAvailable()`/`find()` accessors, and
   writes down the additive growth policy the surface follows after 1.0.0 (default-bodied interface
@@ -443,17 +438,16 @@ schema is pre-release, so the renames below are hard breaks with no aliases.
   rather than hardcoding them here. Hooks see both the reference structure and the formula numbers,
   report info/warn findings only, are try-guarded, and never block.
 - Adds `LOOT_DUPLICATE_FACTOR` (INFO): the same `(Factor, Param)` pair referenced more than once
-  inside one Roll, across its `Conditions`, `Chance.AddFactors`, and `Ladder.Values`. Two `stat`
+  inside one Roll, across its `Conditions`, `Chance.Factors`, and `Ladder.Factors`. Two `stat`
   references with different `Param`s are a legitimate composition and never fire it.
 - Names the authoring sites for what they mean, so the two scaling rules are visible in the JSON
   rather than only in the engine: `Work.PerCycleContributions[]` is posted every completed cycle,
-  multiplied by the resolved tool multiplier and pre-scaled by `Work.Idle.Fraction` on an idle
-  cycle; `Roll.Grants.Contributions[]` is posted once and verbatim, inheriting neither. Same record
-  type, different documented semantics per owning group, no mode flag on the entry. The event
-  carries them as two lists, `contributions()` and `oneShotContributions()`, and `toolMultiplier()`
-  applies to the first only.
-- Names the remaining scaling knobs for the mechanism instead of a consumer's reward type:
-  `Tool.PowerScale` (tool power to the per-cycle multiplier, leaves unchanged) and
+  multiplied by the action's resolved `ContributionScale` and pre-scaled by `Work.Idle.Fraction` on
+  an idle cycle; `Roll.Grants.Contributions[]` is posted once and verbatim, inheriting neither. Same
+  record type, different documented semantics per owning group, no mode flag on the entry. The event
+  carries them as two lists, `contributions()` and `oneShotContributions()`, and the multiplier it
+  reports as `contributionScale()` applies to the first only.
+- Names the remaining scaling knob for the mechanism instead of a consumer's reward type:
   `Work.Idle.Fraction` (the fraction of a normal cycle's amounts an idle practice cycle posts).
   The matching validator ids are `MISSING_CONTRIBUTION_CHANNEL`, `NONPOSITIVE_CONTRIBUTION_AMOUNT`,
   `EXTENSION_CONTRIBUTION_DUPLICATE`, and `LOOT_CONTRIBUTION_{WRONG_TRIGGER,MISSING_CHANNEL,
@@ -471,8 +465,13 @@ as shipped, not a change to something previously released.
 
 - **A station is an ORDERED LIST OF SELF-CONTAINED ACTIONS, and station-level group inheritance is
   DELETED.** `StationAsset` keeps only `Identity`/`Block`/`Requires`/`Flairs`/`Actions[]`; every
-  other group (`Work`, `Recipe`, `Tool`, `Hold`, `Camera`, `Animation`, `Custody`) lives
-  EXCLUSIVELY on an `ActionDef` entry, with no station-level default left to fall back to. Two
+  other group (`Work`, `Recipe`, `Tool`, `Custody`, the `Worker` presentation groups
+  `Hold`/`Camera`/`Animation`/`Puppet`, and the `Moments` cue pair) lives
+  EXCLUSIVELY on an `ActionDef` entry, with no station-level default left to fall back to. The
+  four worker-presentation groups nest under one `Worker` group (how the person looks doing this)
+  and the two cue presentations under one `Moments` group (`Cycle`/`Completion` - what it sounds
+  and looks like, at two times), so an action reads as roughly eight concerns rather than fourteen
+  flat siblings. Two
   actions that used to share a station-level default now share by REFERENCE - both `Ref` the same
   standalone `ActionAsset`, or both name the same native `Parent` between `ActionAsset`s - never by
   implicit fallback. Selection stays the station's `Actions[]` AUTHORED ORDER (the first action
@@ -488,9 +487,15 @@ as shipped, not a change to something previously released.
   probabilistic output moved to the loot layer.** `Roll.Grants.BonusOutputCopies` is deleted
   outright (it granted N copies of the WHOLE produced stack, so a station whose yield already paid
   4 planks silently handed out 4 more for a leaf reading "+1", with the two numbers living in
-  different files under different concept names); its replacement, `Roll.Grants.OutputItems` (an
-  `Integer`), is ADDITIVE - N extra units of the cycle's own primary output, directly comparable to
-  `Yield`'s own number because both count the same item. A `Roll` in an action's own `Bonus` decides
+  different files under different concept names); its replacement, `Roll.Grants.OutputItems` (a
+  `Double`), is ADDITIVE - extra units of the cycle's own primary output, directly comparable to
+  `Yield`'s own number because both count the same item. The amount is FRACTIONAL: the whole part is
+  granted every time and the leftover fraction is the chance of one more, so `1.5` pays one item
+  always plus a second half the time and averages exactly 1.5. Everything a cycle grants is summed
+  before one resolution, so two rolls paying `0.5` each average a whole item rather than rounding
+  twice. That is what lets a half-step tool tier be authored on the ladder floor that earns it (the
+  sawmill's Iron rung), instead of a roll banded to one quality tier beside the ladder, which cannot
+  compose with the rungs above it. A `Roll` in an action's own `Bonus` decides
   every bit of "sometimes you get extra", with the full `Roll` vocabulary (`Trigger`, `Conditions`,
   `Chance`, `Ladder`) available for it; `Yield` decides only "how much of the thing you made,
   guaranteed".
@@ -512,8 +517,8 @@ as shipped, not a change to something previously released.
   `StationStep.Repeat`, `Stamp.Stats.Caps.Budgets[]`).
 - **Other renames:** `StationAsset.Loot`/`ActionDef.Loot` is `ActionDef.Bonus` (an action's whole
   "what else a cycle hands over" group now lives beside its `Recipe`, never on the station);
-  the action/station `Presentation` group is `Cycle` (so it pairs with its `Completion` sibling and
-  both name their moment); `Presentation.Sound` is `Sounds[]` (played in authored order - a thud
+  an action's `Presentation` group is its `Moments.Cycle` (so it pairs with its `Moments.Completion`
+  sibling and both name their moment); `Presentation.Sound` is `Sounds[]` (played in authored order - a thud
   plus a chime is two entries; deliberately not promoted to `[{EventId, Volume, Pitch}]`, which the
   sound primitive cannot honour); `Roll.Grants.DropList` is `DropLists[]` (each entry rolled
   independently, so a guaranteed common table plus a rare one is two entries); `Tool

@@ -16,9 +16,10 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  *
  * <p><b>Concern boundary:</b> {@code Yield} decides how much of the thing you MADE - deterministic,
  * four leaves, nothing hidden. A Roll decides what ELSE the cycle handed over: drop lists, commands,
- * native effects, contribution posts, and {@code Grants.OutputItems} (N ADDITIVE items of that same
- * primary output). Additive is the load-bearing word: the two numbers are directly comparable, so a
- * Roll can never silently MULTIPLY a quantity authored in another file.
+ * native effects, contribution posts, and {@code Grants.OutputItems} (ADDITIVE items of that same
+ * primary output, fractional so a half-step tier is authorable). Additive is the load-bearing word:
+ * the two numbers are directly comparable, so a Roll can never silently MULTIPLY a quantity authored
+ * in another file.
  *
  * <p><b>Weighted-factor unification:</b>
  * <ul>
@@ -298,16 +299,21 @@ public final class Roll {
         @Nullable protected String[] commands;
         @Nullable protected EffectRef[] effects;
         @Nullable protected Contribution[] contributions;
-        @Nullable protected Integer outputItems;
+        @Nullable protected Double outputItems;
 
         public static final BuilderCodec<Grants> CODEC = BuilderCodec.builder(Grants.class, Grants::new)
-                .appendInherited(new KeyedCodec<>("OutputItems", Codec.INTEGER, false),
+                .appendInherited(new KeyedCodec<>("OutputItems", Codec.DOUBLE, false),
                         (o, v) -> o.outputItems = v, o -> o.outputItems, (o, p) -> o.outputItems = p.outputItems)
-                .documentation("N ADDITIVE items of the cycle's own primary output, handed over on top of the deterministic Yield "
-                        + "quantity. Additive, never a multiplier on the produced stack, so this number and the Yield number "
+                .documentation("ADDITIVE items of the cycle's own primary output, handed over on top of the deterministic Yield "
+                        + "quantity. FRACTIONAL: the whole part is granted every time and the fraction left over is the chance "
+                        + "of ONE more, so 1.5 pays one item always plus a second half the time and averages exactly 1.5 per "
+                        + "cycle. That makes a half-step tier authorable directly on the ladder floor that earns it, instead of "
+                        + "needing a separate banded roll beside it. Everything a single cycle grants is summed FIRST and "
+                        + "resolved once, so two rolls paying 0.5 each average one whole item rather than rounding twice. "
+                        + "Additive, never a multiplier on the produced stack, so this number and the Yield number "
                         + "stay directly comparable even though they are authored in different groups. Cycle trigger ONLY (a "
                         + "Completion-trigger roll has no cycle output to add to; the validator warns and the engine drops it).")
-                .addValidator(CodecWarnValidators.positive("Roll.Grants.OutputItems should be positive; a zero/negative count grants nothing.")).add()
+                .addValidator(CodecWarnValidators.positive("Roll.Grants.OutputItems should be positive; a zero/negative amount grants nothing.")).add()
                 .appendInherited(new KeyedCodec<>("DropLists",
                                 new ArrayCodec<>(Codec.STRING, String[]::new), false),
                         (o, v) -> o.dropLists = v, o -> o.dropLists, (o, p) -> o.dropLists = p.dropLists)
@@ -356,7 +362,7 @@ public final class Roll {
 
         /** Convenience for the additive-output authoring shape (fixtures / Java-side construction). */
         @Nonnull
-        public static Grants ofOutputItems(@Nullable Integer outputItems) {
+        public static Grants ofOutputItems(@Nullable Double outputItems) {
             Grants g = new Grants();
             g.outputItems = outputItems;
             return g;
@@ -397,17 +403,23 @@ public final class Roll {
 
         /**
          * Extra items of the CYCLE's own primary output, granted additively on top of the
-         * deterministic {@code Yield} quantity; null/non-positive = none. Meaningful only under a
-         * {@code Cycle} trigger.
+         * deterministic {@code Yield} quantity; null/non-positive = none. FRACTIONAL: the whole part
+         * is granted every time and the fraction left over is the chance of one more, so {@code 1.5}
+         * pays one item always plus a second half the time. Meaningful only under a {@code Cycle}
+         * trigger.
          */
         @Nullable
-        public Integer getOutputItems() {
+        public Double getOutputItems() {
             return outputItems;
         }
 
-        /** Reader-defaulted {@link #getOutputItems()} (0 when absent or non-positive). */
-        public int effectiveOutputItems() {
-            return outputItems != null && outputItems > 0 ? outputItems : 0;
+        /**
+         * Reader-defaulted {@link #getOutputItems()} (0 when absent, non-positive, or non-finite).
+         * A TALLY, not a granted count: every value a cycle collects is summed and the whole
+         * fractional total is resolved to items ONCE, by {@code loot.OutputItemResolver}.
+         */
+        public double effectiveOutputItems() {
+            return outputItems != null && Double.isFinite(outputItems) && outputItems > 0.0 ? outputItems : 0.0;
         }
 
         /** True when no leaf is authored (an empty group is a no-op, same as an absent one). */
@@ -416,7 +428,7 @@ public final class Roll {
                     && (commands == null || commands.length == 0)
                     && (effects == null || effects.length == 0)
                     && (contributions == null || contributions.length == 0)
-                    && effectiveOutputItems() <= 0;
+                    && effectiveOutputItems() <= 0.0;
         }
     }
 }

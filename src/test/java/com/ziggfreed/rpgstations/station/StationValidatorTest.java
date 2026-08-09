@@ -491,8 +491,8 @@ public class StationValidatorTest {
         Roll roll = Roll.of(null, null, null,
                 Roll.Ladder.of(new FactorRef[] {FactorRef.of("yourmod:axis", null, 1.0)},
                         new Roll.Ladder.Floor[] {
-                                Roll.Ladder.Floor.of(5.0, Roll.Grants.ofOutputItems(1), null),
-                                Roll.Ladder.Floor.of(5.0, Roll.Grants.ofOutputItems(2), null)}),
+                                Roll.Ladder.Floor.of(5.0, Roll.Grants.ofOutputItems(1.0), null),
+                                Roll.Ladder.Floor.of(5.0, Roll.Grants.ofOutputItems(2.0), null)}),
                 null);
         StationAsset a = station("dupladder", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
@@ -501,26 +501,38 @@ public class StationValidatorTest {
 
     @Test
     void outputItemsOnACompletionRoll_flagged() {
-        Roll roll = Roll.of(Roll.TRIGGER_COMPLETION, null, null, null, Roll.Grants.ofOutputItems(2));
+        Roll roll = Roll.of(Roll.TRIGGER_COMPLETION, null, null, null, Roll.Grants.ofOutputItems(2.0));
         StationAsset a = station("badtrigger", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
         assertTrue(codes(validate(a)).contains("LOOT_OUTPUT_ITEMS_WRONG_TRIGGER"),
                 "a Completion roll has no cycle output to add items to, so the grant is dropped");
     }
 
+    /**
+     * The amount is fractional, so an amount BELOW one whole item is still a real grant and still
+     * carries every trigger rule. A check that truncated to an int would silently stop warning here.
+     */
+    @Test
+    void aFractionOnlyOutputItemsAmountOnACompletionRoll_isStillFlagged() {
+        Roll roll = Roll.of(Roll.TRIGGER_COMPLETION, null, null, null, Roll.Grants.ofOutputItems(0.5));
+        StationAsset a = station("badtriggerfraction", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withBonus(LootRef.of(null, new Roll[] {roll})));
+        assertTrue(codes(validate(a)).contains("LOOT_OUTPUT_ITEMS_WRONG_TRIGGER"));
+    }
+
     @Test
     void outputItemsOnACycleRoll_isClean() {
-        Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2));
+        Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0));
         StationAsset a = station("goodtrigger", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
         assertFalse(codes(validate(a)).contains("LOOT_OUTPUT_ITEMS_WRONG_TRIGGER"));
         assertFalse(codes(validate(a)).contains("LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT"),
-                "a recipe-driven action HAS a cycle output to add copies of");
+                "a recipe-driven action HAS a cycle output to add items to");
     }
 
     @Test
     void outputItemsOnAStepsActionBonus_flagged() {
-        Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2));
+        Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0));
         StationAsset a = station("ritualbonus", ActionDef.of("Enhance")
                 .withSteps(new StationStep[] {StationStep.of("Beat")})
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
@@ -530,7 +542,7 @@ public class StationValidatorTest {
 
     @Test
     void outputItemsOnAStepRollPhase_flagged() {
-        Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2));
+        Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0));
         StationAsset a = station("ritualstep", ActionDef.of("Enhance")
                 .withSteps(new StationStep[] {
                         StationStep.of("Beat").withRoll(LootRef.of(null, new Roll[] {roll}))}));
@@ -547,7 +559,7 @@ public class StationValidatorTest {
                 "{ \"Steps\": [ { \"Id\": \"Beat\", \"Duration\": { \"Ms\": 100 } } ] }");
         ActionCatalog.getInstance().fold(Map.of("ritualfixture", base), true);
         try {
-            Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2));
+            Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0));
             StationAsset a = station("refbonus", ActionDef.of("Enhance", "ritualfixture")
                     .withBonus(LootRef.of(null, new Roll[] {roll})));
             assertTrue(codes(validate(a)).contains("LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT"),
@@ -566,7 +578,7 @@ public class StationValidatorTest {
                 + " \"Output\": [{ \"ItemId\": \"Fixture_Plank\", \"Quantity\": 2 }] } ] } }");
         ActionCatalog.getInstance().fold(Map.of("millfixture", base), true);
         try {
-            Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2));
+            Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0));
             StationAsset a = station("refmill", ActionDef.of("Mill", "millfixture")
                     .withBonus(LootRef.of(null, new Roll[] {roll})));
             assertFalse(codes(validate(a)).contains("LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT"));
