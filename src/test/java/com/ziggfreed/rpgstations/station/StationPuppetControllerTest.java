@@ -153,7 +153,7 @@ class StationPuppetControllerTest {
     @Test
     void puppetSwing_emoteClipAuthored_staysOnEmoteSlot() {
         // EmoteId is the opt-in full-body override, so it wins the slot when authored.
-        assertFalse(StationPuppetController.useActionSlotForPuppetSwing("RPG_Emote_Saw"));
+        assertFalse(StationPuppetController.useActionSlotForPuppetSwing("Fixture_Work_Emote"));
     }
 
     @Test

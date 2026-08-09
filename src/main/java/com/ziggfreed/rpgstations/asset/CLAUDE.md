@@ -23,7 +23,7 @@ resolution section for the engine half.
 - **Every id is authored in the same casing as the thing it names.** An OWN-asset id is the
   filename, so it is PascalCase (`"Lootables": ["SawmillFinds"]`, `"Target": {"Station": "Sawmill"}`,
   `"Ref": "PrepFish"`, `"Pool": "AnvilWeaponPool"`); a NATIVE id is whatever the native asset is
-  called (`"DropLists": ["RPG_Station_Sawmill_T1"]`, `"EmoteId": "RPG_Emote_Saw"`). Internally every
+  called (`"DropLists": ["RPG_Station_Sawmill_T1"]`, `"EffectId": "RPG_Station_Hold"`). Internally every
   own-asset id canonicalizes to lowercase and every reference matches CASE-INSENSITIVELY, so a
   casing slip never breaks content - the convention is for readability, not for the matcher. The one
   deliberate exception is `RpgStationsSettingsAsset.SummaryHud.Position`, a foreign preset id that

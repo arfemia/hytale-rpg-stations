@@ -1,0 +1,29 @@
+{
+  "$Comment": "The sawmill's deep-session find table (cycle 50 onward of SawmillFinds' ladder): a winning roll nearly always pays - 95 percent for 2 to 4 life essence, a rare 2 percent jackpot of one CONCENTRATED life essence (the trophy the tier's celebration cues announce), and only 3 percent nothing. The scarcity lives in the Roll's own 15 percent per-cycle chance, not inside this table. Weights sum to 100. A find is deliberately a DIFFERENT item from the cycle's own planks - extra planks are the station's Grants.OutputItems concern, never a drop table's.",
+  "Container": {
+    "Type": "Choice",
+    "RollsMin": 1,
+    "RollsMax": 1,
+    "Containers": [
+      { "Type": "Empty", "Weight": 3 },
+      {
+        "Type": "Single",
+        "Weight": 95,
+        "Item": {
+          "ItemId": "Ingredient_Life_Essence",
+          "QuantityMin": 2,
+          "QuantityMax": 4
+        }
+      },
+      {
+        "Type": "Single",
+        "Weight": 2,
+        "Item": {
+          "ItemId": "Ingredient_Life_Essence_Concentrated",
+          "QuantityMin": 1,
+          "QuantityMax": 1
+        }
+      }
+    ]
+  }
+}

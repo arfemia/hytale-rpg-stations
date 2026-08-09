@@ -6,5 +6,4 @@
 # nouvelles pour les EmoteAssets propres à ce mod (Server/Emote/*.json) et ne remplace jamais
 # une clé appartenant au client.
 
-emotes.RPG_Emote_Saw.name = Sciage
 emotes.RPG_Emote_Knife.name = Écaillage de Poisson

@@ -54,7 +54,7 @@ lives on the action entry itself:
           "EffectId": "RPG_Station_Hold",
           "InterruptOnDamage": true
         },
-        "Animation": { "EmoteId": "RPG_Emote_Saw" }
+        "Animation": { "Swing": { "IntervalMs": 933 } }
       },
       "Moments": {
         "Cycle": { "Sounds": ["SFX_Wood_Break"] }

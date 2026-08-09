@@ -46,9 +46,11 @@ still in git**, just unreferenced. Restoring means putting those three sites bac
   and emote keys. An unreferenced lang key is invisible at runtime, so holding them back would have
   bought nothing and risked losing translation work. `i18n/RpgStationsLangKeys.java` and
   `LangFileIntegrityTest` therefore need no change either, in either direction.
-- Shared assets the Sawmill also uses: `Emote/RPG_Emote_Saw.json`,
-  `Entity/Effects/RPG/RPG_Station_Hold.json`, `Item/RootInteractions/RPG_Station_Retrieve.json`,
-  `RpgStations/Settings/Settings.json`, and every `Common/UI/` page.
+- Shared assets the Sawmill also uses: `Entity/Effects/RPG/RPG_Station_Hold.json`,
+  `Item/RootInteractions/RPG_Station_Retrieve.json`, `RpgStations/Settings/Settings.json`, and
+  every `Common/UI/` page. (`Emote/RPG_Emote_Saw.json` no longer exists: it merely wrapped the
+  vanilla hatchet Chop clip the Action-slot work animation now plays natively, so it was deleted
+  outright rather than held back.)
 
 ## Companion change in the stations pack
 

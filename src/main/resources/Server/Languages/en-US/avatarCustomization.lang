@@ -5,5 +5,4 @@
 # into a namespace, so this file adds ONLY brand-new keys for this mod's own EmoteAssets
 # (Server/Emote/*.json) and never overrides a client-owned one.
 
-emotes.RPG_Emote_Saw.name = Sawing
 emotes.RPG_Emote_Knife.name = Scaling Fish

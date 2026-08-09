@@ -122,9 +122,9 @@ cue. The Anvil's hammer-strike ritual is three beats followed by the stamp:
 
 ```json
 "Steps": [
-  { "Id": "strike1", "Duration": { "Ms": 650 }, "Puppet": { "Clip": "RPG_Emote_Saw" },
+  { "Id": "strike1", "Duration": { "Ms": 650 }, "Puppet": { "Clip": "Your_Hammer_Emote" },
     "Presentation": { "Sounds": ["SFX_Metal_Hit"], "Particles": [ { "SystemId": "Block_Gem_Sparks" } ] } },
-  { "Id": "strike2", "Duration": { "Ms": 650 }, "Puppet": { "Clip": "RPG_Emote_Saw" },
+  { "Id": "strike2", "Duration": { "Ms": 650 }, "Puppet": { "Clip": "Your_Hammer_Emote" },
     "Presentation": { "Sounds": ["SFX_Metal_Hit"], "Particles": [ { "SystemId": "Block_Gem_Sparks" } ] } },
   { "Id": "settle",  "Duration": { "Ms": 900 } },
   { "Id": "stamp",   "Duration": { "Ms": 800 }, "Puppet": { "Prop": { "Source": "None" } },
