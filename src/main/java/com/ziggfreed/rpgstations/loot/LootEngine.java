@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.DoubleSupplier;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -46,8 +47,14 @@ import com.ziggfreed.rpgstations.util.Log;
  * ground item at the station block instead of being discarded (never fails or stops the cycle).
  * {@link GrantResult} tallies what actually landed (inventory OR
  * ground) so the caller ({@code StationService}) can fold it into its own session item ledger and
- * play the reached floors' presentations through its OWN {@code emitMoment} choke point (this
+ * play every EARNED celebration cue through its OWN {@code emitMoment} choke point (this
  * class stays presentation-agnostic; it only reports WHAT to play).
+ *
+ * <p><b>Earned, not merely reached</b> - the schema's smart-cue rule (see {@link Roll}) is enforced
+ * HERE, because only this class knows what a grant actually produced: a cue authored beside a
+ * grants group rides out only once applying that group genuinely handed something over, while a cue
+ * with no grants beside it is pure presentation and always rides. That is why
+ * {@link #applyGrants} reports a boolean rather than returning void.
  */
 public final class LootEngine {
 
@@ -73,7 +80,18 @@ public final class LootEngine {
             return dropListItems;
         }
 
-        /** Every reached floor's non-null {@code Presentation}, in roll-evaluation order. */
+        /**
+         * Every EARNED celebration cue this pass collected, in roll-evaluation order - both
+         * altitudes ride this one transport: a {@link Roll#getPresentation()} whose roll hit, and a
+         * reached {@link Roll.Ladder.Floor#getPresentation()}, with the roll-level cue first when
+         * one roll carries both.
+         *
+         * <p><b>Earned is the load-bearing word</b> (the schema's smart-cue rule, see
+         * {@link Roll}): a cue with NO grants group of its own is pure presentation and rides here
+         * on the plain hit/reach, while a cue authored BESIDE grants rides only when applying those
+         * grants actually produced something. A referenced drop table whose own internal weights
+         * resolve to nothing therefore lands no cue at all, instead of celebrating an empty hand.
+         */
         @Nonnull
         public List<Presentation> getFloorPresentations() {
             return floorPresentations;
@@ -195,65 +213,133 @@ public final class LootEngine {
      * {@code store}/{@code blockX,Y,Z} are the world-drop fallback target (a
      * {@code null} store degrades to "log and lose it" only when the caller
      * genuinely cannot resolve one - every live call site has a store).
+     *
+     * <p>The engine handles are folded into the four seams the pass actually consumes (factor
+     * lookup, chance sample, command placeholders, drop-table granter) and handed to the core
+     * below; this method is the live adapter, nothing more.
      */
     @Nonnull
     public static GrantResult rollAndGrant(@Nonnull List<Roll> rolls, @Nonnull String trigger,
             @Nonnull FactorSnapshot snapshot, @Nonnull Player player,
             @Nullable PlayerRef playerRef, @Nonnull String stationId, @Nonnull String actionId, int cycleIndex,
             @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
+        CommandRewardExecutor.Placeholders placeholders = playerRef != null
+                ? CommandRewardExecutor.Placeholders.of(playerRef, stationId, actionId, cycleIndex)
+                : null;
+        return rollAndGrant(rolls, trigger, snapshot::resolve,
+                () -> ThreadLocalRandom.current().nextDouble(100.0), placeholders,
+                id -> rollAndGrantDropList(id, player, store, blockX, blockY, blockZ));
+    }
+
+    /**
+     * The seam-driven core of the pass, with every engine handle already reduced to an injected
+     * function: {@code lookup} resolves a factor, {@code chanceRoll} supplies a fresh {@code [0,100)}
+     * sample, {@code placeholders} substitutes a command grant (null = no command can run), and
+     * {@code dropLists} rolls-and-grants one native table. Package-visible so the smart-cue rule can
+     * be exercised end to end against a PINNED table outcome rather than live randomness.
+     */
+    @Nonnull
+    static GrantResult rollAndGrant(@Nonnull List<Roll> rolls, @Nonnull String trigger,
+            @Nonnull RollEvaluator.FactorLookup lookup, @Nonnull DoubleSupplier chanceRoll,
+            @Nullable CommandRewardExecutor.Placeholders placeholders, @Nonnull DropListGranter dropLists) {
         GrantResult result = new GrantResult();
         // One-shot contributions ride the cycle-completed event, and OutputItems adds to the cycle's
         // own output - both exist only on a Cycle-trigger pass.
         boolean cycleTrigger = Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger);
-        CommandRewardExecutor.Placeholders placeholders = playerRef != null
-                ? CommandRewardExecutor.Placeholders.of(playerRef, stationId, actionId, cycleIndex)
-                : null;
         for (Roll roll : rolls) {
             if (roll == null || !trigger.equalsIgnoreCase(roll.effectiveTrigger())) {
                 continue;
             }
-            RollEvaluator.Outcome outcome = RollEvaluator.evaluate(roll, snapshot::resolve,
-                    () -> ThreadLocalRandom.current().nextDouble(100.0));
+            RollEvaluator.Outcome outcome = RollEvaluator.evaluate(roll, lookup, chanceRoll);
             if (!outcome.isHit()) {
                 continue;
             }
-            applyGrants(outcome.getTopGrants(), player, placeholders, result, store, blockX, blockY,
-                    blockZ, cycleTrigger);
-            applyGrants(outcome.getFloorGrants(), player, placeholders, result, store, blockX, blockY,
-                    blockZ, cycleTrigger);
-            // A floor's Presentation plays whenever the floor is REACHED (design 4.5.1), regardless
-            // of whether that floor also authored Grants (the validator separately flags a
-            // Grants-less floor as a content mistake - it does not silence the moment).
-            if (outcome.getFloorPresentation() != null) {
-                result.floorPresentations.add(outcome.getFloorPresentation());
-            }
+            boolean topProduced = applyGrants(outcome.getTopGrants(), dropLists, placeholders, result, cycleTrigger);
+            boolean floorProduced = applyGrants(outcome.getFloorGrants(), dropLists, placeholders, result, cycleTrigger);
+            // THE SMART-CUE RULE (see Roll's javadoc), applied at both altitudes against each cue's
+            // OWN grants group: a cue with no grants beside it is pure presentation and plays on the
+            // plain hit/reach, while a cue authored beside grants plays only once those grants
+            // genuinely produced something. That is what keeps a referenced drop table whose own
+            // internal weights rolled Empty from firing a jackpot fanfare over an empty hand.
+            collectEarnedCue(result, roll.getPresentation(), outcome.getTopGrants(), topProduced);
+            collectEarnedCue(result, outcome.getFloorPresentation(), outcome.getFloorGrants(), floorProduced);
         }
         return result;
     }
 
-    // Package-visible for the effect-collection fixture test (an effects-only Grants never touches
-    // player/store, so the test drives it with null engine handles - see LootEngineEffectGrantTest).
-    static void applyGrants(@Nullable Roll.Grants grants, @Nonnull Player player,
-            @Nullable CommandRewardExecutor.Placeholders placeholders,
-            @Nonnull GrantResult result, @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ,
-            boolean cycleTrigger) {
-        if (grants == null) {
+    /**
+     * The smart-cue decision: collect {@code cue} when it is a PURE cue (its paired {@code grants}
+     * group is null or authors nothing) or when applying that group actually {@code produced}
+     * something. Shared by the roll-level and floor-level altitudes so one rule governs both.
+     */
+    private static void collectEarnedCue(@Nonnull GrantResult result, @Nullable Presentation cue,
+            @Nullable Roll.Grants grants, boolean produced) {
+        if (cue == null) {
             return;
         }
+        if (grants == null || grants.isEmpty() || produced) {
+            result.floorPresentations.add(cue);
+        }
+    }
+
+    /**
+     * The injectable native drop-table boundary: rolls ONE {@code ItemDropList} and grants every
+     * stack it produced, reporting what actually landed (item id -&gt; quantity) so an EMPTY answer
+     * is the engine's own "that table paid nothing this time". Production passes a lambda over
+     * {@link #rollAndGrantDropList}; a fixture test passes a fake, which is what makes the smart-cue
+     * rule testable against a PINNED table outcome instead of live randomness (the same
+     * injected-seam discipline {@link RollEvaluator}'s chance sample and {@link OutputItemResolver}'s
+     * fraction sample already use).
+     */
+    @FunctionalInterface
+    interface DropListGranter {
+        @Nonnull
+        Map<String, Integer> grant(@Nonnull String dropListId);
+    }
+
+    /**
+     * Applies one {@code Grants} group and reports whether it PRODUCED anything - the measurement
+     * the smart-cue rule reads. Produced means: a drop-table item genuinely landed after that
+     * table's own internal weights resolved, a command ran, an effect was collected, an
+     * {@code OutputItems} amount was tallied, or a contribution was collected. An absent, empty, or
+     * entirely-skipped group produces nothing.
+     *
+     * <p>The player/store/block handles fold into the {@code dropLists} seam rather than riding as
+     * five more parameters: they exist for exactly one leaf, and closing over them there is what
+     * lets a fixture test drive this method with no engine handles at all.
+     */
+    static boolean applyGrants(@Nullable Roll.Grants grants, @Nonnull DropListGranter dropLists,
+            @Nullable CommandRewardExecutor.Placeholders placeholders,
+            @Nonnull GrantResult result, boolean cycleTrigger) {
+        if (grants == null) {
+            return false;
+        }
+        boolean produced = false;
         // Grants.OutputItems: TALLY the additive extra items of the cycle's own primary output for
         // the caller to grant (it owns the item id). Summed as a FRACTIONAL amount and resolved to
         // whole items once per cycle at the caller, never rounded per roll. Skipped entirely outside
         // a Cycle trigger.
         if (cycleTrigger) {
-            result.outputItems += grants.effectiveOutputItems();
+            double tally = grants.effectiveOutputItems();
+            if (tally > 0.0) {
+                result.outputItems += tally;
+                produced = true;
+            }
         }
         // Grants.DropLists[]: each table rolls INDEPENDENTLY, in authored order, so "a guaranteed
-        // common table plus a rare one" is two entries rather than a synthetic merged asset.
-        String[] dropLists = grants.getDropLists();
-        if (dropLists != null) {
-            for (String dropListId : dropLists) {
-                if (dropListId != null && !dropListId.isBlank()) {
-                    grantDropList(player, dropListId, result, store, blockX, blockY, blockZ);
+        // common table plus a rare one" is two entries rather than a synthetic merged asset. An
+        // EMPTY answer is a real outcome, not a failure: the table's own weighted container chose
+        // its Empty branch, and nothing was produced for a cue to celebrate.
+        String[] tables = grants.getDropLists();
+        if (tables != null) {
+            for (String dropListId : tables) {
+                if (dropListId == null || dropListId.isBlank()) {
+                    continue;
+                }
+                Map<String, Integer> landed = dropLists.grant(dropListId);
+                for (Map.Entry<String, Integer> e : landed.entrySet()) {
+                    result.dropListItems.merge(e.getKey(), e.getValue(), Integer::sum);
+                    produced = true;
                 }
             }
         }
@@ -265,6 +351,7 @@ public final class LootEngine {
                 }
                 CommandRewardExecutor.run(raw, placeholders);
                 result.commandsRun++;
+                produced = true;
             }
         }
         // Grants.Effects[] (decision 51d): COLLECT every authored native-effect ref so the caller
@@ -275,6 +362,7 @@ public final class LootEngine {
             for (EffectRef effect : effects) {
                 if (effect != null && effect.hasId()) {
                     result.effectGrants.add(effect);
+                    produced = true;
                 }
             }
         }
@@ -285,36 +373,46 @@ public final class LootEngine {
             for (Contribution post : posts) {
                 if (post != null && post.isPostable()) {
                     result.contributions.add(post);
+                    produced = true;
                 }
             }
         }
+        return produced;
     }
 
     /**
-     * Roll {@code dropListId} once via the native {@code ItemModule.getRandomItemDrops} (pure,
-     * world-thread-safe; frequency control lives entirely in the droplist's own weighted
-     * container) and grant every resulting stack hotbar-first then backpack storage then
-     * drop-at-block (round-5, via {@code util.ItemGrantUtil}).
+     * The production {@link DropListGranter}: roll {@code dropListId} once via the native
+     * {@code ItemModule.getRandomItemDrops} (pure, world-thread-safe; frequency control lives
+     * entirely in the droplist's own weighted container) and grant every resulting stack
+     * hotbar-first then backpack storage then drop-at-block (via {@code util.ItemGrantUtil}).
+     *
+     * <p>Returns what actually LANDED (item id -&gt; quantity). An empty answer covers all three
+     * ways a table can pay nothing - it rolled its own Empty branch, the roll itself failed, or
+     * every stack failed to grant - and the caller reads that as "produced nothing", which is what
+     * keeps a celebration cue silent over an empty hand.
      */
-    private static void grantDropList(@Nonnull Player player, @Nonnull String dropListId,
-            @Nonnull GrantResult result, @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
+    @Nonnull
+    private static Map<String, Integer> rollAndGrantDropList(@Nonnull String dropListId, @Nonnull Player player,
+            @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
         List<ItemStack> drops;
         try {
             drops = ItemModule.get().getRandomItemDrops(dropListId);
         } catch (Throwable t) {
             Log.fine("STATION loot droplist roll failed for '" + dropListId + "': " + t.getMessage());
-            return;
+            return Map.of();
         }
         if (drops == null || drops.isEmpty()) {
-            return;
+            return Map.of();
         }
+        Map<String, Integer> landed = new LinkedHashMap<>();
         for (ItemStack stack : drops) {
             try {
                 ItemGrantUtil.grant(player, stack, store, blockX, blockY, blockZ);
-                result.dropListItems.merge(stack.getItemId(), stack.getQuantity(), Integer::sum);
+                landed.merge(stack.getItemId(), stack.getQuantity(), Integer::sum);
             } catch (Throwable t) {
                 Log.fine("STATION loot droplist item grant failed: " + t.getMessage());
             }
         }
+        return landed;
     }
 }

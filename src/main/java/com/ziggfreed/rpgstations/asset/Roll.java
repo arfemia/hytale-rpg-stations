@@ -11,8 +11,9 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 
 /**
  * ONE conditional-lootable roll: gate ({@code Conditions}/{@code Chance}) + payoff
- * ({@code Ladder}/{@code Grants}), shared by {@link LootRef#getRolls()} (inline, wherever a
- * {@link LootRef} is authored) and {@link LootableAsset#getRolls()} (a referenced table).
+ * ({@code Ladder}/{@code Grants}) plus an optional celebration ({@code Presentation}), shared by
+ * {@link LootRef#getRolls()} (inline, wherever a {@link LootRef} is authored) and
+ * {@link LootableAsset#getRolls()} (a referenced table).
  *
  * <p><b>Concern boundary:</b> {@code Yield} decides how much of the thing you MADE - deterministic,
  * four leaves, nothing hidden. A Roll decides what ELSE the cycle handed over: drop lists, commands,
@@ -44,7 +45,8 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  *                  "Floors": [ { "Min": 50,  "Grants": { "DropLists": ["SawmillFinds_T1"] } },
  *                              { "Min": 100, "Grants": { "DropLists": ["SawmillFinds_T2"] },
  *                                "Presentation": { "Sounds": ["SFX_Coins_Land"] } } ] },
- *   "Grants":    { "DropLists": [ "..." ], "Commands": [ "give {player} ..." ] }
+ *   "Grants":    { "DropLists": [ "..." ], "Commands": [ "give {player} ..." ] },
+ *   "Presentation": { "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player"] }
  * }
  * }</pre>
  *
@@ -52,6 +54,17 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  * reward routes through its OWN {@link Ladder.Floor#getGrants()}); top-level {@link #getGrants()}
  * AND the reached floor's grants BOTH apply; a present, FAILING {@link Chance} means nothing fires
  * (the {@link Ladder} is never evaluated).
+ *
+ * <p><b>The smart-cue rule</b> (binding at BOTH presentation altitudes - {@link #getPresentation()}
+ * here and {@link Ladder.Floor#getPresentation()}): a presentation never celebrates over nothing.
+ * Each one is paired with its OWN grants group - the roll's top-level {@link #getGrants()} for the
+ * roll-level cue, the floor's own {@link Ladder.Floor#getGrants()} for a floor cue. With NO grants
+ * authored beside it, the presentation is a pure cue and plays on the hit (or on the floor being
+ * reached), exactly as written. With grants authored, it plays only when applying them actually
+ * PRODUCED something: an item that a referenced drop table's own internal weights really handed
+ * over, a command run, an effect applied, an {@code OutputItems} amount tallied, or a contribution
+ * posted. A drop table whose internal weights resolve to nothing therefore stays silent instead of
+ * firing a jackpot fanfare over an empty hand.
  */
 public final class Roll {
 
@@ -64,6 +77,7 @@ public final class Roll {
     @Nullable protected Chance chance;
     @Nullable protected Ladder ladder;
     @Nullable protected Grants grants;
+    @Nullable protected Presentation presentation;
 
     public static final BuilderCodec<Roll> CODEC = BuilderCodec.builder(Roll.class, Roll::new)
             .appendInherited(new KeyedCodec<>("Trigger", Codec.STRING, false),
@@ -82,6 +96,16 @@ public final class Roll {
             .appendInherited(new KeyedCodec<>("Grants", Grants.CODEC, false),
                     (o, v) -> o.grants = v, o -> o.grants, (o, p) -> o.grants = p.grants)
             .documentation("Top-level rewards granted when the roll fires (in addition to any reached Ladder floor's Grants).").add()
+            .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
+                    (o, v) -> o.presentation = v, o -> o.presentation, (o, p) -> o.presentation = p.presentation)
+            .documentation("Played at the station block on the rare-find moment when this roll HITS (its Conditions and "
+                    + "Chance both passed), so a plain chance roll can carry its own celebration without a one-floor "
+                    + "Ladder standing in for it. Smart cue: with no top-level Grants authored beside it this is a pure "
+                    + "cue and always plays on the hit; with Grants authored it plays only when applying them actually "
+                    + "produced something (an item a referenced drop table's own internal weights really handed over, a "
+                    + "command run, an effect applied, an OutputItems amount tallied, or a contribution posted), so a "
+                    + "table that resolves to nothing never fires a fanfare over an empty hand. A reached Ladder floor's "
+                    + "own Presentation is judged the same way against that floor's own Grants, and both can play.").add()
             .build();
 
     public Roll() {
@@ -90,12 +114,20 @@ public final class Roll {
     @Nonnull
     public static Roll of(@Nullable String trigger, @Nullable Condition[] conditions, @Nullable Chance chance,
             @Nullable Ladder ladder, @Nullable Grants grants) {
+        return of(trigger, conditions, chance, ladder, grants, null);
+    }
+
+    /** As above, plus the roll-level celebration cue (see the smart-cue rule on this class). */
+    @Nonnull
+    public static Roll of(@Nullable String trigger, @Nullable Condition[] conditions, @Nullable Chance chance,
+            @Nullable Ladder ladder, @Nullable Grants grants, @Nullable Presentation presentation) {
         Roll r = new Roll();
         r.trigger = trigger;
         r.conditions = conditions;
         r.chance = chance;
         r.ladder = ladder;
         r.grants = grants;
+        r.presentation = presentation;
         return r;
     }
 
@@ -122,6 +154,18 @@ public final class Roll {
     @Nullable
     public Grants getGrants() {
         return grants;
+    }
+
+    /**
+     * The roll-level celebration, played on the rare-find moment when this roll HITS - the plain-
+     * chance sibling of a {@link Ladder.Floor#getPresentation()}, so a roll with no tiers to climb
+     * needs no degenerate one-floor ladder to carry a cue. Judged by the smart-cue rule on this
+     * class against this roll's OWN {@link #getGrants()}: a pure cue (no grants beside it) plays on
+     * every hit, and a granting one plays only when the grant actually produced something.
+     */
+    @Nullable
+    public Presentation getPresentation() {
+        return presentation;
     }
 
     /** {@link #trigger}, reader-defaulted to {@link #TRIGGER_CYCLE} when null/blank/unrecognized. */
@@ -255,7 +299,13 @@ public final class Roll {
                     .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
                             (o, v) -> o.presentation = v, o -> o.presentation,
                             (o, p) -> o.presentation = p.presentation)
-                    .documentation("Played on the rare-find moment when this floor is reached and grants something.").add()
+                    .documentation("Played at the station block on the rare-find moment when this floor is REACHED. Smart "
+                            + "cue: with no Grants authored on this floor it is a pure cue and always plays on the reach; "
+                            + "with Grants authored it plays only when applying them actually produced something (an item a "
+                            + "referenced drop table's own internal weights really handed over, a command run, an effect "
+                            + "applied, an OutputItems amount tallied, or a contribution posted), so a table that resolves "
+                            + "to nothing never fires a fanfare over an empty hand. The roll's own top-level Presentation "
+                            + "is judged the same way against the roll's own Grants, and both can play.").add()
                     .build();
 
             @Nonnull
@@ -282,6 +332,12 @@ public final class Roll {
                 return grants;
             }
 
+            /**
+             * This floor's own celebration, played on the rare-find moment when the floor is
+             * reached. Judged by the smart-cue rule on {@link Roll} against THIS floor's own
+             * {@link #getGrants()}, independently of the roll-level cue: a pure cue always plays on
+             * the reach, and a granting one plays only when the grant actually produced something.
+             */
             @Nullable
             public Presentation getPresentation() {
                 return presentation;

@@ -1827,7 +1827,12 @@ public final class StationValidator {
 
         Roll.Grants topGrants = roll.getGrants();
         checkGrants(topGrants, label + ".Grants", id, trigger, noCycleOutput, dropListKnown, out);
-        boolean hasAnything = topGrants != null && !topGrants.isEmpty();
+        // The roll-level celebration gets the SAME native-ref coverage a floor's own cue has always
+        // had - one Presentation type, one check, whichever altitude it is authored at. A roll that
+        // ONLY carries a cue is legitimate (a pure flourish on a lucky moment), so it counts as
+        // authoring something and never trips the empty-roll warn below.
+        checkNativeRefs(roll.getPresentation(), label + ".Presentation", id, out);
+        boolean hasAnything = (topGrants != null && !topGrants.isEmpty()) || roll.getPresentation() != null;
 
         Roll.Ladder ladder = roll.getLadder();
         if (ladder != null) {
@@ -1938,16 +1943,26 @@ public final class StationValidator {
             }
             Double min = f.getMin();
             if (min == null || min <= 0.0) {
-                out.add(Finding.error(DOMAIN, "LOOT_LADDER_FLOOR_MISSING_MIN",
-                        fLabel + " has a null or nonpositive Min - this floor can never be reached", id));
+                // The shared ladder rule (loot/FactorLadder): Min reader-defaults to 0 and a
+                // Min <= 0 floor IS reachable - always, as the ladder's baseline tier. Info-only:
+                // legal and engine-honored, just worth a confirm that a baseline was intended.
+                out.add(Finding.info(DOMAIN, "LOOT_LADDER_FLOOR_MISSING_MIN",
+                        fLabel + " authors no positive Min - it defaults to 0 and is ALWAYS reached,"
+                                + " making it the ladder's baseline tier; confirm a baseline is"
+                                + " intended", id));
             } else if (!seenFloors.add(min)) {
                 out.add(Finding.warning(DOMAIN, "LOOT_LADDER_DUPLICATE_FLOOR",
-                        fLabel + " repeats Min " + min + " (the later entry is unreachable)", id));
+                        fLabel + " repeats Min " + min + " (only the later entry can ever grant)", id));
             }
             if (f.getGrants() == null) {
-                // M3 fix 2: a floor's ONLY reward path is its own Grants - no direct DropList leaf.
-                out.add(Finding.error(DOMAIN, "LOOT_LADDER_FLOOR_EMPTY_GRANTS",
-                        fLabel + " has no Grants - this floor rolls nothing even if reached", id));
+                // A floor's only reward path is its own Grants (no direct DropList leaf), but a
+                // grants-less floor carrying a Presentation is a legal PURE CUE (it plays on
+                // reach); only a floor with neither does nothing at all.
+                if (f.getPresentation() == null) {
+                    out.add(Finding.warning(DOMAIN, "LOOT_LADDER_FLOOR_EMPTY_GRANTS",
+                            fLabel + " authors neither Grants nor a Presentation - reaching it does"
+                                    + " nothing", id));
+                }
             } else {
                 checkGrants(f.getGrants(), fLabel + ".Grants", id, trigger, noCycleOutput, dropListKnown, out);
             }

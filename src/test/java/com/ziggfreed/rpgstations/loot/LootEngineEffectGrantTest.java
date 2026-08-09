@@ -1,25 +1,23 @@
 package com.ziggfreed.rpgstations.loot;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.Roll;
 
 /**
  * F1 (decision 51d): the {@code Grants.Effects[]} altitude - {@link LootEngine#applyGrants} must
  * SURFACE every authored native-effect ref into {@link LootEngine.GrantResult#getEffectGrants} (it
- * previously ignored the array entirely). An effects-only {@code Grants} never touches player/store,
- * so this exercises the collection with null engine handles (mirroring the null-stand-in pattern
- * ziggfreed-common's {@code AppliedEffectTrackerTest} uses). The actual apply+track leg is
+ * previously ignored the array entirely). An effects-only {@code Grants} never touches the
+ * drop-table seam, so this drives it with the pinned no-drop granter (mirroring the null-stand-in
+ * pattern ziggfreed-common's {@code AppliedEffectTrackerTest} uses). The actual apply+track leg is
  * {@code StationService.applyAndTrackEffects} (see StationEffectGrantTest).
  */
 class LootEngineEffectGrantTest {
-
-    private static final Player NULL_PLAYER = null;
 
     @Test
     void applyGrants_collectsEveryAuthoredEffect_droppingBlankIds() {
@@ -31,7 +29,8 @@ class LootEngineEffectGrantTest {
                 null                       // null entry - dropped
         });
 
-        LootEngine.applyGrants(grants, NULL_PLAYER, null, result, null, 0, 0, 0, true);
+        assertTrue(LootEngine.applyGrants(grants, DropListGranters.empty(), null, result, true),
+                "collecting an effect counts as having produced something");
 
         assertEquals(2, result.getEffectGrants().size(), "both non-blank effects surface");
         assertEquals("Root", result.getEffectGrants().get(0).getId());
@@ -43,7 +42,8 @@ class LootEngineEffectGrantTest {
     @Test
     void applyGrants_noEffects_collectsNothing() {
         LootEngine.GrantResult result = new LootEngine.GrantResult();
-        LootEngine.applyGrants(Roll.Grants.of(null, null), NULL_PLAYER, null, result, null, 0, 0, 0, true);
+        assertFalse(LootEngine.applyGrants(Roll.Grants.of(null, null), DropListGranters.empty(), null, result, true),
+                "an empty group produces nothing");
         assertTrue(result.getEffectGrants().isEmpty());
     }
 }

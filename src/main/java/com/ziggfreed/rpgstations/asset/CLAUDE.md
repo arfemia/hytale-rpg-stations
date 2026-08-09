@@ -422,7 +422,8 @@ resolution section for the engine half.
   `Conditions[]`, `Chance{BasePercent, Factors[], CapPercent}`, `Ladder{Factors[], Floors[]}`,
   `Grants{OutputItems, DropLists[], Commands[], Effects[], Contributions[]}` (top-level AND
   per-floor, both fire; `Effects[]` is an [`EffectRef`](EffectRef.java) array applying native
-  EntityEffects on grant). `Chance.Factors` and `Ladder.Factors` are both weighted `FactorRef[]`s
+  EntityEffects on grant), plus a top-level `Presentation` (the SMART-CUE rule, below).
+  `Chance.Factors` and `Ladder.Factors` are both weighted `FactorRef[]`s
   summed BEFORE their use, so a ladder composes two `stat` channels like `YourMod_Luck` +
   `YourMod_Luck_Woods` (the loot middle path's composition exemplar; a single-factor ladder
   authors a one-element array). **`Grants.DropLists` is a plural ARRAY** - each entry rolls
@@ -431,6 +432,21 @@ resolution section for the engine half.
   `Conditions`/`Chance`/`Ladder`. Binding evaluation rules: a `Ladder.Floor` has no direct
   drop-list leaf (every floor routes through its own `Grants`); top-level `Grants` AND the reached
   floor's `Grants` both apply; a failing `Chance` means the `Ladder` never evaluates.
+  **The SMART-CUE rule (binds BOTH presentation altitudes: the roll's own top-level
+  `Presentation` and a `Ladder.Floor`'s).** A celebration never plays over nothing. Each cue is
+  paired with the `Grants` group authored BESIDE it (the roll's own top-level `Grants` for the
+  roll-level cue, the floor's own for a floor cue): with NO grants beside it the cue is pure
+  presentation and plays on the plain hit/reach, and with grants authored it plays only once
+  applying them actually PRODUCED something (a drop-table item that genuinely landed after that
+  table's own internal weights resolved, a command run, an effect applied, an `OutputItems` amount
+  tallied, or a contribution posted). The case it exists for: a `DropLists` entry naming a native
+  table that carries its own internal empty weight grants nothing on a real share of its reaches,
+  and without the rule the jackpot fanfare fired anyway. The two altitudes are judged
+  INDEPENDENTLY and both can play in one pass. The roll-level leaf also retires the degenerate
+  workaround it replaced - a one-floor `Min: 0` Ladder authored purely to hang a cue on a plain
+  chance roll (which the validator flagged as an unreachable floor besides). Enforced engine-side
+  in `loot.LootEngine.rollAndGrant`, which is why `applyGrants` reports a boolean; see
+  `../loot/CLAUDE.md`.
   **`Grants.OutputItems` is ALL probabilistic output**: a `Double`, ADDITIVE items of the
   cycle's own primary output, handed over on top of the deterministic `Recipe.Yield` quantity -
   additive, never a multiplier on the produced stack, so this number and the `Yield` number stay

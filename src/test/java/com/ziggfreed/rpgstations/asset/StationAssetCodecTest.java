@@ -408,6 +408,33 @@ public class StationAssetCodecTest {
                 "a fraction-only amount grants an item some of the time, so it is not empty");
     }
 
+    /**
+     * A Roll carries its OWN top-level celebration, so a plain chance roll needs no degenerate
+     * one-floor Ladder to hang a cue on. It decodes through the SAME shared Presentation type a
+     * Ladder floor's cue uses, and the two are independent leaves that can both be authored.
+     */
+    @Test
+    void bonus_rollDecodesItsOwnTopLevelPresentation() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Bonus\": { \"Rolls\": [ {"
+                + " \"Trigger\": \"Cycle\", \"Chance\": { \"BasePercent\": 0.5 },"
+                + " \"Grants\": { \"Commands\": [\"give {player} Fixture_Trophy\"] },"
+                + " \"Presentation\": { \"Sounds\": [\"Fixture_Fanfare\"],"
+                + "   \"Particles\": [ { \"SystemId\": \"Fixture_Sparks\" } ] } } ] } } ] }");
+        Roll roll = a.getActions()[0].getBonus().getRolls()[0];
+
+        assertNotNull(roll.getPresentation());
+        assertEquals("Fixture_Fanfare", roll.getPresentation().getSounds()[0]);
+        assertEquals("Fixture_Sparks", roll.getPresentation().getParticles()[0].getSystemId());
+        assertNull(roll.getLadder(), "no ladder is needed to carry a roll-level cue");
+    }
+
+    @Test
+    void bonus_rollPresentationOmitted_decodesNull() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Bonus\": { \"Rolls\": [ {"
+                + " \"Grants\": { \"DropLists\": [\"Fixture_T1\"] } } ] } } ] }");
+        assertNull(a.getActions()[0].getBonus().getRolls()[0].getPresentation());
+    }
+
     /** The amount is FRACTIONAL: a half-step tier is authorable on the floor that earns it. */
     @Test
     void bonus_ladderFloorGrantsOutputItems() throws Exception {

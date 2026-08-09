@@ -32,7 +32,8 @@ those two numbers in separate groups is deliberate, so neither can silently mult
                  "Floors": [ { "Min": 50,  "Grants": { "DropLists": ["SawmillFinds_T1"] } },
                              { "Min": 100, "Grants": { "DropLists": ["SawmillFinds_T2"] },
                                "Presentation": { "Sounds": ["SFX_Coins_Land"] } } ] },
-  "Grants":    { "OutputItems": 1.5 }
+  "Grants":    { "OutputItems": 1.5 },
+  "Presentation": { "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player"] }
 }
 ```
 
@@ -53,6 +54,25 @@ those two numbers in separate groups is deliberate, so neither can silently mult
   multi-source stack).
 - `Grants` - the reward vocabulary, below. Top-level `Grants` AND the reached floor's own `Grants` both
   apply when a Ladder is present.
+- `Presentation` - the roll's own celebration, played at the station block on the rare-find moment
+  when the roll HITS. A Ladder floor carries the same leaf for its own tier, so a tiered find
+  celebrates per tier and a plain chance roll celebrates on the win with no Ladder involved.
+
+## The smart-cue rule: a celebration never plays over nothing
+
+A `Presentation` is always paired with the `Grants` group authored beside it - the roll's own
+top-level `Grants` for the roll-level cue, the floor's own `Grants` for a floor cue:
+
+- **No `Grants` beside it** - a pure cue, played on the hit (or on the floor being reached), exactly
+  as written.
+- **`Grants` beside it** - played only when applying them actually PRODUCED something: an item a
+  referenced drop table's own internal weights really handed over, a command run, an effect applied,
+  an `OutputItems` amount tallied, or a contribution posted.
+
+The case this exists for: a `DropLists` entry points at a native table that carries its own internal
+empty weight, so a reached floor regularly grants nothing at all. Without the rule, a jackpot fanfare
+fires over an empty hand every time that happens. The two altitudes are judged independently, so a
+roll whose command grant landed still celebrates even when its floor's table paid nothing.
 
 ## Grants: the reward vocabulary
 

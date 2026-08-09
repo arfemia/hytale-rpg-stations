@@ -743,6 +743,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Chance` | [Chance](#field-roll-chance) | `null` | Probabilistic gate over the WHOLE roll (Ladder included); absent = a deterministic pass. |
 | `Ladder` | [Ladder](#field-roll-ladder) | `null` | A floor ladder over a summed factor value; the highest reached floor's Grants fire. |
 | `Grants` | [Grants](#field-roll-grants) | `null` | Top-level rewards granted when the roll fires (in addition to any reached Ladder floor's Grants). |
+| `Presentation` | [Presentation](#type-presentation) | `null` | Played at the station block on the rare-find moment when this roll HITS (its Conditions and Chance both passed), so a plain chance roll can carry its own celebration without a one-floor Ladder standing in for it. Smart cue: with no top-level Grants authored beside it this is a pure cue and always plays on the hit; with Grants authored it plays only when applying them actually produced something (an item a referenced drop table's own internal weights really handed over, a command run, an effect applied, an OutputItems amount tallied, or a contribution posted), so a table that resolves to nothing never fires a fanfare over an empty hand. A reached Ladder floor's own Presentation is judged the same way against that floor's own Grants, and both can play. |
 
 <a id="field-roll-chance"></a>
 ### Roll.Chance
@@ -779,7 +780,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
 | `Grants` | [Grants](#field-roll-ladder-floors-item-grants) | `null` | This floor's ONLY reward path; there is deliberately no sibling drop-list leaf. |
-| `Presentation` | [Presentation](#type-presentation) | `null` | Played on the rare-find moment when this floor is reached and grants something. |
+| `Presentation` | [Presentation](#type-presentation) | `null` | Played at the station block on the rare-find moment when this floor is REACHED. Smart cue: with no Grants authored on this floor it is a pure cue and always plays on the reach; with Grants authored it plays only when applying them actually produced something (an item a referenced drop table's own internal weights really handed over, a command run, an effect applied, an OutputItems amount tallied, or a contribution posted), so a table that resolves to nothing never fires a fanfare over an empty hand. The roll's own top-level Presentation is judged the same way against the roll's own Grants, and both can play. |
 
 <a id="field-roll-grants-effects-item"></a>
 #### Roll.Grants.Effects[]

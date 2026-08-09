@@ -8,7 +8,6 @@ import java.util.function.DoubleSupplier;
 
 import org.junit.jupiter.api.Test;
 
-import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.ziggfreed.rpgstations.asset.Roll;
 
 /**
@@ -20,8 +19,6 @@ import com.ziggfreed.rpgstations.asset.Roll;
  * <p>Fixture amounts are this test's own; they deliberately do not mirror any shipped content.
  */
 class OutputItemResolverTest {
-
-    private static final Player NULL_PLAYER = null;
 
     /** A roll source that can never land under a fraction, so only unconditional grants survive it. */
     private static final DoubleSupplier NEVER_UNDER = () -> 1.0;
@@ -81,8 +78,8 @@ class OutputItemResolverTest {
     @Test
     void twoHalfGrantsSumToAWholeItemBeforeResolution() {
         LootEngine.GrantResult result = new LootEngine.GrantResult();
-        LootEngine.applyGrants(Roll.Grants.ofOutputItems(0.5), NULL_PLAYER, null, result, null, 0, 0, 0, true);
-        LootEngine.applyGrants(Roll.Grants.ofOutputItems(0.5), NULL_PLAYER, null, result, null, 0, 0, 0, true);
+        LootEngine.applyGrants(Roll.Grants.ofOutputItems(0.5), DropListGranters.empty(), null, result, true);
+        LootEngine.applyGrants(Roll.Grants.ofOutputItems(0.5), DropListGranters.empty(), null, result, true);
 
         assertEquals(1.0, result.getOutputItems(), 1e-9);
         assertEquals(1, OutputItemResolver.resolve(result.getOutputItems(), NEVER_UNDER),

@@ -8,6 +8,23 @@ selection itself. Binding evaluation rules: `Chance.Factors`/`Ladder.Factors` ar
 leaf), top-level AND per-floor `Grants` both fire, and `Chance` gates the WHOLE roll including
 `Ladder`.
 
+**The SMART-CUE rule (enforced HERE, in `LootEngine.rollAndGrant`).** A celebration never plays over
+nothing. A `Roll` carries its own top-level `Presentation` and a `Ladder.Floor` carries its own; each
+is paired with the `Grants` group authored BESIDE it. With no grants beside it a cue is pure
+presentation and rides on the plain hit/reach; with grants authored it rides only once applying them
+actually PRODUCED something (a drop-table item that genuinely landed after that table's own internal
+weights resolved, a command run, an effect applied, an `OutputItems` amount tallied, a contribution
+posted). This is the engine's job rather than the schema's precisely because only this package knows
+what a grant produced: a `DropLists` entry names a native table with its own internal empty weight,
+so "the floor was reached" and "the player got something" are genuinely different facts. The
+mechanism is small and deliberate - `applyGrants` returns a BOOLEAN (produced anything?) instead of
+void, the roll-level and floor-level cues are judged independently against their own groups by the
+one shared `collectEarnedCue`, and both land in the SAME `GrantResult.getFloorPresentations()`
+transport (roll cue first), so `StationService.applyGrantResult` needs no new plumbing at all. The
+NATIVE drop roll behind it is an injected `DropListGranter` seam (`rollAndGrantDropList` in
+production), which is what lets the rule be unit-tested against a PINNED table outcome rather than
+live randomness - `LootEngineCuePresentationTest`.
+
 **Concern boundary (the one rule to read first):** a `Roll` grants what ELSE a cycle handed over -
 `DropLists`, `Commands`, `Effects`, `Contributions`, and `Grants.OutputItems` (ADDITIVE items of
 the cycle's own primary output, fractional). It never touches HOW MUCH of the cycle's own output was produced
@@ -64,8 +81,13 @@ the engine UNROUNDED and resolves once per cycle (`OutputItemResolver`, below).
   (`s.cycleOutputItemId`), through the SAME `ItemGrantUtil` seam every other grant uses. `Grants.DropLists` is a plural ARRAY, each entry
   rolled independently in authored order, so "a guaranteed common table plus a rare one" is two
   entries rather than a synthetic merged asset or two whole duplicated `Roll`s. This class stays
-  presentation-agnostic - it reports WHAT reward landed; `StationService` plays it through its OWN
-  `emitMoment` choke point (see `../station/CLAUDE.md`), never a second playback path here.
+  presentation-agnostic - it reports WHAT reward landed and WHICH cues were EARNED (the smart-cue
+  rule above); `StationService` plays them through its OWN `emitMoment` choke point (see
+  `../station/CLAUDE.md`), never a second playback path here. The public 12-arg `rollAndGrant` is a
+  thin ADAPTER over a package-visible seam-driven core (`lookup`/`chanceRoll`/`placeholders`/
+  `dropLists`), the same injected-seam discipline `RollEvaluator` and `OutputItemResolver` already
+  keep - every engine handle reduces to a function before the pass runs, so the whole pass is
+  deterministically testable.
 - **[`OutputItemResolver`](OutputItemResolver.java)** - the PURE fractional-to-whole-items
   resolution behind `Grants.OutputItems`: `floor(tally)` items always, plus ONE more when an
   injected `[0,1)` sample lands under the leftover fraction (the same injected-randomness seam
