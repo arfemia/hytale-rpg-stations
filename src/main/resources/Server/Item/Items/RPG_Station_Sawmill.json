@@ -1,5 +1,5 @@
 {
-  "$Comment": "The standalone RpgStations Sawmill work station block. Model reuses the vanilla Lumbermill bench. BlockType.Seats is the seat hold mode's mount anchor (StationAsset.Hold.Mount, Surface Block); Offset stands the player back at working distance rather than seated inside the bench. Yaw 180: the engine adds a hard +180deg to the authored seat yaw, so 180 lands the worker facing the work surface. Shared id with the pack's own block: a pack ships its own same-id block and overrides this jar default WHOLESALE via load order. Recipe makes the bare jar's sawmill craftable at the same Furniture bench slot the vanilla Lumbermill uses: one crude hatchet (the tool becomes part of the bench), any one log (the Wood_Trunk family covers every species), and any four planks (Wood_Planks likewise). That craftability is DELIBERATELY jar-only: an asset-pack override replaces this whole item, so a pack that authors no Recipe on its copy makes the station uncraftable the moment it is installed and owns acquisition its own way - no flag needed, pure load order.",
+  "$Comment": "The standalone RpgStations Sawmill work station block. Model reuses the vanilla Lumbermill bench. BlockType.Seats is the seat hold mode's mount anchor (StationAsset.Hold.Mount, Surface Block); Offset stands the player back at working distance rather than seated inside the bench. Yaw 180: the engine adds a hard +180deg to the authored seat yaw, so 180 lands the worker facing the work surface. Shared id with the pack's own block: a pack ships its own same-id block and overrides this jar default WHOLESALE via load order. Recipe makes the bare jar's sawmill craftable at the WORKBENCH, the bench where every functional station is crafted (vanilla makes its Builders/Cooking/Farming/Furnace/Salvage benches there, and every hatchet including the crude one this recipe consumes) - deliberately NOT the Furniture bench the decor-grade vanilla Lumbermill sits at, since this is a working station: one crude hatchet (the tool becomes part of the bench), any one log (the Wood_Trunk family covers every species), and any four planks (Wood_Planks likewise). That craftability is DELIBERATELY jar-only: an asset-pack override replaces this whole item, so a pack that authors no Recipe on its copy makes the station uncraftable the moment it is installed and owns acquisition its own way - no flag needed, pure load order.",
   "TranslationProperties": {
     "Name": "items.RPG_Station_Sawmill.name",
     "Description": "items.RPG_Station_Sawmill.description"
@@ -13,8 +13,8 @@
     "BenchRequirement": [
       {
         "Type": "Crafting",
-        "Id": "Furniture_Bench",
-        "Categories": ["Furniture_Misc"]
+        "Id": "Workbench",
+        "Categories": ["Workbench_Crafting"]
       }
     ]
   },
