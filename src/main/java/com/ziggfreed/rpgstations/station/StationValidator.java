@@ -1934,7 +1934,9 @@ public final class StationValidator {
     private static void checkFloors(@Nonnull Roll.Ladder.Floor[] floors, @Nonnull String rollLabel,
                                     @Nonnull String id, @Nonnull String trigger, boolean noCycleOutput,
                                     @Nonnull Predicate<String> dropListKnown, @Nonnull List<Finding> out) {
-        Set<Double> seenFloors = new HashSet<>();
+        // Duplicate-Min coverage deliberately does NOT live here: checkDuplicateFloorMins is the
+        // ONE shared duplicate-floor check both ladder consumers run (LADDER_DUPLICATE_FLOOR_MIN),
+        // and a second local emit here double-reported the same defect under a second code.
         for (int i = 0; i < floors.length; i++) {
             Roll.Ladder.Floor f = floors[i];
             String fLabel = rollLabel + ".Ladder.Floors[" + i + "]";
@@ -1950,9 +1952,6 @@ public final class StationValidator {
                         fLabel + " authors no positive Min - it defaults to 0 and is ALWAYS reached,"
                                 + " making it the ladder's baseline tier; confirm a baseline is"
                                 + " intended", id));
-            } else if (!seenFloors.add(min)) {
-                out.add(Finding.warning(DOMAIN, "LOOT_LADDER_DUPLICATE_FLOOR",
-                        fLabel + " repeats Min " + min + " (only the later entry can ever grant)", id));
             }
             if (f.getGrants() == null) {
                 // A floor's only reward path is its own Grants (no direct DropList leaf), but a

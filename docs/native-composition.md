@@ -19,9 +19,10 @@ at runtime) rather than crashing a session.
 { "Interaction": { "Id": "SomeRootInteractionId" } }
 ```
 
-Any moment that carries a `Presentation` (a station's per-cycle moment, a step's entry cue, a flair
-overlay) can also fire a native `RootInteraction` chain by id - a one-leaf reference, never an inlined
-interaction body. An unresolvable id is a content-audit note (typo detection) and a no-op at fire time.
+Any moment that carries a `Presentation` (a station's per-cycle moment, a step's entry cue, a Roll's
+own celebration or a reached ladder floor's, a flair overlay) can also fire a native `RootInteraction`
+chain by id - a one-leaf reference, never an inlined interaction body. An unresolvable id is a
+content-audit note (typo detection) and a no-op at fire time.
 
 ## Presentation.Effect and Roll.Grants.Effects - native EntityEffects
 
@@ -33,8 +34,14 @@ interaction body. An unresolvable id is a content-audit note (typo detection) an
 The same `{Id, DurationMs?}` reference shape applies a native `EntityEffect` asset by id in two places:
 a single per-moment effect on a `Presentation`, or an array of reward-time effects on a Roll's
 `Grants`. `DurationMs` is an OPTIONAL override - omit it and the effect runs for whatever duration the
-referenced effect asset itself declares. Every session-scoped effect the engine applies is tracked so
-it is removed automatically when the session stops.
+referenced effect asset itself declares.
+
+Teardown follows the trigger that granted the effect, deliberately. An effect applied while the
+session is running - a per-moment `Presentation` effect, or a `Cycle`-trigger Roll's grant - is
+tracked and removed automatically when the session stops, so nothing lingers on a worker who walked
+away. A `Completion`-trigger Roll's grant is applied from inside that same stop, after teardown has
+already run, and therefore PERSISTS for its own authored (or asset-declared) duration: it is a
+finishing reward for the work, not part of the work.
 
 ## Grants.DropLists - native item drop tables
 

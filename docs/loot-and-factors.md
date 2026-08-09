@@ -50,8 +50,9 @@ those two numbers in separate groups is deliberate, so neither can silently mult
   `clamp(BasePercent + sum(resolve(factor) * Weight), 0, CapPercent)`, rolled once against a uniform
   0-100 sample. A failing Chance means nothing fires, and the Ladder is never even evaluated.
 - `Ladder` - an UNCAPPED, summed factor value looked up against a floor list; the HIGHEST reached
-  floor's own `Grants` fires (a floor above a factor's "normal" range stays reachable via a
-  multi-source stack).
+  floor's own `Grants` and `Presentation` fire (a floor above a factor's "normal" range stays
+  reachable via a multi-source stack). Floors are not cumulative: exactly one floor is reached, never
+  several.
 - `Grants` - the reward vocabulary, below. Top-level `Grants` AND the reached floor's own `Grants` both
   apply when a Ladder is present.
 - `Presentation` - the roll's own celebration, played at the station block on the rare-find moment
@@ -73,6 +74,13 @@ The case this exists for: a `DropLists` entry points at a native table that carr
 empty weight, so a reached floor regularly grants nothing at all. Without the rule, a jackpot fanfare
 fires over an empty hand every time that happens. The two altitudes are judged independently, so a
 roll whose command grant landed still celebrates even when its floor's table paid nothing.
+
+A floor carrying ONLY a `Presentation` and no `Grants` is a blessed shape, not a mistake - it is the
+pure floor cue, a rung that announces itself without paying anything extra. The validator agrees:
+`LOOT_LADDER_FLOOR_EMPTY_GRANTS` warns only about a floor authoring NEITHER, since reaching that one
+genuinely does nothing. A floor authoring no positive `Min` is likewise legal and engine-honored - it
+defaults to `0` and is therefore always reached, making it the ladder's baseline tier, which
+`LOOT_LADDER_FLOOR_MISSING_MIN` reports at INFO only, as a confirm-you-meant-a-baseline nudge.
 
 ## Grants: the reward vocabulary
 

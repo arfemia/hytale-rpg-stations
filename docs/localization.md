@@ -41,8 +41,8 @@ lang namespaces, not RPG Stations' own:
 
 ```
 RPG_Station_Sawmill.name = Sawmill
-RPG_Station_Sawmill.description = A sawmill for turning logs into planks.
-RPG_Station_Sawmill.hint.empty = Press [{key}] to place logs
+RPG_Station_Sawmill.description = A work station that saws logs into planks. Press use to start working.
+RPG_Station_Sawmill.hint.empty = Press [{key}] to load logs
 RPG_Station_Sawmill.hint.loaded = Press [{key}] to work
 ```
 

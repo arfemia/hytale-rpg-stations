@@ -6,14 +6,22 @@ RPG Stations adds interactive work stations to your Hytale server. No menus, no 
 conversions - materials go in, your character (or a stand-in performer) visibly does the work over
 real time, and results come out.
 
-**0.1.0 ships one station, the Sawmill:** load logs onto the bench, press `F`, and your character
-saws them into that wood family's planks one cycle at a time, with a held-tool gate, a tool-power
-loot ladder, and a session summary when you stop. The bench pays for the time it takes, and it pays
-by the tool you bring: a starter hatchet mills one plank per log, a copper two, and the best in the
-game four. Mid-ladder tools land on fractional yields (two planks and often a third), so every
-upgrade is felt instead of only the big jumps. Every number in that curve is an ordinary content
-leaf, so a server can retune what better tools are worth, or key the bonus off something else
-entirely.
+**0.1.0 ships one station, the Sawmill:** craft the bench at a tier 2 Workbench, load logs onto it,
+press `F`, and your character saws them into that wood family's planks one cycle at a time, with a
+held-tool gate, a tool-scaling yield curve, and a session summary when you stop.
+
+The bench pays for the time it takes, and it pays by the tool you bring: a starter hatchet mills one
+plank per log, a copper two, the best forgeable hatchets four, and the sawmill's own trophy hatchet
+five. Mid-ladder tools land on fractional yields (two planks and often a third), so every upgrade is
+felt instead of only the big jumps. Staying at the bench pays too: past ten cycles a decent hatchet
+starts shaking life essence loose from the milled logs, and the finds get richer the longer one
+session runs. And a few cycles into any session worked with mithril-grade steel, every cycle carries a
+1-in-2500 shot at the **Sawmiller's Hatchet** - a legendary masterwork that drops nowhere else, cannot
+be forged at any bench, and is the only tool in the game that reaches the top rung of the sawmill's
+own curve.
+
+Every number in all of that is an ordinary content leaf, so a server can retune what better tools are
+worth, change what the finds hand over, or key the whole thing off something else entirely.
 
 The engine underneath is the full thing, not a Sawmill special case - multi-action stations, step
 programs, multi-station walks, placed-input custody and props, the puppet performer, conditional
@@ -73,7 +81,11 @@ exactly where the animation calls for them.
 Every station can roll bonus rewards on top of its normal output: extra copies of the result, a
 chance-gated drop table, a floor ladder that scales with any stat your server tracks (tool power,
 session length, whatever another installed mod writes) - composed from a small, weighted vocabulary
-shared across every loot site in the mod.
+shared across every loot site in the mod. Extra copies of the result can be fractional, so a
+mid-ladder tier can be worth "two and often a third" rather than being rounded onto a neighbouring
+rung. Every find can carry its own sound-and-particle celebration, and a celebration never fires over
+an empty hand: a cue authored beside a reward only plays once that reward actually handed something
+over, so a drop table that rolled nothing stays silent instead of announcing a jackpot.
 
 ### Enhancement stamping
 
@@ -143,6 +155,14 @@ session-summary HUD tuning, layered like any other asset - there is no separate 
 3. Optionally add a content pack that ships station catalog content.
 4. Restart the server. Confirm the boot log shows each loaded station id and no asset validation
    failures, or run `/rpgstations validate` at any time.
+
+**Getting the Sawmill in-game.** On a bare install players craft the bench themselves at a **tier 2
+Workbench**: one crude hatchet (the tool becomes part of the bench), any one log, and any four
+planks. The tier gate puts it behind the first workbench upgrade, so the sawmill arrives as an earned
+base improvement rather than a day-one freebie. Admins can `/give` the block directly
+(`RPG_Station_Sawmill`). A content pack that ships its own block under the same id replaces the
+jar's, so a pack that authors no recipe on its copy removes that craftability and owns acquisition
+its own way - a shop, a quest, whatever that pack's economy wants.
 
 ## Integrations
 

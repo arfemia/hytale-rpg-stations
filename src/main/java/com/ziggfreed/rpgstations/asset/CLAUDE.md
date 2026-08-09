@@ -480,7 +480,12 @@ resolution section for the engine half.
   lowercased filename), body `{Rolls: [Roll, ...]}`, referenced by a `LootRef.Lootables` entry
   (an action, step, or extension may combine any number of shared tables with its own inline
   `Rolls`). The standalone `SawmillFinds` lootable ships in this
-  jar's resources, alive with RpgStations alone (built-in `rpgstations:` factors only).
+  jar's resources, alive with RpgStations alone (BUILT-IN factors only - `rpgstations:cycle_count`
+  for its session-loyalty ladder, plus the `hytale:tool_quality`/`tool_item_level`/`tool_power`
+  native reads its trophy and T4 gates need; nothing another mod has to register). Its three rolls
+  are the shipped exemplars of the whole Roll vocabulary - a conditioned chance + ladder, a
+  roll-level `Presentation` on a plain chance roll, and a Conditions-only tier - see
+  `../station/CLAUDE.md`'s Sawmill content bullet for the numbers.
 - **[`FlairAsset`](FlairAsset.java)** - a standalone, ANY-mod-authorable cosmetic flair layer,
   `Server/RpgStations/Flairs/<Name>.json` (Pattern A, id = lowercased filename): `{Stations?[],
   Moments}`. `Stations` null/empty = applies to every station; `Moments` is an OPEN

@@ -45,14 +45,48 @@ the WHOLE set executes:
   an ADDITIVE `Extensions/*.json` (below) rather than a full-file override. **The jar Sawmill
   declares NO `Work.PerCycleContributions` at all** - jar-layer content is progression-free by
   design, so a pack OWNS the sawmill's contributions outright and there is no base entry for an
-  extension to collide with. The station's tool ladder lives where its EFFECT is visible: TWO
+  extension to collide with. The station's tool ladder lives where its EFFECT is visible: TWO INLINE
   `Bonus.Rolls` (a `Ladder` over three weighted tool factors granting `Grants.OutputItems` per
   floor - the mid rung's `1.5` is the FRACTIONAL half-step, one plank always plus a second half the
   time - and a small flat windfall `Chance`) plus a
   parallel `ContributionScale` ladder describing the identical tool curve for whichever mod adds
   contributions - rather than in a separate baked curve
   - see `../../../../../../CONTENT_PACKS.md`'s Station authoring section for the authoring guide
-  (brief reference only; do not duplicate it here). **The jar Sawmill owns the PRESENTATION defaults
+  (brief reference only; do not duplicate it here). Those two are the action's OWN rolls;
+  `Bonus.Lootables` pulls in three more from `SawmillFinds` (below), so the live per-cycle pass
+  evaluates five.
+  **The yield ladder's five floors** are `11`/`22`/`33`/`40`/`50` paying `1`/`1.5`/`2`/`3`/`4`
+  OutputItems on top of `Yield.Base` 1, and `ContributionScale` crosses at the SAME five Mins with
+  `2.0`/`2.5`/`3.0`/`4.0`/`5.0` - the two curves track rung for rung on purpose, trophy rung
+  included. Over the vanilla hatchets: Wood 10.6 / Crude 10.55 reach nothing (1 plank), Copper 11.3
+  (2), Iron 22.3 (2.5 average, the fractional rung), Thorium 33.5 / Cobalt 34.0 / Adamantite 34.5
+  (3), Onyxium 40.9 / Mithril 45.5 (4). **The 50 floor is unreachable by any FORGEABLE tool** - only
+  the jar's own drop-only `RPG_Tool_Hatchet_Sawmiller` (scoring 55.55) or a better modded tool gets
+  the fifth plank, which is what makes the trophy the bench's one endgame upgrade. Any doc claiming
+  "up to four" predates the trophy.
+  **`SawmillFinds` (`Lootables/SawmillFinds.json`) is THREE rolls**, all `Cycle`-trigger: (1) the
+  session-loyalty ladder - Conditions `rpgstations:cycle_count >= 10` AND `hytale:tool_quality >= 2`,
+  `Chance` 15 percent, a `cycle_count` `Ladder` whose 10/25/50 floors grant the jar's own
+  `Drops/RPG_Station_Sawmill_T{1,2,3}` tables (the upper two floors carry their own celebration
+  `Presentation`, kept honest by the smart-cue rule since each table authors its own empty weight);
+  (2) the TROPHY roll - all three tool axes at the vanilla Mithril hatchet's own values
+  (`tool_quality >= 4`, `tool_item_level >= 50`, `tool_power >= 0.5`) plus `cycle_count >= 5`, a
+  visible `Chance.BasePercent` of `0.04` (1 in 2500), granting inline through its own top-level
+  `Grants.Commands` (`give {player} RPG_Tool_Hatchet_Sawmiller`) with its own top-level
+  `Presentation` - the shipped exemplar of the roll-level cue, and a command grant always counts as
+  produced so the fanfare can never fire dry; (3) the T4 find tier - gated on the TROPHY's own axes
+  (`tool_quality >= 5`, `tool_item_level >= 50`, `tool_power >= 0.55`, unreachable by any forgeable
+  vanilla tool), no cycle gate, the same 15 percent cadence into `RPG_Station_Sawmill_T4`, the one
+  find table with no empty entry. `RPG_Tool_Hatchet_Sawmiller` itself is a drop-only Legendary
+  masterwork Mithril copy (500 durability, Woods power `0.55`, explicit `Tags.Family: Hatchet`),
+  authored with NO `Parent` and NO `Recipe` deliberately - a Parent off the vanilla Mithril hatchet
+  would inherit its forge recipe and make the chase pointless.
+  **The jar's Sawmill BLOCK is craftable, jar-only.** `Item/Items/RPG_Station_Sawmill.json` authors a
+  `Recipe` at the Crafting `Workbench` with `RequiredTierLevel: 2` (1 `Tool_Hatchet_Crude` + 1
+  `Wood_Trunk` + 4 `Wood_Planks`, both materials as native resource-type families). A pack shipping
+  its own same-id block replaces the WHOLE item by load order, so a pack authoring no `Recipe` makes
+  the station uncraftable and owns acquisition itself - no flag, no engine branch, pure load order.
+  **The jar Sawmill owns the PRESENTATION defaults
   too** (`Puppet` + `Custody.Display`, the maintainer's in-game-tuned values, plus `Work.CycleMs`
   4805): they used to live only in the pack's full-file station override, so retiring that override
   dropped them and the sawmill regressed to a visible seat-mounted player working invisible placed
@@ -434,6 +468,17 @@ presentation-playback funnel every station moment goes through (`StationFlairs.M
 `MOMENT_SWING`/`MOMENT_IMPACT`/`MOMENT_RARE_FIND`/`MOMENT_COMPLETION`, plus a per-step
 `StationFlairs.stepMomentId(actionId, stepId)`) - it is ALSO the flair-resolution choke point
 (`StationFlairs.effective` against `FlairCatalog.effectiveFlairsFor`'s merged map).
+
+**`MOMENT_RARE_FIND` plays only EARNED cues (the smart-cue rule - see `../loot/CLAUDE.md`).**
+`applyGrantResult` walks `GrantResult.getFloorPresentations()` and emits each entry on
+`MOMENT_RARE_FIND` at the block, and that list is deliberately pre-filtered by `loot.LootEngine`:
+BOTH cue altitudes ride it (a `Roll`'s own top-level `Presentation` when the roll hit, and a reached
+`Ladder.Floor`'s, roll cue first when one roll carries both), and each was admitted only if it is a
+PURE cue (no `Grants` group authored beside it) or its own paired grants group actually PRODUCED
+something. This package therefore needs no new plumbing and must not grow its own second filter: the
+"was it earned" question is answerable only where the grant was applied, which is why `applyGrants`
+returns a boolean over there. The transport name predates the roll-level altitude; it now carries
+both.
 
 **Particles are an authored ARRAY of tunable bursts** (`Presentation.ModelParticle[]`, see
 `../asset/CLAUDE.md`) played in order by `StationService#spawnMomentParticles`: per burst a
@@ -907,7 +952,10 @@ mod's own concern; this engine stores no per-player fact). The open STRING momen
 .flairIds()` and `StationCatalog.allFlairIds()` both reuse the SAME merge point. See
 `../loot/CLAUDE.md` for the `LootRef`/`Roll` evaluation engine this package calls into per cycle
 and per step `Roll` phase (both routes are the SAME `loot.LootEngine` call - one roll engine,
-whether the source is a station's implicit cycle or an authored step's `Roll` phase).
+whether the source is a station's implicit cycle or an authored step's `Roll` phase) - including the
+SMART-CUE rule, which decides over there which `MOMENT_RARE_FIND` cues this package is ever handed
+(see the `emitMoment` section above: a `Roll` carries its own top-level `Presentation` beside the
+per-floor one, and a cue paired with grants rides only once those grants produced something).
 
 ## Engine settings + Validation (unchanged mechanism; new checks)
 

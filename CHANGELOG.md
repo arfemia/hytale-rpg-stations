@@ -53,7 +53,8 @@ to recompile against a later release rather than treat these types as stable.
   a full tool family alone: gather power saturates across the upper tiers, quality cannot separate
   tools that share a tier, and item level does not track rarity at all. The shipped Sawmill uses
   exactly that curve to pay for its milling time, running from one plank per log on a starter
-  hatchet up to four on the best.
+  hatchet up to five with the station's own drop-only trophy hatchet (four on the best forgeable
+  one). See the shipped-content section below for the whole curve.
 - A factor's NAMESPACE names the vocabulary's owner rather than whoever registered the provider.
   A straight native read is `hytale:` and therefore portable, meaning the same thing to any mod that
   reads native data: `hytale:tool_power` (an `ItemToolSpec` power, its native `GatherType` given as
@@ -452,9 +453,15 @@ schema is pre-release, so the renames below are hard breaks with no aliases.
   The matching validator ids are `MISSING_CONTRIBUTION_CHANNEL`, `NONPOSITIVE_CONTRIBUTION_AMOUNT`,
   `EXTENSION_CONTRIBUTION_DUPLICATE`, and `LOOT_CONTRIBUTION_{WRONG_TRIGGER,MISSING_CHANNEL,
   NONPOSITIVE_AMOUNT}`.
-- Adds `MmoAgnosticismTest`, which scans `src/main/java`, `api/src/main/java`, and
-  `src/main/resources` for foreign progression vocabulary and fails the build on any hit, with an
-  empty allowlist. A convenient comment is exactly how a vocabulary creeps back in.
+- Adds `MmoAgnosticismTest`, which scans `src/main/java`, `api/src/main/java`, `src/main/resources`,
+  and the in-repo `docs/` guides for foreign progression vocabulary and fails the build on any hit.
+  The docs source is scanned because it is the public authoring surface, and a tutorial teaching the
+  foreign vocabulary is the worst leak of all; exactly ONE line is allowlisted, the Add-ons &
+  Integrations page naming the companion mod it links out to. `CHANGELOG.md`, `CURSEFORGE.md`, and
+  the in-repo package routers stay out of scope structurally rather than for convenience: they are
+  the surfaces that STATE this rule and narrate its history, so they have to be able to quote the
+  retired vocabulary while explaining why it is retired. A convenient comment is exactly how a
+  vocabulary creeps back in.
 
 ### Pre-release schema sweep (the last authoring-surface pass before 0.1.0)
 
@@ -499,6 +506,22 @@ as shipped, not a change to something previously released.
   every bit of "sometimes you get extra", with the full `Roll` vocabulary (`Trigger`, `Conditions`,
   `Chance`, `Ladder`) available for it; `Yield` decides only "how much of the thing you made,
   guaranteed".
+- **A `Roll` carries its own top-level `Presentation`, and a celebration never plays over nothing.**
+  A plain chance roll can hang its own cue directly on the roll, beside the `Ladder.Floor`
+  `Presentation` that already celebrated a reached tier, so a roll with no tiers to climb needs no
+  degenerate one-floor ladder standing in for a cue (a shape the validator flagged as unreachable
+  besides). **The smart-cue rule binds both altitudes**: each cue is paired with the `Grants` group
+  authored BESIDE it (the roll's own top-level `Grants` for the roll-level cue, the floor's own for
+  a floor cue). With no grants beside it a cue is pure presentation and plays on the plain hit or
+  reach; with grants authored it plays only once applying them actually PRODUCED something - an item
+  a referenced drop table's own internal weights really handed over, a command run, an effect
+  applied, an `OutputItems` amount tallied, or a contribution posted. That matters because a
+  `DropLists` entry names a native table carrying its own internal empty weight, so "the floor was
+  reached" and "the player got something" are genuinely different facts, and a jackpot fanfare over
+  an empty hand is the outcome the rule exists to prevent. The two altitudes are judged
+  independently and both can play in one pass. Enforced engine-side (only the engine knows what a
+  grant produced, which is why applying a grants group reports a boolean), and unit-tested against a
+  pinned drop-table outcome through an injected roller seam rather than live randomness.
 - **A new `ActionDef.ContributionScale` group** (`{Factors[], Floors[]}`, the SAME
   `loot.FactorLadder` core `Roll.Ladder` uses) multiplies every `Work.PerCycleContributions` amount
   before it is forwarded. The engine PRE-SCALES: the resolved multiplier applies before
@@ -511,7 +534,13 @@ as shipped, not a change to something previously released.
   (`Roll.Ladder`, `ContributionScale`) resolves through the shared `loot.FactorLadder`: an
   absent/empty `Factors` array resolves 0.0, a floor's `Min` reader-defaults to 0 and a `Min <= 0`
   floor IS reachable, and an equal-`Min` tie goes to the LAST authored floor. A duplicate `Min` in
-  one ladder is `LADDER_DUPLICATE_FLOOR_MIN`, from one shared check.
+  one ladder is `LADDER_DUPLICATE_FLOOR_MIN`, from one shared check. The two per-floor loot checks
+  report what that core actually does: a floor authoring no positive `Min` is
+  `LOOT_LADDER_FLOOR_MISSING_MIN` at INFO, because it is legal and engine-honored - the always-reached
+  baseline tier - and only worth a confirm that a baseline was intended; and
+  `LOOT_LADDER_FLOOR_EMPTY_GRANTS` warns only when a floor authors NEITHER `Grants` nor a
+  `Presentation`, since a grants-less floor carrying a cue is the blessed pure-cue shape and reaching
+  it does something. Only a floor with neither does nothing at all.
 - **One name for the one weighted-factor concept:** `AddFactors` and `Values` are both now `Factors`
   (`Roll.Chance`, `Roll.Ladder`, `ContributionScale`, `StatRollEntry.Points`,
   `StationStep.Repeat`, `Stamp.Stats.Caps.Budgets[]`).
@@ -601,6 +630,63 @@ as shipped, not a change to something previously released.
   implementation overrides with the direct catalog size - the cheap presence-check/count path for a
   consumer that only wants to know whether stations are installed, without materializing a full
   `StationView` per station.
+
+### The shipped Sawmill: its tool curve, its finds, and how you get the bench
+
+The one default station 0.1.0 ships, authored entirely in ordinary content assets a server owner can
+retune or replace leaf by leaf. Nothing here is engine-special-cased.
+
+- Ships the Sawmill's tool-yield ladder, the curve that pays for the milling time. Three weighted
+  tool factors sum into one ladder value (`hytale:tool_quality` at weight 10, `hytale:tool_item_level`
+  at 0.1 to break ties inside a quality tier, `hytale:tool_power` at 1.0), and five floors at
+  `11`/`22`/`33`/`40`/`50` grant `1`/`1.5`/`2`/`3`/`4` bonus planks on top of the deterministic
+  `Yield.Base` of 1. Over the vanilla hatchets that reads as: a Wood or Crude hatchet reaches no floor
+  and mills one plank per log; Copper reaches 11 for two; Iron reaches 22, whose fractional `1.5` pays
+  two planks always and a third half the time, so the rung sits genuinely between its neighbours
+  instead of collapsing onto one; Thorium, Cobalt and Adamantite reach 33 for three; Onyxium and
+  Mithril reach 40 for four; and the 50 floor's five planks is beyond every forgeable tool, reachable
+  only with the station's own drop-only trophy hatchet or a better modded one. A second roll adds a
+  small flat windfall for everyone (a 2 percent base chance plus the held tool's own gather power,
+  capped at 25 percent so an extreme modded power value cannot turn it into a guarantee).
+- Ships a `ContributionScale` ladder tracking that curve rung for rung - the same three factors and
+  the same `11`/`22`/`33`/`40`/`50` crossings, scaling `2.0`/`2.5`/`3.0`/`4.0`/`5.0` - so a tool that
+  doubles a worker's planks also doubles whatever amounts a listening mod attaches to the action. The
+  jar attaches none itself (its own content is deliberately free of any progression vocabulary), so
+  the ladder ships ready and inert until something declares a channel.
+- Ships `SawmillFinds`, the station's session-loyalty find table, referenced from the action's
+  `Bonus.Lootables`. Its first roll gates on staying at the bench: cycle 10 or later AND a tool of
+  quality 2 or better, then 15 percent of qualifying cycles, into a three-floor ladder over the
+  session's own cycle count - the first tier from cycle 10, the second from 25, the third from 50,
+  each granting its own jar-shipped drop table of life essence with its own internal empty weight.
+  The upper two floors carry their own celebration cue, which the smart-cue rule keeps silent on a
+  cycle whose table resolved to nothing.
+- Ships the trophy chase. A second roll in that table wants all three tool axes at the vanilla Mithril
+  hatchet's own values (quality 4, item level 50, Woods gather power 0.5) from cycle 5 onward, and
+  then a visible `Chance` of `0.04` percent - 1 in 2500 eligible cycles, on the order of one per
+  twenty-five full sessions. The whole probability is one readable leaf, with no ladder and no tiers
+  hiding inside it. The win grants inline from the roll's own `Grants`, a command handing over the
+  new **Sawmiller's Hatchet**: a drop-only Legendary masterwork copy of the Mithril hatchet with 500
+  durability (the original carries 400) and a Woods gather power of `0.55` (the highest any vanilla
+  hatchet reaches is `0.5`). It is authored standalone with no `Parent` and deliberately no `Recipe`,
+  because inheriting the Mithril hatchet would inherit its forge recipe and make the chase pointless.
+  The roll's own top-level `Presentation` fires the celebration on the win.
+- Ships a fourth find tier for the trophy's owner. It gates on the Sawmiller's Hatchet's own three
+  axes (quality 5, item level 50, Woods power `0.55`), which no forgeable vanilla tool reaches, and
+  needs no cycle gate at all - the chase already proved the loyalty. Same 15 percent per-cycle
+  cadence, into the one find table with no empty entry: the tool that took 1 in 2500 to earn never
+  comes up dry on a find. The reward composes rather than branching: a Sawmiller's Hatchet in hand
+  scores 55.55 on the yield ladder, so it unlocks the 50 floor's fifth plank, the matching
+  contribution rung, and this tier at once.
+- Ships the Sawmill block as a craftable item on a bare install: a **tier 2 Workbench** recipe taking
+  one crude hatchet (the tool becomes part of the bench), any one log, and any four planks, both
+  material inputs authored as native resource-type families so every wood species qualifies. The tier
+  gate puts it behind the first workbench upgrade, so the bench arrives as an earned base improvement
+  rather than a day-one freebie, and the Crafting bench is deliberately where it sits (that is where
+  vanilla crafts every functional station and every hatchet) rather than the Furniture bench the
+  decor-grade vanilla Lumbermill sits at. That craftability is a property of the jar's own block item
+  and nothing else: a pack shipping its own block under the same id replaces the whole item by load
+  order, so a pack authoring no `Recipe` on its copy makes the station uncraftable the moment it is
+  installed and owns acquisition its own way. No flag, no engine branch, pure load order.
 
 ### Docs: the RPG Stations documentation
 
