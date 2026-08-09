@@ -100,7 +100,7 @@ public class StationFlairsTest {
         Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
-        assertEquals("SFX_Golden", result.getSound());
+        assertEquals("SFX_Golden", result.getSounds()[0]);
         assertEquals("Particles_Base", result.getParticles()[0].getSystemId());
     }
 
@@ -115,7 +115,7 @@ public class StationFlairsTest {
         Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
-        assertEquals("SFX_Golden", result.getSound());
+        assertEquals("SFX_Golden", result.getSounds()[0]);
         assertEquals("Particles_Golden", result.getParticles()[0].getSystemId());
     }
 
@@ -131,7 +131,7 @@ public class StationFlairsTest {
         Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
-        assertEquals("SFX_Zulu", result.getSound());
+        assertEquals("SFX_Zulu", result.getSounds()[0]);
         assertEquals("Particles_Alpha", result.getParticles()[0].getSystemId());
     }
 
@@ -174,7 +174,7 @@ public class StationFlairsTest {
         Presentation swingResult = StationFlairs.effective(swingBase, flairs, StationFlairs.MOMENT_SWING, PLAYER, STATION_ID);
         Presentation cycleResult = StationFlairs.effective(cycleBase, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
-        assertEquals("SFX_Golden_Swing", swingResult.getSound());
+        assertEquals("SFX_Golden_Swing", swingResult.getSounds()[0]);
         assertSame(cycleBase, cycleResult);
     }
 
@@ -204,7 +204,7 @@ public class StationFlairsTest {
         Presentation swingResult = StationFlairs.effective(swingBase, flairs, StationFlairs.MOMENT_SWING, PLAYER, STATION_ID);
         Presentation cycleResult = StationFlairs.effective(cycleBase, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
-        assertEquals("SFX_Golden_Rare", rareFindResult.getSound());
+        assertEquals("SFX_Golden_Rare", rareFindResult.getSounds()[0]);
         assertSame(swingBase, swingResult);
         assertSame(cycleBase, cycleResult);
     }
@@ -218,7 +218,7 @@ public class StationFlairsTest {
         Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_RARE_FIND, PLAYER, STATION_ID);
 
         assertNotNull(result);
-        assertEquals("SFX_Golden_Rare", result.getSound());
+        assertEquals("SFX_Golden_Rare", result.getSounds()[0]);
         assertEquals("Particles_Golden_Rare", result.getParticles()[0].getSystemId());
     }
 
@@ -250,7 +250,7 @@ public class StationFlairsTest {
         Presentation cycleResult = StationFlairs.effective(cycleBase, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
         Presentation rareFindResult = StationFlairs.effective(rareFindBase, flairs, StationFlairs.MOMENT_RARE_FIND, PLAYER, STATION_ID);
 
-        assertEquals("SFX_Golden_Complete", completionResult.getSound());
+        assertEquals("SFX_Golden_Complete", completionResult.getSounds()[0]);
         assertSame(swingBase, swingResult);
         assertSame(cycleBase, cycleResult);
         assertSame(rareFindBase, rareFindResult);
@@ -266,7 +266,7 @@ public class StationFlairsTest {
         Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_COMPLETION, PLAYER, STATION_ID);
 
         assertNotNull(result);
-        assertEquals("SFX_Golden_Complete", result.getSound());
+        assertEquals("SFX_Golden_Complete", result.getSounds()[0]);
         assertEquals("Particles_Golden_Complete", result.getParticles()[0].getSystemId());
     }
 
@@ -285,8 +285,8 @@ public class StationFlairsTest {
         Presentation swingResult = StationFlairs.effective(swingBase, flairs, StationFlairs.MOMENT_SWING, PLAYER, STATION_ID);
         Presentation impactResult = StationFlairs.effective(impactBase, flairs, StationFlairs.MOMENT_IMPACT, PLAYER, STATION_ID);
 
-        assertEquals("SFX_Golden_Swing", swingResult.getSound());
-        assertEquals("SFX_Golden_Impact", impactResult.getSound());
+        assertEquals("SFX_Golden_Swing", swingResult.getSounds()[0]);
+        assertEquals("SFX_Golden_Impact", impactResult.getSounds()[0]);
     }
 
     @Test
@@ -309,12 +309,12 @@ public class StationFlairsTest {
         Presentation base = Presentation.of("SFX_Base", "Particles_Base");
         Presentation.Shake shake = Presentation.Shake.of("Damage_Shake", 0.5);
         Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
-                moments(StationFlairs.MOMENT_CYCLE, Presentation.of(null, null, null, null, null, null, shake)));
+                moments(StationFlairs.MOMENT_CYCLE, Presentation.of(null, null, shake, null, null)));
 
         Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
-        assertEquals("SFX_Base", result.getSound(), "the flair leaves Sound null - the base survives");
+        assertEquals("SFX_Base", result.getSounds()[0], "the flair leaves Sound null - the base survives");
         assertSame(shake, result.getShake());
     }
 
@@ -331,7 +331,7 @@ public class StationFlairsTest {
         Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
-        assertEquals("SFX_Zulu", result.getSound());
+        assertEquals("SFX_Zulu", result.getSounds()[0]);
         assertEquals("Particles_Alpha", result.getParticles()[0].getSystemId());
     }
 
@@ -347,7 +347,7 @@ public class StationFlairsTest {
         Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
         assertNotNull(result);
-        assertEquals("SFX_Golden", result.getSound());
+        assertEquals("SFX_Golden", result.getSounds()[0]);
     }
 
     // ==================== stepMomentId / isKnownMomentId (open vocabulary, design 9.6) ====================
@@ -369,7 +369,7 @@ public class StationFlairsTest {
         Presentation stampResult = StationFlairs.effective(stampBase, flairs, stepId, PLAYER, STATION_ID);
         Presentation cycleResult = StationFlairs.effective(cycleBase, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
 
-        assertEquals("SFX_Golden_Stamp", stampResult.getSound());
+        assertEquals("SFX_Golden_Stamp", stampResult.getSounds()[0]);
         assertSame(cycleBase, cycleResult);
     }
 

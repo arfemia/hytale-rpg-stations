@@ -3,53 +3,86 @@
 Router for `loot/`. Native Hytale `ItemDropList`s have ZERO conditional/gating fields (scout-
 verified: all 5 container types, unconditional once reached); this layer is the additive
 condition/weight/command vocabulary ABOVE that native roller, never a reimplementation of item
-selection itself. Design authority: `../../../../../../.claude/research/raw/rpg-stations-unified-design-2026-07-21.md`
-section 4.5, tightened by critique M3 (all fixes binding: `AddFactors` is an array, every floor
-reward routes through its own `Grants` - no direct floor `DropList` leaf, top-level AND per-floor
-`Grants` both fire, `Chance` gates the WHOLE roll including `Ladder`).
+selection itself. Binding evaluation rules: `Chance.Factors`/`Ladder.Factors` are weighted
+`FactorRef` arrays, every floor reward routes through its own `Grants` (no direct floor drop-list
+leaf), top-level AND per-floor `Grants` both fire, and `Chance` gates the WHOLE roll including
+`Ladder`.
+
+**Concern boundary (the one rule to read first):** a `Roll` grants what ELSE a cycle handed over -
+`DropLists`, `Commands`, `Effects`, `Contributions`, and `Grants.OutputItems` (N ADDITIVE items of
+the cycle's own primary output). It never touches HOW MUCH of the cycle's own output was produced
+by the conversion itself; that lives end to end in `ActionDef.Recipe.Yield`, which is now purely
+DETERMINISTIC (`Base`/`Scale`/`Min`/`Max`, no ladder, no roll, zero factor involvement - see
+`../asset/CLAUDE.md` and `../station/CLAUDE.md`'s `StationYield` bullet). The retired
+`Grants.BonusOutputCopies` used to overlap the two: it granted N copies of the WHOLE produced
+stack, so a station whose yield already paid 4 planks silently handed out 4 more for a leaf that
+read as "+1", with the two numbers living in different files under different concept names. The
+leaf is deleted, not renamed; `Grants.OutputItems` is its ADDITIVE, single-item replacement,
+directly comparable to `Yield`'s own number because both count the same output item.
 
 - **[`RollEvaluator`](RollEvaluator.java)** - the PURE decision core (conditions / chance roll /
   ladder floor pick), unit-tested with an injected roll source + factor lookup, zero store access.
-  This is where the M3 schema ambiguities were resolved into concrete behavior - read its javadoc
-  before changing `asset/Roll`'s shape, since the schema doc and this class must stay in lockstep.
-- **[`LootEngine`](LootEngine.java)** - the store-touching half: resolves a station's effective
-  `Roll` list, then evaluates + APPLIES every roll matching a trigger against ONE
-  [`FactorSnapshot`](FactorSnapshot.java) built fresh per batch (memoizes each `(factorId, param)`
-  resolution so a bonus-copy `Chance` and a `Ladder` reading the SAME factor - e.g.
-  `yourmod:station_luck` - see the identical resolved number, the "one aggregation, two
-  consumers" invariant). Every grant routes through the shared
-  `util.ItemGrantUtil` seam (round-5, 2026-07-22: hotbar-first, then backpack storage, then
-  drop-at-block - `ItemGrantUtil` is a thin policy wrapper over `ziggfreed-common`'s
-  `inventory.InventoryGrant`, the mod-agnostic ordering primitive) - a stack that cannot fit
-  anywhere still lands as a ground item at the block, never a silent skip; never fails or stops the
-  cycle. Bonus-copy items and droplist items tally SEPARATELY (`GrantResult`) so the caller
-  (`station.StationService`) folds both into its own session item ledger; both grant kinds now
-  fire the SAME item-specific GOLD "what you gained" notification (round-5, `StationService
-  #notifyItemGain`, `lucky=true`) - REPLACING the old two generic `ui.station.lucky`/
-  `ui.station.rare_find` toasts. This class stays
+  Read its javadoc before changing `asset/Roll`'s shape, since the schema reference and this class
+  must stay in lockstep. Its `chancePasses` is PUBLIC on purpose: it is the ONE chance-gate
+  authority every `Roll.Chance` site (an action's `Bonus`, a `StationStep.Roll` phase) reuses
+  rather than growing a second, subtly-different percent gate.
+- **[`FactorLadder`](FactorLadder.java)** - the ONE ladder core: "sum the weighted factors, pick the
+  reached floor", called by EVERY ladder-shaped consumer in the schema (`RollEvaluator.highestFloor`
+  here, `station.ContributionScaling.multiplier` for an action's `ContributionScale`). It exists
+  because ladder consumers used to present an IDENTICAL authored shape and then diverge in three
+  invisible ways - whether an empty factor array killed the ladder, whether a `Min <= 0` floor was
+  reachable, and which of two equal-`Min` floors won. One core now fixes all three: an absent/empty
+  `Factors` resolves `0.0`, a `Min` reader-defaults to `0` and a `Min <= 0` floor IS reachable
+  (rejecting a malformed threshold is a validator's job, never an evaluator's), and an equal-`Min`
+  tie goes to the LAST authored floor, matching every other later-wins rule in this schema. The
+  validator warns on the duplicate rather than letting the evaluator silently pick. `StationYield`
+  (the deterministic per-cycle output transform) does NOT use this core any more - it has no ladder
+  left to resolve.
+- **[`LootEngine`](LootEngine.java)** - the store-touching half: resolves an action's effective
+  `Bonus` `Roll` list (`resolveRolls(LootRef)`), then evaluates + APPLIES every roll matching a
+  trigger against ONE [`FactorSnapshot`](FactorSnapshot.java) built fresh per batch
+  (`rollAndGrant`, memoizes each `(factorId, param)` resolution so an `OutputItems` `Chance` and a
+  `Ladder` reading the SAME factor - e.g. `yourmod:station_luck` - see the identical resolved
+  number, the "one aggregation, several consumers" invariant that also covers the deterministic
+  `Yield` transform reading the SAME cycle snapshot). Every item grant routes through the shared
+  `util.ItemGrantUtil` seam (hotbar-first, then backpack storage, then drop-at-block -
+  `ItemGrantUtil` is a thin policy wrapper over `ziggfreed-common`'s `inventory.InventoryGrant`,
+  the mod-agnostic ordering primitive) - a stack that cannot fit anywhere still lands as a ground
+  item at the block, never a silent skip; never fails or stops the cycle. Droplist items AND
+  `Grants.OutputItems` both tally on `GrantResult` (`getDropListItems()`/`getOutputItems()`) so the
+  caller (`station.StationService`) folds them into its own session item ledger and fires the
+  item-specific GOLD "what you gained" notification (`StationService#notifyItemGain`,
+  `lucky=true`); `StationService#grantBonusOutputItems` grants `getOutputItems()` copies of the
+  cycle's own resolved primary output id (`s.cycleOutputItemId`), through the SAME
+  `ItemGrantUtil` seam every other grant uses. `Grants.DropLists` is a plural ARRAY, each entry
+  rolled independently in authored order, so "a guaranteed common table plus a rare one" is two
+  entries rather than a synthetic merged asset or two whole duplicated `Roll`s. This class stays
   presentation-agnostic - it reports WHAT reward landed; `StationService` plays it through its OWN
   `emitMoment` choke point (see `../station/CLAUDE.md`), never a second playback path here.
 - **[`LootableCatalog`](LootableCatalog.java)** - the folded `asset.LootableAsset` store
-  (`Server/RpgStations/Lootables/*.json`), `defaults < pack`, referenced by a station's
-  `Loot.Lootables`.
+  (`Server/RpgStations/Lootables/*.json`), `defaults < pack`, referenced by ANY `LootRef.Lootables`
+  entry (an action's `Bonus`, a `StationStep.Roll` phase, or an `ExtensionAsset`'s `Bonus`
+  payload) - `LootRef` is the ONE loot-reference vocabulary, so this catalog has no notion of
+  "which site" referenced it.
 - **`Roll.Grants.Contributions[]` collection** - the engine grants items/commands/effects itself but
   NEVER resolves a contribution channel; a granted `{Channel, Param, Amount}` entry (top-level AND
   per-floor) is COLLECTED onto the roll result (`getContributions()`) for `station.StationEvents` to
   forward on `StationCycleCompletedEvent.oneShotContributions`, a list deliberately separate from
-  the station's own `Work.PerCycleContributions`: a one-shot find grant BYPASSES both the tool-power
-  multiplier and the idle fraction, so a rare find is worth the same whatever tool the worker holds.
+  the action's own `Work.PerCycleContributions`: a one-shot find grant BYPASSES both a per-cycle
+  entry's scalings (the action's own `ContributionScale` ladder AND the idle fraction), so a rare
+  find is worth the same on a practice cycle as on a real one and whatever tool the player holds.
   The two sites also keep DIFFERENT filters on purpose - the grants site gates on
   `Contribution.isPostable()` (non-blank channel AND a positive amount, because a grant either fires
   or does not), while the per-cycle site forwards any non-blank channel with a null amount read as
   `0.0`, so a zero-amount entry still reaches a listener as a visible zero row. Collection is gated on
   a `Cycle` trigger, because a `Completion` roll fires from inside `stop()` with no cycle event left
-  to ride (the validator warns on that authoring, exactly as it does for `BonusOutputCopies`).
+  to ride (the validator warns on that authoring).
 - **[`CommandRewardExecutor`](CommandRewardExecutor.java)** - the zero-code third-party
   integration surface: a `Roll.Grants.Commands` entry runs through common's `util.CommandExecutor`
   AS THE SERVER CONSOLE (never limited to the triggering player's own permissions - an authored
   `"give {player} ..."` just works), with fixed placeholders `{player}`/`{uuid}`/`{station}`/
   `{action}`/`{cycles}` substituted first.
 - **`ItemModule.get().getRandomItemDrops(id)` is the native roll boundary** - pure compute,
-  world-thread-safe (`ThreadLocalRandom` internally), called from `LootEngine` for a `Grants.DropList`
-  grant. `ItemDropContainer.populateDrops(..., DoubleSupplier, ...)` (the custom-RNG seam) is a
-  documented FUTURE hook for luck-weighted in-table rolls - NOT used in phase 1 (parity first).
+  world-thread-safe (`ThreadLocalRandom` internally), called from `LootEngine` once per
+  `Grants.DropLists` entry. `ItemDropContainer.populateDrops(..., DoubleSupplier, ...)` (the custom-RNG seam) is a
+  documented FUTURE hook for luck-weighted in-table rolls - NOT used today (parity first).

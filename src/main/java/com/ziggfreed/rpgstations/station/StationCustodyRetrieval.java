@@ -38,18 +38,41 @@ final class StationCustodyRetrieval {
     }
 
     /**
-     * Pure: which blockKey's live claim owns the display entity carrying {@code targetNetworkId}
-     * (a live snapshot of every claim's display entity's OWN network id, built by the caller -
-     * engine-free so this stays unit-testable with plain fixture ids; comparing by NetworkId
-     * rather than {@code Ref} identity sidesteps needing a live {@code Store} to construct a
-     * fixture {@code Ref} in a test, and matches the wire-level identity the native mount/
-     * interaction systems already key off). {@code null} when nothing matches.
+     * Pure: does the claim standing at {@code blockKey} own the display entity carrying
+     * {@code targetNetworkId}? Comparing by network id rather than {@code Ref} identity keeps this
+     * decision engine-free (a test needs no live {@code Store} to build a fixture {@code Ref}) and
+     * matches the wire-level identity the native mount/interaction systems already key off.
+     *
+     * <p><b>The world scope is load-bearing, not a micro-optimisation.</b> A network id is issued
+     * from a per-world counter that starts at 1 in every world, so the SAME integer routinely
+     * names a different entity in each loaded world. {@code worldPrefix} is the presser's own
+     * {@code "<worldUuid>:"} - the exact prefix {@code StationAnchors#blockKey} already encodes -
+     * and a claim whose key does not start with it can never be the one that was clicked. Without
+     * that guard, a press in world A can resolve a claim in world B and hand over its contents.
+     *
+     * @param blockKey             the candidate claim's own block key
+     * @param worldPrefix          the presser's world uuid followed by {@code ":"}
+     * @param claimDisplayNetworkId the candidate claim's stored display network id, null when it has no display
+     * @param targetNetworkId      the clicked entity's network id
+     */
+    static boolean owns(@Nonnull String blockKey, @Nonnull String worldPrefix,
+            @Nullable Integer claimDisplayNetworkId, int targetNetworkId) {
+        return claimDisplayNetworkId != null
+                && claimDisplayNetworkId == targetNetworkId
+                && blockKey.startsWith(worldPrefix);
+    }
+
+    /**
+     * Pure: the first blockKey in {@code blockKeyToDisplayNetworkId} whose claim {@link #owns} the
+     * clicked entity, or {@code null} when none does. The map-shaped convenience over
+     * {@link #owns} - the live retrieval path walks its own claim map with the predicate directly
+     * (no snapshot allocation, no component read), so both share ONE matching rule.
      */
     @Nullable
-    static String findOwningBlockKey(@Nonnull Map<String, Integer> blockKeyToDisplayNetworkId, int targetNetworkId) {
+    static String findOwningBlockKey(@Nonnull Map<String, Integer> blockKeyToDisplayNetworkId,
+            @Nonnull String worldPrefix, int targetNetworkId) {
         for (Map.Entry<String, Integer> e : blockKeyToDisplayNetworkId.entrySet()) {
-            Integer id = e.getValue();
-            if (id != null && id == targetNetworkId) {
+            if (owns(e.getKey(), worldPrefix, e.getValue(), targetNetworkId)) {
                 return e.getKey();
             }
         }

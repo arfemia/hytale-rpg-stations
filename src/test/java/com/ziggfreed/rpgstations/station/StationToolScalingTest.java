@@ -6,62 +6,14 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import com.ziggfreed.rpgstations.asset.StationAsset;
 
-/** Pure tests for {@link StationToolScaling}. */
+/**
+ * Pure tests for {@link StationToolScaling}: the held-tool power read plus the idle-cadence and
+ * durability-drain reader defaults. There is no tool-power CURVE here to test - the engine holds no
+ * baked multiplier of its own, so "a better tool earns more" is authored as a factor inside a
+ * recipe Yield ladder instead.
+ */
 public class StationToolScalingTest {
-
-    private static StationAsset.Tool.PowerScale scale(Double referencePower, Double exponent,
-            Double minMult, Double maxMult) {
-        return StationAsset.Tool.PowerScale.of(null, referencePower, exponent, minMult, maxMult);
-    }
-
-    // ==================== multiplier() ====================
-
-    @Test
-    void vanillaHatchetTriple_sawmillClamp() {
-        StationAsset.Tool.PowerScale sawmillScale = scale(0.2, null, 0.75, 1.5);
-        assertEquals(0.75, StationToolScaling.multiplier(0.15, sawmillScale), 1e-9);
-        assertEquals(1.0, StationToolScaling.multiplier(0.20, sawmillScale), 1e-9);
-        assertEquals(1.5, StationToolScaling.multiplier(0.30, sawmillScale), 1e-9);
-    }
-
-    @Test
-    void pickaxeFlatPower_landsOnDefaultMinMult() {
-        StationAsset.Tool.PowerScale defaultScale = scale(0.2, null, null, null);
-        assertEquals(0.5, StationToolScaling.multiplier(0.05, defaultScale), 1e-9);
-    }
-
-    @Test
-    void exponentShaping() {
-        StationAsset.Tool.PowerScale squared = scale(0.2, 2.0, 0.0, 10.0);
-        assertEquals(4.0, StationToolScaling.multiplier(0.4, squared), 1e-9);
-    }
-
-    @Test
-    void clampEdges_neverExceedMinOrMax() {
-        StationAsset.Tool.PowerScale clamped = scale(0.2, 1.0, 0.75, 1.5);
-        assertEquals(1.5, StationToolScaling.multiplier(100.0, clamped), 1e-9);
-        assertEquals(0.75, StationToolScaling.multiplier(0.0001, clamped), 1e-9);
-    }
-
-    @Test
-    void nullScale_isNeutral() {
-        assertEquals(1.0, StationToolScaling.multiplier(0.30, null), 1e-9);
-    }
-
-    @Test
-    void nullOrNonpositiveReferencePower_isNeutral() {
-        assertEquals(1.0, StationToolScaling.multiplier(0.30, scale(null, null, null, null)), 1e-9);
-        assertEquals(1.0, StationToolScaling.multiplier(0.30, scale(0.0, null, null, null)), 1e-9);
-        assertEquals(1.0, StationToolScaling.multiplier(0.30, scale(-1.0, null, null, null)), 1e-9);
-    }
-
-    @Test
-    void nonpositiveHeldPower_isNeutral() {
-        assertEquals(1.0, StationToolScaling.multiplier(-1.0, scale(0.2, null, 0.75, 1.5)), 1e-9);
-        assertEquals(1.0, StationToolScaling.multiplier(0.0, scale(0.2, null, 0.75, 1.5)), 1e-9);
-    }
 
     // ==================== heldPowerFor() ====================
 

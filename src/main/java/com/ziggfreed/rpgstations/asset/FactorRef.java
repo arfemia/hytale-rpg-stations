@@ -11,9 +11,9 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 /**
  * The ONE weighted factor reference (scope-2 design section 1.3/4.2, decisions 20/29c): a
  * {@code {Factor, Weight?, Param?}} leaf reused at EVERY site that composes numeric factor
- * channels - {@code Roll.Chance.AddFactors}, {@code Roll.Ladder.Values}, {@code StatRollEntry
- * .Points.AddFactors}, {@code StationStep.Stamp.Stats.Caps.Budgets[].Factors}, and
- * {@code StationStep.Repeat.AddFactors}. Composition at every consumer is a flat weighted sum,
+ * channels - {@code Roll.Chance.Factors}, {@code Roll.Ladder.Factors}, {@code StatRollEntry
+ * .Points.Factors}, {@code StationStep.Stamp.Stats.Caps.Budgets[].Factors}, and
+ * {@code StationStep.Repeat.Factors}. Composition at every consumer is a flat weighted sum,
  * {@code sum(resolve(Factor, Param) * Weight)} - no expression nesting (directive 3's boundary).
  *
  * <p>This is the ADD/scale sibling of {@link Condition}: {@link Condition} is a factor reference

@@ -9,6 +9,7 @@ import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.protocol.AnimationSlot;
+import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.entity.component.EntityScaleComponent;
@@ -34,37 +35,40 @@ import com.ziggfreed.rpgstations.util.Log;
 
 /**
  * Policy-thin glue over {@code ziggfreed-common}'s {@code entity.PlayerPuppetService} for a
- * station session's PUPPET presentation route (round-4 design, {@code
- * .claude/research/raw/rpg-stations-puppet-presentation-design-2026-07-22.md} section 4 - "mount
- * the player, hide their player model, and spawn/display a visual of their character model
- * performing the steps"). Sibling to {@link StationEntityMountController}/{@link
- * StationHoldController}: this class owns ONLY the puppet's spawn/hide/reveal/despawn/animation
- * MECHANISM (the offset/yaw/prop resolution against the station's own block-top anchor - FACING-
- * RELATIVE to the placed block's own yaw since the round-3 smoke, see {@link #resolveWorldOffset}/
- * {@link #resolveYawRadians} and the shared {@link StationBlockFacing} reader - which
- * hide route an author picked, and the swing-beat cadence caller policy) - the generic
- * "clone-a-skin-onto-a-networked-entity" + "scale self-hide" primitives themselves live in common
- * ({@code entity.PlayerPuppetService}/{@code entity.PlayerModelService}), per the root
+ * station session's PUPPET presentation route: mount the player, hide their player model, and
+ * spawn a visual of their own character model performing the steps. Sibling to {@link
+ * StationEntityMountController}/{@link StationHoldController}: this class owns ONLY the puppet's
+ * spawn/hide/reveal/despawn/animation MECHANISM (the offset/yaw/prop resolution against the
+ * station's own block-top anchor - FACING-RELATIVE to the placed block's own yaw, see
+ * {@link #resolveWorldOffset}/{@link #resolveYawRadians} and the shared {@link StationBlockFacing}
+ * reader - which hide route an author picked, and the swing-beat cadence caller policy) - the
+ * generic "clone-a-skin-onto-a-networked-entity" + "scale self-hide" primitives themselves live in
+ * common ({@code entity.PlayerPuppetService}/{@code entity.PlayerModelService}), per the root
  * additional-mods PARADIGM (a reusable Hytale primitive belongs in common, not duplicated here).
  *
- * <p><b>Hide route, this leg (design round-4 crowned decision):</b> {@code Hide.Route} is a
+ * <p><b>Hide route:</b> {@code Hide.Route} is a
  * THREE-arm union - {@code "Scale"} (in-game PROVEN, the ONLY route this class actually applies:
  * {@link PlayerPuppetService#hideByScale}/{@link PlayerPuppetService#revealByScale}), {@code
  * "Effect"} (schema-reserved future work - the shadowstep/{@code Portal_Teleport} pointer, see
- * {@link Puppet.Hide}'s own javadoc; this leg applies NO hide for it, a puppet spawns but the real
- * player stays visible, the same degraded posture as {@code "None"}), and {@code "None"} (the
- * deliberate degraded fallback). The design doc's {@code "ModelSwap"}/{@code "HiddenManager"}
- * routes were RETIRED before this schema shipped (buggy/unproven in the P0 spike) - this class
- * therefore never touches {@code HiddenPlayersManager} at all. The temporary {@code
- * puppetspike.PuppetSpikeService} P0 harness that once exercised those retired routes for
- * diagnostic comparison was DELETED (cleanup pass, 2026-07-23) after the maintainer's in-game
- * confirm of this production route; this class is now the sole puppet-presentation code path.
+ * {@link Puppet.Hide}'s own javadoc; no hide is applied for it today, so a puppet spawns but the
+ * real player stays visible, the same degraded posture as {@code "None"}), and {@code "None"} (the
+ * deliberate degraded fallback). Two further routes were trialled and RETIRED before this schema
+ * shipped, a model swap and a hidden-players registry, both buggy and unproven - this class
+ * therefore never touches {@code HiddenPlayersManager} at all, and is the sole
+ * puppet-presentation code path.
  *
- * <p><b>Animation routing (design 4.3):</b> a puppet ALWAYS plays its clip on the {@code Emote}
- * slot - it has no sit pose to fight (unlike a seat-mounted real player), so it needs none of
- * {@code StationHoldController#playActionSwing}'s Action-slot held-item workaround. This
- * SUPERSEDES {@code StationService#useActionSlotForSwing} entirely for a puppet-active session -
- * see {@code StationService#runSwing}'s branch. The per-step {@code StationStep.Puppet} override
+ * <p><b>Animation routing:</b> a puppet-active session SUPERSEDES
+ * {@code StationService#useActionSlotForSwing} entirely - see {@code StationService#runSwing}'s
+ * branch - and picks its own swing slot through {@link #useActionSlotForPuppetSwing}. An
+ * {@code Emote}-slot clip is the opt-in full-body override and wins whenever one resolved
+ * ({@code Animation.EmoteId}, or the in-flight step's own {@code Puppet.Clip}); the puppet has no
+ * sit pose to fight, so nothing forces it off that slot the way a seat-mounted real player is
+ * forced off. With NO emote clip authored the work animation is the held item's own Action-slot
+ * clip ({@code Animation.ActionClip}, defaulting to {@code "Chop"}), so the swing rides
+ * {@link #playActionSlotSwing} against the item the puppet mirrors into its own Hotbar - the same
+ * clip a seat-mounted worker would play. Either slot keeps the {@code Swing.IntervalMs} re-fire
+ * cadence, which is what lets a viewer arriving mid-session see the clip within one interval.
+ * The per-step {@code StationStep.Puppet} override
  * ({@link StationStep.PuppetOverride}) is read off the SESSION's already-tracked step-resume state
  * ({@code StationSession#programSuspended}/{@code #activeProgramSteps}/{@code #programIndex}) so a
  * ritual's distinct beats (e.g. the anvil's future strike/quench/stamp poses) get their own puppet
@@ -80,14 +84,14 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@code CommandBuffer} the caller threads through, never a live {@code Store} - {@code toggle}
  * (an interaction handler) and the heartbeat frame-drain both run inside the store's own
  * write-processing lock, where a direct {@code store.putComponent}/{@code removeEntity} throws
- * (accessor-bug fix, fix round; see each method's own javadoc). {@code teardownStore} (resolved
+ * (see each method's own javadoc). {@code teardownStore} (resolved
  * off {@code s.ref.getStore()}, falling back to {@code s.puppetRef.getStore()}) still backs
  * {@link #revealAndDespawn}'s entity-still-resolvable validity gate, mirroring {@code
  * returnCustody}'s exact resolution pattern; the mutation itself uses the passed-in {@code
  * commandBuffer}, which is {@code null} on the same damage/death/disconnect/shutdown sweeps
  * {@code returnCustody} already accepts a {@code null} commandBuffer for.
- * {@link #reassertOnReady} is the belt-and-suspenders {@code PlayerReadyEvent} safety net (design
- * 4.4/leg P5): unconditional, not gated on any remembered session (a restart wipes every
+ * {@link #reassertOnReady} is the belt-and-suspenders {@code PlayerReadyEvent} safety net:
+ * unconditional, not gated on any remembered session (a restart wipes every
  * in-memory {@code StationSession} by construction), it also catches the residual case of a
  * {@code null}-commandBuffer exit leaving a hidden player un-revealed for the rest of that
  * session - the only OTHER residual risk is a PERSISTED {@link EntityScaleComponent} on the
@@ -100,7 +104,7 @@ final class StationPuppetController {
     }
 
     /**
-     * F2 part (a): re-point {@link StationSession#puppetRef} at the performer's LIVE ref, called
+     * Re-point {@link StationSession#puppetRef} at the performer's LIVE ref, called
      * once per frame from {@code StationService#tickFrameOnce}. The {@code NpcRole} backend spawns
      * its {@code NPCEntity} one tick LATE (a lock-held engage caller has only a {@code CommandBuffer};
      * {@code NPCPlugin.spawnEntity} needs a concrete store, so the spawn defers via {@code
@@ -130,7 +134,7 @@ final class StationPuppetController {
      * StationSession} puppet field at its default, the session continues in-body - matching {@link
      * StationEntityMountController}'s own graceful-degradation contract.
      *
-     * <p><b>Accessor-bug fix (fix round):</b> both the spawn AND the {@code Scale} hide route
+     * <p><b>Accessor-bug fix:</b> both the spawn AND the {@code Scale} hide route
      * through {@code commandBuffer}, never {@code store} - this call runs from {@code
      * StationService#toggle}, inside the store's write-processing lock (an interaction-handler
      * call site), where a direct {@code store.putComponent} throws {@code IllegalStateException(
@@ -148,11 +152,11 @@ final class StationPuppetController {
             double anchorX = s.blockX + 0.5;
             double anchorY = s.blockY + 0.5;
             double anchorZ = s.blockZ + 0.5;
-            // FACING-RELATIVE composition (round-3 smoke): read the placed station block's own facing
-            // yaw so the authored Puppet.Offset/Yaw are relative to the block's FRONT, not absolute
-            // world axes - a rotated sawmill carries its worker's side around with it. The read is the
-            // ONE impure step (StationBlockFacing, shared with StationCustodyDisplay's round-8
-            // Custody.Display composition); the composition itself stays in the pure cores below.
+            // FACING-RELATIVE composition: read the placed station block's own facing yaw so the
+            // authored Puppet.Offset/Yaw are relative to the block's FRONT, not absolute world axes
+            // - a rotated sawmill carries its worker's side around with it. The read is the ONE
+            // impure step (StationBlockFacing, shared with StationCustodyDisplay's Custody.Display
+            // composition); the composition itself stays in the pure cores below.
             double blockYawRadians = world != null
                     ? StationBlockFacing.yawRadians(world, s.blockX, s.blockY, s.blockZ)
                     : StationBlockFacing.yawRadians(commandBuffer, s.blockX, s.blockY, s.blockZ);
@@ -164,10 +168,9 @@ final class StationPuppetController {
             Puppet.Prop prop = puppet.getProp();
             String propItemId = resolveEffectivePropItemId(heldItemIdOf(player), prop);
 
-            // Backend from Look.Source (seam wave decision 47/55): PlayerClone/Model -> the bare-
-            // Holder puppet (byte-parity with the shipped route); NpcRole -> the Role-driven NPC,
-            // with an engage-time fail-closed fallback to the Holder (one warn) when the role is
-            // unusable (decision 53's full-pass check + engage-time degrade).
+            // Backend from Look.Source: PlayerClone/Model -> the bare-Holder puppet; NpcRole -> the
+            // Role-driven NPC, with an engage-time fail-closed fallback to the Holder (one warn)
+            // when the role is unusable (the validator's full pass flags it ahead of runtime).
             PerformerLook look = resolveLook(puppet.getLook());
             StationPerformer performer = createBackend(look, s);
             boolean synchronousSpawn = performer instanceof HolderPerformer;
@@ -235,7 +238,7 @@ final class StationPuppetController {
             Puppet.Model m = look.getModel();
             return PerformerLook.builder().source(LookSource.MODEL)
                     .modelId(m != null ? m.getModelId() : null)
-                    .fallbackModelId(m != null ? m.getFallbackModelId() : null)
+                    .fallbackModelId(look.getFallbackModelId())
                     .build();
         }
         if (Puppet.LOOK_SOURCE_NPC_ROLE.equals(source)) {
@@ -284,7 +287,7 @@ final class StationPuppetController {
      * entity-still-resolvable validity gate now - the actual reveal/despawn mutations route
      * through {@code commandBuffer}.
      *
-     * <p><b>Accessor-bug fix (fix round):</b> {@code revealByScale}/{@code despawn} now take the
+     * <p><b>Accessor-bug fix:</b> {@code revealByScale}/{@code despawn} now take the
      * {@code commandBuffer} {@code stop()} threads through (the SAME nullable parameter it already
      * passes to {@code returnCustody} and the mount-anchor despawn), never {@code teardownStore} -
      * the prior store-routed calls threw {@code IllegalStateException("Store is currently
@@ -293,7 +296,7 @@ final class StationPuppetController {
      * fine log, leaving a ghost puppet untracked in the world and (whenever the hide itself HAD
      * applied) the real player stuck invisible.
      *
-     * <p><b>Round-6 puppet smoke (D-A secondary):</b> DAMAGED ({@code onDamage}) and DIED
+     * <p><b>The two interrupt exits:</b> DAMAGED ({@code onDamage}) and DIED
      * ({@code stopForRef}) NOW thread the live {@code CommandBuffer} their own dispatch already
      * receives (both are the common connected-player exit reasons - a station-interrupting hit or
      * a death mid-work - previously stranding an invisible player until their next reconnect with
@@ -363,12 +366,20 @@ final class StationPuppetController {
     // ==================== animation + prop routing ====================
 
     /**
-     * Engage-time loop clip - mirrors {@code StationHoldController#playEmote} exactly, but
-     * targets the puppet instead of the real player. No-op when {@link StationSession#puppetActive}
-     * is false or the station authors no {@code Animation.EmoteId}.
+     * Engage-time clip - mirrors {@code StationHoldController#playEmote}'s instant start, but
+     * targets the puppet instead of the real player. An authored {@code Animation.EmoteId} starts
+     * its {@code Emote}-slot loop; with none authored the held item's {@code Action}-slot work
+     * clip fires once immediately (the same {@link #useActionSlotForPuppetSwing} choice the swing
+     * makes, so the worker is never idle for the first {@code Swing.IntervalMs}; the re-fire then
+     * keeps the clip alive). No-op when {@link StationSession#puppetActive} is false.
      */
-    static void playLoop(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
-        if (!s.puppetActive || s.performer == null || s.emoteId == null || s.emoteId.isBlank()) {
+    static void playLoop(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nullable Player player) {
+        if (!s.puppetActive || s.performer == null) {
+            return;
+        }
+        if (useActionSlotForPuppetSwing(s.emoteId)) {
+            playActionSlotSwing(s, store, player, null);
             return;
         }
         // The engage loop clip is a network packet (not a mutation) - route it through the live
@@ -377,17 +388,19 @@ final class StationPuppetController {
     }
 
     /**
-     * The per-swing beat: fires the effective clip on the puppet's {@code Emote} slot (design
-     * 4.3 - supersedes the real-player Action-slot seat workaround entirely) and syncs its held
-     * prop. Both the clip and the prop prefer the currently-suspended step's own {@code
-     * StationStep.Puppet} override when one is in flight, else fall back to the resolved action's
-     * defaults ({@code s.emoteId}/{@code s.puppetDefaultProp}) - design 3.1's "absent = inherit
-     * the action's default clip/prop". The animation packet itself still routes through {@code
-     * store} ({@link PlayerPuppetService#playAnimation} sends a network packet, not a component
-     * mutation - not part of the accessor-bug fix); the prop sync (a real {@code Hotbar} component
-     * mutation) routes through {@code commandBuffer} - see {@link #syncProp}.
+     * The per-swing beat: fires the effective clip on the puppet and syncs its held prop. Both the
+     * clip and the prop prefer the currently-suspended step's own {@code StationStep.Puppet}
+     * override when one is in flight, else fall back to the resolved action's defaults
+     * ({@code s.emoteId}/{@code s.puppetDefaultProp}), the schema's "absent = inherit the action's
+     * default clip/prop" rule. The SLOT that clip lands on is {@link
+     * #useActionSlotForPuppetSwing}'s call: an authored emote clip plays on the {@code Emote}
+     * slot, and with none authored the swing rides {@link #playActionSlotSwing}'s {@code Action}
+     * slot against the held item's own animation set. The animation packet itself still routes
+     * through {@code store} ({@link PlayerPuppetService#playAnimation} sends a network packet, not
+     * a component mutation); the prop sync (a real {@code Hotbar} component mutation) routes
+     * through {@code commandBuffer} - see {@link #syncProp}.
      *
-     * <p><b>{@code playClip} suppression (round-8 step-synced swings):</b> {@code false} when the
+     * <p><b>{@code playClip} suppression (step-synced swings):</b> {@code false} when the
      * session runs a stepped program whose steps author their OWN per-step clips
      * ({@link StationSession#stepProgramAuthorsClip}) - those clips fire at each step's ITERATION
      * ENTRY ({@link StationStepRegistry}) and are the sole puppet animation driver, so the generic
@@ -402,9 +415,11 @@ final class StationPuppetController {
         StationStep.PuppetOverride override = activeStepPuppetOverride(s);
         if (playClip) {
             String clip = resolveEffectiveClip(override != null ? override.getClip() : null, s.emoteId);
-            if (clip != null && !clip.isBlank()) {
-                // Clip = a network packet -> the live store; the prop sync below = a Hotbar mutation
-                // -> the tick-safe commandBuffer. Byte-parity with the pre-swap split.
+            // Clip = a network packet -> the live store; the prop sync below = a Hotbar mutation
+            // -> the tick-safe commandBuffer.
+            if (useActionSlotForPuppetSwing(clip)) {
+                playActionSlotSwing(s, store, player, override);
+            } else {
                 s.performer.playClip(store, ClipSpec.of(AnimationSlot.Emote, clip));
             }
         }
@@ -412,7 +427,77 @@ final class StationPuppetController {
     }
 
     /**
-     * The step-synced swing beat (round-8, maintainer-approved): plays {@code clip} ONCE on the
+     * The puppet's {@code Action}-slot swing: the resolved {@code Animation.ActionClip} fired
+     * against the animation set of whatever the PUPPET is actually holding. No-op when nothing
+     * resolves a {@code PlayerAnimationsId} (nothing to resolve a clip against) or the performer is
+     * gone. Never throws.
+     *
+     * <p><b>Why the puppet's own prop and not simply the player's held item.</b> Under the
+     * {@code MirrorHeld} default the two are the same item, which is why the seat-mode route's
+     * {@code StationHoldController#heldItemAnimationsId} resolution was enough on its own. But a
+     * {@code Puppet.Prop} of {@code Source: "ItemId"} - authored on the action, or overridden by
+     * the in-flight step - puts a DIFFERENT item in the puppet's hand, and resolving the clip
+     * against the player's hotbar then animated the puppet with the wrong profile entirely (a
+     * puppet holding a fish playing the hatchet's chop). {@link #resolvePuppetAnimationsId} asks
+     * the prop first and keeps the held item as the fallback, so the mirror case is unchanged.
+     */
+    private static void playActionSlotSwing(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nullable Player player, @Nullable StationStep.PuppetOverride override) {
+        StationPerformer performer = s.performer;
+        if (performer == null) {
+            return;
+        }
+        try {
+            String itemAnimationsId = resolvePuppetAnimationsId(s, player, override);
+            if (itemAnimationsId == null) {
+                return;
+            }
+            performer.playClip(store, new ClipSpec(AnimationSlot.Action, itemAnimationsId,
+                    StationHoldController.effectiveActionClip(s.actionClip), true));
+        } catch (Throwable t) {
+            Log.warn("STATION puppet action animation failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * The {@code ItemPlayerAnimations} set an {@code Action}-slot puppet clip resolves against: the
+     * puppet's EFFECTIVE prop item when that differs from the player's held item (the same
+     * {@link #resolveEffectivePropItemId} the prop sync itself uses, so the hand and the animation
+     * can never disagree), else the player's own held item through the shared
+     * {@code StationHoldController#heldItemAnimationsId}. A prop whose item carries no
+     * {@code PlayerAnimationsId} falls back to the held item too rather than going silent.
+     */
+    @Nullable
+    private static String resolvePuppetAnimationsId(@Nonnull StationSession s, @Nullable Player player,
+            @Nullable StationStep.PuppetOverride override) {
+        String heldItemId = heldItemIdOf(player);
+        Puppet.Prop effectiveProp = override != null && override.getProp() != null
+                ? override.getProp() : s.puppetDefaultProp;
+        String propItemId = resolveEffectivePropItemId(heldItemId, effectiveProp);
+        if (propItemId != null && !propItemId.equalsIgnoreCase(heldItemId)) {
+            String propAnimationsId = itemAnimationsIdOf(propItemId);
+            if (propAnimationsId != null) {
+                return propAnimationsId;
+            }
+        }
+        return StationHoldController.heldItemAnimationsId(player);
+    }
+
+    /** The {@code PlayerAnimationsId} of {@code itemId}'s Item asset, or null when it has none. */
+    @Nullable
+    private static String itemAnimationsIdOf(@Nonnull String itemId) {
+        try {
+            Item item = Item.getAssetMap().getAsset(itemId);
+            String animationsId = item != null ? item.getPlayerAnimationsId() : null;
+            return animationsId != null && !animationsId.isBlank() ? animationsId : null;
+        } catch (Throwable t) {
+            Log.fine("STATION puppet prop animation lookup failed for '" + itemId + "': " + t.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * The step-synced swing beat: plays {@code clip} ONCE on the
      * puppet's {@code Emote} slot the moment a step that authors its own {@code Puppet.Clip} begins
      * executing ({@link StationStepRegistry}'s per-step clip entry hook, gated by
      * {@link StationStepDecisions#shouldPlayClipOnEntry}). No-op when the puppet is not active or
@@ -431,7 +516,7 @@ final class StationPuppetController {
     }
 
     /**
-     * The step-synced prop swap (round-8 continuation): re-syncs the puppet's held PROP to
+     * The step-synced prop swap: re-syncs the puppet's held PROP to
      * {@code step}'s OWN effective prop the moment the step begins executing ({@link
      * StationStepRegistry}'s per-step entry hook, gated by {@link
      * StationStepDecisions#shouldSyncPropOnEntry}). Delegates to the SAME {@link #syncProp} plumbing
@@ -452,7 +537,7 @@ final class StationPuppetController {
     }
 
     /**
-     * P-1 fix (held-item mirror refresh, post-round-5 puppet smoke): resolves the CURRENT
+     * The held-item mirror refresh: resolves the CURRENT
      * effective prop item id fresh every beat (a station's own {@code Puppet.Prop} may be
      * {@code MirrorHeld}, so this tracks a live tool switch, e.g. hatchet-for-hammer mid-work) and
      * hands it to {@code ziggfreed-common}'s {@link PlayerPuppetService#updateHeldItem} - the
@@ -460,8 +545,8 @@ final class StationPuppetController {
      * fans a per-viewer equipment-update packet) when the resolved id actually CHANGED from
      * {@link StationSession#puppetHeldItemId} (this session's own last-mirrored value, threaded
      * back from the primitive's return so it stays authoritative across beats - the primitive
-     * itself is stateless). Accessor-bug fix (fix round, unchanged by this leg): the mutation
-     * still routes through {@code commandBuffer}, never {@code store} - this runs from
+     * itself is stateless). Accessor-bug fix: the mutation
+     * routes through {@code commandBuffer}, never {@code store} - this runs from
      * {@link #playSwing}, reached via {@code StationService#runSwing} on the heartbeat
      * frame-drain's swing-beat timer, a processing context (the same class as {@code toggle}).
      */
@@ -513,14 +598,13 @@ final class StationPuppetController {
      * {@link PlayerPuppetService#offsetPosition}'s block-top anchor - kept primitive so it needs no
      * live Hytale type.
      *
-     * <p><b>Facing-relative convention (round-3 smoke), the round-8 {@code Custody.Display}
-     * precedent applied to the puppet:</b> the authored {@code Offset.X}/{@code .Z} are in the
-     * BLOCK'S OWN horizontal frame ({@code +Z} = the block's FRONT, {@code +X} = its right), rotated
-     * through the ONE shared core {@link StationBlockFacing#rotateOffset}. Before this, they were
-     * WORLD-SPACE (a documented phase-4 simplification), so which side of a sawmill the puppet stood
-     * on depended entirely on how that particular block happened to be placed. At a
-     * DEFAULT-orientation placement ({@code blockYawRadians == 0}) the rotation is the IDENTITY, so
-     * every in-game-tuned value shipped before this change renders BYTE-IDENTICALLY.
+     * <p><b>Facing-relative convention</b> (the same one {@code Custody.Display} follows): the
+     * authored {@code Offset.X}/{@code .Z} are in the BLOCK'S OWN horizontal frame ({@code +Z} = the
+     * block's FRONT, {@code +X} = its right), rotated through the ONE shared core
+     * {@link StationBlockFacing#rotateOffset}. Authoring them in WORLD space instead would make
+     * which side of a sawmill the puppet stands on depend entirely on how that particular block
+     * happened to be placed. At a DEFAULT-orientation placement ({@code blockYawRadians == 0}) the
+     * rotation is the IDENTITY, so an in-game-tuned value reads the same either way.
      */
     @Nonnull
     static double[] resolveWorldOffset(@Nullable Vec3 offset, double blockYawRadians) {
@@ -543,8 +627,8 @@ final class StationPuppetController {
     }
 
     /**
-     * PURE: {@code stepClipOverride} wins when authored, else {@code defaultClip} - design 3.1's
-     * "absent = inherit the action's default clip".
+     * PURE: {@code stepClipOverride} wins when authored, else {@code defaultClip} - the schema's
+     * "absent = inherit the action's default clip" rule.
      */
     @Nullable
     static String resolveEffectiveClip(@Nullable String stepClipOverride, @Nullable String defaultClip) {
@@ -552,7 +636,21 @@ final class StationPuppetController {
     }
 
     /**
-     * PURE: the effective puppet prop item id (design 3.6) - {@code null} {@code prop} (no group
+     * PURE: the puppet swing's SLOT choice. An {@code Emote}-slot clip is the OPT-IN full-body
+     * override, so it wins whenever one resolved ({@code Animation.EmoteId}, or the in-flight
+     * step's own {@code Puppet.Clip}); with none authored the swing rides the {@code Action} slot
+     * against the held item's own animation set instead, which is the work animation for a station
+     * that authors no {@code EmoteId} at all. {@code true} = Action slot.
+     *
+     * <p>Both slots are dispatched by the identical engine call and its model-lookup guard exempts
+     * the two identically, so the choice costs nothing beyond which clip vocabulary applies.
+     */
+    static boolean useActionSlotForPuppetSwing(@Nullable String effectiveEmoteClip) {
+        return effectiveEmoteClip == null || effectiveEmoteClip.isBlank();
+    }
+
+    /**
+     * PURE: the effective puppet prop item id - {@code null} {@code prop} (no group
      * authored at all) mirrors the live held item ({@code MirrorHeld}'s own zero-authoring
      * default); {@code "None"} always empties the puppet's hand; {@code "ItemId"} forces {@code
      * prop.getItemId()} (blank/absent degrades to empty-handed, never a crash); every other
@@ -574,14 +672,13 @@ final class StationPuppetController {
         return heldItemId;
     }
 
-    // ==================== PlayerReady safety net (design 4.4 / leg P5) ====================
+    // ==================== PlayerReady safety net ====================
 
     /**
      * Unconditionally clears any lingering {@link EntityScaleComponent} and restores the correct
-     * cosmetic model on the FRESH ready ref/store - the belt-and-suspenders net design 4.4 calls
-     * for ("a spike must never strand an invisible/shrunk player"), generalized from the shape
-     * the now-deleted {@code puppetspike.PuppetSpikeService#safetyNetOnReady} P0 harness had
-     * already proved during the spike phase. Deliberately NOT gated on any remembered
+     * cosmetic model on the FRESH ready ref/store - the belt-and-suspenders net behind the
+     * hide route's one hard rule: a puppet must never strand an invisible or shrunk player.
+     * Deliberately NOT gated on any remembered
      * {@code StationSession}: a server restart wipes every in-memory session by construction, so
      * the only residual risk is a PERSISTED component on the player's own entity from an unclean
      * shutdown mid-hide. Never throws.

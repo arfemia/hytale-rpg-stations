@@ -12,6 +12,7 @@ import com.hypixel.hytale.component.query.Query;
 import com.hypixel.hytale.server.core.modules.entity.damage.Damage;
 import com.hypixel.hytale.server.core.modules.entity.damage.DamageEventSystem;
 import com.hypixel.hytale.server.core.modules.entity.damage.DamageModule;
+import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -30,10 +31,16 @@ public final class StationInterruptDamageSystem extends DamageEventSystem {
         return DamageModule.get().getInspectDamageGroup();
     }
 
+    /**
+     * PLAYERS ONLY - the same query {@code StationCustodyBreakSystem}/{@code StationBlockPlaceSystem}
+     * already use. Only a player can hold a work session, so a mob taking damage (by far the bulk of
+     * damage events in a populated world) has no reason to reach the service at all; the previous
+     * {@code Query.any()} paid a dispatch plus a session lookup for every one of them.
+     */
     @Nullable
     @Override
     public Query<EntityStore> getQuery() {
-        return Query.any();
+        return PlayerRef.getComponentType();
     }
 
     @Override

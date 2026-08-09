@@ -41,12 +41,15 @@ the WHOLE set executes:
   folds into [`StationCatalog`](StationCatalog.java). Ids are lowercase (canonicalized at
   decode). This jar ships its OWN default Sawmill (`Server/RpgStations/Stations/Sawmill.json`,
   standalone-playable with the built-in `rpgstations:` factors + `SawmillFinds` lootable); the
-  sibling stations pack adds its own luck-tier lootable plus a luck-scaled bonus-copy roll as
+  sibling stations pack adds its own luck-tier lootable plus a luck-scaled `Grants.OutputItems` roll as
   an ADDITIVE `Extensions/*.json` (below) rather than a full-file override. **The jar Sawmill
   declares NO `Work.PerCycleContributions` at all** - jar-layer content is progression-free by
   design, so a pack OWNS the sawmill's contributions outright and there is no base entry for an
-  extension to collide with. `Tool.PowerScale` stays authored on it with zero contributions
-  behind it, so a pack that layers contributions on inherits a tuned tool ladder for free
+  extension to collide with. The station's tool ladder lives where its EFFECT is visible: THREE
+  `Bonus.Rolls` (a `Ladder` over three weighted tool factors granting `Grants.OutputItems` per
+  floor, a mid-tier `Chance`-gated half-plank roll, and a small flat windfall `Chance`) plus a
+  parallel `ContributionScale` ladder describing the identical tool curve for whichever mod adds
+  contributions - rather than in a separate baked curve
   - see `../../../../../../CONTENT_PACKS.md`'s Station authoring section for the authoring guide
   (brief reference only; do not duplicate it here). **The jar Sawmill owns the PRESENTATION defaults
   too** (`Puppet` + `Custody.Display`, the maintainer's in-game-tuned values, plus `Work.CycleMs`
@@ -101,7 +104,9 @@ a discriminator.
   (`{Consume, Stamp:null, Produce, Roll, Presentation}` folded onto a single `StationStep`
   instead of the old four-step `[Consume, Produce, Roll, Present]` array) - byte-equivalent
   behavior (a station with no `Actions`/`Steps` authored runs identically), simpler anchor for
-  the phase model.
+  the phase model. Its `Roll` phase is where the action's own `Bonus` rides on THIS route, which
+  is why `dispatchProgram`'s completion-time `Bonus` pass is flagged off for it (see the cadence
+  section: one `Cycle` moment per completed pass, whichever program shape ran).
 - `StationSession` resume state (`programSuspended`/`programIndex`/`stepDeadlineMs`/
   `activeProgramSteps`) is UNCHANGED this wave - a `Duration` hold suspends/resumes through the
   exact same fields the old `Wait` type used. The design's `stepIteration`/`walkProgress`
@@ -116,53 +121,159 @@ a discriminator.
   existing per-cycle commit boundary - never split across a suspend this wave (that split is
   exactly what `Walk` would enable, `[wave 3]`).
 
-## ActionAsset resolution (design 1.5)
+## Action resolution: Id lookup -> Ref overlay -> extension overlays
 
-`Ref` resolution is a NEW branch inside the existing [`ActionResolver`](ActionResolver.java)
-choke point (`resolve(asset, actionId)`): when an inline `Actions` entry authors `Ref`, the named
-`ActionCatalog` entry is the BASE and the inline entry's other groups overlay it group-wise (the
-SAME whole-group-replace rule `ActionResolver` already applies station -> action, applied twice).
-A dangling `Ref` is validator finding `ACTION_REF_UNKNOWN`; `toggle()` denies gracefully with
-`ui.station.action_unavailable` rather than throwing. `ActionResolver.selectAction`/
-`selectActionByFamily` (the diegetic input-matched selection cores) are unaffected - they operate
-on the RESOLVED `ActionDef` regardless of whether it came from an inline body or a `Ref`.
+**Station-level group inheritance is DELETED.** A station supplies no defaults of its own any
+more - `StationAsset` keeps only `Identity`/`Block`/`Requires`/`Flairs`/`Actions[]` (see
+`../asset/CLAUDE.md`), so there is no station-wide `Work`/`Recipe`/`Tool`/`Hold`/`Camera` for an
+action to fall back to. Every live read goes through [`ActionResolver`](ActionResolver.java), the
+ONE choke point, in three layered steps:
 
-## ExtensionAsset resolution (design 1.8, decisions 27/37)
+1. **Id lookup** - `findAction(asset, actionId)` walks `StationAsset.getActions()` (folded with
+   any `Target:{Station}` `ExtensionAsset` appends, `effectiveActions`) for the entry whose
+   `effectiveActionId` (its own `Id`, else the `ActionAsset` its `Ref` names, else its array
+   index) matches case-insensitively.
+2. **`Ref` overlay** - the pure 3-arg `resolve(asset, actionId, refLookup)` core: when the found
+   inline entry authors `Ref`, the named `ActionCatalog` entry is the BASE and the inline entry's
+   OTHER groups overlay it group-wise, ONE level (the inline entry's own group wins when authored,
+   else the `Ref` base's, else neither contributes). A dangling `Ref` resolves as if no `Ref`
+   existed (validator finding `ACTION_REF_UNKNOWN`; `toggle()` denies gracefully with
+   `ui.station.action_unavailable` rather than throwing). This core stays catalog-free for unit
+   tests.
+3. **Extension overlays** - the live 2-arg `resolve(asset, actionId)` wraps step 2 and layers the
+   Action-targeted `ExtensionAsset` per-leaf overlays on top (`Puppet`/`Custody`/
+   `ContributionScale` - see the ExtensionAsset section below); identity-preserving, so the
+   zero-extension path returns the pure result untouched.
 
-`ExtensionCatalog.applyTo(target, targetType, targetId)` is the ONE resolve-at-read fold point
-(the `FlairCatalog.effectiveFlairsFor` pattern generalized): given a station/action/lootable/
-rollpool about to be used, it gathers every folded `ExtensionAsset` whose `Target` resolves to
-that type+id, sorts them via `ExtensionAsset.sortedForApply` (the `(Priority, extension id)`
-tuple), and applies each in order per the codec's own documented merge rules (`../asset/
-CLAUDE.md`'s ExtensionAsset bullet: additive-only, base-wins key collisions, append for unkeyed
-arrays, anchored insertion for `Steps`). Cached per fold generation alongside `StationCatalog
-.resolvedConversions`, so a hot per-cycle read never re-walks the extension set. Composition order
+The result is a flat [`ActionResolver.ResolvedAction`](ActionResolver.java) - every accessor a
+`station.step` handler or the direct-Java engine path should read, never the raw `StationAsset`/
+`ActionDef`/`ActionAsset` group directly once an action id is chosen. `ActionResolver.selectAction`/
+`selectActionByFamily` (the diegetic input-matched selection cores) sit BEFORE resolution, not
+inside it - they operate on the RAW `ActionDef`s in `effectiveActions`, choosing WHICH action id
+to resolve.
+
+**Ordered-array selection.** `StationAsset.Actions[]` is authored order, and authored order IS
+selection priority: `selectAction`/`selectActionByFamily` walk front to back and return the FIRST
+action whose effective `Select` (its own, or its `Ref` base's) is absent, catch-all, or matches
+the held/placed context. A station authoring no actions selects nothing and is inert
+(`STATION_NO_ACTIONS`). `StationService#toggle` runs action selection BEFORE the `Requires` check,
+so the right action's own gate is the one checked - a loaded custody claim already owned by the
+player commits to ITS OWN action first (re-pressing F with a different item held never switches a
+ritual already in progress); a restart-orphan recovery path
+(`ActionResolver.selectActionForBlockState`) falls back to matching the block's own persisted
+`Custody.States.Loaded` name when neither a live claim nor the held item resolves an action.
+
+**`Requires` ANDing.** `toggle()` checks `checkRequires(asset.getRequires(), ...)` AND
+`checkRequires(resolvedAction.getRequires(), ...)` - both must pass. Neither defaults the other:
+an action authoring no `Requires` is gated by the station's alone, and a station authoring none
+leaves the action's own gate as the only one.
+
+**Per-action completion.** The session-end `Moments.Completion` presentation, and a
+`Roll{Trigger:"Completion"}` in the action's own `Bonus`, are both read off the RESOLVED action -
+there is no station-level completion-loot fallback any more, matching the "no station-level
+group" rule everywhere else.
+
+## ExtensionAsset resolution
+
+`ExtensionCatalog.extensionsFor(targetType, targetId, stationId)` is the ONE resolve-at-read gather
+point (the `FlairCatalog.effectiveFlairsFor` pattern generalized): given a station/action/lootable/
+rollpool about to be used, it collects every folded `ExtensionAsset` whose `Target` resolves to
+that type+id AND whose station scope matches the context, then sorts them via
+`ExtensionAsset.sortedForApply` (the `(Priority, extension id)` tuple), cached per fold generation
+so a hot per-cycle read never re-walks the extension set. One `applyTo*` entry point per payload
+sits on top of it (`applyToActionBonus`, `applyToActionContributions`, `applyToActionPuppet`,
+`applyToActionCustody`, `applyToActionContributionScale`, `applyToActionConversions`,
+`applyToActionSteps`, `applyToActionAnchors`, `applyToStationActions`, `applyToLootableRolls`,
+`applyToRollPoolEntries`), each delegating to a PURE merge core that applies the codec's own
+documented rules (`../asset/CLAUDE.md`'s ExtensionAsset bullet: additive-only, base-wins key
+collisions, append for unkeyed arrays, anchored insertion for `Steps`).
+
+**The station context is a parameter, not an assumption.** A `Target` may SCOPE an Action target to
+one station (`{Station, Action}`), so every Action-targeted `applyTo*` takes the station the action
+is being read ON as its first argument, and `extensionsFor` keys its cache on that context too - two
+stations sharing one `Ref`'d action legitimately see different extension lists, and a single key per
+`(type, id)` would hand the second station whichever list the first one warmed. A bare target still
+matches every station (including a caller with none); a scoped one only its own.
+
+**Where each one is applied** (there is no decode-only payload): `Puppet`/`Custody`/
+`ContributionScale`/`Anchors` layer inside `ActionResolver.applyExtensionOverlays`, so every reader
+of a `ResolvedAction` sees them at once; `Bonus`/`PerCycleContributions` at `StationService`'s
+per-cycle read sites (`Bonus` through the ONE `effectiveBonusRolls` all three of its read routes
+share; `PerCycleContributions` through BOTH `onCycleCompleted`'s forwarded list AND
+`contributionParams`, the channel/`Param` projection every `FactorContext` carries - a factor
+reading `contributionParams(channel)` must see exactly what the cycle will post); `Steps` in
+`StationService.effectiveProgramSteps`, the ONE read of "the program this session
+will run" (shared by the dispatch, the engage-time walk-anchor reachability check, and the
+per-step-clip detection); `Actions` in `ActionResolver.effectiveActions`; `Conversions` inside
+`StationCatalog.resolvedConversions`, before that derivation is cached - which is why
+`ExtensionCatalog.fold` AND `ActionCatalog.fold` both call
+`StationCatalog.invalidateResolvedConversions()`, since the three stores fold in no guaranteed order
+and a layer arriving after the first conversion resolve would otherwise never be seen; `Rolls`
+inside `loot.LootEngine.resolveRolls`, at the point a
+referenced lootable table is read (so a table gains its extended rolls at EVERY reference site - an
+action's `Bonus` and a step's `Roll` phase both route through that one resolution); `Entries` inside
+`StampCapEngine.candidateEntries`, at the point a `Stamp.Stats.Pool` is read. Those last two read
+their catalog per call and derive nothing, so unlike `Conversions` they need no invalidation
+companion.
+
+**`Steps` is deliberately NOT merged onto `ResolvedAction.getSteps()`.** That array is what decides
+WHICH engine an action runs (authored program vs. the recipe-driven convert loop, branched on at
+`toggle`'s viability check and at `runCycle`), so merging insertions in there would let an
+extension flip a convert action into a step program and silently skip its conversion check. The
+merge happens at the program READ instead, over a base the action itself authored: an insertion can
+only add beats to a program that already exists. Composition order
 (m7): extensions apply to the `Parent`-resolved target at READ time and do NOT flow down `Parent`
 chains; a `Target:{Action}` extension reaches every `Ref` user of that action, a
 `Target:{Station}` step-insert applies post-`Ref` to that one station only. Boot log carries one
 INFO `EXTENSION_APPLIED` summary line per target, enumerating the CONTRIBUTION KINDS that composed
 onto it and not just how many extensions did (`EXTENSION_APPLIED: Station sawmill <- 1 extension(s)
-[Loot]`); the enumeration comes from the pure `authoredPayloadKinds`.
+[Bonus]`); the enumeration comes from the pure `authoredPayloadKinds`.
 
-**The two PER-LEAF presentation overlays (`Puppet`, `Custody`)** are the one non-collection payload
-shape, so they merge leaf-wise instead of appending: `applyToStationPuppet`/`applyToActionPuppet`/
-`applyToStationCustody`/`applyToActionCustody` are the read-side entry points over the pure
-`overlayPuppet`/`overlayCustody` cores, which walk the group recursively and take the OVERLAY's leaf
-where it is authored, the BASE's where it is not (`firstNonNull` is the ONE rule at every depth). A
-`Custody` overlay carrying only `Display` therefore never clobbers `States`/`MaxQuantity`/`Input` -
-that is the whole reason the capability exists, so a pack can re-skin a station's placed-input visual
-without silently disabling its placement mechanics. Overlays apply in `APPLY_ORDER`, so the later
-(higher-priority) extension wins a same-leaf contest and the fold stays deterministic; a null overlay
-group returns the base object unchanged. Covered by `ExtensionOverlayTest` (`src/test/java/com/
-ziggfreed/rpgstations/station/`, fixture JSON authored by the test and decoded through the real
-shipped codecs). **Call-site status: WIRED** - the 2-arg live `ActionResolver.resolve` applies both
-overlays after the pure resolution (`applyExtensionOverlays`: the `Ref` `ActionAsset` id first, then
-the inline map key when it differs, then the station id - most-specific-wins per leaf;
-identity-preserving, so the zero-extension path returns the pure result untouched). The 3-arg pure
-core stays extension-free for unit tests. Unlike `Loot`/`PerCycleContributions` (applied at `StationService`'s own read
-sites), `Puppet`/`Custody` overlay INSIDE the resolver choke point, so every reader
-(`StationService`, `StationStepHandlers`, `selectActionForBlockState`'s restart recovery) sees the
-same effective groups with no per-site wiring.
+**The three PER-LEAF overlays (`Puppet`, `Custody`, `ContributionScale`)** are the non-collection
+payloads, so they merge leaf-wise instead of appending: `applyToActionPuppet`/`applyToActionCustody`/
+`applyToActionContributionScale` are the read-side entry points over the pure
+`overlayPuppet`/`overlayCustody`/(a `ContributionScale`-shaped overlay) cores, which walk the group
+recursively and take the OVERLAY's leaf where it is authored, the BASE's where it is not
+(`firstNonNull` is the ONE rule at every depth). A `Custody` overlay carrying only `Display`
+therefore never clobbers `States`/`MaxQuantity`/`Input` - that is the whole reason the capability
+exists, so a pack can re-skin a station's placed-input visual without silently disabling its
+placement mechanics; a `ContributionScale` overlay authoring only `Floors` keeps the base action's
+own `Factors`. Overlays apply in `APPLY_ORDER`, so the later (higher-priority) extension wins a
+same-leaf contest and the fold stays deterministic; a null overlay group returns the base object
+unchanged. Covered by `ExtensionOverlayTest` (`src/test/java/com/ziggfreed/rpgstations/station/`,
+fixture JSON authored by the test and decoded through the real shipped codecs). The keyed `Anchors`
+map layers in the same place but by the keyed rule, not the leaf rule (`applyToActionAnchors` over
+the pure `mergeAnchors`: base keys first, then each extension's NEW keys in `APPLY_ORDER`, the base
+winning a collision case-insensitively). It is safe at this level precisely because nothing branches
+on the map being non-empty - it is only ever read to resolve a `Walk`/`At` target - so an added key
+widens what an inserted step can address without changing which engine path the action takes.
+**Call-site status: WIRED** - the 2-arg live `ActionResolver.resolve` applies all four after the
+pure resolution (`applyExtensionOverlays`: `actionTargetId` resolves the ONE Action-target
+identity - the `Ref`'d `ActionAsset` id when the entry Refs one, else the entry's own effective id
+- identity-preserving, so the zero-extension path returns the pure result untouched). The 3-arg
+pure core stays extension-free for unit tests. Unlike `Bonus`/`PerCycleContributions` (applied at
+`StationService`'s own read sites), `Puppet`/`Custody`/`ContributionScale`/`Anchors` overlay INSIDE
+the resolver choke point, so every reader (`StationService`, `StationStepHandlers`,
+`selectActionForBlockState`'s restart recovery) sees the same effective groups with no per-site
+wiring.
+
+**Validator: an Action target is an inline action id too.** `StationValidator`'s
+`actionBodiesByTargetId` builds the union the runtime resolves by - standalone `ActionAsset` ids
+PLUS every station's own inline (non-`Ref`) action ids - and `EXTENSION_TARGET_UNKNOWN` plus the
+three base-resolution checks (`resolveBaseAnchors`, `resolveBaseContributionKeys`,
+`resolveTargetStepIds`) all read it. Resolving against the standalone collection alone made the
+shipped pack's own progression extension report its target as unknown while applying perfectly, and
+silently skipped those three checks for the only target shape a pack can currently author. A SCOPED
+`{Station, Action}` target resolves instead as "that station exists AND resolves an action answering
+to that id" (`stationResolvesActionTarget`, the runtime's own `actionTargetId` rule), and its base
+body is taken from THAT station first (`resolveTargetActionBody`) - the id-keyed union holds one
+body per id, which cannot represent the very case a scoped target is authored for (two stations,
+same inline action id). Cross-extension claims are bucketed by target key alone (`claimKey`, no
+scope segment) and partitioned by scope at report time (`overlapGroups`), so two extensions claiming
+one key on the same action id but on different stations are still not reported as colliding, while a
+BARE claim and a scoped one on that key - which genuinely both apply on the scoped station - are.
+Putting the scope IN the key had bought the first property by filing those two under different keys,
+which silently cost the second.
 
 ## Held-tool gate (identity routes unchanged; a separate WEAR gate this wave)
 
@@ -176,14 +287,46 @@ work emote NEVER sets `HideItemInHand` (correlated with a client `NullReferenceE
 early smoke testing). Cycle consume prefers BACKPACK storage over the combined view for the same
 reason.
 
-**`Tool.MinDurabilityPercent` is a SEPARATE, orthogonal WEAR gate** (schema-review wave), not a
+**`Tool.Durability.MinStartPercent` is a SEPARATE, orthogonal WEAR gate**, not a
 fourth identity route: which tool and how worn it may be are two independent questions, so it
-composes with whichever routes are authored instead of joining their ANY-of match.
-`StationService#toggle` checks it at ENGAGE ONLY, right after `heldToolMatches`, denying with
+composes with whichever routes are authored instead of joining their ANY-of match. It lives INSIDE
+the `Durability` group (beside the `PerSwing`/`PerCycle` drains) because it is a wear number, and its
+name states the semantics the old flat `MinDurabilityPercent` spelling made a reader hunt for:
+`StationService#toggle` checks it at ENGAGE ONLY, against the resolved action's own `Tool` gate,
+denying with
 `ui.station.tool_worn`; the PER-HEARTBEAT re-check deliberately stays about tool IDENTITY, so a
 session already running still ends at breakage (`TOOL_BROKEN`) rather than being cut short the
 moment wear crosses the threshold. `hasDurabilityGate()` (non-null and `> 0`) is the one
 is-it-active predicate; the live read is `resolveHeldToolDurabilityPercent`.
+
+## Recipe: one per action, no selection needed
+
+**`Recipes` is not a list any more; `RecipeSelection` is deleted.** An action authors AT MOST one
+`Recipe` (`{Conversions?, FromCrafting?, Yield?}`, see `../asset/CLAUDE.md`), gated by that
+action's own `Tool` - the "which tool" and "which transform" questions are answered by the SAME
+group a reader is already looking at, so there is no per-recipe tool override left to resolve and
+nothing to try-in-order. Two variants that used to be two `Recipes[]` entries sharing one action
+are now two `ActionDef`s (see `../asset/CLAUDE.md`'s `Select` bullet): the diegetic held-item
+match already IS the "try this, else that" chain, one level up. `s.toolReq` is set to the resolved
+action's own `Tool` gate at engage, so the heartbeat identity re-check and the wear drain follow
+the same gate the engage checked.
+
+`ConversionCheck` (built off `StationAsset.Conversion.Input`/`Output`, resolved via
+`firstRunnableConversion`/`firstRunnableConversionFromCustody`) carries the resolved action's
+`Recipe` unchanged, so the produce phase reads THAT recipe's own `Yield`. The sneak+F picker's
+category strip and custody's derived acceptance matcher still read the WHOLE effective conversion
+set of the resolved action (`StationService#allConversionsFor`), because both answer "what can
+this action make/accept at all", not "what runs this cycle" - that flatten is unaffected by the
+list-to-singular change, since a single `Recipe.Conversions[]`/`FromCrafting`-derived set can
+still hold several conversions (e.g. the sawmill's 33 species x category combinations).
+
+**`ContributionScaling`** ([`ContributionScaling.java`](ContributionScaling.java)) is the pure
+resolution of an action's `ContributionScale` ladder into ONE multiplier, over the SAME
+`loot.FactorLadder` core `Roll.Ladder` uses. `StationService` calls
+`ContributionScaling.multiplier(action.getContributionScale(), snapshot::resolve)` at both
+per-cycle contribution sites and PRE-SCALES every `Work.PerCycleContributions` amount before
+`StationCycleCompletedEvent` dispatches, reporting the resolved multiplier back on
+`contributionScale()` for DISPLAY only.
 
 ## THE `ItemToolSpec` construction trap ([`StationToolScaling`](StationToolScaling.java))
 
@@ -195,13 +338,20 @@ a new pure-tested helper that reads tool data, follow this pattern - do not cons
 `ItemToolSpec` (or any other `AssetBuilderCodec`-backed engine type) in code that must run in a
 unit JVM.
 
-## Tool-power contribution scaling
+## The engine holds NO baked tool curve (`Tool.PowerScale` is deleted)
 
-`StationAsset.Tool.PowerScale`: `multiplier()` = `clamp((heldPower/ReferencePower)^Exponent,
-MinMult, MaxMult)` (defaults `Exponent 1.0`/`MinMult 0.5`/`MaxMult 2.0`), read fresh every cycle
-off the currently-held item, neutral 1.0 for a null/inactive scale or a held tool with no
-matching spec. Forwards on `StationCycleCompletedEvent.toolMultiplier`, which applies to
-`contributions()` ONLY - never `oneShotContributions()`.
+There is no engine-owned multiplier over a station's contributions any more, and
+`StationCycleCompletedEvent` carries no `toolMultiplier()`. The retired `Tool.PowerScale` group was a
+baked, non-composable curve (`clamp((heldPower/ReferencePower)^Exponent, MinMult, MaxMult)`) over the
+same number `hytale:tool_power` already exposes as a freely composable FACTOR, it was inert on the
+standalone Sawmill (which declares no `PerCycleContributions` for it to scale), and its only possible
+output was a contribution amount - i.e. it could only ever move a number the engine forwards without
+interpreting. "A better tool earns more" is now authored where its effect is visible: as a factor
+inside an action's own `Bonus` Rolls for OUTPUT (a visible `Ladder`/`Chance` granting
+`Grants.OutputItems`), an action's own `ContributionScale` ladder for a CONTRIBUTION amount, or by
+whichever mod owns a channel for anything else it decides a contribution means. `StationToolScaling`
+keeps only `heldPowerFor` (the pure spec scan behind the `hytale:tool_power` factor) plus the
+idle-cadence and durability-drain reader defaults.
 
 ## Recipe ingredients (`asset.Ingredient` ARRAYS, the native CraftingRecipe shape)
 
@@ -214,7 +364,7 @@ require EVERY input available and room for EVERY output before a cycle starts, a
 conversion's whole arrays drive the implicit program's one atomic Consume/Produce step pair
 (`ConversionCheck` carries them; `Conversion#primaryInput`/`#primaryOutput` are the display/matching
 convenience the picker preview, custody acceptance, and validator labels speak in, never the consume
-path). `Roll.Grants.BonusOutputCopies` duplicates the PRIMARY output only.
+path).
 [`StationRecipeDeriver`](StationRecipeDeriver.java)'s `Recipe.FromCrafting` derives one
 `Conversion` per LIVE `Item` whose native `Recipe.BenchRequirement[].Categories` intersects the
 authored `Categories`, carrying that recipe's WHOLE native `Input` array (a multi-material recipe
@@ -225,27 +375,27 @@ carries a quantity of 1: the native `CraftingRecipe.primaryOutputQuantity` is a 
 no getter and is absent from the recipe packet, so it is unreadable at that seam (and is verified 1
 for every recipe family the shipped content derives).
 
-**Yield is [`StationYield`](StationYield.java)'s job, not the deriver's.** `Recipe.Yield`
-(`../asset/CLAUDE.md`) is resolved PER CYCLE at the one point a chosen conversion becomes a live
-produce phase (`StationService#runRealCycle`), because a yield keyed off the worker's held tool
-cannot be baked in at asset-fold time - the tool is re-read every cycle and the tool gate only
-guarantees it still MATCHES, not that it is the same item. That call site builds the cycle's
-`FactorSnapshot` ONCE and passes it into `dispatchProgram`, so the yield ladder and the cycle's loot
-rolls read the identical resolved factor numbers ("one aggregation, two consumers"); a second
-snapshot per cycle would quietly break that. The transform also feeds `cycleOutput`, the
-`Roll.Grants.BonusOutputCopies` source, since a bonus copy duplicates the WHOLE produced stack and
-sourcing it pre-yield would hand out a smaller copy than the cycle just produced. `StationYield`
-itself is pure (`ladderValue`/`bonusAdd`/`exactQuantity`/`resolveQuantity`/`applyToOutputs`,
-unit-tested with authored fixtures) and is IDENTITY on a null `Yield`, so a station authoring none is
-byte-identical to pre-knob behavior. A FRACTIONAL effective yield pays its whole part every cycle and
-rolls only the remainder (`exactQuantity` exposes the pre-roll number so a caller or test can read
-authored intent without consuming a roll); the roll is an injected `DoubleSupplier`, the same seam
-`RollEvaluator` takes, and `cycleOutput` reuses the ALREADY-ROLLED primary quantity rather than
-re-resolving, so a bonus copy can never disagree with the stack it copies. The three tool factors
-that make a ladder authorable (`hytale:tool_quality`, `hytale:tool_item_level`,
-`hytale:tool_power`) are read by `StationService#resolveHeldToolQuality`/
-`#resolveHeldToolItemLevel`/`#resolveHeldToolPower`; the quality one is an asset-map index resolve,
-not a raw index compare - see its javadoc.
+**Yield is [`StationYield`](StationYield.java)'s job, not the deriver's - and it is PURELY
+DETERMINISTIC now, with zero factor/roll involvement.** `Recipe.Yield` (`../asset/CLAUDE.md`) is
+resolved PER CYCLE at the one point a chosen conversion becomes a live produce phase
+(`StationService#runRealCycle`), because even a purely deterministic `Base`/`Scale` still needs
+re-reading every cycle (a tool swap mid-session changes nothing about `Yield` itself, but the
+conversion driving it can). `StationYield` is now just `resolveQuantity`/`applyToOutputs` -
+`floor(base * Scale)` clamped into `[max(1, Min), Max]` - with NO ladder, NO roll, and NO
+`FactorSnapshot` dependency at all; a null `Yield` is the IDENTITY (the conversion's own authored
+quantity, untouched). **Everything probabilistic moved to the loot layer**: a `Roll` in the
+action's own `Bonus` (evaluated by `loot.LootEngine`/`RollEvaluator` off the SAME per-cycle
+`FactorSnapshot` `runRealCycle` builds once for the whole cycle - "one aggregation, several
+consumers") tallies `Grants.OutputItems`, and `StationService#grantBonusOutputItems` hands out
+that many additional units of `s.cycleOutputItemId` (the cycle's own resolved primary output,
+captured right after `StationYield.applyToOutputs` runs) through the same `util.ItemGrantUtil`
+seam every other grant uses. An authored `Steps` program has no single "cycle output" for
+`OutputItems` to add to (`s.cycleOutputItemId` stays null, and `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT`
+warns on an action authoring `OutputItems` there - on its own `Bonus` or on a step's `Roll` phase
+alike). The three tool factors that make a `Bonus`/`ContributionScale`
+ladder authorable (`hytale:tool_quality`, `hytale:tool_item_level`, `hytale:tool_power`) are read
+by `StationService#resolveHeldToolQuality`/`#resolveHeldToolItemLevel`/`#resolveHeldToolPower`;
+the quality one is an asset-map index resolve, not a raw index compare - see its javadoc.
 
 ## Cadence + the `emitMoment` choke point (unchanged)
 
@@ -257,6 +407,21 @@ output-room PRE-check before consume; loot rolls via `loot/LootEngine`; `Station
 station's authored `Steps` program dispatches through the step engine above instead of the
 classic Convert transaction; the implicit single-step program (`ImplicitProgram`) is what a
 station with no `Actions`/`Steps` gets, so both paths converge on the SAME step engine.
+
+**`Trigger: "Cycle"` means THE action's cycle-completed moment, whatever program shape runs it.**
+Both program shapes resolve the action's effective `Bonus` through the ONE
+`StationService#effectiveBonusRolls` (its own group plus every matching extension's, expanded by
+`LootEngine.resolveRolls`), and they differ only in WHERE the `Cycle` pass fires: the implicit
+convert program folds those rolls into its own `Roll` phase at build time, while an authored `Steps`
+program has no such phase, so `dispatchProgram` runs the pass itself on a COMPLETED walk
+(`rollCycleBonus`, gated by its `bonusAtCompletion` flag so the implicit route never double-rolls).
+It fires BEFORE `onCycleCompleted`, so a `Grants.Contributions` find rides that same cycle's event
+on either route. Exactly one moment per completed pass: a suspend/resume pair is still ONE pass, and
+an idle-practice cycle rolls no loot at all by design. The one grant kind that still lands nowhere
+under an authored program is `Grants.OutputItems` - there is no single cycle output to add copies of
+(`s.cycleOutputItemId` stays null and `grantBonusOutputItems` no-ops), which is what
+`LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` warns about at authoring time; every other kind (droplists,
+commands, effects, contributions, the reached floor's presentation) applies.
 
 `emitMoment(store, s, momentId, presentation, targetPos)` in `StationService` is the ONE
 presentation-playback funnel every station moment goes through (`StationFlairs.MOMENT_CYCLE`/
@@ -297,7 +462,8 @@ sent in the FIRST-PARTY packet shape ONLY - engage = `ClientCameraView.Custom` +
 fully-populated `ServerCameraSettings`, disable = `Custom` + `false` + `null`. NEVER send a
 built-in view (`ThirdPerson`/`FirstPerson`) or locked+null-settings; that unexercised client path
 correlated with a deterministic post-walk-off client `NullReferenceException` pre-extraction. The
-`FaceBlock` fixed-camera recipe (`applyFaceBlockPreset`) only combines fields the THREE
+fixed-look camera recipe (`applyFaceBlockPreset`, reached whenever `Camera.Recipe` is authored at
+all - there is no second boolean gating it) only combines fields the THREE
 first-party `ServerCameraSettings` senders in the shared source actually establish:
 `movementForceRotationType=Custom` + `movementForceRotation` is necessary but NOT sufficient to
 stop mouse-driven camera spin while STANDING STILL - that additionally needs
@@ -348,29 +514,108 @@ the work emote on the `Emote` slot (the sit pose wins over that slot's clip). `S
 .runSwing`'s `useActionSlotForSwing(seatMode)` routes a seat-mode session through
 `StationHoldController.playActionSwing` instead - fires the swing on `AnimationSlot.Action`
 against the CURRENTLY HELD ITEM'S OWN `ItemPlayerAnimations` clip set, the exact mechanism
-vanilla combat swings ride. The clip id is `StationAsset.Animation.ActionClip` when authored,
-else `DEFAULT_ACTION_CLIP` (`"Chop"`) - deliberately NOT a cross-family default; a station gated
-on a different tool family must author its own `ActionClip` or the swing plays nothing
-(`ACTION_CLIP_WITHOUT_SWING` warns).
+vanilla combat swings ride. The clip id is `StationHoldController.effectiveActionClip` -
+`StationAsset.Animation.ActionClip` when authored, else `DEFAULT_ACTION_CLIP` (`"Chop"`) -
+deliberately NOT a cross-family default; a station gated on a different tool family must author
+its own `ActionClip` or the swing plays nothing (`ACTION_CLIP_WITHOUT_SWING` warns).
+
+**A PUPPET-active session bypasses `useActionSlotForSwing` but reaches the same Action-slot clip**
+through its own slot choice (see the puppet-engine bullet's Animation-routing paragraph): the two
+routes share `StationHoldController`'s `heldItemAnimationsId` + `effectiveActionClip` resolution,
+so an authored `ActionClip` means the same thing whether the worker is seated or a puppet.
 
 ## Idle practice mode + tool durability drain (unchanged)
 
 `StationAsset.Work.Idle` (opt-in, default OFF): a `NO_INPUTS` start proceeds into idle mode
 instead of denying. An idle cycle posts fractional contributions only (each `Amount *
-Work.Idle.Fraction`, ALREADY pre-scaled on the event, tool multiplier forced to 1.0) with NO
+Work.Idle.Fraction`, ALREADY pre-scaled on the event) with NO
 conversion and NO loot, marked `idle=true` on
 `StationCycleCompletedEvent`. `StationAsset.Tool.Durability {PerSwing, PerCycle}` (both default
 OFF): the mutation is native `ItemUtils.updateItemStackDurability`; a broken held stack
 (`ItemStack.isBroken()`) stops the session (`TOOL_BROKEN`) and fires `StationToolBrokeEvent`.
 
-## Exit hooks (unchanged)
+## Exit hooks
 
 Re-press F / crouch / walk-off (heartbeat), damage
 ([`StationInterruptDamageSystem`](StationInterruptDamageSystem.java), read-only, calls `stop`
 only), death ([`StationDeathSystem`](StationDeathSystem.java) -> `stopForRef`), disconnect
 (`RpgStationsPlugin`'s `PlayerDisconnectEvent` registration -> `stopFor`), world-change
-(heartbeat store check), shutdown (`stopAll`). `stop()` is the ONE idempotent exit funnel: it
-fires `StationSessionCompletedEvent` UNCONDITIONALLY (every stop, silent included).
+(heartbeat store check), world-unload (`onWorldRemoved`, below), shutdown (`stopAll`). `stop()` is
+the ONE idempotent exit funnel: it fires `StationSessionCompletedEvent` UNCONDITIONALLY (every
+stop, silent included).
+
+**`StationInterruptDamageSystem`/`StationDeathSystem` are PLAYERS-ONLY queries**
+(`getQuery()` returns `PlayerRef.getComponentType()`, the same query
+`StationCustodyBreakSystem`/`StationBlockPlaceSystem` already used): only a player can hold a work
+session, so a mob taking damage or dying - the overwhelming majority of either event in a
+populated world - used to pay a dispatch plus a session lookup for a question whose answer could
+only ever be "no". The prior `Query.any()` on the damage system paid that cost for EVERY entity.
+
+## World-unload teardown + disconnect claim eviction (`RemoveWorldEvent`)
+
+**Every one of this engine's block-keyed maps (`custodyByBlock`, `byBlock`, `workingByPlayer`'s
+block-anchored entries) is GLOBAL, keyed by a composite `"<worldUuid>:<x>:<y>:<z>"` string, rather
+than partitioned per world.** Unloading a world used to remove nothing from them: a fleet that
+creates and destroys instance worlds accumulated a stale entry (and pinned a stale `World`/display
+`Ref`) for the whole server uptime, one per station block that had ever been used or loaded into
+in a since-unloaded world.
+
+- **[`RpgStationsPlugin`](../RpgStationsPlugin.java)`#registerWorldEviction`** registers a global
+  `com.hypixel.hytale.server.core.universe.world.events.RemoveWorldEvent` listener (skipping a
+  CANCELLED removal, since the world then stays loaded): `StationService.getInstance()
+  .onWorldRemoved(removed)` runs FIRST (it reads the per-world session queue the shared
+  `ziggfreed-common` `WorldEvictors.onWorldRemoved` fan-out is about to drop), THEN that shared
+  fan-out runs. This mod owns its own world-unload listener rather than relying on a co-installed
+  mod's - depending on `ziggfreed-common` alone means nothing else is guaranteed to register one.
+- **`StationService#onWorldRemoved(world)`** stops every session still queued or tracked for that
+  world (`StopReason.WORLD_CHANGED`, idempotent so a session reached via both the world's own
+  queue AND the belt-and-braces `byPlayer` scan costs nothing extra), then
+  `forgetBlockKeyedState(key -> key.startsWith(worldPrefix))` releases (never hands back - the
+  world and its entity store are going away, and custody is never persisted) every block-keyed
+  entry whose key names that world, using the world-uuid PREFIX the key already carries as the
+  whole sweep. Never throws.
+- **Disconnect claim eviction** (`RpgStationsPlugin#registerTeardownHooks`'s `PlayerDisconnectEvent`
+  handler): a player who places custody input and disconnects WITHOUT a live session touching that
+  block (place logs, walk away, log off) used to leak both the claim and its display prop entity
+  forever - none of the four existing claim-removal paths (`returnCustody`,
+  `onCustodyBlockBroken`, a retrieve press, the world-unload sweep above) ever fired for that
+  shape, since each needs a session stop, a block break, or a press. `stopFor` (the session-stop
+  half) runs first in the departure world, THEN `StationService#returnClaimsOf(playerUuid,
+  worldUuid, world)` hands back every remaining claim the player owns in that world (inventory-first
+  via `giveClaimToOwner`, dropped at the block when the departing player's inventory cannot be
+  reached), THEN `sweepClaimsInOtherWorlds` hops onto EACH other world the player has a standing
+  claim in (`StationService#claimWorldsOf`, a distinct-world-uuid scan over `custodyByBlock`) on
+  its own world thread and repeats the hand-back there. A world that is gone or dead falls back to
+  the direct (non-hopped) call, which still releases the bookkeeping even though it can no longer
+  write into that world.
+
+## Owner ceilings (`Settings.Limits`, `RpgStationsSettingsAsset.Limits`)
+
+Three INDEPENDENT per-WORLD ceilings (see `../asset/CLAUDE.md`'s `RpgStationsSettingsAsset`
+bullet), read live (never cached) so a settings reload takes effect on the next press. The shared
+predicate `RpgStationsSettingsAsset.Limits.atCapacity(max, currentCount)` treats null OR
+non-positive as unlimited, so a server that never authors `Limits` behaves exactly as it did
+before the group existed, and the check costs one null read until an owner sets a number.
+
+- **`atSessionCap(world)`** (`MaxSessionsPerWorld`) - checked in `toggle()` AFTER the custody
+  placement branch (a press that only loads material starts no session, so a busy world must never
+  block placing/topping-up) but BEFORE the tool gate: a world already running as many sessions as
+  the owner allows denies a NEW engage with `ui.station.server_busy`. Counts the world's own
+  session queue (`countLiveSessions`), not the global player map, so the answer is per-world by
+  construction, and excludes an already-stopped session still awaiting its frame drain.
+- **`atCustodyClaimCap(worldPrefix)`** (`MaxCustodyClaimsPerWorld`) - checked ONLY when a press
+  would actually OPEN a brand-new claim: `claim == null` AND something acceptable was found to
+  place. Both halves matter, so the check sits AT each `placeIntoCustody` call rather than at the
+  top of the branch - hoisting it denied presses that place nothing, which reported "storage full"
+  for what is really a no-materials press and made idle practice unreachable at an empty
+  `Work.Idle` station. Topping up a claim that already stands adds no new bookkeeping and no new
+  display prop, so it is never denied and a player can never be locked out of material they already
+  placed. Denies with `ui.station.storage_full`.
+- **`atPuppetCap(world)`** (`MaxPuppetsPerWorld`) - checked right before `StationPuppetController
+  .spawnAndHide`. Past the ceiling the session starts and runs completely normally; it simply
+  performs in the player's own body instead of spawning a worker double - the EXACT graceful
+  fallback a failed puppet spawn already takes, so no engage is ever denied purely over
+  presentation. A world without a busy puppet count pays nothing extra.
 
 ## Placed-input custody + block states (unchanged mechanism; phase-based Consume this wave)
 
@@ -502,8 +747,10 @@ block-top anchor, gated on `asset.Custody.Display`. Block-shaped items (the sawm
 logs) spawn a real `BlockEntity`; everything else (the anvil's placed weapon) spawns a bare
 `ItemComponent` prop. Both routes `ensureComponent(EntityStore.REGISTRY
 .getNonSerializedComponentType())` - never survives a restart, matching the custody claim's own
-lifecycle. Ref lives ON the claim (`StationCustodyClaim#displayRef`); spawned once at first
-placement, despawned at whichever of `#returnCustody`/`#onCustodyBlockBroken` fires first.
+lifecycle. Both the ref AND the spawned entity's own `NetworkId` live ON the claim
+(`StationCustodyClaim#displayRef`/`#displayNetworkId`, captured together at spawn via
+`#setDisplay`); spawned once at first placement, despawned at whichever of
+`#returnCustody`/`#onCustodyBlockBroken` fires first.
 `Offset`/`Rotation` are FACING-RELATIVE to the placed block's own yaw (via the shared
 [`StationBlockFacing`](StationBlockFacing.java)`.yawRadians`, which reads
 `World#getBlockRotationIndex` try-guarded to yaw 0 on any failure, plus its `rotateOffset` core -
@@ -512,7 +759,21 @@ the SAME one-reader helper the puppet engine composes against since the round-3 
 ([`StationCustodyRetrieval`](StationCustodyRetrieval.java)) resolves the clicked display entity's
 `NetworkId` back to its owning block key and routes eligibility through the pure `decide`
 (precedence: `UNKNOWN_TARGET` -> `BUSY` -> `NOT_OWNER` -> `NOTHING_TO_RETRIEVE` -> `RETRIEVE` -
-a session actively working the block always wins over ownership checks). **A successful `RETRIEVE`
+a session actively working the block always wins over ownership checks). The BUSY input comes from
+`sessionWorkingAt(blockKey)`, NOT from `byBlock` alone: the engage claim only writes that map for an
+EXCLUSIVE station's primary block, so a `Block.Exclusive: false` bench had nothing standing between
+a press-F retrieval and the materials its own running session was mid-way through consuming. The
+occupancy map stays the fast path and a sweep of live sessions (primary block or claimed anchor) is
+the backstop. **The match is
+WORLD-SCOPED (`StationCustodyRetrieval#owns`), not global**: a `NetworkId` is issued from a
+per-world counter that starts at 1 in EVERY world, so the same integer routinely names a different
+entity in each loaded world, and an unscoped match could resolve a claim in a DIFFERENT world and
+hand over its contents. `owns(blockKey, worldPrefix, claimDisplayNetworkId, targetNetworkId)`
+requires BOTH the network id match AND `blockKey.startsWith(worldPrefix)` (the presser's own
+`"<worldUuid>:"`, the exact prefix `StationAnchors#blockKey` already encodes).
+`StationCustodyClaim` now CACHES its own display entity's `displayNetworkId()` at spawn time, so
+this walk reads NO live components at all (it used to fetch `NetworkId` off every claim's display
+entity, across EVERY world, on every single press). **A successful `RETRIEVE`
 plays the presser's own COLLECT gesture** (`StationService#playCollectAnimation`, round-3 smoke):
 the native `"Interact"` clip on the `Action` slot against the held item's own
 `ItemPlayerAnimations` set (falling back to the engine's item-agnostic `Default` set), fired with
@@ -536,8 +797,11 @@ bullet: MIN over every `Budget` entry, `PerStat` layered on top, `Economics` unc
 engine's MIN-composition RULE is identical to pre-scope-2, only the authoring shape changed;
 `StampCapEngineTest`'s fixtures were re-anchored on it. `ActionResolver.selectActionByFamily` (a DIFFERENT NAME from
 `selectAction`, never an overload) is the resource-type-FAMILY-aware selection entry
-`StationService` calls from `selectActionForHeld`/`liveFunctionOf`. `StationCatalog` carries an
-action-aware `resolvedConversions(asset, actionId, actionRecipe)` overload. `StationService
+`StationService` calls from `selectActionForHeld`/`liveFunctionOf`. `StationCatalog`'s
+`resolvedConversions(asset, actionId, recipe)` caches the derived conversions per
+`"<station>::<action>"` - one recipe per action, so an action id fully identifies the entry; the
+`recipe` argument is the caller's already-`ActionResolver`-resolved `Recipe`, never re-derived
+here. `StationService
 .dispatchProgram` reads the resolved action's `Work.effectiveLooping()` and calls
 `stop(..., StopReason.RITUAL_COMPLETE, ...)` on a completed non-repeating program; a
 non-repeating authored Steps program (e.g. the anvil's Enhance) gets INSTANT first dispatch
@@ -591,9 +855,24 @@ on a default-facing placement. Only the engage-time spawn resolves position/yaw;
 actually hides (`hideByScale`/`revealByScale`); `"Effect"`/`"None"` apply no hide. **Reveal +
 despawn** happens in the ONE idempotent `stop()` funnel (`revealAndDespawn`, right after
 `returnCustody`), resolving its own store so a disconnect/shutdown stop still reveals + despawns.
-**Animation routing**: a puppet-active session's engage-time loop and per-swing beat BOTH fire on
-the puppet's `Emote` slot, superseding `useActionSlotForSwing`/`playActionSwing` entirely for
-that session. **Per-step sync**: a `StationStep.Puppet.Clip` plays once at step ITERATION ENTRY
+**Animation routing**: a puppet-active session supersedes `useActionSlotForSwing` entirely and
+picks its OWN swing slot through the pure `StationPuppetController.useActionSlotForPuppetSwing`,
+fed by the already-existing `resolveEffectiveClip`. An `Emote`-slot clip is the OPT-IN full-body
+override and WINS whenever one resolved (`Animation.EmoteId`, or the in-flight step's own
+`Puppet.Clip`) - the puppet has no sit pose to fight, so nothing forces it off that slot the way a
+seat-mounted real player is forced off. With NO emote clip resolved (the shipped shape: an
+`Animation` group authoring `Swing` but no `EmoteId`) the swing rides the `Action` slot instead
+(`playActionSlotSwing`), firing the resolved `Animation.ActionClip` against the animation set of
+the item the worker HOLDS - the SAME `StationHoldController.heldItemAnimationsId` /
+`effectiveActionClip` resolution the seat-mode route uses, which lands on the right profile
+precisely because the puppet mirrors that item into its own Hotbar. Before this the puppet knew
+only the `Emote` route, so an emote-less station's puppet played NOTHING. Either slot keeps the
+`Swing.IntervalMs` re-fire cadence (that re-fire is why a viewer arriving mid-session sees the
+clip within one interval - never convert it to a play-once); both slots ride the identical engine
+dispatch, whose model-lookup guard exempts `Action` and `Emote` identically. The engage-time clip
+(`playLoop`) follows the SAME slot choice: an authored emote starts its `Emote`-slot loop at
+engage, and with none authored the Action-slot work clip fires once immediately at engage too, so
+the worker is never idle for the first `Swing.IntervalMs`. **Per-step sync**: a `StationStep.Puppet.Clip` plays once at step ITERATION ENTRY
 (`StationStepDecisions.shouldPlayClipOnEntry`, resume-safe via `resumingStep` identity); the
 generic engage/swing clip is suppressed for a stepped program whose steps author any clip
 (`StationSession.stepProgramAuthorsClip`); a `StationStep.Puppet.Prop` override syncs at the SAME
@@ -633,28 +912,52 @@ check except cross-layer reference-existence ones); `validate()`/`runAndLog()` (
 runs ONCE post-load from the first `PlayerReadyEvent` and on demand from `/rpgstations validate`.
 The lang-key check (`langKeyKnownLive`) is a MERGED-view check: a miss against the jar's own
 `i18n.RpgStationsLangKeys` falls through to a LIVE `I18nModule.getMessage` query, so a pack's own
-additive `rpgstations.lang` overlay resolves correctly. **Scope-2 checks**: `ACTION_REF_UNKNOWN`,
-`EXTENSION_TARGET_UNKNOWN`, `EXTENSION_PAYLOAD_MISMATCH`, `EXTENSION_KEY_COLLISION`,
-`EXTENSION_ANCHOR_MISSING`, `EXTENSION_STEP_MISSING_ID`, `ANCHOR_STATION_UNKNOWN`,
-`ANCHOR_STATION_NOT_DISCOVERABLE` (AV wave - see the discovery-seed section above),
-`WALK_TARGET_UNKNOWN_ANCHOR`, `STEP_AT_UNKNOWN_ANCHOR`, `WALK_REQUIRES_PUPPET`.
-**Schema-review-wave checks**: `EXTENSION_CONTRIBUTION_DUPLICATE` (keyed on the
-`(Channel, Param)` PAIR, case-folded and param-null-normalized; two arms - an extension's
-`PerCycleContributions[]` re-declaring a pair its base station/action already declares via
+additive `rpgstations.lang` overlay resolves correctly. **Multi-station/extension checks**:
+`ACTION_REF_UNKNOWN`, `EXTENSION_TARGET_UNKNOWN`, `EXTENSION_PAYLOAD_MISMATCH`,
+`EXTENSION_KEY_COLLISION`, `EXTENSION_ANCHOR_MISSING`, `EXTENSION_STEP_MISSING_ID`,
+`ANCHOR_STATION_UNKNOWN`, `ANCHOR_STATION_NOT_DISCOVERABLE` (see the discovery-seed section
+above), `WALK_TARGET_UNKNOWN_ANCHOR`, `STEP_AT_UNKNOWN_ANCHOR`, `WALK_REQUIRES_PUPPET`.
+**Action-first checks** (the restructure's own new coverage): `STATION_NO_ACTIONS` (an
+empty/absent `Actions[]` leaves the station permanently inert), `ACTION_MISSING_ID`/
+`ACTION_DUPLICATE_ID`/`EMPTY_ACTION_ENTRY`/`ACTION_NO_BODY` (an inline entry with neither a `Ref`
+nor any of its own groups authored), `AMBIGUOUS_ACTION_INPUT`/`UNREACHABLE_ACTION` (a later
+action's `Select` can never win because an earlier one's already matches every context it would),
+`RECIPE_ENTRY_EMPTY` (an action's own `Recipe` group with neither `Conversions` nor
+`FromCrafting` - it can never run a cycle), `LOOT_OUTPUT_ITEMS_WRONG_TRIGGER` (a
+`Roll.Grants.OutputItems` authored under a `Completion` trigger, which has no cycle output to add
+to), `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` (its sibling for the other way a cycle can have no output:
+the action runs an authored `Steps` program - its OWN, or the one its `Ref` base authors, read
+through `ActionResolver.effectiveStepsOf` - so the roll evaluates but has nothing to multiply),
+and `CONTRIBUTION_SCALE_EMPTY`/`CONTRIBUTION_SCALE_FACTORS_WITHOUT_FLOORS`/
+`CONTRIBUTION_SCALE_FLOORS_WITHOUT_FACTORS` (an authored `ContributionScale` group that can never
+actually multiply anything). **Other schema checks**: `EXTENSION_CONTRIBUTION_DUPLICATE` (keyed
+on the `(Channel, Param)` PAIR, case-folded and param-null-normalized; two arms - an extension's
+`PerCycleContributions[]` re-declaring a pair its base action already declares via
 `Work.PerCycleContributions`, and two extensions declaring the same pair on the same target;
 deliberately NOT routed through `reportCrossExtensionCollisions`, whose "the later one wins, this
 is skipped" wording is wrong here because `ExtensionCatalog#mergeContributions` APPENDS rather
 than resolving a keyed collision, so every claimant's amount genuinely SUMS),
-`TOOL_MIN_DURABILITY_OUT_OF_RANGE` (a `Tool.MinDurabilityPercent`
+`TOOL_MIN_DURABILITY_OUT_OF_RANGE` (a `Tool.Durability.MinStartPercent`
 outside `(0, 100]`, catching the fraction-vs-percent authoring slip),
+`LADDER_DUPLICATE_FLOOR_MIN` (two floors of ONE ladder sharing a `Min`, in EITHER ladder consumer
+through one shared check - only the LAST authored one can ever be reached, so the earlier duplicate
+silently never grants), `CAMERA_RECIPE_WITHOUT_CAMERA` (a
+`Camera.Recipe` under `Camera.Enabled: false`), `LOOT_BLANK_DROPLIST`,
 `CUSTODY_SINGLE_FAMILY_REDUNDANT` (`SingleFamily: true` where the effective `MaxQuantity <= 1`
 already enforces exclusivity), and `CONSUME_DUPLICATE_ITEM_REF` (one Consume's `Items` array
 authoring the same item/family ref in two entries - the engine sums them, one combined entry says
-it plainly). **Dropped checks**: `WAVE3_PENDING` (the multi-station seam
-executes, so the boundary warn has nothing left to gate - the anchor/walk checks above are the
-live coverage), plus the reserved-field set whose fields no longer exist
-(`UNIMPLEMENTED_STEP_TYPE`, `UNIMPLEMENTED_CONSUME_SOURCE`, `UNIMPLEMENTED_PRODUCE_DEST`,
-`WAIT_BOTH_ROUTES`, `UNIMPLEMENTED_WAIT_BEATS`). The pure `validate(...)` core is unit-tested.
+it plainly). **Retired checks** (the fields/shapes they warned about no longer exist):
+`WAVE3_PENDING` (the multi-station seam executes, so the boundary warn has nothing left to gate -
+the anchor/walk checks above are the live coverage), the reserved-field set from the pre-phase-2
+step union (`UNIMPLEMENTED_STEP_TYPE`, `UNIMPLEMENTED_CONSUME_SOURCE`, `UNIMPLEMENTED_PRODUCE_DEST`,
+`WAIT_BOTH_ROUTES`, `UNIMPLEMENTED_WAIT_BEATS`), `DEAD_POWER_SCALE`/`POWER_SCALE_*` (the group
+is gone), `FACE_BLOCK_WITHOUT_CAMERA` (renamed `CAMERA_RECIPE_WITHOUT_CAMERA`), the four
+`*_UNPLAYED_LEAVES` checks (the reserved `Presentation` leaves they warned about are deleted), the
+pre-release sweep's `PICKER_*`/`YIELD_BONUS_*` sets (the `Picker` group and `Yield.Bonus` leaf are
+both gone - all probabilistic output is a `Bonus` `Roll` now, covered by the normal `Roll`
+checks), and the whole `RECIPE_SELECTION`/multi-recipe check family from the `Recipes[]`-list era
+(one `Recipe` per action needs no selection-order coverage). The pure `validate(...)` core is
+unit-tested.
 
 **Contribution-channel checks**: `MISSING_CONTRIBUTION_CHANNEL` / `NONPOSITIVE_CONTRIBUTION_AMOUNT`
 on a `Work.PerCycleContributions` entry, `LOOT_CONTRIBUTION_WRONG_TRIGGER` (a
@@ -665,7 +968,7 @@ and `UNKNOWN_CHANNEL` - the exact mirror of `UNKNOWN_FACTOR`: a `Channel` nobody
 FAIL-OPEN is absolute here; an undeclared channel must never block a station.
 
 **`LOOT_DUPLICATE_FACTOR` (INFO)** fires when ONE Roll references the same `(Factor, Param)` pair
-more than once across its `Conditions`, `Chance.AddFactors`, and `Ladder.Values` (case-folded,
+more than once across its `Conditions`, `Chance.Factors`, and `Ladder.Factors` (case-folded,
 param-null-normalized). Keyed on the PAIR, never the bare factor id: every stat read carries factor
 id `"hytale:stat"`, so a ladder summing two different stat channels is a legitimate composition and must
 not fire. In practice only a param-less duplicate of a zero-arg engine factor

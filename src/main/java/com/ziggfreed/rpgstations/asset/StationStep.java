@@ -39,13 +39,10 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  * {@link #puppet} clip (fire at iteration entry, listed here for the mental model) -&gt;
  * {@link #duration} hold (suspend) -&gt; next iteration or next step.
  *
- * <p><b>WAVE BOUNDARY (this codec vs the wave-2 engine):</b> this codec carries the FULL field
- * set - a step authoring {@link #walk}/{@link #at} or {@code Produce.To: "Custody"} DECODES fine.
- * The wave-2 engine executes {@link #consume}/{@link #produce} (To Inventory)/{@link #roll}/
- * {@link #commands}/{@link #stamp}/{@link #duration}/{@link #repeat} only; a step authoring
- * {@link #walk}, {@link #at}, or {@code Produce.To: "Custody"} draws a {@code WAVE3_PENDING}-style
- * validator WARN and engage denies gracefully (wave 3 makes them real). No shipped wave-2 content
- * authors them.
+ * <p><b>Every field here EXECUTES.</b> There are no decode-only decoys on this type: {@link #walk},
+ * {@link #at}, and {@code Produce.To: "Custody"} run the multi-station seam for real, alongside
+ * {@link #consume}/{@link #produce}/{@link #roll}/{@link #commands}/{@link #stamp}/
+ * {@link #duration}/{@link #repeat}.
  */
 public final class StationStep {
 
@@ -82,7 +79,7 @@ public final class StationStep {
             .documentation("The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'self'.").add()
             .appendInherited(new KeyedCodec<>("Repeat", Repeat.CODEC, false),
                     (o, v) -> o.repeat = v, o -> o.repeat, (o, p) -> o.repeat = p.repeat)
-            .documentation("Per-step iteration count: a fixed Times, or Min/Max/AddFactors resolved once at step entry.").add()
+            .documentation("Per-step iteration count: a fixed Times, or Min/Max/Factors resolved once at step entry.").add()
             .appendInherited(new KeyedCodec<>("Duration", Duration.CODEC, false),
                     (o, v) -> o.duration = v, o -> o.duration, (o, p) -> o.duration = p.duration)
             .documentation("A post-phase hold in ms per iteration; prop/presentation persist across the hold.").add()
@@ -147,7 +144,7 @@ public final class StationStep {
         return this;
     }
 
-    /** The anchor id this step runs at (from the action's {@code Anchors} map); null = the primary station {@code "self"}. [wave 3] */
+    /** The anchor id this step runs at (from the action's {@code Anchors} map); null = the primary station {@code "self"}. */
     @Nullable
     public String getAt() {
         return at;
@@ -228,7 +225,7 @@ public final class StationStep {
         return this;
     }
 
-    /** Move the puppet to an anchor; null = no walk. [wave 3] */
+    /** Move the puppet to an anchor; null = no walk. */
     @Nullable
     public Walk getWalk() {
         return walk;
@@ -315,13 +312,6 @@ public final class StationStep {
                 && (commands == null || commands.length == 0) && stamp == null;
     }
 
-    /** True when this step authors any [wave 3] field (Walk, At) the wave-2 engine cannot execute (validator warns; engage denies gracefully). */
-    public boolean authorsWave3OnlyPhase() {
-        boolean walkAuthored = walk != null;
-        boolean atAuthored = at != null && !at.isBlank();
-        boolean produceToCustody = produce != null && Produce.TO_CUSTODY.equalsIgnoreCase(produce.effectiveTo());
-        return walkAuthored || atAuthored || produceToCustody;
-    }
 
     /**
      * The branch/skip leaf (design 2.1): {@link #result} decides what a FAILING {@link #conditions}
@@ -375,7 +365,7 @@ public final class StationStep {
     /**
      * Per-step iteration count (design 2.1, decision 29c). EITHER a fixed {@link #times}, OR a
      * factor-resolved range {@code clamp(round(Min + sum(resolve(f) * f.Weight)), Min, Max)} via
-     * {@link #addFactors} - the same weighted vocabulary as loot chances and caps. Resolved ONCE at
+     * {@link #factors} - the same weighted vocabulary as loot chances and caps. Resolved ONCE at
      * step entry; per iteration the Conditions re-check, the phases re-execute, and any
      * clip/presentation re-fire.
      */
@@ -383,12 +373,12 @@ public final class StationStep {
         @Nullable protected Integer times;
         @Nullable protected Integer min;
         @Nullable protected Integer max;
-        @Nullable protected FactorRef[] addFactors;
+        @Nullable protected FactorRef[] factors;
 
         public static final BuilderCodec<Repeat> CODEC = BuilderCodec.builder(Repeat.class, Repeat::new)
                 .appendInherited(new KeyedCodec<>("Times", Codec.INTEGER, false),
                         (o, v) -> o.times = v, o -> o.times, (o, p) -> o.times = p.times)
-                .documentation("A fixed iteration count. Authored INSTEAD of Min/Max/AddFactors (the fixed route).")
+                .documentation("A fixed iteration count. Authored INSTEAD of Min/Max/Factors (the fixed route).")
                 .addValidator(CodecWarnValidators.positive("StationStep.Repeat.Times should be positive; it floors at 1 otherwise.")).add()
                 .appendInherited(new KeyedCodec<>("Min", Codec.INTEGER, false),
                         (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
@@ -398,9 +388,19 @@ public final class StationStep {
                         (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max)
                 .documentation("Upper bound of the factor-resolved iteration count (the ranged route).")
                 .addValidator(CodecWarnValidators.positive("StationStep.Repeat.Max should be positive; a non-positive value floors to Min.")).add()
-                .appendInherited(new KeyedCodec<>("AddFactors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
-                        (o, v) -> o.addFactors = v, o -> o.addFactors, (o, p) -> o.addFactors = p.addFactors)
+                .appendInherited(new KeyedCodec<>("Factors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
+                        (o, v) -> o.factors = v, o -> o.factors, (o, p) -> o.factors = p.factors)
                 .documentation("Weighted factor references summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max).").add()
+                .afterDecode((Repeat repeat, ExtraInfo extraInfo) -> {
+                    if (repeat.times != null
+                            && (repeat.min != null || repeat.max != null
+                                    || (repeat.factors != null && repeat.factors.length > 0))) {
+                        extraInfo.getValidationResults().warn(
+                                "StationStep.Repeat should author either the fixed Times route OR the ranged "
+                                        + "Min/Max/Factors route, not both - the fixed Times wins and the ranged "
+                                        + "leaves are ignored.");
+                    }
+                })
                 .build();
 
         @Nonnull
@@ -412,12 +412,12 @@ public final class StationStep {
 
         @Nonnull
         public static Repeat of(@Nullable Integer times, @Nullable Integer min, @Nullable Integer max,
-                @Nullable FactorRef[] addFactors) {
+                @Nullable FactorRef[] factors) {
             Repeat r = new Repeat();
             r.times = times;
             r.min = min;
             r.max = max;
-            r.addFactors = addFactors;
+            r.factors = factors;
             return r;
         }
 
@@ -438,8 +438,8 @@ public final class StationStep {
 
         /** Weighted factor references summed into the ranged count; null = a fixed {@link #times} (or a Min-only floor). */
         @Nullable
-        public FactorRef[] getAddFactors() {
-            return addFactors;
+        public FactorRef[] getFactors() {
+            return factors;
         }
 
         /** True when the fixed {@link #times} route is authored (takes precedence over the ranged route). */
@@ -496,11 +496,10 @@ public final class StationStep {
     }
 
     /**
-     * The Walk phase (design 2.3, [wave 3] execution): move the PUPPET to the anchor {@link #to}
+     * The Walk phase (design 2.3): move the PUPPET to the anchor {@link #to}
      * (an id from the action's {@code Anchors} map, or the reserved {@code "self"}) at
      * {@link #speedMps}. Requires the action's {@code Puppet} enabled (validator {@code
-     * WALK_REQUIRES_PUPPET}). Decodes and validates in wave 2; the wave-2 engine denies engage
-     * gracefully for any program authoring it (wave 3 makes it real).
+     * WALK_REQUIRES_PUPPET}).
      */
     public static final class Walk {
         /** The design default straight-line speed (m/s). */
@@ -874,7 +873,7 @@ public final class StationStep {
              *
              * <p><b>{@link #budgets}</b> is a list of total-budget entries, each EITHER a flat
              * {@code {Points}} or a factor-scaled {@code {PointsPer, Factors[]}}
-             * ({@code PointsPer * sum(resolve(f) * f.Weight)}). <b>M2's binding rule (unchanged):</b>
+             * ({@code PointsPer * sum(resolve(f) * f.Weight)}). <b>Binding rule:</b>
              * the EFFECTIVE total budget is the MIN over every authored {@link Budget} entry.
              * <b>{@link #perStat}</b> is a SEPARATE per-stat-id ceiling layered on top.
              * <b>{@link #economics}</b> scales REAGENT cost per prior stamp count; it never affects
@@ -888,7 +887,7 @@ public final class StationStep {
                 public static final BuilderCodec<Caps> CODEC = BuilderCodec.builder(Caps.class, Caps::new)
                         .appendInherited(new KeyedCodec<>("Budgets", new ArrayCodec<>(Budget.CODEC, Budget[]::new), false),
                                 (o, v) -> o.budgets = v, o -> o.budgets, (o, p) -> o.budgets = p.budgets)
-                        .documentation("Total-point budget entries; the EFFECTIVE budget is the MIN over every entry (M2 rule).").add()
+                        .documentation("Total-point budget entries; the EFFECTIVE budget is the MIN over every entry.").add()
                         .appendInherited(new KeyedCodec<>("PerStat", new MapCodec<>(Codec.DOUBLE, LinkedHashMap::new), false),
                                 (o, v) -> o.perStat = v, o -> o.perStat, (o, p) -> o.perStat = p.perStat)
                         .documentation("A per-stat-id ceiling layered ON TOP of the total budget (stat id -> max points).").add()

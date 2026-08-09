@@ -156,14 +156,25 @@ class StationCustodyTest {
     }
 
     @Test
-    void claim_displayRef_defaultsNull_thenSettable() {
+    void claim_display_defaultsNull_thenSettable() {
         // design section 9, phase 2 leg G: the PLACED-AS-ENTITY visual's ref lives on the claim
         // itself, null until StationCustodyDisplay#spawn succeeds (never constructed here - a
         // live Ref<EntityStore> needs a running server; this only exercises the plain getter/setter).
         StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
         assertNull(claim.displayRef());
-        claim.setDisplayRef(null);
+        assertNull(claim.displayNetworkId());
+        claim.setDisplay(null, null);
         assertNull(claim.displayRef());
+        assertNull(claim.displayNetworkId());
+    }
+
+    @Test
+    void claim_displayNetworkId_isRecordedForTheRetrievalMatch() {
+        // The id is captured at spawn beside the ref so press-F retrieval never reads a live
+        // NetworkId component back off the prop; the ref half stays null here (it needs a server).
+        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
+        claim.setDisplay(null, 4321);
+        assertEquals(4321, claim.displayNetworkId());
     }
 
     // ==================== matchesInput / matchesAnyConversionInput ====================

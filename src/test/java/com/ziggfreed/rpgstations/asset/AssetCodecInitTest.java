@@ -34,7 +34,6 @@ public class AssetCodecInitTest {
     @Test
     void seamWaveSharedLeafCodecs_initializeWithoutThrowing() {
         assertDoesNotThrow(() -> assertNotNull(EffectRef.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(Picker.CODEC));
     }
 
     /** Seam wave Look nesting + FromCrafting native-composition groups (decisions 47/51c/52). */

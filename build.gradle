@@ -82,19 +82,19 @@ test {
     useJUnitPlatform()
 }
 
-// Regenerate the docs-site schema reference (docs-site/rpg-stations-docs/src/data/reference/
-// schema.json) from the actual asset codecs, the generateEnglishLang JavaExec pattern (design doc
-// section 6.2). Classpath needs the compiled classes PLUS every compile-time dependency
-// (compileClasspath, not runtimeClasspath): SchemaDocWriter loads StationAsset/ActionDef/... and
-// therefore transitively the Hytale server jar's codec classes, which are compileOnly and NEVER
-// bundled - unlike generateEnglishLang/generateXpTokenItems, whose generators touch no Hytale API.
-// Run ON DEMAND (`gradlew generateSchemaDocs`); the output is committed and NOT wired into
-// processResources/build (schema.json is docs-site data, not a JAR resource).
-def schemaDocOutput = file('docs-site/rpg-stations-docs/src/data/reference/schema.json')
+// Regenerate the repo-root SCHEMA.md schema reference from the actual asset codecs, the
+// generateEnglishLang JavaExec pattern. Classpath needs the compiled classes PLUS every
+// compile-time dependency (compileClasspath, not runtimeClasspath): SchemaDocWriter loads
+// StationAsset/ActionDef/... and therefore transitively the Hytale server jar's codec classes,
+// which are compileOnly and NEVER bundled - unlike generateEnglishLang/generateXpTokenItems, whose
+// generators touch no Hytale API. Run ON DEMAND (`gradlew generateSchemaDocs`); the output is
+// committed and NOT wired into processResources/build (SCHEMA.md is repo documentation, not a JAR
+// resource).
+def schemaDocOutput = file('SCHEMA.md')
 tasks.register('generateSchemaDocs', JavaExec) {
     dependsOn 'compileJava'
     group = 'documentation'
-    description = 'Regenerate the docs-site schema reference (schema.json) from the RpgStations asset codecs'
+    description = 'Regenerate the repo-root SCHEMA.md schema reference from the RpgStations asset codecs'
     classpath = sourceSets.main.output.classesDirs + configurations.compileClasspath
     mainClass = 'com.ziggfreed.rpgstations.docs.SchemaDocWriter'
     args schemaDocOutput.absolutePath

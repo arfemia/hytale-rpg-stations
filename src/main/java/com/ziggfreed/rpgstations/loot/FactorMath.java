@@ -10,9 +10,9 @@ import com.ziggfreed.rpgstations.asset.FactorRef;
 /**
  * The ONE weighted-sum authority for a {@link FactorRef}{@code []} (scope-2 design 1.3/4.2): the
  * flat composition {@code sum(resolve(Factor, Param) * Weight)} every consumer of the unified
- * factor vocabulary uses - {@code Roll.Chance.AddFactors}, {@code Roll.Ladder.Values},
- * {@code StatRollEntry.Points.AddFactors}, {@code StationStep.Stamp.Stats.Caps.Budgets[].Factors},
- * and {@code StationStep.Repeat.AddFactors}. Pure, unit-testable, no store access; the {@code
+ * factor vocabulary uses - {@code Roll.Chance.Factors}, {@code Roll.Ladder.Factors},
+ * {@code StatRollEntry.Points.Factors}, {@code StationStep.Stamp.Stats.Caps.Budgets[].Factors},
+ * and {@code StationStep.Repeat.Factors}. Pure, unit-testable, no store access; the {@code
  * lookup} is any {@code (factorId, param) -> Double} resolver (a {@code FactorSnapshot::resolve},
  * a fixture map, etc.). An unresolvable factor (a {@code null} lookup result) contributes 0
  * (fail-closed), never a throw. Kept in {@code loot/} so both the loot layer ({@code RollEvaluator})

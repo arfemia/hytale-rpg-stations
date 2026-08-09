@@ -11,7 +11,6 @@ import java.util.Arrays;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 import com.hypixel.hytale.assetstore.codec.ContainedAssetCodec;
@@ -44,25 +43,37 @@ import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**
  * Walks every authorable RpgStations asset type's declared static {@code CODEC} field via
- * {@link BuilderCodec#getEntries()} and renders a JSON schema-reference document consumed by
- * the docs-site's Schema Reference page ({@code docs-site/rpg-stations-docs/src/data/reference/
- * schema.json}, design doc section 6.2).
+ * {@link BuilderCodec#getEntries()} and renders a GitHub-Markdown schema-reference document,
+ * committed at the repo root as {@code SCHEMA.md} (regenerated on demand via
+ * {@code gradlew generateSchemaDocs}).
  *
  * <p>ONE pure
  * {@link #render()} function shared by the Gradle {@code generateSchemaDocs} task ({@link #main})
  * and {@code SchemaDocDriftTest}, so the two can never diverge. Field documentation strings are
- * REAL (not backfilled here): every rewritten codec field in this mod's scope-2 authoring surface
- * carries a {@code .documentation("...")} call by design (principle 1.1-4), so {@link
- * BuilderField#getDocumentation()} already returns authored prose wherever an author wrote one;
- * fields without one simply omit the {@code "documentation"} key.
+ * REAL (not backfilled here): every rewritten codec field in this mod's authoring surface carries
+ * a {@code .documentation("...")} call by design, so {@link BuilderField#getDocumentation()}
+ * already returns authored prose wherever an author wrote one; fields without one simply render an
+ * empty documentation cell.
  *
- * <p><b>Type shape emitted per field</b>: {@code key}, {@code required}, {@code documentation?},
- * plus a classification of the field's child {@link Codec}:
+ * <p><b>What {@link #render()} emits</b>: one {@code ##} section per registered root type (a table
+ * of contents up top, then each section's own {@code Key | Type | Default | Documentation} table),
+ * plus one further subsection per PRIVATE nested field group (a group with no independent doc
+ * section of its own, e.g. {@code Custody.Display}) - a shared vocabulary type reused inline (e.g.
+ * {@code Roll} inside {@code LootableAsset}) instead links straight to its own top-level section
+ * rather than re-inlining the whole subtree. Every section carries an explicit {@code <a id="...">}
+ * anchor so cross-references resolve regardless of how GitHub's own heading-slug algorithm treats
+ * the visible heading text. The {@code Default} column reads the literal `required` marker for a
+ * required field and `null` for every optional one (every RpgStations field is nullable-by-omission
+ * unless marked required, so that IS its default).
+ *
+ * <p>Internally, {@link #renderModel()} still walks the codecs into a pure in-memory
+ * {@code Map}/{@code List}/{@code String} model first (also consumed directly by
+ * {@code SchemaDocDriftTest}'s structural sanity check), classifying each field's child
+ * {@link Codec}:
  * <ul>
  *   <li>a nested {@link BuilderCodec} group renders {@code type:"object"} + {@code nestedType}; if
- *       that nested type is itself one of the 19 top-level documented types (a shared vocabulary
- *       type like {@code Condition}/{@code Roll}/{@code Presentation} reused inline elsewhere) the
- *       field carries a {@code "ref"} pointer instead of re-inlining the whole subtree (avoids both
+ *       that nested type is itself one of the registered top-level documented types the field
+ *       carries a {@code "ref"} pointer instead of re-inlining the whole subtree (avoids both
  *       duplicating huge shared groups and the nested-class-name collisions several private groups
  *       share, e.g. three unrelated classes are all named {@code Offset}) - otherwise its fields are
  *       inlined recursively (a private structural group with no independent doc page);
@@ -76,25 +87,21 @@ import com.ziggfreed.rpgstations.asset.StationStep;
  *       stripped): {@code string}/{@code integer}/{@code double}/{@code boolean}/{@code long}/...
  * </ul>
  *
- * <p>The "Opportunistic route" from the design doc ({@code CODEC.toSchema(SchemaContext)}, the
- * official Hytale editor JSON-schema shape) was evaluated: {@link
- * com.hypixel.hytale.codec.schema.SchemaContext} IS constructible outside a live server (a bare
- * no-arg constructor over pure in-memory maps), so it is not blocked the way the design doc's open
- * question worried it might be. It was NOT wired in here: its output shape (editor UI metadata,
- * {@code $Title}/{@code $Comment} synthetic properties, a {@code common.json}/{@code other.json}
- * definitions split) targets the Hytale asset-pack EDITOR, not a docs-site field table, and the
- * design doc's own field shape ({@code key}/{@code type}/{@code nestedType}/{@code required}/
- * {@code documentation}) is exactly what {@link #render()} already produces from {@code
- * getEntries()} alone - "the getEntries() walk stands alone" per section 6.2. A future docs-site
- * leg wanting the raw editor schema can add a second output file from {@code toSchema} without
- * touching this one.
+ * <p>The "opportunistic" official-schema route ({@code CODEC.toSchema(SchemaContext)}, the same
+ * shape the Hytale asset-pack editor consumes) was evaluated and deliberately NOT wired in here:
+ * its output (editor UI metadata, {@code $Title}/{@code $Comment} synthetic properties, a
+ * {@code common.json}/{@code other.json} definitions split) targets the in-editor tooling, not a
+ * readable field-reference table, and the {@code key}/{@code type}/{@code nestedType}/
+ * {@code required}/{@code documentation} shape {@link #render()} already produces from
+ * {@code getEntries()} alone covers this document's job on its own. A future addition wanting the
+ * raw editor schema can add a second output file from {@code toSchema} without touching this one.
  */
 public final class SchemaDocWriter {
 
     /**
-     * The 19 authorable / shared-vocabulary types this schema reference documents, keyed by the
-     * name the docs-site groups them under (design doc section 6.2's list). {@code SettingsAsset}
-     * is the doc-facing name for the actual class {@link RpgStationsSettingsAsset}.
+     * The authorable / shared-vocabulary types this schema reference documents, keyed by the name
+     * used as both the section heading and the cross-reference target. {@code SettingsAsset} is
+     * the doc-facing name for the actual class {@link RpgStationsSettingsAsset}.
      */
     private static final Map<String, BuilderCodec<?>> ROOT_CODECS = new LinkedHashMap<>();
 
@@ -137,9 +144,10 @@ public final class SchemaDocWriter {
     }
 
     /**
-     * Render every registered root type's codec into the in-memory JSON model
-     * ({@code Map}/{@code List}/{@code String}/{@code Boolean} only, so {@link #toJson} can print
-     * it with zero external dependencies - this mod carries no Gson/Jackson runtime dependency).
+     * Walk every registered root type's codec into a pure in-memory model
+     * ({@code Map}/{@code List}/{@code String}/{@code Boolean} only, no external dependency - this
+     * mod carries no Gson/Jackson runtime dependency), consumed by both {@link #render()} (the
+     * Markdown renderer) and {@code SchemaDocDriftTest}'s structural sanity check.
      */
     public static Map<String, Object> renderModel() {
         Map<String, Object> types = new LinkedHashMap<>();
@@ -162,12 +170,9 @@ public final class SchemaDocWriter {
         return root;
     }
 
-    /** {@link #renderModel()} pretty-printed as stable, deterministic JSON text (2-space indent, LF-terminated). */
+    /** {@link #renderModel()} rendered as stable, deterministic GitHub Markdown (LF-terminated). */
     public static String render() {
-        StringBuilder sb = new StringBuilder(16_384);
-        toJson(renderModel(), sb, 0);
-        sb.append('\n');
-        return sb.toString();
+        return renderMarkdown(renderModel());
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -283,80 +288,165 @@ public final class SchemaDocWriter {
         return Character.toLowerCase(simple.charAt(0)) + simple.substring(1);
     }
 
+    /**
+     * One pending private nested-group subsection discovered while rendering a table, queued so it
+     * renders (breadth-first, in discovery order) after the table that referenced it.
+     *
+     * @param anchor the {@code <a id="...">} target, ASCII/hyphen only
+     * @param heading the human-readable dotted path shown as the section heading text
+     * @param fields  that group's own field list (the same shape {@link #renderFields} produces)
+     * @param level   the Markdown heading level ({@code 1}-{@code 6}) this subsection renders at
+     */
+    private record PendingSection(String anchor, String heading, List<Object> fields, int level) {
+    }
+
     @SuppressWarnings("unchecked")
-    private static void toJson(Object value, StringBuilder sb, int indent) {
-        if (value instanceof Map<?, ?> map) {
-            if (map.isEmpty()) {
-                sb.append("{}");
-                return;
-            }
-            sb.append("{\n");
-            int i = 0;
-            int n = map.size();
-            for (Map.Entry<?, ?> e : map.entrySet()) {
-                indent(sb, indent + 1);
-                sb.append('"').append(escape(String.valueOf(e.getKey()))).append("\": ");
-                toJson(e.getValue(), sb, indent + 1);
-                if (++i < n) {
-                    sb.append(',');
-                }
-                sb.append('\n');
-            }
-            indent(sb, indent);
-            sb.append('}');
-        } else if (value instanceof List<?> list) {
-            if (list.isEmpty()) {
-                sb.append("[]");
-                return;
-            }
-            sb.append("[\n");
-            for (int i = 0; i < list.size(); i++) {
-                indent(sb, indent + 1);
-                toJson(list.get(i), sb, indent + 1);
-                if (i < list.size() - 1) {
-                    sb.append(',');
-                }
-                sb.append('\n');
-            }
-            indent(sb, indent);
-            sb.append(']');
-        } else if (value instanceof String s) {
-            sb.append('"').append(escape(s)).append('"');
-        } else if (value instanceof Boolean || value instanceof Number) {
-            sb.append(value);
-        } else if (value == null) {
-            sb.append("null");
-        } else {
-            sb.append('"').append(escape(String.valueOf(value))).append('"');
+    private static String renderMarkdown(Map<String, Object> model) {
+        List<String> rootTypes = (List<String>) model.get("rootTypes");
+        Map<String, Object> types = (Map<String, Object>) model.get("types");
+
+        StringBuilder sb = new StringBuilder(65_536);
+        sb.append("# RPG Stations Schema Reference\n\n");
+        sb.append("Generated by `gradlew generateSchemaDocs` from the RpgStations asset codecs ")
+                .append("(`SchemaDocWriter`, walking each authorable type's static `CODEC` via ")
+                .append("`BuilderCodec#getEntries()`). Do not hand-edit; `SchemaDocDriftTest` fails ")
+                .append("the build if this file drifts from the live codecs.\n\n");
+        sb.append("Every field is nullable and defaults to `null` unless its Default column reads ")
+                .append("*(required)*. See [Getting Started](docs/getting-started.md) and ")
+                .append("[Your First Station](docs/your-first-station.md) for worked examples of the ")
+                .append("shapes below.\n\n");
+
+        sb.append("## Types\n\n");
+        for (String name : rootTypes) {
+            sb.append("- [").append(name).append("](#type-").append(slug(name)).append(")\n");
+        }
+        sb.append('\n');
+
+        for (String name : rootTypes) {
+            renderType(sb, name, (Map<String, Object>) types.get(name));
+        }
+        return sb.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void renderType(StringBuilder sb, String rootName, Map<String, Object> typeDoc) {
+        sb.append("<a id=\"type-").append(slug(rootName)).append("\"></a>\n");
+        sb.append("## ").append(rootName).append("\n\n");
+
+        String doc = (String) typeDoc.get("documentation");
+        if (doc != null && !doc.isBlank()) {
+            sb.append(doc.strip()).append("\n\n");
+        }
+
+        Deque<PendingSection> queue = new ArrayDeque<>();
+        renderFieldsTable(sb, (List<Object>) typeDoc.get("fields"), slug(rootName), rootName, 3, queue);
+
+        while (!queue.isEmpty()) {
+            PendingSection section = queue.poll();
+            sb.append("<a id=\"field-").append(section.anchor()).append("\"></a>\n");
+            sb.append("#".repeat(Math.min(Math.max(section.level(), 1), 6)))
+                    .append(' ').append(section.heading()).append("\n\n");
+            renderFieldsTable(sb, section.fields(), section.anchor(), section.heading(), section.level() + 1, queue);
         }
     }
 
-    private static void indent(StringBuilder sb, int level) {
-        for (int i = 0; i < level; i++) {
-            sb.append("  ");
+    @SuppressWarnings("unchecked")
+    private static void renderFieldsTable(StringBuilder sb, List<Object> fields, String anchorPrefix,
+            String humanPrefix, int level, Deque<PendingSection> queue) {
+        if (fields.isEmpty()) {
+            sb.append("_No fields._\n\n");
+            return;
         }
+        sb.append("| Key | Type | Default | Documentation |\n");
+        sb.append("|---|---|---|---|\n");
+        for (Object o : fields) {
+            Map<String, Object> field = (Map<String, Object>) o;
+            String key = (String) field.get("key");
+            boolean required = Boolean.TRUE.equals(field.get("required"));
+            String anchor = anchorPrefix + "-" + slug(key);
+            String human = humanPrefix + "." + key;
+            String typeLabel = describeType(field, anchor, human, level, queue);
+            String def = required ? "*(required)*" : "`null`";
+            Object docValue = field.get("documentation");
+            String docCell = docValue != null ? escapeCell((String) docValue) : "";
+            sb.append("| `").append(key).append("` | ").append(typeLabel).append(" | ").append(def)
+                    .append(" | ").append(docCell).append(" |\n");
+        }
+        sb.append('\n');
     }
 
-    private static String escape(String s) {
-        StringBuilder out = new StringBuilder(s.length() + 8);
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"' -> out.append("\\\"");
-                case '\\' -> out.append("\\\\");
-                case '\n' -> out.append("\\n");
-                case '\r' -> out.append("\\r");
-                case '\t' -> out.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        out.append(String.format(Locale.ROOT, "\\u%04x", (int) c));
-                    } else {
-                        out.append(c);
+    /** Describes one {@code classify()}-shaped type map as a Markdown table-cell label. */
+    @SuppressWarnings("unchecked")
+    private static String describeType(Map<String, Object> typeInfo, String anchor, String human, int level,
+            Deque<PendingSection> queue) {
+        String type = (String) typeInfo.get("type");
+        switch (type) {
+            case "object" -> {
+                String ref = (String) typeInfo.get("ref");
+                String nestedType = (String) typeInfo.get("nestedType");
+                if (ref != null) {
+                    return "[" + ref + "](#type-" + slug(ref) + ")";
+                }
+                if (Boolean.TRUE.equals(typeInfo.get("cyclic"))) {
+                    return "*(cyclic reference to " + nestedType + ")*";
+                }
+                queue.add(new PendingSection(anchor, human, (List<Object>) typeInfo.get("fields"), level));
+                return "[" + nestedType + "](#field-" + anchor + ")";
+            }
+            case "array", "map", "set" -> {
+                Map<String, Object> of = (Map<String, Object>) typeInfo.get("of");
+                String childLabel = describeType(of, anchor + "-item", human + "[]", level, queue);
+                String prefix = switch (type) {
+                    case "array" -> "array of ";
+                    case "map" -> "map of ";
+                    default -> "set of ";
+                };
+                return prefix + childLabel;
+            }
+            case "enum" -> {
+                List<String> values = (List<String>) typeInfo.get("values");
+                StringBuilder joined = new StringBuilder("enum (");
+                for (int i = 0; i < values.size(); i++) {
+                    if (i > 0) {
+                        joined.append(", ");
                     }
+                    joined.append('`').append(values.get(i)).append('`');
                 }
+                return joined.append(')').toString();
             }
+            case "containedAsset" -> {
+                String assetType = (String) typeInfo.get("assetType");
+                String ref = (String) typeInfo.get("ref");
+                return ref != null
+                        ? "id, or inline [" + assetType + "](#type-" + slug(ref) + ")"
+                        : "id, or inline `" + assetType + "`";
+            }
+            default -> {
+                return "`" + type + "`";
+            }
+        }
+    }
+
+    /** Lowercase ASCII slug for a Markdown `<a id>` anchor: letters/digits kept, everything else collapsed to `-`. */
+    private static String slug(String s) {
+        StringBuilder out = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = Character.toLowerCase(s.charAt(i));
+            if (Character.isLetterOrDigit(c)) {
+                out.append(c);
+            } else if (!out.isEmpty() && out.charAt(out.length() - 1) != '-') {
+                out.append('-');
+            }
+        }
+        while (!out.isEmpty() && out.charAt(out.length() - 1) == '-') {
+            out.setLength(out.length() - 1);
         }
         return out.toString();
+    }
+
+    /** Makes a documentation string safe inside one GitHub Markdown table cell. */
+    private static String escapeCell(String s) {
+        return s.replace("|", "\\|").replace("\r\n", "<br>").replace("\n", "<br>");
     }
 
     /** Render and write {@link #render()} to {@code outFile}, creating parent directories as needed. */
@@ -371,13 +461,12 @@ public final class SchemaDocWriter {
     }
 
     /**
-     * Gradle entry point: {@code args[0]} is the output file path (e.g.
-     * {@code docs-site/rpg-stations-docs/src/data/reference/schema.json}).
+     * Gradle entry point: {@code args[0]} is the output file path (e.g. {@code SCHEMA.md} at the
+     * repo root).
      */
     public static void main(String[] args) {
         if (args.length < 1 || args[0].isBlank()) {
-            throw new IllegalArgumentException(
-                    "Usage: SchemaDocWriter <outFile> (e.g. docs-site/rpg-stations-docs/src/data/reference/schema.json)");
+            throw new IllegalArgumentException("Usage: SchemaDocWriter <outFile> (e.g. SCHEMA.md)");
         }
         Path outFile = writeTo(Path.of(args[0]));
 

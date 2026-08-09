@@ -36,11 +36,19 @@ public final class ActionCatalog {
         return INSTANCE;
     }
 
+    /**
+     * Fold {@code layer} in and drop {@link StationCatalog}'s derived-conversion cache, the same
+     * companion {@link StationCatalog#fold} and {@link ExtensionCatalog#fold} carry: a {@code Ref}'d
+     * action's own {@code Recipe} is part of what that cache derives, and the three stores fold in
+     * no guaranteed order, so an {@link ActionAsset} arriving after the first conversion resolve
+     * would otherwise stay invisible for the rest of the uptime.
+     */
     public void fold(@Nonnull Map<String, ActionAsset> layer, boolean replace) {
         if (replace) {
             actions.clear();
         }
         actions.putAll(layer);
+        StationCatalog.getInstance().invalidateResolvedConversions();
     }
 
     @Nullable

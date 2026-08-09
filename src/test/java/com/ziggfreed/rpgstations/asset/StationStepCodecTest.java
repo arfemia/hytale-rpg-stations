@@ -25,8 +25,8 @@ public class StationStepCodecTest {
     }
 
     private static StationStep[] stepsOf(String stepsJson) throws Exception {
-        return decodeAsset("{ \"Actions\": { \"a\": { \"Steps\": " + stepsJson + " } } }")
-                .getActions().get("a").getSteps();
+        return decodeAsset("{ \"Actions\": [ { \"Id\": \"a\", \"Steps\": " + stepsJson + " } ] }")
+                .getActions()[0].getSteps();
     }
 
     // ==================== Repeat ====================
@@ -44,13 +44,13 @@ public class StationStepCodecTest {
     @Test
     void repeat_rangedWithAddFactors_decodes() throws Exception {
         StationStep[] s = stepsOf("[ { \"Id\": \"x\", \"Repeat\": { \"Min\": 1, \"Max\": 4,"
-                + " \"AddFactors\": [ { \"Factor\": \"stat\", \"Param\": \"MMO_Luck\", \"Weight\": 0.5 } ] } } ]");
+                + " \"Factors\": [ { \"Factor\": \"stat\", \"Param\": \"MMO_Luck\", \"Weight\": 0.5 } ] } } ]");
         StationStep.Repeat r = s[0].getRepeat();
         assertFalse(r.isFixed());
         assertEquals(1, r.getMin());
         assertEquals(4, r.getMax());
-        assertEquals("MMO_Luck", r.getAddFactors()[0].getParam());
-        assertEquals(0.5, r.getAddFactors()[0].effectiveWeight());
+        assertEquals("MMO_Luck", r.getFactors()[0].getParam());
+        assertEquals(0.5, r.getFactors()[0].effectiveWeight());
     }
 
     @Test
@@ -137,13 +137,13 @@ public class StationStepCodecTest {
     void statRollEntryPoints_addFactorsDecode() throws Exception {
         StationStep[] s = stepsOf("[ { \"Id\": \"stamp\", \"Stamp\": { \"Stats\": { \"Entries\": ["
                 + " { \"Stat\": \"MMO_CritChance\", \"Points\": { \"Min\": 1, \"Max\": 3,"
-                + "   \"AddFactors\": [ { \"Factor\": \"stat\", \"Param\": \"MMO_Level_SMITHING\", \"Weight\": 0.1 } ] } } ] } } } ]");
+                + "   \"Factors\": [ { \"Factor\": \"stat\", \"Param\": \"MMO_Level_SMITHING\", \"Weight\": 0.1 } ] } } ] } } } ]");
         StatRollEntry entry = s[0].getStamp().getStats().getEntries()[0];
         assertEquals("MMO_CritChance", entry.getStat());
         assertEquals(1.0, entry.getPoints().effectiveMin());
         assertEquals(3.0, entry.getPoints().effectiveMax());
-        assertEquals("MMO_Level_SMITHING", entry.getPoints().getAddFactors()[0].getParam());
-        assertEquals(0.1, entry.getPoints().getAddFactors()[0].effectiveWeight());
+        assertEquals("MMO_Level_SMITHING", entry.getPoints().getFactors()[0].getParam());
+        assertEquals(0.1, entry.getPoints().getFactors()[0].effectiveWeight());
     }
 
     // ==================== Native Parent per-leaf inheritance of a step phase group ====================
@@ -152,13 +152,13 @@ public class StationStepCodecTest {
     void stationStep_stampCaps_perLeafParentInherit() throws Exception {
         AssetExtraInfo.Data pData = new AssetExtraInfo.Data(StationAsset.class, "anvil_parent", null);
         StationAsset parent = StationAsset.CODEC.decodeAndInheritJsonAsset(
-                RawJsonReader.fromJsonString("{ \"Actions\": { \"enhance\": { \"Steps\": ["
+                RawJsonReader.fromJsonString("{ \"Actions\": [ { \"Id\": \"enhance\", \"Steps\": ["
                         + " { \"Id\": \"stamp\", \"Stamp\": { \"Stats\": { \"Caps\": {"
-                        + " \"Budgets\": [ { \"Points\": 30 } ], \"Economics\": { \"RepeatCostMultiplier\": 1.25 } } } } } ] } } }"),
+                        + " \"Budgets\": [ { \"Points\": 30 } ], \"Economics\": { \"RepeatCostMultiplier\": 1.25 } } } } } ] } ] }"),
                 null, new AssetExtraInfo<>(pData));
-        // The whole Actions map inherits wholesale (validated in StationAssetCodecTest); here we assert the
+        // The whole Actions array inherits wholesale (validated in StationAssetCodecTest); here we assert the
         // parent's own budget decoded so downstream can trust the shape.
-        StationStep.Stamp.Stats.Caps caps = parent.getActions().get("enhance").getSteps()[0]
+        StationStep.Stamp.Stats.Caps caps = parent.getActions()[0].getSteps()[0]
                 .getStamp().getStats().getCaps();
         assertEquals(30.0, caps.getBudgets()[0].getPoints());
         assertEquals(1.25, caps.getEconomics().getRepeatCostMultiplier());

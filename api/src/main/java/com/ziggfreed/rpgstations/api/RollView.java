@@ -39,7 +39,7 @@ public interface RollView {
 
     /**
      * EVERY factor reference in this roll, flattened across {@code Conditions},
-     * {@code Chance.AddFactors} and {@code Ladder.Values}, in that order. This is the list a
+     * {@code Chance.Factors} and {@code Ladder.Factors}, in that order. This is the list a
      * double-count lint walks: a factor family owner decides for itself which combinations of
      * {@code (factor, param)} are redundant.
      */
@@ -55,11 +55,11 @@ public interface RollView {
     Double chanceCapPercent();
 
     /**
-     * The {@code Ladder.Values} references, summed engine-side before the floor lookup; empty when
+     * The {@code Ladder.Factors} references, summed engine-side before the floor lookup; empty when
      * the roll authors no ladder.
      */
     @Nonnull
-    List<FactorRefView> ladderValues();
+    List<FactorRefView> ladderFactors();
 
     /** The ladder's floors in authored order; empty when the roll authors no ladder. */
     @Nonnull

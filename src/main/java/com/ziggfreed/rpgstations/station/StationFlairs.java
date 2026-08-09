@@ -47,6 +47,13 @@ import com.ziggfreed.rpgstations.asset.Presentation;
  * base presentation ADDS one. Multiple unlocked flairs STACK, applied in SORTED flair-id
  * order (a later id's non-null leaf wins over an earlier id's on the same leaf). An unlocked
  * id with no matching entry in the station's effective flair map is silently ignored.
+ *
+ * <p><b>Casing is canonicalized to lowercase at BOTH ends</b> (flair ids and moment ids alike):
+ * {@link FlairCatalog} lowercases the authored keys and this class lowercases the lookup plus
+ * whatever a provider hands back, so an inline {@code Flairs} key, a standalone {@code FlairAsset}
+ * id, and a provider's returned id all meet in ONE namespace - which is what makes a single
+ * {@code FlairUnlockProvider} able to satisfy both authoring routes, and what stops a moment key
+ * authored {@code "Cycle"} from validating as known and then never firing.
  */
 public final class StationFlairs {
 
@@ -69,10 +76,18 @@ public final class StationFlairs {
     private StationFlairs() {
     }
 
-    /** Builds the per-step moment id {@code step:<actionId>:<stepId>} (design section 9.6). */
+    /**
+     * Builds the per-step moment id {@code step:<actionId>:<stepId>} (design section 9.6).
+     *
+     * <p>Both arguments are LOWERCASED, so a PascalCase-authored action or step id composes to a
+     * stable lowercase moment id. Moment ids are matched by exact map key, and the whole flair
+     * pipeline canonicalizes to lowercase at both ends ({@link #effective} lowercases the lookup and
+     * {@link FlairCatalog} lowercases the authored keys), so a key authored {@code "Cycle"} resolves
+     * instead of validating as known and then silently never firing.
+     */
     @Nonnull
     public static String stepMomentId(@Nonnull String actionId, @Nonnull String stepId) {
-        return STEP_MOMENT_PREFIX + actionId + ":" + stepId;
+        return STEP_MOMENT_PREFIX + actionId.toLowerCase(Locale.ROOT) + ":" + stepId.toLowerCase(Locale.ROOT);
     }
 
     /**
@@ -111,54 +126,60 @@ public final class StationFlairs {
             return base;
         }
 
-        String sound = base != null ? base.getSound() : null;
+        String lookupId = momentId.toLowerCase(Locale.ROOT);
+        String[] sounds = base != null ? base.getSounds() : null;
         Presentation.ModelParticle[] particles = base != null ? base.getParticles() : null;
-        String animation = base != null ? base.getAnimation() : null;
-        String animationItem = base != null ? base.getAnimationItem() : null;
-        String animationSlot = base != null ? base.getAnimationSlot() : null;
-        String cameraEffect = base != null ? base.getCameraEffect() : null;
         Presentation.Shake shake = base != null ? base.getShake() : null;
+        Presentation.Interaction interaction = base != null ? base.getInteraction() : null;
+        com.ziggfreed.rpgstations.asset.EffectRef effect = base != null ? base.getEffect() : null;
         boolean overlaidAny = false;
 
-        for (String flairId : new TreeSet<>(unlockedIds)) {
-            if (flairId == null) {
-                continue;
-            }
+        for (String flairId : new TreeSet<>(lowercased(unlockedIds))) {
             Map<String, Presentation> moments = flairs.get(flairId);
             if (moments == null) {
                 continue; // unlocked id with no matching effective flair - ignored, never an error
             }
-            Presentation momentPresentation = moments.get(momentId);
+            Presentation momentPresentation = moments.get(lookupId);
             if (momentPresentation == null) {
                 continue;
             }
             overlaidAny = true;
-            if (momentPresentation.getSound() != null) {
-                sound = momentPresentation.getSound();
+            if (momentPresentation.getSounds() != null) {
+                sounds = momentPresentation.getSounds();
             }
             if (momentPresentation.getParticles() != null) {
                 particles = momentPresentation.getParticles();
             }
-            if (momentPresentation.getAnimation() != null) {
-                animation = momentPresentation.getAnimation();
-            }
-            if (momentPresentation.getAnimationItem() != null) {
-                animationItem = momentPresentation.getAnimationItem();
-            }
-            if (momentPresentation.getAnimationSlot() != null) {
-                animationSlot = momentPresentation.getAnimationSlot();
-            }
-            if (momentPresentation.getCameraEffect() != null) {
-                cameraEffect = momentPresentation.getCameraEffect();
-            }
             if (momentPresentation.getShake() != null) {
                 shake = momentPresentation.getShake();
+            }
+            if (momentPresentation.getInteraction() != null) {
+                interaction = momentPresentation.getInteraction();
+            }
+            if (momentPresentation.getEffect() != null) {
+                effect = momentPresentation.getEffect();
             }
         }
 
         if (!overlaidAny) {
             return base;
         }
-        return Presentation.of(sound, particles, animation, animationItem, animationSlot, cameraEffect, shake);
+        return Presentation.of(sounds, particles, shake, interaction, effect);
+    }
+
+    /**
+     * {@code ids} lowercased, dropping nulls/blanks - applied to whatever a registered
+     * {@code FlairUnlockProvider} hands back, so a provider's own spelling never has to match the
+     * canonicalized flair ids {@link FlairCatalog} folds.
+     */
+    @Nonnull
+    private static Set<String> lowercased(@Nonnull Set<String> ids) {
+        Set<String> out = new TreeSet<>();
+        for (String id : ids) {
+            if (id != null && !id.isBlank()) {
+                out.add(id.toLowerCase(Locale.ROOT));
+            }
+        }
+        return out;
     }
 }

@@ -38,12 +38,14 @@ public class LootableAssetCodecTest {
     @Test
     void decodesRolls() throws Exception {
         LootableAsset a = decodeAsset("{ \"Rolls\": [ { \"Trigger\": \"Cycle\","
-                + " \"Chance\": { \"BasePercent\": 2, \"AddFactors\": [ { \"Factor\": \"hytale:tool_power\" } ] },"
-                + " \"Grants\": { \"BonusOutputCopies\": 1 } } ] }");
+                + " \"Chance\": { \"BasePercent\": 2, \"Factors\": [ { \"Factor\": \"hytale:tool_power\" } ] },"
+                + " \"Grants\": { \"DropLists\": [\"Fixture_Common\", \"Fixture_Rare\"] } } ] }");
         assertNotNull(a.getRolls());
         assertEquals(1, a.getRolls().length);
         assertEquals("Cycle", a.getRolls()[0].getTrigger());
-        assertEquals(1, a.getRolls()[0].getGrants().getBonusOutputCopies());
+        assertEquals(2, a.getRolls()[0].getGrants().getDropLists().length,
+                "DropLists is plural, so one floor can roll a common table and a rare one independently");
+        assertEquals("Fixture_Rare", a.getRolls()[0].getGrants().getDropLists()[1]);
     }
 
     @Test
@@ -54,17 +56,17 @@ public class LootableAssetCodecTest {
 
     @Test
     void parentInheritance_wholesaleOnOmit_ownWins() throws Exception {
-        String parentJson = "{ \"Rolls\": [ { \"Grants\": { \"DropList\": \"RPG_Station_Sawmill_T1\" } } ] }";
+        String parentJson = "{ \"Rolls\": [ { \"Grants\": { \"DropLists\": [\"RPG_Station_Sawmill_T1\"] } } ] }";
         LootableAsset parent = decodeWithParent(parentJson, null, "finds_parent", null);
         assertEquals(1, parent.getRolls().length);
 
         LootableAsset child = decodeWithParent("{}", parent, "finds_child", "finds_parent");
         assertNotNull(child.getRolls(), "Rolls inherits wholesale on omit");
-        assertEquals("RPG_Station_Sawmill_T1", child.getRolls()[0].getGrants().getDropList());
+        assertEquals("RPG_Station_Sawmill_T1", child.getRolls()[0].getGrants().getDropLists()[0]);
 
         LootableAsset ownChild = decodeWithParent(
-                "{ \"Rolls\": [ { \"Grants\": { \"DropList\": \"RPG_Station_Sawmill_T2\" } } ] }",
+                "{ \"Rolls\": [ { \"Grants\": { \"DropLists\": [\"RPG_Station_Sawmill_T2\"] } } ] }",
                 parent, "finds_own", "finds_parent");
-        assertEquals("RPG_Station_Sawmill_T2", ownChild.getRolls()[0].getGrants().getDropList());
+        assertEquals("RPG_Station_Sawmill_T2", ownChild.getRolls()[0].getGrants().getDropLists()[0]);
     }
 }

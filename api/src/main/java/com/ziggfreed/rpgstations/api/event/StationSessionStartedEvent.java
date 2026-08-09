@@ -72,7 +72,10 @@ public final class StationSessionStartedEvent implements IEvent<Void> {
         return stationId;
     }
 
-    /** The resolved action id ({@code "work"} for a station with no {@code Actions} map). */
+    /**
+     * The id of the station action this session runs - the {@code Actions} entry selected at
+     * engage. Every station declares its actions explicitly, so this is always one of them.
+     */
     @Nonnull
     public String actionId() {
         return actionId;

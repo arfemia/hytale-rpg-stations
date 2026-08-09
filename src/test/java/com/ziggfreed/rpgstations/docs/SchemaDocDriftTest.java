@@ -11,9 +11,8 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
 /**
- * Fails the build when the committed docs-site schema reference
- * ({@code docs-site/rpg-stations-docs/src/data/reference/schema.json}) lags the actual asset
- * codecs - the {@code EnglishLangDriftTest} pattern (design doc section 6.2), applied to {@link
+ * Fails the build when the committed repo-root schema reference ({@code SCHEMA.md}) lags the
+ * actual asset codecs - the {@code EnglishLangDriftTest} pattern, applied to {@link
  * SchemaDocWriter} instead of {@code EnglishLangWriter}.
  *
  * <p>{@link SchemaDocWriter#render()} is the single source of truth for both the committed file
@@ -23,11 +22,10 @@ import org.junit.jupiter.api.Test;
  */
 class SchemaDocDriftTest {
 
-    private static final Path SCHEMA_FILE =
-            Path.of("docs-site", "rpg-stations-docs", "src", "data", "reference", "schema.json");
+    private static final Path SCHEMA_FILE = Path.of("SCHEMA.md");
 
     @Test
-    void committedSchemaJsonMatchesTheLiveCodecs() throws IOException {
+    void committedSchemaMdMatchesTheLiveCodecs() throws IOException {
         String expected = SchemaDocWriter.render();
 
         if (!Files.exists(SCHEMA_FILE)) {

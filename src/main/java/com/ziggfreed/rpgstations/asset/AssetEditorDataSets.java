@@ -39,8 +39,8 @@ import com.ziggfreed.rpgstations.util.Log;
  *       declared a channel), never an error.</li>
  *   <li><b>FIXED</b> - the closed value sets of the union discriminators, each sourced from the
  *       SAME constant the decoder compares against, so a renamed arm can never leave a stale
- *       dropdown behind. The two literal sets that have no constants
- *       ({@code camera-mode}, {@code action-function}) name their consumer in a comment.</li>
+ *       dropdown behind. The one literal set that has no constants ({@code action-function}) names
+ *       its consumer in a comment.</li>
  * </ul>
  *
  * <p><b>The dropdown is authoring convenience, never validation.</b> A hand-written JSON never
@@ -63,7 +63,6 @@ public final class AssetEditorDataSets {
     public static final String FACTORS = "rpgstations:factors";
     public static final String CHANNELS = "rpgstations:channels";
     public static final String MOUNT_SURFACE = "rpgstations:mount-surface";
-    public static final String CAMERA_MODE = "rpgstations:camera-mode";
     public static final String CAMERA_PRESETS = "rpgstations:camera-presets";
     public static final String HIDE_ROUTE = "rpgstations:hide-route";
     public static final String LOOK_SOURCE = "rpgstations:look-source";
@@ -84,9 +83,9 @@ public final class AssetEditorDataSets {
      * upstream surfaces as a warn instead of a silently-offered dead option.
      */
     private static final String[] HUD_POSITION_PRESETS = {
-            "TOP_LEFT", "TOP_CENTER", "TOP_RIGHT",
-            "CENTER_LEFT", "CENTER", "CENTER_RIGHT",
-            "BOTTOM_LEFT", "BOTTOM_CENTER", "BOTTOM_RIGHT"
+            "TopLeft", "TopCenter", "TopRight",
+            "CenterLeft", "Center", "CenterRight",
+            "BottomLeft", "BottomCenter", "BottomRight"
     };
 
     private AssetEditorDataSets() {
@@ -108,8 +107,6 @@ public final class AssetEditorDataSets {
         // StationAsset.Hold.Mount.Surface, compared case-insensitively by StationValidator and
         // the two mount controllers it discriminates between.
         fixed(registry, MOUNT_SURFACE, "Block", "Entity");
-        // StationAsset.Camera.Mode, compared as a literal in StationService's camera route.
-        fixed(registry, CAMERA_MODE, "ThirdPerson", "None");
         fixed(registry, CAMERA_PRESETS, cameraPresetIds());
         fixed(registry, HIDE_ROUTE, Puppet.HIDE_ROUTE_SCALE, Puppet.HIDE_ROUTE_EFFECT, Puppet.HIDE_ROUTE_NONE);
         fixed(registry, LOOK_SOURCE, Puppet.LOOK_SOURCE_PLAYER_CLONE, Puppet.LOOK_SOURCE_MODEL,

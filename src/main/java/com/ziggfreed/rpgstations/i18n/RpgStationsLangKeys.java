@@ -26,6 +26,11 @@ import javax.annotation.Nonnull;
  * {@code StationCustodyDisplay#addRetrieveInteraction}).
  * The round-5 grant-notification round (2026-07-22) adds {@code ui.station.gain.produced} (the
  * live item-gain toast, {@code StationService#notifyItemGain}).
+ * The pre-release schema sweep adds {@code ui.station.summary.produced_breakdown} - the smaller
+ * SECOND line under a PRODUCED ledger row, decomposing that row's total into its per-cycle base and
+ * yield-bonus terms plus the cycle count ({@code StationService#yieldBreakdownLine}). It renders only
+ * when the yield actually moved the number, so its presence is itself the signal that the tool is
+ * earning something; the wording stays tool-shaped, never progression-shaped.
  * Round-7 (D-6) adds {@code ui.station.summary.enhance_durability} (the engine-owned durability
  * row of the enhancement session summary, {@code StationService#enhanceLedgerRows}); round-7 (D-4)
  * also drops the quantity from {@code ui.station.gain.produced}'s value (now bare {@code {0}}) so
@@ -64,6 +69,10 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.start",
             "rpgstations.ui.station.locked",
             "rpgstations.ui.station.occupied",
+            // The two owner-ceiling denials (Settings.Limits): too many sessions in this world, and
+            // too many stations in it already holding placed input.
+            "rpgstations.ui.station.server_busy",
+            "rpgstations.ui.station.storage_full",
             "rpgstations.ui.station.no_materials",
             "rpgstations.ui.station.custody.placed",
             "rpgstations.ui.station.custody.topped_up",
@@ -102,6 +111,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.summary.cycles",
             "rpgstations.ui.station.summary.item_consumed",
             "rpgstations.ui.station.summary.item_produced",
+            "rpgstations.ui.station.summary.produced_breakdown",
             "rpgstations.ui.station.summary.lucky",
             "rpgstations.ui.station.summary.items_more",
             "rpgstations.ui.station.summary.enhance_durability",

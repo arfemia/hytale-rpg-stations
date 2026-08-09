@@ -30,27 +30,36 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  * collection-bearing group that is NOT cosmetic routes through this ONE mechanism (cosmetics stay
  * {@link FlairAsset}).
  *
- * <p><b>{@link #target}</b> names EXACTLY ONE target ({@code {Station|Action|Lootable|RollPool}} -
- * orthogonal exactly-one-of leaves, gate Q21, never a {@code Type} enum). Target-specific payload
- * groups (all nullable; authoring a group the target type cannot carry is validator
+ * <p><b>{@link #target}</b> names ONE target ({@code {Station|Action|Lootable|RollPool}} -
+ * orthogonal leaves, never a {@code Type} enum), with the single legal pairing
+ * {@code {Station, Action}}: the SCOPED action target, which carries the Action payload set but
+ * applies only where that station resolves that action id (a bare {@code Action} target keeps
+ * matching the id on every station that has it). Target-specific payload groups (all nullable;
+ * authoring a group the target type cannot carry is validator
  * {@code EXTENSION_PAYLOAD_MISMATCH} - see {@link #payloadAllowedFor}):
  * <table><tr><th>Target</th><th>Payload keys</th></tr>
- * <tr><td>Station</td><td>PerCycleContributions, Loot, Actions, Conversions, Steps, Anchors, Puppet, Custody</td></tr>
- * <tr><td>Action</td><td>Steps, Anchors, Loot, Conversions, PerCycleContributions, Puppet, Custody</td></tr>
+ * <tr><td>Station</td><td>Actions</td></tr>
+ * <tr><td>Action (bare or {@code {Station, Action}}-scoped)</td><td>Steps, Anchors, Bonus, Conversions, PerCycleContributions, ContributionScale, Puppet, Custody</td></tr>
  * <tr><td>Lootable</td><td>Rolls</td></tr>
  * <tr><td>RollPool</td><td>Entries</td></tr></table>
  *
- * <p><b>Merge + conflict semantics (deterministic, applied engine-side in
- * {@code ExtensionCatalog.applyTo} - leg A3):</b>
+ * <p><b>Why a Station target carries only {@code Actions}.</b> A station holds no group an extension
+ * could add to any more: everything a job is made of lives inside a self-contained action. So adding
+ * a WHOLE new action is the station-scoped statement, and every finer-grained addition names the
+ * ACTION it belongs to.
+ *
+ * <p><b>Merge + conflict semantics (deterministic, applied engine-side by
+ * {@code ExtensionCatalog}'s read-side {@code applyTo*} entry points):</b>
  * <ol>
  *   <li>ADDITIVE ONLY for every COLLECTION payload - never mutate/replace/remove an existing entry
  *   (replacing a whole file stays load-order's job). The two PRESENTATION-overlay payloads
  *   ({@link #puppet}/{@link #custody}, rule 5) are the deliberate exception: they carry no
  *   collection at all, so "additive" there means per-leaf, never a whole-group clobber.
- *   <li>Keyed collections ({@code Actions}, {@code Anchors}): the BASE always wins a key collision
- *   ({@code EXTENSION_KEY_COLLISION}, entry skipped); among extensions the {@link #APPLY_ORDER}
- *   tuple ({@code Priority} asc so higher applies LATER, then extension id lex) decides, with the
- *   later (higher-priority) extension winning a new key.
+ *   <li>Id-keyed collections ({@code Actions} by its entries' own {@code Id}, {@code Anchors} by
+ *   map key): the BASE always wins a collision ({@code EXTENSION_KEY_COLLISION}, entry skipped);
+ *   among extensions the {@link #APPLY_ORDER} tuple ({@code Priority} asc so higher applies
+ *   LATER, then extension id lex) decides, with the later (higher-priority) extension winning a
+ *   new key.
  *   <li>Unkeyed arrays ({@code PerCycleContributions}, {@code Conversions}, {@code Rolls},
  *   {@code Entries}): pure
  *   append, ordered by {@link #APPLY_ORDER} ({@code Priority}, extension id, in-file order).
@@ -59,7 +68,7 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  *   anchor step id degrades to {@code AtEnd} + {@code EXTENSION_ANCHOR_MISSING}; inserted steps
  *   need {@code Id}s so LATER extensions can anchor on them. Co-anchored insertions from different
  *   extensions apply in {@link #APPLY_ORDER} (m2).
- *   <li>NESTED PER-LEAF OVERLAY ({@code Puppet}, {@code Custody}): recursively, at EVERY nesting
+ *   <li>NESTED PER-LEAF OVERLAY ({@code Puppet}, {@code Custody}, {@code ContributionScale}): recursively, at EVERY nesting
  *   depth, an AUTHORED extension leaf wins and a NULL extension leaf leaves the base's value
  *   intact - the {@code appendInherited}/nullable-nested-leaves convention applied across assets
  *   instead of across a {@code Parent} chain. So a {@code Custody} overlay carrying only
@@ -68,9 +77,10 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  *   extensions the later (higher-priority) one overlays on top, so IT wins a same-leaf contest.
  * </ol>
  *
- * <p><b>Composition order (m7, stated for the docsite):</b> extensions apply to the
- * Parent-resolved target at read time; extension ADDITIONS do NOT flow down Parent chains. A
- * {@code Target:{Action}} extension flows to every {@code Ref} user of that action; a
+ * <p><b>Composition order (m7, stated for docs/extending-other-packs.md):</b> extensions apply to the
+ * Parent-resolved target at read time; extension ADDITIONS do NOT flow down Parent chains. A bare
+ * {@code Target:{Action}} extension flows to every {@code Ref} user of that action, while the
+ * scoped {@code Target:{Station, Action}} form stops at the one station named; a
  * {@code Target:{Station}} step-insert applies post-Ref to THAT station only.
  *
  * <p><b>Deliberately NON-extensible</b> (docs state each): {@code Requires}, {@code Settings},
@@ -89,7 +99,8 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
 
     /** Payload-group keys, used by {@link #payloadAllowedFor} and the validator. */
     public static final String PAYLOAD_PER_CYCLE_CONTRIBUTIONS = "PerCycleContributions";
-    public static final String PAYLOAD_LOOT = "Loot";
+    public static final String PAYLOAD_BONUS = "Bonus";
+    public static final String PAYLOAD_CONTRIBUTION_SCALE = "ContributionScale";
     public static final String PAYLOAD_ACTIONS = "Actions";
     public static final String PAYLOAD_CONVERSIONS = "Conversions";
     public static final String PAYLOAD_STEPS = "Steps";
@@ -115,8 +126,9 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     @Nullable private Target target;
     @Nullable private Integer priority;
     @Nullable private Contribution[] perCycleContributions;
-    @Nullable private LootRef loot;
-    @Nullable private Map<String, ActionDef> actions;
+    @Nullable private LootRef bonus;
+    @Nullable private ContributionScale contributionScale;
+    @Nullable private ActionDef[] actions;
     @Nullable private StationAsset.Conversion[] conversions;
     @Nullable private StepInsertion[] steps;
     @Nullable private Map<String, ActionDef.Anchor> anchors;
@@ -147,28 +159,32 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
                             new ArrayCodec<>(Contribution.CODEC, Contribution[]::new), false),
                     (a, v) -> a.perCycleContributions = v, a -> a.perCycleContributions,
                     (a, p) -> a.perCycleContributions = p.perCycleContributions)
-            .documentation("Appended Work.PerCycleContributions entries (Station/Action target).").add()
-            .appendInherited(new KeyedCodec<>("Loot", LootRef.CODEC, false),
-                    (a, v) -> a.loot = v, a -> a.loot, (a, p) -> a.loot = p.loot)
-            .documentation("Appended loot references and inline Rolls (Station/Action target).").add()
-            .appendInherited(new KeyedCodec<>("Actions", new MapCodec<>(ActionDef.CODEC, LinkedHashMap::new), false),
+            .documentation("Appended Work.PerCycleContributions entries (Action target).").add()
+            .appendInherited(new KeyedCodec<>("Bonus", LootRef.CODEC, false),
+                    (a, v) -> a.bonus = v, a -> a.bonus, (a, p) -> a.bonus = p.bonus)
+            .documentation("Appended Bonus references and inline Rolls (Action target).").add()
+            .appendInherited(new KeyedCodec<>("ContributionScale", ContributionScale.CODEC, false),
+                    (a, v) -> a.contributionScale = v, a -> a.contributionScale,
+                    (a, p) -> a.contributionScale = p.contributionScale)
+            .documentation("ContributionScale overlay (Action target), merged PER LEAF: an overlay authoring only Floors keeps the base action's own Factors.").add()
+            .appendInherited(new KeyedCodec<>("Actions", new ArrayCodec<>(ActionDef.CODEC, ActionDef[]::new), false),
                     (a, v) -> a.actions = v, a -> a.actions, (a, p) -> a.actions = p.actions)
-            .documentation("NEW actions only (Station target); base wins a key collision.").add()
+            .documentation("NEW actions appended to a station's ordered Actions list (Station target); the base wins an Id collision, and an appended action is selected only after every base action.").add()
             .appendInherited(new KeyedCodec<>("Conversions", new ArrayCodec<>(StationAsset.Conversion.CODEC, StationAsset.Conversion[]::new), false),
                     (a, v) -> a.conversions = v, a -> a.conversions, (a, p) -> a.conversions = p.conversions)
-            .documentation("Appended Recipe.Conversions (Station/Action target).").add()
+            .documentation("Appended Recipe.Conversions (Action target).").add()
             .appendInherited(new KeyedCodec<>("Steps", new ArrayCodec<>(StepInsertion.CODEC, StepInsertion[]::new), false),
                     (a, v) -> a.steps = v, a -> a.steps, (a, p) -> a.steps = p.steps)
-            .documentation("Ordered step insertions into a named action (Station/Action target).").add()
+            .documentation("Ordered step insertions into an action's OWN authored step program (Action target); an action that authors no Steps runs the recipe-driven convert loop and has no program to insert into.").add()
             .appendInherited(new KeyedCodec<>("Anchors", new MapCodec<>(ActionDef.Anchor.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.anchors = v, a -> a.anchors, (a, p) -> a.anchors = p.anchors)
-            .documentation("NEW anchor declarations only (Station/Action target); base wins a key collision.").add()
+            .documentation("NEW anchor declarations only (Action target); base wins a key collision.").add()
             .appendInherited(new KeyedCodec<>("Puppet", Puppet.CODEC, false),
                     (a, v) -> a.puppet = v, a -> a.puppet, (a, p) -> a.puppet = p.puppet)
-            .documentation("Puppet presentation overlay (Station/Action target), merged PER LEAF at every depth: an authored leaf wins, an omitted leaf keeps the base station's own value.").add()
+            .documentation("Puppet presentation overlay (Action target), merged PER LEAF at every depth: an authored leaf wins, an omitted leaf keeps the base action's own value.").add()
             .appendInherited(new KeyedCodec<>("Custody", Custody.CODEC, false),
                     (a, v) -> a.custody = v, a -> a.custody, (a, p) -> a.custody = p.custody)
-            .documentation("Custody overlay (Station/Action target), merged PER LEAF at every depth: an overlay carrying only Display never clears the base's States, MaxQuantity or Input.").add()
+            .documentation("Custody overlay (Action target), merged PER LEAF at every depth: an overlay carrying only Display never clears the base's States, MaxQuantity or Input.").add()
             .appendInherited(new KeyedCodec<>("Rolls", new ArrayCodec<>(Roll.CODEC, Roll[]::new), false),
                     (a, v) -> a.rolls = v, a -> a.rolls, (a, p) -> a.rolls = p.rolls)
             .documentation("Appended Rolls (Lootable target).").add()
@@ -209,46 +225,56 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         return priority != null ? priority : 0;
     }
 
-    /** Appended {@code Work.PerCycleContributions} entries (Station/Action target); null = none. */
+    /** Appended {@code Work.PerCycleContributions} entries (Action target); null = none. */
     @Nullable
     public Contribution[] getPerCycleContributions() {
         return perCycleContributions;
     }
 
-    /** Appended loot references (Station/Action target); null = none. */
+    /** Appended {@code Bonus} references (Action target); null = none. */
     @Nullable
-    public LootRef getLoot() {
-        return loot;
+    public LootRef getBonus() {
+        return bonus;
     }
 
-    /** NEW actions only (Station target); null = none. */
+    /**
+     * The {@code ContributionScale} overlay (Action target); null = none. Merged PER LEAF like
+     * {@link #getPuppet()}, so an overlay authoring only {@code Floors} keeps the base's
+     * {@code Factors}.
+     */
     @Nullable
-    public Map<String, ActionDef> getActions() {
+    public ContributionScale getContributionScale() {
+        return contributionScale;
+    }
+
+    /** NEW actions appended to a station's ordered list (Station target); null = none. */
+    @Nullable
+    public ActionDef[] getActions() {
         return actions;
     }
 
-    /** Appended conversions (Station/Action target); null = none. */
+    /** Appended conversions (Action target); null = none. */
     @Nullable
     public StationAsset.Conversion[] getConversions() {
         return conversions;
     }
 
-    /** Ordered step insertions (Station/Action target); null = none. */
+    /** Ordered step insertions (Action target); null = none. */
     @Nullable
     public StepInsertion[] getSteps() {
         return steps;
     }
 
-    /** NEW anchor declarations only (Station/Action target); null = none. */
+    /** NEW anchor declarations only (Action target); null = none. */
     @Nullable
     public Map<String, ActionDef.Anchor> getAnchors() {
         return anchors;
     }
 
     /**
-     * The {@code Puppet} presentation overlay (Station/Action target); null = none. Merged PER LEAF
-     * onto the base station's own group (rule 5), never as a whole-group replace - so a re-skinning
-     * pack authors only the leaves it re-tunes.
+     * The {@code Puppet} presentation overlay (Action target); null = none. Merged PER LEAF onto the
+     * base action's own group (rule 5), never as a whole-group replace - so a re-skinning pack
+     * authors only the leaves it re-tunes.
      */
     @Nullable
     public Puppet getPuppet() {
@@ -256,8 +282,8 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     }
 
     /**
-     * The {@code Custody} overlay (Station/Action target); null = none. Merged PER LEAF onto the base
-     * station's own group (rule 5): an overlay carrying only {@code Display} leaves the base's
+     * The {@code Custody} overlay (Action target); null = none. Merged PER LEAF onto the base
+     * action's own group (rule 5): an overlay carrying only {@code Display} leaves the base's
      * {@code States}/{@code MaxQuantity}/{@code Input} exactly as they were.
      */
     @Nullable
@@ -301,14 +327,12 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         }
         switch (targetType) {
             case Target.STATION:
-                return PAYLOAD_PER_CYCLE_CONTRIBUTIONS.equals(payloadKey) || PAYLOAD_LOOT.equals(payloadKey)
-                        || PAYLOAD_ACTIONS.equals(payloadKey) || PAYLOAD_CONVERSIONS.equals(payloadKey)
-                        || PAYLOAD_STEPS.equals(payloadKey) || PAYLOAD_ANCHORS.equals(payloadKey)
-                        || PAYLOAD_PUPPET.equals(payloadKey) || PAYLOAD_CUSTODY.equals(payloadKey);
+                return PAYLOAD_ACTIONS.equals(payloadKey);
             case Target.ACTION:
                 return PAYLOAD_STEPS.equals(payloadKey) || PAYLOAD_ANCHORS.equals(payloadKey)
-                        || PAYLOAD_LOOT.equals(payloadKey) || PAYLOAD_CONVERSIONS.equals(payloadKey)
+                        || PAYLOAD_BONUS.equals(payloadKey) || PAYLOAD_CONVERSIONS.equals(payloadKey)
                         || PAYLOAD_PER_CYCLE_CONTRIBUTIONS.equals(payloadKey)
+                        || PAYLOAD_CONTRIBUTION_SCALE.equals(payloadKey)
                         || PAYLOAD_PUPPET.equals(payloadKey) || PAYLOAD_CUSTODY.equals(payloadKey);
             case Target.LOOTABLE:
                 return PAYLOAD_ROLLS.equals(payloadKey);
@@ -320,9 +344,22 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     }
 
     /**
-     * The exactly-one-of target (gate Q21): {@code {Station|Action|Lootable|RollPool}} - four
-     * orthogonal string leaves, EXACTLY one authored (never a {@code Type} enum + Id pair). See
-     * {@link #hasExactlyOneTarget()}/{@link #resolvedType()}/{@link #resolvedId()}.
+     * What an extension adds to: {@code {Station|Action|Lootable|RollPool}} - four orthogonal
+     * string leaves, never a {@code Type} enum + Id pair. Exactly one is authored, with ONE legal
+     * pairing: {@code Station} may accompany {@code Action} to SCOPE that action extension to a
+     * single station. See {@link #hasLegalTarget()}/{@link #resolvedType()}/{@link #resolvedId()}/
+     * {@link #scopedStation()}.
+     *
+     * <p><b>Why exactly that pairing is legal and no other.</b> An action id is not globally
+     * unique: a bare {@code {Action: "Mill"}} matches the id wherever it resolves - the
+     * {@code Ref}'d {@link ActionAsset} id on every station that shares it, and any station's own
+     * inline entry answering to that id. That reach is the point when a fourth party extends a
+     * SHARED ritual, and a collision when two packs happen to name an action alike or when only ONE
+     * station's copy of a shared action should be tuned. {@code {Station: "Sawmill", Action:
+     * "Mill"}} is the narrowing answer: identical payload rules, applied only where that station
+     * resolves that action id. The other pairings have no such reading - a lootable table and a
+     * roll pool are already globally unique ids, and {@code Station} alone means "the station
+     * itself", so pairing either with anything else would be two targets, not one narrowed one.
      */
     public static final class Target {
         public static final String STATION = "Station";
@@ -338,24 +375,25 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         public static final BuilderCodec<Target> CODEC = BuilderCodec.builder(Target.class, Target::new)
                 .appendInherited(new KeyedCodec<>("Station", Codec.STRING, false),
                         (o, v) -> o.station = v, o -> o.station, (o, p) -> o.station = p.station)
-                .documentation("A station id to extend (exactly one of Station | Action | Lootable | RollPool).")
+                .documentation("A station id to extend. Alone it targets the station itself (Actions is its only payload); authored BESIDE Action it instead scopes that action extension to this one station, applying only where this station resolves that action id. Never combined with Lootable or RollPool.")
                 .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:stations"))).add()
                 .appendInherited(new KeyedCodec<>("Action", Codec.STRING, false),
                         (o, v) -> o.action = v, o -> o.action, (o, p) -> o.action = p.action)
-                .documentation("An ActionAsset id to extend (exactly one of Station | Action | Lootable | RollPool).")
+                .documentation("An action id to extend: the ActionAsset id a station's entry Refs, or a station's own inline action Id. Alone it applies wherever that id resolves, on every station sharing it - add a Station key beside it to narrow the same payload to that one station. Never combined with Lootable or RollPool.")
                 .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:actions"))).add()
                 .appendInherited(new KeyedCodec<>("Lootable", Codec.STRING, false),
                         (o, v) -> o.lootable = v, o -> o.lootable, (o, p) -> o.lootable = p.lootable)
-                .documentation("A LootableAsset id to extend (exactly one of Station | Action | Lootable | RollPool).")
+                .documentation("A LootableAsset id to extend (authored alone - a lootable id is already globally unique, so it takes no qualifier).")
                 .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:lootables"))).add()
                 .appendInherited(new KeyedCodec<>("RollPool", Codec.STRING, false),
                         (o, v) -> o.rollPool = v, o -> o.rollPool, (o, p) -> o.rollPool = p.rollPool)
-                .documentation("A RollPool id to extend (exactly one of Station | Action | Lootable | RollPool).")
+                .documentation("A RollPool id to extend (authored alone - a roll pool id is already globally unique, so it takes no qualifier).")
                 .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:rollpools"))).add()
                 .afterDecode((Target target, ExtraInfo extraInfo) -> {
-                    if (!target.hasExactlyOneTarget()) {
+                    if (!target.hasLegalTarget()) {
                         extraInfo.getValidationResults().warn(
-                                "ExtensionAsset.Target should author exactly one of Station | Action | Lootable | RollPool, not zero or several.");
+                                "ExtensionAsset.Target should author ONE of Station | Action | Lootable | RollPool, or the"
+                                        + " Station plus Action pair that scopes an action extension to a single station.");
                     }
                 })
                 .build();
@@ -371,6 +409,18 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         public static Target action(@Nullable String id) {
             Target t = new Target();
             t.action = id;
+            return t;
+        }
+
+        /**
+         * The SCOPED action target: the same Action payload rules as {@link #action(String)},
+         * narrowed to the station whose effective action id matches {@code actionId}.
+         */
+        @Nonnull
+        public static Target actionOnStation(@Nullable String stationId, @Nullable String actionId) {
+            Target t = new Target();
+            t.station = stationId;
+            t.action = actionId;
             return t;
         }
 
@@ -412,35 +462,37 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
             return s != null && !s.isBlank();
         }
 
-        /** True when EXACTLY one target leaf is authored (the exactly-one-of contract). */
-        public boolean hasExactlyOneTarget() {
-            int n = 0;
-            if (set(station)) {
-                n++;
+        /**
+         * True when the authored leaves name ONE target: exactly one leaf, or the {@code Station}
+         * plus {@code Action} pair (the scoped action target). Zero leaves, three leaves, and every
+         * other pairing are illegal - see this class's own javadoc for why that one pair is the
+         * only narrowing that has a reading.
+         */
+        public boolean hasLegalTarget() {
+            int tables = (set(lootable) ? 1 : 0) + (set(rollPool) ? 1 : 0);
+            if (tables > 0) {
+                // A lootable/roll-pool id is globally unique, so it never takes a qualifier and
+                // never pairs with the other table kind.
+                return tables == 1 && !set(station) && !set(action);
             }
-            if (set(action)) {
-                n++;
-            }
-            if (set(lootable)) {
-                n++;
-            }
-            if (set(rollPool)) {
-                n++;
-            }
-            return n == 1;
+            return set(action) || set(station);
         }
 
-        /** The resolved target TYPE constant ({@link #STATION}/...), or null when not exactly one is authored. */
+        /**
+         * The resolved target TYPE constant ({@link #STATION}/...), or null for an illegal target.
+         * The scoped {@code {Station, Action}} form resolves as {@link #ACTION}: it carries the
+         * Action payload set, with the station as a match qualifier rather than a second target.
+         */
         @Nullable
         public String resolvedType() {
-            if (!hasExactlyOneTarget()) {
+            if (!hasLegalTarget()) {
                 return null;
-            }
-            if (set(station)) {
-                return STATION;
             }
             if (set(action)) {
                 return ACTION;
+            }
+            if (set(station)) {
+                return STATION;
             }
             if (set(lootable)) {
                 return LOOTABLE;
@@ -448,41 +500,66 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
             return ROLLPOOL;
         }
 
-        /** The resolved target ID (the authored leaf's value), or null when not exactly one is authored. */
+        /** The resolved target ID (the authored leaf's value), or null for an illegal target. */
         @Nullable
         public String resolvedId() {
-            if (!hasExactlyOneTarget()) {
+            if (!hasLegalTarget()) {
                 return null;
-            }
-            if (set(station)) {
-                return station;
             }
             if (set(action)) {
                 return action;
+            }
+            if (set(station)) {
+                return station;
             }
             if (set(lootable)) {
                 return lootable;
             }
             return rollPool;
         }
+
+        /**
+         * The station this target is SCOPED to, or null when it applies unscoped. Non-null only for
+         * the {@code {Station, Action}} pair; a bare {@code Station} target is the station itself,
+         * not a qualifier, so it reads null here.
+         */
+        @Nullable
+        public String scopedStation() {
+            return hasLegalTarget() && set(action) && set(station) ? station : null;
+        }
+
+        /**
+         * Whether this target applies in the context of {@code stationId} (case-insensitive). An
+         * unscoped target matches every context, including a caller with none; a scoped one matches
+         * only its own station, so a caller that cannot name a station never picks one up.
+         */
+        public boolean matchesStationScope(@Nullable String stationId) {
+            String scope = scopedStation();
+            return scope == null || (stationId != null && scope.equalsIgnoreCase(stationId));
+        }
     }
 
     /**
-     * ONE ordered step insertion (design 1.8): {@link #action} names the target action's step
-     * program (for a {@code Target:{Station}}, WHICH of the station's actions to insert into; for a
-     * {@code Target:{Action}} it may be omitted - the action itself); {@link #anchor} is the
-     * exactly-one-of position; {@link #insert} are the inserted {@link StationStep}s (each REQUIRES
-     * an {@code Id} so later extensions can anchor on them).
+     * ONE ordered step insertion (design 1.8). Every insertion an extension carries applies to the
+     * action the extension TARGETS - the insertion itself names no action, so which programs it
+     * reaches is decided entirely by {@link Target}: a bare {@code {Action}} target reaches every
+     * station resolving that id, and the compound {@code {Station, Action}} target narrows the same
+     * payload to one station's copy. That pair is the ONE aiming mechanism; an extension whose
+     * insertions belong to two different actions is two extensions.
+     *
+     * <p>{@link #anchor} is the exactly-one-of position; {@link #insert} are the inserted
+     * {@link StationStep}s (each REQUIRES an {@code Id} so later extensions can anchor on them).
+     *
+     * <p>Insertions ADD beats to a program an action ALREADY authors. An action with no
+     * {@code Steps} of its own runs the recipe-driven convert loop, and no insertion can turn it
+     * into a step-programmed one - extend that shape with {@code Conversions} or {@code Bonus}
+     * instead.
      */
     public static final class StepInsertion {
-        @Nullable protected String action;
         @Nullable protected Anchor anchor;
         @Nullable protected StationStep[] insert;
 
         public static final BuilderCodec<StepInsertion> CODEC = BuilderCodec.builder(StepInsertion.class, StepInsertion::new)
-                .appendInherited(new KeyedCodec<>("Action", Codec.STRING, false),
-                        (o, v) -> o.action = v, o -> o.action, (o, p) -> o.action = p.action)
-                .documentation("Which action's step program to insert into (e.g. 'work'); omit for a Target:{Action} extension.").add()
                 .appendInherited(new KeyedCodec<>("Anchor", Anchor.CODEC, false),
                         (o, v) -> o.anchor = v, o -> o.anchor, (o, p) -> o.anchor = p.anchor)
                 .documentation("The insertion position: exactly one of After | Before | AtStart | AtEnd.").add()
@@ -492,17 +569,11 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
                 .build();
 
         @Nonnull
-        public static StepInsertion of(@Nullable String action, @Nullable Anchor anchor, @Nullable StationStep[] insert) {
+        public static StepInsertion of(@Nullable Anchor anchor, @Nullable StationStep[] insert) {
             StepInsertion s = new StepInsertion();
-            s.action = action;
             s.anchor = anchor;
             s.insert = insert;
             return s;
-        }
-
-        @Nullable
-        public String getAction() {
-            return action;
         }
 
         @Nullable

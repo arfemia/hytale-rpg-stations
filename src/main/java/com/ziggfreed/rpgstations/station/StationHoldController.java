@@ -52,7 +52,7 @@ final class StationHoldController {
     static final float HOLD_TTL_SECONDS = 2.5f;
 
     /**
-     * The seat-mode Action-slot swing fix's zero-authoring default clip id: the Hatchet
+     * The Action-slot swing route's zero-authoring default clip id: the Hatchet
      * family's own attack clip ({@code "Chop"}). NOT a cross-family default - a station whose
      * {@code Tool} gate requires a different family MUST author its own {@code ActionClip}.
      */
@@ -210,8 +210,7 @@ final class StationHoldController {
 
     /**
      * (Re)play the station's work emote clip on the {@code Emote} slot ({@code sendToSelf=true}).
-     * EFFECT-MODE ONLY (the seated-worker swing fix): a seat-mode session never calls this -
-     * see {@link #playActionSwing}.
+     * EFFECT-MODE ONLY: a seat-mode session never calls this - see {@link #playActionSwing}.
      */
     static void playEmote(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
         if (s.emoteId == null || s.emoteId.isBlank()) {
@@ -225,9 +224,9 @@ final class StationHoldController {
     }
 
     /**
-     * The seated-worker swing fix's per-swing SEAT-MODE route, replacing {@link #playEmote}'s
-     * {@code Emote}-slot re-fire with a one-shot on the {@code Action} slot via the currently
-     * HELD ITEM'S OWN {@code ItemPlayerAnimations} clip set.
+     * The per-swing SEAT-MODE route, replacing {@link #playEmote}'s {@code Emote}-slot re-fire
+     * with a one-shot on the {@code Action} slot via the currently HELD ITEM'S OWN
+     * {@code ItemPlayerAnimations} clip set (the mechanism every vanilla combat swing rides).
      */
     static void playActionSwing(@Nonnull StationSession s, @Nullable Player player,
                                 @Nonnull Store<EntityStore> store) {
@@ -235,19 +234,51 @@ final class StationHoldController {
             return;
         }
         try {
-            ItemStack held = InventoryAccess.activeHotbarItemOf(player);
-            Item item = held != null ? held.getItem() : null;
-            String itemAnimationsId = item != null ? item.getPlayerAnimationsId() : null;
-            if (itemAnimationsId == null || itemAnimationsId.isBlank()) {
-                Log.fine("STATION seat-mode action swing skipped: held item '"
-                        + (item != null ? item.getId() : "none") + "' has no PlayerAnimationsId");
+            String itemAnimationsId = heldItemAnimationsId(player);
+            if (itemAnimationsId == null) {
                 return;
             }
-            String clipId = s.actionClip != null && !s.actionClip.isBlank() ? s.actionClip : DEFAULT_ACTION_CLIP;
-            AnimationUtils.playAnimation(s.ref, AnimationSlot.Action, itemAnimationsId, clipId, true, store);
+            AnimationUtils.playAnimation(s.ref, AnimationSlot.Action, itemAnimationsId,
+                    effectiveActionClip(s.actionClip), true, store);
         } catch (Throwable t) {
             Log.warn("STATION seat-mode action animation failed: " + t.getMessage());
         }
+    }
+
+    /**
+     * The ONE resolution of "which {@code ItemPlayerAnimations} set does an {@code Action}-slot
+     * clip resolve against" - the player's currently active hotbar item's own
+     * {@code PlayerAnimationsId}. Shared by the seat-mode route above and the puppet's own
+     * Action-slot swing ({@code StationPuppetController}), which mirrors that same held item into
+     * the puppet's Hotbar, so both resolve against the identical animation profile. Returns
+     * {@code null} (with one fine log) when the held item carries no set, which is the
+     * nothing-to-play case at either call site.
+     */
+    @Nullable
+    static String heldItemAnimationsId(@Nullable Player player) {
+        if (player == null) {
+            return null;
+        }
+        ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+        Item item = held != null ? held.getItem() : null;
+        String itemAnimationsId = item != null ? item.getPlayerAnimationsId() : null;
+        if (itemAnimationsId == null || itemAnimationsId.isBlank()) {
+            Log.fine("STATION action swing skipped: held item '"
+                    + (item != null ? item.getId() : "none") + "' has no PlayerAnimationsId");
+            return null;
+        }
+        return itemAnimationsId;
+    }
+
+    /**
+     * PURE: the authored {@code Animation.ActionClip} when present, else
+     * {@link #DEFAULT_ACTION_CLIP}. Shared by both Action-slot swing routes so a station's
+     * authored clip means the same thing whether the worker is seated or a puppet.
+     */
+    @Nonnull
+    static String effectiveActionClip(@Nullable String authoredActionClip) {
+        return authoredActionClip != null && !authoredActionClip.isBlank()
+                ? authoredActionClip : DEFAULT_ACTION_CLIP;
     }
 
     /** Stop the work emote (only when the entity still exists). Harmless defense. */

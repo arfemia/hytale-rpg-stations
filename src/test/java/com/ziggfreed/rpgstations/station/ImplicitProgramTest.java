@@ -39,7 +39,7 @@ public class ImplicitProgramTest {
     void build_carriesTheCallersValueObjectsVerbatim() {
         StationStep.Consume consume = StationStep.Consume.ofOne("Wood_Oak_Trunk", null, 1, "Inventory");
         StationStep.Produce produce = StationStep.Produce.ofOne("Wood_Hardwood_Planks", 2, "Inventory");
-        Roll[] rolls = new Roll[]{Roll.of("Cycle", null, null, null, Roll.Grants.of(1, null, null))};
+        Roll[] rolls = new Roll[]{Roll.of("Cycle", null, null, null, Roll.Grants.ofDropList("Fixture_Drops"))};
         Presentation cyclePresentation = Presentation.ofSound("SFX_Wood_Break");
 
         List<StationStep> steps = ImplicitProgram.build(consume, produce, rolls, cyclePresentation);

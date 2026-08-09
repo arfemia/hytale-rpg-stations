@@ -54,13 +54,14 @@ final class StationEvents {
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull PlayerRef playerRef,
             @Nonnull UUID playerId, @Nonnull UUID sessionId, @Nonnull String stationId, @Nonnull String actionId,
             int cycleIndex, boolean idle, @Nonnull List<StationContribution> contributions,
-            @Nonnull List<StationContribution> oneShotContributions, double toolMultiplier) {
+            @Nonnull List<StationContribution> oneShotContributions, double contributionScale) {
         try {
             IEventDispatcher<StationCycleCompletedEvent, StationCycleCompletedEvent> d =
                     HytaleServer.get().getEventBus().dispatchFor(StationCycleCompletedEvent.class);
             if (d.hasListener()) {
                 d.dispatch(new StationCycleCompletedEvent(store, commandBuffer, playerRef, playerId, sessionId,
-                        stationId, actionId, cycleIndex, idle, contributions, oneShotContributions, toolMultiplier));
+                        stationId, actionId, cycleIndex, idle, contributions, oneShotContributions,
+                        contributionScale));
             }
         } catch (Throwable t) {
             log("StationCycleCompleted", t);

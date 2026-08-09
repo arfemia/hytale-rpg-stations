@@ -74,8 +74,8 @@ final class CodecWarnValidators {
             public void updateSchema(SchemaContext context, Schema target) {
                 // Warn-only: publishes no hard schema constraint. A leaf that genuinely wants a
                 // published min/max keeps the engine's own fail()-backed Validators.range()/min()
-                // instead (which DOES feed the docsite schema per P8's undersold-upside note) -
-                // this class exists for the invariants that must stay advisory.
+                // instead (which DOES feed the generated SCHEMA.md per P8's undersold-upside note)
+                // - this class exists for the invariants that must stay advisory.
             }
         };
     }

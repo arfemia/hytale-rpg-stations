@@ -37,12 +37,12 @@ shipped jar asset - forwarding a value without interpreting it is NOT a defense 
 argument is what the pre-1.0.0 `Work.Xp`/`XpAsk` shape was retired for). (2) Shipped javadoc and
 `.documentation()` may name the ENGINE's own namespaces (`EntityStatType`, `DamageCause`,
 `ItemDropList`) and this mod's own ids; for a third-party example use the fictitious `yourmod:`
-namespace. (3) The docsite may keep ONE short "Known integrations" line naming a consumer with an
-outbound link; it may NOT host that mod's reference tables. Enforcement is
+namespace. (3) The docs (`docs/`) may keep ONE short "Known integrations" page naming a consumer
+with an outbound link; it may NOT host that mod's reference tables. Enforcement is
 `src/test/.../MmoAgnosticismTest`, which scans `src/main/java`, `api/src/main/java`, and
 `src/main/resources` and fails the build on a hit, with an empty allowlist. `src/test` is
 deliberately out of scope (fixture values are author-owned and ship nothing); prose surfaces
-(docsite, `CHANGELOG.md`, `CURSEFORGE.md`, these routers) are reviewed as documentation, which is
+(`docs/`, `CHANGELOG.md`, `CURSEFORGE.md`, these routers) are reviewed as documentation, which is
 why an in-repo router like this one may name a consumer by class where it is genuinely the
 reference for an idiom.
 
@@ -63,7 +63,13 @@ is the exact inverse of a permanently-opaque channel.
   `get()` before RpgStations finishes `setup()` (or when it is simply not installed) throws
   `IllegalStateException` - a caller MUST presence-check the plugin first; this method performs no
   detection of its own. Exposes `factors()`, `channels()`, `validationHooks()`, `flairUnlocks()`,
-  `summaryEnrichers()`, `enhanceStampers()`, and a read-only `stations()` catalog view.
+  `summaryEnrichers()`, `enhanceStampers()`, a read-only `stations()` catalog view, and
+  **`stationCount()`** - the cheap presence-check/count path (`stationCount() > 0`), a
+  default-bodied method (`stations().size()`) the shipped implementation overrides with the direct
+  catalog size so a caller who only wants a count never pays for materializing a full
+  `StationView` per station (each one eagerly resolves its actions and merges its contribution and
+  flair sets). Station content cannot appear after asset load, so the count is stable once
+  `setup()` has run.
 - **[`FactorRegistry`](FactorRegistry.java)** / **[`StationFactorProvider`](StationFactorProvider.java)**
   / **[`FactorContext`](FactorContext.java)** - the ONE extensible numeric-factor vocabulary every
   conditional-lootable `Roll` (Conditions/Chance/Ladder) and every station `Requires` gate
@@ -78,7 +84,13 @@ is the exact inverse of a permanently-opaque channel.
   `Condition` CLOSED (roll does not fire) and resolves a `Chance`/`Ladder` value to 0, each with a
   one-time warn.
   **The three TOOL factors are deliberately three, not one.** None of them subsumes another, and a
-  formula ranking a full tool family generally wants all three summed with different weights:
+  formula ranking a full tool family generally wants all three summed with different weights. They
+  are also the ONLY tool-power surface: the engine holds no baked tool CURVE of its own (the retired
+  `Tool.PowerScale` group and the `StationCycleCompletedEvent.toolMultiplier()` it fed are both
+  gone), so "a better tool earns more" is composed from these factors at the authoring site where its
+  effect is visible - an action's own `Bonus` `Roll` (a visible `Ladder`/`Chance` granting
+  `Grants.OutputItems`) for output, its `ContributionScale` ladder for a posted amount, or whatever
+  the channel owner decides for anything else a contribution means.
   `tool_power` is the FUNCTIONAL read (an `ItemToolSpec` power for a native `GatherType`, named by
   the `Param`, defaulting to the station's own) but it SATURATES across a family's upper tiers, so it cannot separate the top rungs; `tool_quality`
   is the native `ItemQuality.QualityValue`, the authored number that ORDERS quality tiers (so a pack
@@ -138,13 +150,24 @@ is the exact inverse of a permanently-opaque channel.
   blank/absent `Param`, so a consumer that needs to flag one (an author who wrote a `Channel` and
   an `Amount` but forgot the `Param` its channel requires) iterates the raw list. The engine cannot
   make that check itself - whether `Param` is required is the channel owner's contract.
-- **`StationCycleCompletedEvent`'s two lists** - `contributions()` carries the station's own
-  `Work.PerCycleContributions` and a listener multiplies each amount by `toolMultiplier()` (on an
-  idle cycle the amounts arrive ALREADY pre-scaled by `Work.Idle.Fraction`, with the multiplier
-  forced to 1.0); `oneShotContributions()` carries `Roll.Grants.Contributions` find grants, kept
-  SEPARATE because they are DELIBERATELY UNSCALED - post each at its stated amount, never applying
-  `toolMultiplier()`. **A listener MUST filter both by `StationContribution#channel()`**: both
-  lists carry every channel the station authored, so consuming an entry you did not declare is
+- **`StationCycleCompletedEvent`'s two lists (plus `contributionScale()`)** - `contributions()`
+  carries the action's own `Work.PerCycleContributions` at their ALREADY-SCALED amounts: the
+  engine applies the action's own `ContributionScale` ladder (a `../asset/CLAUDE.md`
+  `{Factors[], Floors[]}` group, the SAME `loot.FactorLadder` core `Roll.Ladder` uses) BEFORE
+  dispatch (and, on an idle cycle, the amounts are also pre-scaled by `Work.Idle.Fraction` on top
+  of that). **`contributionScale()`** reports the resolved multiplier back for DISPLAY ONLY (`1.0`
+  when no ladder is authored or no floor was reached) - grant `contributions()` verbatim; a
+  listener that forgot to multiply therefore cannot under-award, and one that multiplied again
+  cannot over-award. It is exposed purely so a listener can SHOW why a cycle was worth what it was
+  (a "x2.5 tool" line in a summary); `oneShotContributions()` is never touched by it.
+  `oneShotContributions()` carries `Roll.Grants.Contributions` find grants, kept SEPARATE because
+  they are DELIBERATELY UNSCALED - post each at its stated amount, touched by neither
+  `ContributionScale` nor the idle fraction. There is deliberately **no `toolMultiplier()`**: the
+  engine applies no BAKED curve of its own to an amount it never interprets (that role belongs to
+  the authored `ContributionScale` ladder above, itself composed from freely-registered factors),
+  so a listener that wants a number the engine did not already apply composes it from the
+  `hytale:tool_*` FACTORS directly. **A listener MUST filter both by `StationContribution#channel()`**:
+  both lists carry every channel the action authored, so consuming an entry you did not declare is
   reading another mod's vocabulary.
 - **`event/`** - the five `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
   `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`/
@@ -187,7 +210,8 @@ exists specifically so a consumer can detect which additive members are present 
 reflection: bump it by exactly one integer per addition batch that lands under this policy (not
 per individual method - a coordinated wave of additions is one bump), never on its own.
 `apiVersion()` itself is exempt from "default-bodied only" since it shipped before the freeze; it
-will never change again once RpgStations reaches 1.0.0.
+will never change again once RpgStations reaches 1.0.0. Current value is **3**: the `stationCount()`
+default-bodied addition bumped it from 2.
 
 `RpgStationsApi.isAvailable()`/`find()` (added the same round) are convenience, not a way around
 this policy - see their own javadoc for what they do and do not solve.
@@ -245,7 +269,7 @@ private static final class Extensions {
     static int install() {
         RpgStationsApi api = RpgStationsApi.get();
         // ... register factor providers, flair-unlock provider, summary enricher, etc.
-        return api.stations().size();
+        return api.stationCount(); // cheap count/presence check - see the stationCount() bullet above
     }
 }
 ```

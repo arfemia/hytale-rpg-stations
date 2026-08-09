@@ -25,13 +25,13 @@ class StationEventsTest {
     @Test
     void fireSessionStarted_noListener_neverThrows() {
         assertDoesNotThrow(() -> StationEvents.fireSessionStarted(null, null, PLAYER_ID, SESSION_ID,
-                "sawmill", "work", 0, 64, 0, false));
+                "sawmill", "Mill", 0, 64, 0, false));
     }
 
     @Test
     void fireCycleCompleted_noListener_neverThrows() {
         assertDoesNotThrow(() -> StationEvents.fireCycleCompleted(null, null, null, PLAYER_ID, SESSION_ID,
-                "sawmill", "work", 1, false, List.of(), List.of(), 1.0));
+                "sawmill", "Mill", 1, false, List.of(), List.of(), 1.0));
     }
 
     @Test

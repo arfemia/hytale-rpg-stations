@@ -43,17 +43,17 @@ public class FlairAssetCodecTest {
     @Test
     void decodesStationsAndMoments() throws Exception {
         FlairAsset a = decodeAsset("{ \"Stations\": [\"sawmill\"], \"Moments\": { \"swing\": "
-                + "{ \"Particles\": [ { \"SystemId\": \"Petal_Burst\" } ] }, \"step:enhance:stamp\": { \"Sound\": \"SFX_Choir_Hit\" } } }");
+                + "{ \"Particles\": [ { \"SystemId\": \"Petal_Burst\" } ] }, \"step:enhance:stamp\": { \"Sounds\": [\"SFX_Choir_Hit\"] } } }");
         assertArrayEquals(new String[]{"sawmill"}, a.getStations());
         assertNotNull(a.getMoments());
         assertEquals(2, a.getMoments().size());
         assertEquals("Petal_Burst", a.getMoments().get("swing").getParticles()[0].getSystemId());
-        assertEquals("SFX_Choir_Hit", a.getMoments().get("step:enhance:stamp").getSound());
+        assertEquals("SFX_Choir_Hit", a.getMoments().get("step:enhance:stamp").getSounds()[0]);
     }
 
     @Test
     void stationsOmitted_decodesNull_appliesToEverything() throws Exception {
-        FlairAsset a = decodeAsset("{ \"Moments\": { \"cycle\": { \"Sound\": \"SFX_A\" } } }");
+        FlairAsset a = decodeAsset("{ \"Moments\": { \"cycle\": { \"Sounds\": [\"SFX_A\"] } } }");
         assertNull(a.getStations());
         assertTrue(a.appliesTo("sawmill"));
         assertTrue(a.appliesTo("anything_at_all"));
@@ -76,17 +76,17 @@ public class FlairAssetCodecTest {
 
     @Test
     void parentInheritance_wholesaleOnOmit_ownWins() throws Exception {
-        String parentJson = "{ \"Stations\": [\"sawmill\"], \"Moments\": { \"cycle\": { \"Sound\": \"SFX_Parent\" } } }";
+        String parentJson = "{ \"Stations\": [\"sawmill\"], \"Moments\": { \"cycle\": { \"Sounds\": [\"SFX_Parent\"] } } }";
         FlairAsset parent = decodeWithParent(parentJson, null, "flair_parent", null);
         assertEquals(1, parent.getStations().length);
 
         FlairAsset child = decodeWithParent("{}", parent, "flair_child", "flair_parent");
         assertNotNull(child.getMoments(), "Moments inherits wholesale on omit");
-        assertEquals("SFX_Parent", child.getMoments().get("cycle").getSound());
+        assertEquals("SFX_Parent", child.getMoments().get("cycle").getSounds()[0]);
         assertArrayEquals(new String[]{"sawmill"}, child.getStations());
 
         FlairAsset ownChild = decodeWithParent(
-                "{ \"Moments\": { \"cycle\": { \"Sound\": \"SFX_Own\" } } }", parent, "flair_own", "flair_parent");
-        assertEquals("SFX_Own", ownChild.getMoments().get("cycle").getSound());
+                "{ \"Moments\": { \"cycle\": { \"Sounds\": [\"SFX_Own\"] } } }", parent, "flair_own", "flair_parent");
+        assertEquals("SFX_Own", ownChild.getMoments().get("cycle").getSounds()[0]);
     }
 }

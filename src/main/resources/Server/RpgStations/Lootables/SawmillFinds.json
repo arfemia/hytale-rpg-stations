@@ -1,27 +1,18 @@
 {
-  "$Comment": "The roll-1 'Chance.AddFactors' entries use the {Factor, Param?} shape FactorRef reuses. The roll-2 ladder's 'Ladder.Values' is a FactorRef[] summed before the floor lookup (asset.Roll.Ladder); a single-factor ladder authors a one-element array.",
+  "$Comment": "A Roll grants what ELSE a cycle handed over. How MUCH of the thing you made is the action's own Recipe.Yield, which is purely deterministic; a Roll can only ever ADD to it (Grants.OutputItems, whole extra items of that same output), never multiply it. This table is purely the cycle-count find ladder, so it grants drop lists rather than output items. Ladder.Factors is a FactorRef[] summed before the floor lookup; a single-factor ladder authors a one-element array. Grants.DropLists is a plural array, so a floor can roll a guaranteed common table plus a rare one as two independent entries; each entry rolls once through the native ItemModule.getRandomItemDrops. Floors resolve through the one shared ladder core every other ladder in this schema uses: the highest reached Min wins, a Min of 0 is reachable, and two floors sharing a Min is a validator warning because only the last authored one could ever grant.",
   "Rolls": [
-    {
-      "Trigger": "Cycle",
-      "Chance": {
-        "BasePercent": 2,
-        "AddFactors": [ { "Factor": "hytale:tool_power" } ],
-        "CapPercent": 25
-      },
-      "Grants": { "BonusOutputCopies": 1 }
-    },
     {
       "Trigger": "Cycle",
       "Conditions": [ { "Factor": "rpgstations:cycle_count", "Min": 10 } ],
       "Chance": { "BasePercent": 15 },
       "Ladder": {
-        "Values": [ { "Factor": "rpgstations:cycle_count" } ],
+        "Factors": [ { "Factor": "rpgstations:cycle_count" } ],
         "Floors": [
-          { "Min": 10, "Grants": { "DropList": "RPG_Station_Sawmill_T1" } },
+          { "Min": 10, "Grants": { "DropLists": ["RPG_Station_Sawmill_T1"] } },
           {
             "Min": 25,
-            "Grants": { "DropList": "RPG_Station_Sawmill_T2" },
-            "Presentation": { "Sound": "SFX_Coins_Land", "Particles": [ { "SystemId": "Block_Gem_Sparks" } ] }
+            "Grants": { "DropLists": ["RPG_Station_Sawmill_T2"] },
+            "Presentation": { "Sounds": ["SFX_Coins_Land"], "Particles": [ { "SystemId": "Block_Gem_Sparks" } ] }
           }
         ]
       }

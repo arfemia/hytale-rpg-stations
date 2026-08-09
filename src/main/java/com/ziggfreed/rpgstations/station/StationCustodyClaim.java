@@ -67,6 +67,19 @@ final class StationCustodyClaim {
      */
     @Nullable private Ref<EntityStore> displayRef;
 
+    /**
+     * The display entity's own {@code NetworkId} value, captured at spawn beside {@link #displayRef}
+     * so the press-F retrieval path can resolve a clicked prop back to its claim WITHOUT reading a
+     * live {@code NetworkId} component off every claim's entity on every press.
+     *
+     * <p><b>A network id is scoped to ONE world's entity store</b> (each store issues 1, 2, 3, ...
+     * from its own counter), so two worlds hand out colliding values as a matter of course. It is
+     * therefore only ever compared against claims whose block key names the SAME world - see
+     * {@link StationCustodyRetrieval#owns}. Null when no display entity was spawned, or when the
+     * spawn failed.
+     */
+    @Nullable private Integer displayNetworkId;
+
     StationCustodyClaim(@Nonnull UUID ownerId, @Nonnull String stationId, @Nonnull String actionId,
             int blockX, int blockY, int blockZ) {
         this.ownerId = ownerId;
@@ -121,9 +134,20 @@ final class StationCustodyClaim {
         return displayRef;
     }
 
-    /** Set once by {@code StationCustodyDisplay#spawn}'s caller; cleared implicitly when the claim itself is discarded. */
-    void setDisplayRef(@Nullable Ref<EntityStore> displayRef) {
+    /** The display entity's own network id, or {@code null} when none was spawned. See {@link #displayNetworkId}. */
+    @Nullable
+    Integer displayNetworkId() {
+        return displayNetworkId;
+    }
+
+    /**
+     * Set once by {@code StationCustodyDisplay#spawn}'s caller with the ref AND the network id that
+     * entity was built with (one call, so the pair can never half-update); cleared implicitly when
+     * the claim itself is discarded.
+     */
+    void setDisplay(@Nullable Ref<EntityStore> displayRef, @Nullable Integer displayNetworkId) {
         this.displayRef = displayRef;
+        this.displayNetworkId = displayNetworkId;
     }
 
     /** One concrete {@link ItemStack} per tallied item id, for the auto-return path - prefers {@link #uniqueStack} when set (metadata preserved). */

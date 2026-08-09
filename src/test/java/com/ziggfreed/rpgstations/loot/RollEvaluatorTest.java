@@ -117,8 +117,8 @@ public class RollEvaluatorTest {
 
     @Test
     void highestFloor_picksTheHighestReachedFloor() {
-        Roll.Ladder.Floor low = Roll.Ladder.Floor.of(10.0, Roll.Grants.of(null, "T1", null), null);
-        Roll.Ladder.Floor high = Roll.Ladder.Floor.of(25.0, Roll.Grants.of(null, "T2", null), null);
+        Roll.Ladder.Floor low = Roll.Ladder.Floor.of(10.0, Roll.Grants.ofDropList("T1"), null);
+        Roll.Ladder.Floor high = Roll.Ladder.Floor.of(25.0, Roll.Grants.ofDropList("T2"), null);
         Roll.Ladder ladder = Roll.Ladder.of(refs("rpgstations:cycle_count"), new Roll.Ladder.Floor[]{low, high});
         assertEquals(high, RollEvaluator.highestFloor(ladder, lookup(Map.of("rpgstations:cycle_count", 30.0))));
         assertEquals(low, RollEvaluator.highestFloor(ladder, lookup(Map.of("rpgstations:cycle_count", 12.0))));
@@ -128,7 +128,7 @@ public class RollEvaluatorTest {
     @Test
     void highestFloor_summedValues_composeMultipleChannels() {
         // Two channels 8 + 5 = 13 clears the 10 floor a single channel would miss.
-        Roll.Ladder.Floor f = Roll.Ladder.Floor.of(10.0, Roll.Grants.of(null, "T1", null), null);
+        Roll.Ladder.Floor f = Roll.Ladder.Floor.of(10.0, Roll.Grants.ofDropList("T1"), null);
         Roll.Ladder ladder = Roll.Ladder.of(refs("a", "b"), new Roll.Ladder.Floor[]{f});
         assertEquals(f, RollEvaluator.highestFloor(ladder, lookup(Map.of("a", 8.0, "b", 5.0))));
     }
@@ -136,14 +136,14 @@ public class RollEvaluatorTest {
     @Test
     void highestFloor_unresolvableValueFactor_reachesNoFloor() {
         Roll.Ladder ladder = Roll.Ladder.of(refs("rpgstations:unknown"),
-                new Roll.Ladder.Floor[]{Roll.Ladder.Floor.of(1.0, Roll.Grants.of(null, "T1", null), null)});
+                new Roll.Ladder.Floor[]{Roll.Ladder.Floor.of(1.0, Roll.Grants.ofDropList("T1"), null)});
         assertNull(RollEvaluator.highestFloor(ladder, lookup(Map.of())), "an unresolvable factor sums to 0 - no floor reached");
     }
 
     @Test
     void highestFloor_malformedFloor_isSkippedNotThrown() {
-        Roll.Ladder.Floor malformed = Roll.Ladder.Floor.of(null, Roll.Grants.of(null, "T1", null), null);
-        Roll.Ladder.Floor valid = Roll.Ladder.Floor.of(5.0, Roll.Grants.of(null, "T2", null), null);
+        Roll.Ladder.Floor malformed = Roll.Ladder.Floor.of(null, Roll.Grants.ofDropList("T1"), null);
+        Roll.Ladder.Floor valid = Roll.Ladder.Floor.of(5.0, Roll.Grants.ofDropList("T2"), null);
         Roll.Ladder ladder = Roll.Ladder.of(refs("f"), new Roll.Ladder.Floor[]{malformed, valid});
         assertEquals(valid, RollEvaluator.highestFloor(ladder, lookup(Map.of("f", 10.0))));
     }
@@ -153,7 +153,7 @@ public class RollEvaluatorTest {
     @Test
     void evaluate_conditionsFail_producesNone() {
         Roll roll = Roll.of("Cycle", new Condition[]{Condition.of("rpgstations:unknown", null, null, null)},
-                null, null, Roll.Grants.of(1, null, null));
+                null, null, Roll.Grants.of(null, null));
         RollEvaluator.Outcome outcome = RollEvaluator.evaluate(roll, lookup(Map.of()), fixedRoll(0.0));
         assertFalse(outcome.isHit());
         assertNull(outcome.getTopGrants());
@@ -162,7 +162,7 @@ public class RollEvaluatorTest {
     @Test
     void evaluate_chanceFails_killsTheWholeRoll_ladderIncluded() {
         Roll.Ladder ladder = Roll.Ladder.of(refs("rpgstations:cycle_count"),
-                new Roll.Ladder.Floor[]{Roll.Ladder.Floor.of(1.0, Roll.Grants.of(null, "T1", null), null)});
+                new Roll.Ladder.Floor[]{Roll.Ladder.Floor.of(1.0, Roll.Grants.ofDropList("T1"), null)});
         Roll roll = Roll.of("Cycle", null, Roll.Chance.of(0.0, null, 100.0), ladder, null);
         RollEvaluator.Outcome outcome = RollEvaluator.evaluate(roll, lookup(Map.of("rpgstations:cycle_count", 999.0)),
                 fixedRoll(0.0));
@@ -172,8 +172,8 @@ public class RollEvaluatorTest {
 
     @Test
     void evaluate_topGrantsAndFloorGrants_stack() {
-        Roll.Grants top = Roll.Grants.of(1, null, null);
-        Roll.Grants floorGrants = Roll.Grants.of(null, "T1", null);
+        Roll.Grants top = Roll.Grants.of(null, null);
+        Roll.Grants floorGrants = Roll.Grants.ofDropList("T1");
         Roll.Ladder ladder = Roll.Ladder.of(refs("rpgstations:cycle_count"),
                 new Roll.Ladder.Floor[]{Roll.Ladder.Floor.of(1.0, floorGrants, null)});
         Roll roll = Roll.of("Cycle", null, null, ladder, top);
@@ -185,13 +185,13 @@ public class RollEvaluatorTest {
     }
 
     @Test
-    void sawmillShapedFixture_bonusCopyRoll_andGatedLadderRoll() {
-        Roll bonusCopyRoll = Roll.of("Cycle", null,
+    void sawmillShapedFixture_chanceGatedRoll_andGatedLadderRoll() {
+        Roll chanceRoll = Roll.of("Cycle", null,
                 Roll.Chance.of(2.0, refs("hytale:tool_power"), 25.0),
-                null, Roll.Grants.of(1, null, null));
+                null, Roll.Grants.ofDropList("Fixture_Bonus"));
 
-        Roll.Grants t1 = Roll.Grants.of(null, "RPG_Station_Sawmill_T1", null);
-        Roll.Grants t2 = Roll.Grants.of(null, "RPG_Station_Sawmill_T2", null);
+        Roll.Grants t1 = Roll.Grants.ofDropList("RPG_Station_Sawmill_T1");
+        Roll.Grants t2 = Roll.Grants.ofDropList("RPG_Station_Sawmill_T2");
         Roll.Ladder ladder = Roll.Ladder.of(refs("rpgstations:cycle_count"),
                 new Roll.Ladder.Floor[]{
                         Roll.Ladder.Floor.of(10.0, t1, null),
@@ -205,9 +205,9 @@ public class RollEvaluatorTest {
         earlySession.put("hytale:tool_power", 0.5);
         earlySession.put("rpgstations:cycle_count", 3.0);
 
-        RollEvaluator.Outcome bonusHit = RollEvaluator.evaluate(bonusCopyRoll, lookup(earlySession), fixedRoll(2.0));
-        assertTrue(bonusHit.isHit());
-        assertEquals(1, bonusHit.getTopGrants().getBonusOutputCopies());
+        RollEvaluator.Outcome chanceHit = RollEvaluator.evaluate(chanceRoll, lookup(earlySession), fixedRoll(2.0));
+        assertTrue(chanceHit.isHit());
+        assertEquals("Fixture_Bonus", chanceHit.getTopGrants().getDropLists()[0]);
 
         RollEvaluator.Outcome tooEarly = RollEvaluator.evaluate(ladderRoll, lookup(earlySession), fixedRoll(0.0));
         assertFalse(tooEarly.isHit());
@@ -217,6 +217,6 @@ public class RollEvaluatorTest {
         RollEvaluator.Outcome lateHit = RollEvaluator.evaluate(ladderRoll, lookup(lateSession), fixedRoll(14.999));
         assertTrue(lateHit.isHit());
         assertNotNull(lateHit.getFloorGrants());
-        assertEquals("RPG_Station_Sawmill_T2", lateHit.getFloorGrants().getDropList());
+        assertEquals("RPG_Station_Sawmill_T2", lateHit.getFloorGrants().getDropLists()[0]);
     }
 }

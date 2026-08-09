@@ -11,9 +11,10 @@ import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.common.codec.Rotation;
 
 /**
- * One presentation moment: sound/particle bursts/animation/camera/shake asset references (design
- * section 4.1/4.4.3). Every leaf names a NATIVE asset id this engine plays directly, with no
- * feedback-service indirection in between.
+ * One presentation moment: sound / particle-burst / shake / native-composition asset references
+ * (design section 4.1/4.4.3). Every leaf names a NATIVE asset id this engine plays directly, with no
+ * feedback-service indirection in between, and every leaf here is genuinely PLAYED - this type
+ * carries no reserved slots.
  *
  * <p>Every leaf is {@code appendInherited} so a station whose {@code Parent} sibling
  * partially overrides a nested {@code Presentation} object still inherits the leaves it did
@@ -21,36 +22,20 @@ import com.ziggfreed.common.codec.Rotation;
  */
 public final class Presentation {
 
-    @Nullable protected String sound;
+    @Nullable protected String[] sounds;
     @Nullable protected ModelParticle[] particles;
-    @Nullable protected String animation;
-    @Nullable protected String animationItem;
-    @Nullable protected String animationSlot;
-    @Nullable protected String cameraEffect;
     @Nullable protected Shake shake;
     @Nullable protected Interaction interaction;
     @Nullable protected EffectRef effect;
 
     public static final BuilderCodec<Presentation> CODEC = BuilderCodec.builder(Presentation.class, Presentation::new)
-            .appendInherited(new KeyedCodec<>("Sound", Codec.STRING, false),
-                    (o, v) -> o.sound = v, o -> o.sound, (o, p) -> o.sound = p.sound)
-            .documentation("A native one-shot SoundEvent id played at the moment's target position. Never author a LOOPING event here - nothing can stop it once fired.").add()
+            .appendInherited(new KeyedCodec<>("Sounds", new ArrayCodec<>(Codec.STRING, String[]::new), false),
+                    (o, v) -> o.sounds = v, o -> o.sounds, (o, p) -> o.sounds = p.sounds)
+            .documentation("Native one-shot SoundEvent ids played at the moment's target position, in authored order (a thud plus a chime is two entries). Never author a LOOPING event here - nothing can stop it once fired.").add()
             .appendInherited(new KeyedCodec<>("Particles",
                             new ArrayCodec<>(ModelParticle.CODEC, ModelParticle[]::new), false),
                     (o, v) -> o.particles = v, o -> o.particles, (o, p) -> o.particles = p.particles)
             .documentation("The particle bursts played at this moment, in authored order (native InteractionEffects.Particles is an array too). Each entry is one ModelParticle-shaped burst; layering two is the author's call.").add()
-            .appendInherited(new KeyedCodec<>("Animation", Codec.STRING, false),
-                    (o, v) -> o.animation = v, o -> o.animation, (o, p) -> o.animation = p.animation)
-            .documentation("Reserved: an animation clip id for this moment. Station moments do not play it (an authored value warns as unused); worker swing clips are authored via the Puppet group and StationStep.Puppet.Clip instead.").add()
-            .appendInherited(new KeyedCodec<>("AnimationItem", Codec.STRING, false),
-                    (o, v) -> o.animationItem = v, o -> o.animationItem, (o, p) -> o.animationItem = p.animationItem)
-            .documentation("Reserved alongside Animation: the item id whose ItemPlayerAnimations set would resolve the clip. Station moments do not play it (an authored value warns as unused).").add()
-            .appendInherited(new KeyedCodec<>("AnimationSlot", Codec.STRING, false),
-                    (o, v) -> o.animationSlot = v, o -> o.animationSlot, (o, p) -> o.animationSlot = p.animationSlot)
-            .documentation("Reserved alongside Animation: the AnimationSlot the clip would play on (e.g. Emote, Action). Station moments do not play it (an authored value warns as unused).").add()
-            .appendInherited(new KeyedCodec<>("CameraEffect", Codec.STRING, false),
-                    (o, v) -> o.cameraEffect = v, o -> o.cameraEffect, (o, p) -> o.cameraEffect = p.cameraEffect)
-            .documentation("Reserved: a native CameraEffect asset id (spelled as native InteractionEffects does; the nested Camera GROUP one level up is the station's own camera pull, a different thing). Station moments do not play it (an authored value warns as unused); one-shot shakes route through Shake.").add()
             .appendInherited(new KeyedCodec<>("Shake", Shake.CODEC, false),
                     (o, v) -> o.shake = v, o -> o.shake, (o, p) -> o.shake = p.shake)
             .documentation("A one-shot camera shake: a CameraEffect asset id plus a contextual intensity.").add()
@@ -65,22 +50,21 @@ public final class Presentation {
     public Presentation() {
     }
 
-    /** Java-side factory carrying only a {@code Sound}. */
+    /** Java-side factory carrying a single {@code Sounds} entry. */
     @Nonnull
     public static Presentation ofSound(@Nullable String sound) {
         Presentation p = new Presentation();
-        p.sound = sound;
+        p.sounds = sound == null || sound.isBlank() ? null : new String[] {sound};
         return p;
     }
 
     /**
-     * Java-side factory carrying a {@code Sound} and/or a single default-tuned particle burst (the
+     * Java-side factory carrying one sound and/or a single default-tuned particle burst (the
      * one-id convenience shape - {@link ModelParticle#of(String)}).
      */
     @Nonnull
     public static Presentation of(@Nullable String sound, @Nullable String particleSystemId) {
-        Presentation p = new Presentation();
-        p.sound = sound;
+        Presentation p = ofSound(sound);
         p.particles = particleSystemId == null || particleSystemId.isBlank()
                 ? null : new ModelParticle[] {ModelParticle.of(particleSystemId)};
         return p;
@@ -88,55 +72,27 @@ public final class Presentation {
 
     /** Fully-populated Java-side factory; does NOT touch the codec or JSON keys. */
     @Nonnull
-    public static Presentation of(@Nullable String sound, @Nullable ModelParticle[] particles,
-            @Nullable String animation, @Nullable String animationItem, @Nullable String animationSlot,
-            @Nullable String cameraEffect, @Nullable Shake shake) {
+    public static Presentation of(@Nullable String[] sounds, @Nullable ModelParticle[] particles,
+            @Nullable Shake shake, @Nullable Interaction interaction, @Nullable EffectRef effect) {
         Presentation p = new Presentation();
-        p.sound = sound;
+        p.sounds = sounds;
         p.particles = particles;
-        p.animation = animation;
-        p.animationItem = animationItem;
-        p.animationSlot = animationSlot;
-        p.cameraEffect = cameraEffect;
         p.shake = shake;
+        p.interaction = interaction;
+        p.effect = effect;
         return p;
     }
 
+    /** The one-shot sound ids played at this moment, in authored order; null/empty = silent. */
     @Nullable
-    public String getSound() {
-        return sound;
+    public String[] getSounds() {
+        return sounds;
     }
 
     /** The particle bursts played at this moment, in authored order; null/empty = none. */
     @Nullable
     public ModelParticle[] getParticles() {
         return particles;
-    }
-
-    @Nullable
-    public String getAnimation() {
-        return animation;
-    }
-
-    @Nullable
-    public String getAnimationItem() {
-        return animationItem;
-    }
-
-    @Nullable
-    public String getAnimationSlot() {
-        return animationSlot;
-    }
-
-    /**
-     * A native {@code CameraEffect} asset id for this moment. Named for the native
-     * {@code InteractionEffects.CameraEffect} leaf it mirrors, which also disambiguates it from the
-     * NESTED {@code Camera} GROUP one level up ({@code StationAsset.Camera}, the station's own
-     * third-person camera pull) - the two used to share the spelling at different altitudes.
-     */
-    @Nullable
-    public String getCameraEffect() {
-        return cameraEffect;
     }
 
     /** One-shot camera shake (nullable); null = no shake. */

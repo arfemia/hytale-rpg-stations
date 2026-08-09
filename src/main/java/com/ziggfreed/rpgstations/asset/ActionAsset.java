@@ -31,8 +31,11 @@ import com.hypixel.hytale.codec.codecs.map.MapCodec;
  * {@link #body} {@link ActionDef}, and every codec leaf delegates to it - so {@link ActionDef}
  * stays the single storage + logic authority and this wrapper only adds id/data/Parent plumbing.
  * The key strings are re-declared here to match {@link ActionDef#CODEC} (an
- * {@code AssetBuilderCodec} cannot splice a {@code BuilderCodec} field list); keep the two in
- * lockstep - {@link AssetCodecInitTest} guards PascalCase, the codec round-trip test guards shape.
+ * {@code AssetBuilderCodec} cannot splice a {@code BuilderCodec} field list); the two are held in
+ * lockstep by a FIELD-SET PARITY TEST that walks both codecs' entries with named exclusion sets
+ * ({@code Ref} and {@code Id} on the {@link ActionDef} side, {@code Name} on this one), so a leaf
+ * added to one and forgotten on the other fails the build instead of shipping as a silently
+ * unauthorable capability.
  */
 public final class ActionAsset implements JsonAssetWithMap<String, DefaultAssetMap<String, ActionAsset>> {
 
@@ -57,54 +60,44 @@ public final class ActionAsset implements JsonAssetWithMap<String, DefaultAssetM
             .appendInherited(new KeyedCodec<>("Label", Codec.STRING, false),
                     (a, v) -> a.body.label = v, a -> a.body.label, (a, p) -> a.body.label = p.body.label)
             .documentation("An advisory localization key for admin/UI display of the action's name.").add()
-            .appendInherited(new KeyedCodec<>("Input", ActionInput.CODEC, false),
-                    (a, v) -> a.body.input = v, a -> a.body.input, (a, p) -> a.body.input = p.body.input)
-            .documentation("The diegetic action-selection matcher (held item / custody). Absent = a catch-all action.").add()
-            .appendInherited(new KeyedCodec<>("Custody", Custody.CODEC, false),
-                    (a, v) -> a.body.custody = v, a -> a.body.custody, (a, p) -> a.body.custody = p.body.custody)
-            .documentation("Placed-input custody for this action.").add()
-            .appendInherited(new KeyedCodec<>("Puppet", Puppet.CODEC, false),
-                    (a, v) -> a.body.puppet = v, a -> a.body.puppet, (a, p) -> a.body.puppet = p.body.puppet)
-            .documentation("The puppet-presentation group for this action.").add()
+            .appendInherited(new KeyedCodec<>("Select", ActionInput.CODEC, false),
+                    (a, v) -> a.body.select = v, a -> a.body.select, (a, p) -> a.body.select = p.body.select)
+            .documentation("Which held or placed material picks this action out of a station's ordered list. ABSENT means it matches any context, and its custody acceptance derives from its own Recipe inputs instead.").add()
+            .appendInherited(new KeyedCodec<>("Requires", Requires.CODEC, false),
+                    (a, v) -> a.body.requires = v, a -> a.body.requires, (a, p) -> a.body.requires = p.body.requires)
+            .documentation("This action's own start gate. The hosting station's own Requires must ALSO pass; this never inherits it.").add()
+            .appendInherited(new KeyedCodec<>("Tool", StationAsset.Tool.CODEC, false),
+                    (a, v) -> a.body.tool = v, a -> a.body.tool, (a, p) -> a.body.tool = p.body.tool)
+            .documentation("The held-tool gate for this action - the ONE gate, checked at engage and re-checked every heartbeat.").add()
+            .appendInherited(new KeyedCodec<>("Recipe", StationAsset.Recipe.CODEC, false),
+                    (a, v) -> a.body.recipe = v, a -> a.body.recipe, (a, p) -> a.body.recipe = p.body.recipe)
+            .documentation("The ONE transform this action performs (Conversions and/or FromCrafting, plus Yield). Two transforms means two actions.").add()
             .appendInherited(new KeyedCodec<>("Work", StationAsset.Work.CODEC, false),
                     (a, v) -> a.body.work = v, a -> a.body.work, (a, p) -> a.body.work = p.body.work)
             .documentation("The work-loop cadence for this action.").add()
-            .appendInherited(new KeyedCodec<>("Recipe", StationAsset.Recipe.CODEC, false),
-                    (a, v) -> a.body.recipe = v, a -> a.body.recipe, (a, p) -> a.body.recipe = p.body.recipe)
-            .documentation("The convert recipe for this action.").add()
-            .appendInherited(new KeyedCodec<>("Tool", StationAsset.Tool.CODEC, false),
-                    (a, v) -> a.body.tool = v, a -> a.body.tool, (a, p) -> a.body.tool = p.body.tool)
-            .documentation("The held-tool gate for this action.").add()
-            .appendInherited(new KeyedCodec<>("Hold", StationAsset.Hold.CODEC, false),
-                    (a, v) -> a.body.hold = v, a -> a.body.hold, (a, p) -> a.body.hold = p.body.hold)
-            .documentation("The movement-hold / mount for this action.").add()
-            .appendInherited(new KeyedCodec<>("Camera", StationAsset.Camera.CODEC, false),
-                    (a, v) -> a.body.camera = v, a -> a.body.camera, (a, p) -> a.body.camera = p.body.camera)
-            .documentation("The camera pull for this action.").add()
-            .appendInherited(new KeyedCodec<>("Animation", StationAsset.Animation.CODEC, false),
-                    (a, v) -> a.body.animation = v, a -> a.body.animation, (a, p) -> a.body.animation = p.body.animation)
-            .documentation("The work animation for this action.").add()
-            .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
-                    (a, v) -> a.body.presentation = v, a -> a.body.presentation,
-                    (a, p) -> a.body.presentation = p.body.presentation)
-            .documentation("The per-cycle presentation moment for this action.").add()
-            .appendInherited(new KeyedCodec<>("Completion", Presentation.CODEC, false),
-                    (a, v) -> a.body.completion = v, a -> a.body.completion,
-                    (a, p) -> a.body.completion = p.body.completion)
-            .documentation("The session-completion presentation moment for this action.").add()
-            .appendInherited(new KeyedCodec<>("Loot", LootRef.CODEC, false),
-                    (a, v) -> a.body.loot = v, a -> a.body.loot, (a, p) -> a.body.loot = p.body.loot)
-            .documentation("The conditional-loot (LootRef) for this action.").add()
-            .appendInherited(new KeyedCodec<>("Requires", Requires.CODEC, false),
-                    (a, v) -> a.body.requires = v, a -> a.body.requires, (a, p) -> a.body.requires = p.body.requires)
-            .documentation("The start gate for this action.").add()
-            .appendInherited(new KeyedCodec<>("Steps", new ArrayCodec<>(StationStep.CODEC, StationStep[]::new), false),
-                    (a, v) -> a.body.steps = v, a -> a.body.steps, (a, p) -> a.body.steps = p.body.steps)
-            .documentation("The authored step PROGRAM; absent = the implicit classic-convert-loop program.").add()
+            .appendInherited(new KeyedCodec<>("Custody", Custody.CODEC, false),
+                    (a, v) -> a.body.custody = v, a -> a.body.custody, (a, p) -> a.body.custody = p.body.custody)
+            .documentation("Placed-input custody for this action.").add()
             .appendInherited(new KeyedCodec<>("Anchors",
                             new MapCodec<>(ActionDef.Anchor.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.body.anchors = v, a -> a.body.anchors, (a, p) -> a.body.anchors = p.body.anchors)
             .documentation("Named multi-station anchor declarations (id -> {Station, MaxRadiusMeters}); a step's At/Walk.To names one and the engine discovers + claims the nearest matching placed block within MaxRadiusMeters.").add()
+            .appendInherited(new KeyedCodec<>("Steps", new ArrayCodec<>(StationStep.CODEC, StationStep[]::new), false),
+                    (a, v) -> a.body.steps = v, a -> a.body.steps, (a, p) -> a.body.steps = p.body.steps)
+            .documentation("The authored step PROGRAM; absent = the implicit classic-convert-loop program built from Recipe.").add()
+            .appendInherited(new KeyedCodec<>("Bonus", LootRef.CODEC, false),
+                    (a, v) -> a.body.bonus = v, a -> a.body.bonus, (a, p) -> a.body.bonus = p.body.bonus)
+            .documentation("What ELSE a cycle hands over: referenced Lootables plus inline Rolls. Yield decides how much of the thing you made, Bonus decides what else you got.").add()
+            .appendInherited(new KeyedCodec<>("ContributionScale", ContributionScale.CODEC, false),
+                    (a, v) -> a.body.contributionScale = v, a -> a.body.contributionScale,
+                    (a, p) -> a.body.contributionScale = p.body.contributionScale)
+            .documentation("A factor ladder multiplying every Work.PerCycleContributions amount before it is forwarded; the engine pre-scales, so a listener grants the amount verbatim.").add()
+            .appendInherited(new KeyedCodec<>("Worker", ActionDef.Worker.CODEC, false),
+                    (a, v) -> a.body.worker = v, a -> a.body.worker, (a, p) -> a.body.worker = p.body.worker)
+            .documentation("How the person looks doing this: Hold, Camera, Animation, Puppet.").add()
+            .appendInherited(new KeyedCodec<>("Moments", ActionDef.Moments.CODEC, false),
+                    (a, v) -> a.body.moments = v, a -> a.body.moments, (a, p) -> a.body.moments = p.body.moments)
+            .documentation("What it sounds and looks like: the per-Cycle moment and the session Completion moment.").add()
             .build();
 
     /**
@@ -130,22 +123,18 @@ public final class ActionAsset implements JsonAssetWithMap<String, DefaultAssetM
         ActionAsset a = new ActionAsset();
         a.id = id;
         a.body.label = body.label;
-        a.body.ref = body.ref;
-        a.body.input = body.input;
-        a.body.custody = body.custody;
-        a.body.puppet = body.puppet;
-        a.body.work = body.work;
-        a.body.recipe = body.recipe;
-        a.body.tool = body.tool;
-        a.body.hold = body.hold;
-        a.body.camera = body.camera;
-        a.body.animation = body.animation;
-        a.body.presentation = body.presentation;
-        a.body.completion = body.completion;
-        a.body.loot = body.loot;
+        a.body.select = body.select;
         a.body.requires = body.requires;
-        a.body.steps = body.steps;
+        a.body.tool = body.tool;
+        a.body.recipe = body.recipe;
+        a.body.work = body.work;
+        a.body.custody = body.custody;
         a.body.anchors = body.anchors;
+        a.body.steps = body.steps;
+        a.body.bonus = body.bonus;
+        a.body.contributionScale = body.contributionScale;
+        a.body.worker = body.worker;
+        a.body.moments = body.moments;
         return a;
     }
 
@@ -155,10 +144,10 @@ public final class ActionAsset implements JsonAssetWithMap<String, DefaultAssetM
     }
 
     /**
-     * The action body (design 1.5 - "the same ActionDef codec"). NOTE: an {@code ActionAsset} does
-     * NOT carry {@link ActionDef#getRef()} (a Ref references ANOTHER action; a standalone action
-     * asset is itself a base and never references) - the {@code Ref} key is intentionally absent
-     * from this codec, so {@link ActionDef#getRef()} on this body is always null.
+     * The action body (the same {@link ActionDef} field set). NOTE: an {@code ActionAsset} carries
+     * neither {@link ActionDef#getRef()} (a Ref references ANOTHER action; a standalone action asset
+     * is itself a base and never references one) nor {@link ActionDef#getId()} (its id IS its
+     * filename) - both keys are intentionally absent from this codec, so both read null on this body.
      */
     @Nonnull
     public ActionDef getBody() {

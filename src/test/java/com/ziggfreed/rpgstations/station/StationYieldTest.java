@@ -3,203 +3,128 @@ package com.ziggfreed.rpgstations.station;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
-import java.util.Map;
-import java.util.function.BiFunction;
-import java.util.function.DoubleSupplier;
-
 import org.junit.jupiter.api.Test;
 
-import com.ziggfreed.rpgstations.asset.FactorRef;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
- * Exercises the PURE {@code Recipe.Yield} transform ({@link StationYield}). Every expected number
- * here is derived from fixture values this test AUTHORS, never from shipped balance data - a
- * balancing pass on a station's own JSON must never require a test edit. The stochastic remainder is
- * covered by pinning the injected roll to always-lose / always-win rather than by sampling, so no
- * assertion here can flake.
+ * The PURE {@link StationYield} transform, now DETERMINISTIC end to end: no ladder, no chance, no
+ * injected randomness. What a reader sees in a {@code Yield} group is exactly what a cycle makes;
+ * everything conditional is a {@code Bonus} Roll granting ADDITIVE {@code OutputItems} instead.
+ *
+ * <p>Every number below is authored by this test.
  */
 public class StationYieldTest {
 
-    /** A roll that always LOSES, so a fractional remainder never pays out (whole part alone). */
-    private static final DoubleSupplier NEVER = () -> 0.999999;
-    /** A roll that always WINS, so any nonzero remainder pays out. */
-    private static final DoubleSupplier ALWAYS = () -> 0.0;
-
-    /** A fixture factor resolver over an authored map; an unknown id resolves null (fail-closed). */
-    private static BiFunction<String, String, Double> lookup(Map<String, Double> values) {
-        return (factorId, param) -> values.get(factorId);
+    private static StationAsset.Yield yieldOf(Integer base, Double scale, Integer min, Integer max) {
+        return StationAsset.Yield.of(base, scale, min, max);
     }
 
-    private static StationAsset.Yield.Floor floor(double min, double add) {
-        return StationAsset.Yield.Floor.of(min, add);
-    }
-
-    private static StationAsset.Yield.Bonus bonus(FactorRef[] values, StationAsset.Yield.Floor... floors) {
-        return StationAsset.Yield.Bonus.of(values, floors);
-    }
-
-    private static FactorRef ref(String id, Double weight) {
-        return FactorRef.of(id, null, weight);
-    }
-
-    // ==================== No group / identity ====================
+    // ==================== Base + Scale ====================
 
     @Test
-    void nullYield_leavesTheAuthoredQuantityUntouched() {
-        assertEquals(7, StationYield.resolveQuantity(null, 7, 999.0, ALWAYS));
+    void nullYield_isTheIdentity_soAnUnauthoredRecipeIsUnchanged() {
+        assertEquals(7, StationYield.resolveQuantity(null, 7));
     }
 
     @Test
-    void nullYield_returnsTheSameOutputsArrayInstance() {
-        Ingredient[] outputs = {Ingredient.item("Wood_Hardwood_Planks", 3)};
-        assertSame(outputs, StationYield.applyToOutputs(null, outputs, 0.0, ALWAYS));
-    }
-
-    // ==================== Base / Scale ====================
-
-    @Test
-    void absentBase_defersToTheConversionsOwnQuantity() {
-        StationAsset.Yield y = StationAsset.Yield.of(null, null, null, null, null);
-        assertEquals(4, StationYield.resolveQuantity(y, 4, 0.0, NEVER));
+    void absentBase_usesTheConversionsOwnQuantity() {
+        assertEquals(4, StationYield.resolveQuantity(yieldOf(null, null, null, null), 4));
     }
 
     @Test
     void authoredBase_overridesTheConversionsOwnQuantity() {
-        StationAsset.Yield y = StationAsset.Yield.of(2, null, null, null, null);
-        assertEquals(2, StationYield.resolveQuantity(y, 9, 0.0, NEVER));
+        assertEquals(3, StationYield.resolveQuantity(yieldOf(3, null, null, null), 9));
     }
 
     @Test
-    void scale_multipliesTheBase() {
-        assertEquals(6, StationYield.resolveQuantity(
-                StationAsset.Yield.of(3, 2.0, null, null, null), 1, 0.0, NEVER));
+    void nonPositiveBase_isIgnoredInFavourOfTheConversionsOwnQuantity() {
+        assertEquals(9, StationYield.resolveQuantity(yieldOf(0, null, null, null), 9));
+        assertEquals(9, StationYield.resolveQuantity(yieldOf(-2, null, null, null), 9));
     }
 
     @Test
-    void nonpositiveScale_readerDefaultsToNeutral() {
-        assertEquals(3, StationYield.resolveQuantity(
-                StationAsset.Yield.of(3, 0.0, null, null, null), 1, 0.0, NEVER));
-        assertEquals(3, StationYield.resolveQuantity(
-                StationAsset.Yield.of(3, Double.NaN, null, null, null), 1, 0.0, NEVER));
-    }
-
-    // ==================== Bonus ladder ====================
-
-    @Test
-    void ladderValue_isTheWeightedSumOfEveryAuthoredFactor() {
-        StationAsset.Yield y = StationAsset.Yield.of(1, null, bonus(new FactorRef[]{
-                ref("fixture:quality", 10.0), ref("fixture:level", 0.1), ref("fixture:power", 1.0)},
-                floor(11.0, 1.0)), null, null);
-        // 2*10.0 + 20*0.1 + 0.3*1.0 = 22.3
-        assertEquals(22.3, StationYield.ladderValue(y, lookup(Map.of(
-                "fixture:quality", 2.0, "fixture:level", 20.0, "fixture:power", 0.3))), 1e-9);
+    void scale_multipliesAndFloorsToAWholeItem() {
+        assertEquals(6, StationYield.resolveQuantity(yieldOf(3, 2.0, null, null), 1));
+        assertEquals(5, StationYield.resolveQuantity(yieldOf(2, 2.5, null, null), 1),
+                "2 x 2.5 = 5.0 exactly");
+        assertEquals(7, StationYield.resolveQuantity(yieldOf(3, 2.5, null, null), 1),
+                "3 x 2.5 = 7.5 floors to 7 - deterministic, never a remainder roll");
     }
 
     @Test
-    void unresolvedFactor_contributesZero() {
-        StationAsset.Yield y = StationAsset.Yield.of(1, null,
-                bonus(new FactorRef[]{ref("fixture:missing", 1.0)}, floor(1.0, 1.0)), null, null);
-        assertEquals(0.0, StationYield.ladderValue(y, lookup(Map.of())));
+    void absentOrNonPositiveScale_isTheNeutralOne() {
+        assertEquals(3, StationYield.resolveQuantity(yieldOf(3, null, null, null), 1));
+        assertEquals(3, StationYield.resolveQuantity(yieldOf(3, 0.0, null, null), 1));
+        assertEquals(3, StationYield.resolveQuantity(yieldOf(3, -4.0, null, null), 1));
+    }
+
+    // ==================== The absolute 1-item floor ====================
+
+    @Test
+    void aSubOneResult_stillProducesOneItem_becauseItemLossIsNeverATuningOutcome() {
+        assertEquals(1, StationYield.resolveQuantity(yieldOf(1, 0.4, null, null), 1));
+        assertEquals(1, StationYield.resolveQuantity(yieldOf(2, 0.1, null, null), 1));
     }
 
     @Test
-    void reachedFloor_addsItsAddOnTopOfTheScaledBase() {
-        StationAsset.Yield y = StationAsset.Yield.of(2, null,
-                bonus(new FactorRef[]{ref("fixture:v", null)}, floor(5.0, 1.0)), null, null);
-        assertEquals(2, StationYield.resolveQuantity(y, 1, 4.9, NEVER));
-        assertEquals(3, StationYield.resolveQuantity(y, 1, 5.0, NEVER));
-        assertEquals(3, StationYield.resolveQuantity(y, 1, 100.0, NEVER));
+    void authoredMinBelowTheAbsoluteFloor_cannotLowerIt() {
+        assertEquals(1, StationYield.resolveQuantity(yieldOf(1, 0.2, 0, null), 1));
+        assertEquals(1, StationYield.resolveQuantity(yieldOf(1, 0.2, -5, null), 1));
+    }
+
+    // ==================== Min / Max clamps ====================
+
+    @Test
+    void authoredMin_raisesASmallResult() {
+        assertEquals(4, StationYield.resolveQuantity(yieldOf(1, null, 4, null), 1));
     }
 
     @Test
-    void floorsAreNotCumulative_highestReachedWins() {
-        StationAsset.Yield y = StationAsset.Yield.of(2, null,
-                bonus(new FactorRef[]{ref("fixture:v", null)}, floor(5.0, 1.0), floor(9.0, 2.0)), null, null);
-        assertEquals(0.0, StationYield.bonusAdd(y, 4.0));
-        assertEquals(1.0, StationYield.bonusAdd(y, 5.0));
-        assertEquals(1.0, StationYield.bonusAdd(y, 8.9));
-        // NOT 3 - the 9.0 floor replaces the 5.0 one rather than stacking with it.
-        assertEquals(2.0, StationYield.bonusAdd(y, 9.0));
+    void authoredMax_capsALargeResult() {
+        assertEquals(5, StationYield.resolveQuantity(yieldOf(20, null, null, 5), 1));
     }
 
     @Test
-    void floorOrderInTheArrayDoesNotMatter() {
-        StationAsset.Yield descending = StationAsset.Yield.of(1, null,
-                bonus(new FactorRef[]{ref("fixture:v", null)}, floor(9.0, 2.0), floor(5.0, 1.0)), null, null);
-        assertEquals(2.0, StationYield.bonusAdd(descending, 9.0));
-        assertEquals(1.0, StationYield.bonusAdd(descending, 5.0));
+    void minAboveMax_resolvesToMax_soTheClampNeverContradictsItself() {
+        assertEquals(2, StationYield.resolveQuantity(yieldOf(1, null, 9, 2), 1));
     }
 
     @Test
-    void noBonusGroup_addsNothing() {
-        assertEquals(0.0, StationYield.bonusAdd(StationAsset.Yield.of(2, null, null, null, null), 999.0));
+    void aNonPositiveMax_isIgnoredRatherThanErasingTheOutput() {
+        assertEquals(3, StationYield.resolveQuantity(yieldOf(3, null, null, 0), 1));
     }
 
-    // ==================== Fractional remainder ====================
+    // ==================== applyToOutputs ====================
 
-    /** A fractional yield: base 1 plus a 1.5 floor = an exact 2.5. */
-    private static StationAsset.Yield fractional() {
-        return StationAsset.Yield.of(1, null,
-                bonus(new FactorRef[]{ref("fixture:v", null)}, floor(10.0, 1.5)), null, null);
+    @Test
+    void applyToOutputs_isIdentityOnANullYield_soTheNoKnobPathAllocatesNothing() {
+        Ingredient[] outputs = {Ingredient.item("Fixture_Plank", 2)};
+        assertSame(outputs, StationYield.applyToOutputs(null, outputs));
     }
 
     @Test
-    void exactQuantity_keepsTheFractionBeforeAnyRoll() {
-        assertEquals(2.5, StationYield.exactQuantity(fractional(), 1, 10.0), 1e-9);
+    void applyToOutputs_scalesEveryOutputOfAMultiOutputConversion() {
+        Ingredient[] outputs = {
+                Ingredient.item("Fixture_Plank", 2),
+                Ingredient.item("Fixture_Offcut", 1)};
+        Ingredient[] scaled = StationYield.applyToOutputs(yieldOf(null, 3.0, null, null), outputs);
+
+        assertEquals(6, scaled[0].effectiveQuantity(), "the main product scales");
+        assertEquals(3, scaled[1].effectiveQuantity(), "so does the byproduct - one recipe, one curve");
+        assertEquals("Fixture_Plank", scaled[0].getItemId());
+        assertEquals("Fixture_Offcut", scaled[1].getItemId());
     }
 
     @Test
-    void fractionalYield_paysTheWholePartAlwaysAndTheRemainderOnAWinningRoll() {
-        assertEquals(2, StationYield.resolveQuantity(fractional(), 1, 10.0, NEVER));
-        assertEquals(3, StationYield.resolveQuantity(fractional(), 1, 10.0, ALWAYS));
-    }
-
-    @Test
-    void wholeNumberYield_isUnaffectedByTheRoll() {
-        StationAsset.Yield whole = StationAsset.Yield.of(2, null, null, null, null);
-        assertEquals(2, StationYield.resolveQuantity(whole, 1, 0.0, NEVER));
-        assertEquals(2, StationYield.resolveQuantity(whole, 1, 0.0, ALWAYS));
-    }
-
-    @Test
-    void remainderRollComparesAgainstTheFractionItself() {
-        // Exact 2.5 -> a roll of 0.49 wins (0.49 < 0.5), a roll of 0.51 loses.
-        assertEquals(3, StationYield.resolveQuantity(fractional(), 1, 10.0, () -> 0.49));
-        assertEquals(2, StationYield.resolveQuantity(fractional(), 1, 10.0, () -> 0.51));
-    }
-
-    // ==================== Clamps ====================
-
-    @Test
-    void minRaisesAndMaxCapsTheFinalQuantity() {
-        assertEquals(5, StationYield.resolveQuantity(
-                StationAsset.Yield.of(1, null, null, 5, null), 1, 0.0, NEVER));
-        assertEquals(3, StationYield.resolveQuantity(
-                StationAsset.Yield.of(10, null, null, null, 3), 1, 0.0, NEVER));
-    }
-
-    @Test
-    void oneItemFloorIsAlwaysEnforced() {
-        // Base 1 scaled by 0.1 is 0.1, which would consume inputs and produce nothing on a lost roll.
-        assertEquals(StationAsset.Yield.ABSOLUTE_MIN, StationYield.resolveQuantity(
-                StationAsset.Yield.of(1, 0.1, null, null, null), 1, 0.0, NEVER));
-        // An authored Min below the absolute floor cannot lower it either.
-        assertEquals(StationAsset.Yield.ABSOLUTE_MIN, StationYield.resolveQuantity(
-                StationAsset.Yield.of(1, 0.1, null, 0, null), 1, 0.0, NEVER));
-    }
-
-    // ==================== Multi-output ====================
-
-    @Test
-    void everyOutputOfAMultiOutputConversionIsTransformed() {
-        StationAsset.Yield y = StationAsset.Yield.of(null, 2.0, null, null, null);
-        Ingredient[] outputs = {Ingredient.item("Main", 3), Ingredient.item("Byproduct", 1)};
-        Ingredient[] out = StationYield.applyToOutputs(y, outputs, 0.0, NEVER);
-        assertEquals(6, out[0].effectiveQuantity());
-        assertEquals("Main", out[0].getItemId());
-        assertEquals(2, out[1].effectiveQuantity());
-        assertEquals("Byproduct", out[1].getItemId());
+    void applyToOutputs_isDeterministic_soRepeatedCallsAgree() {
+        Ingredient[] outputs = {Ingredient.item("Fixture_Plank", 3)};
+        StationAsset.Yield y = yieldOf(null, 2.5, null, null);
+        int first = StationYield.applyToOutputs(y, outputs)[0].effectiveQuantity();
+        for (int i = 0; i < 20; i++) {
+            assertEquals(first, StationYield.applyToOutputs(y, outputs)[0].effectiveQuantity(),
+                    "the same authored Yield always produces the same quantity");
+        }
     }
 }

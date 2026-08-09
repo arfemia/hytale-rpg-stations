@@ -22,9 +22,22 @@ import com.ziggfreed.common.codec.TagMatch;
 
 /**
  * An interactive work station (diegetic work loop), loaded from a pack's
- * {@code Server/RpgStations/Stations/*.json}. {@link #requires} is this mod's own
- * {@link Requires} gate codec, and {@link #loot} is the conditional-lootable
- * {@code {Lootables, Rolls}} group over the shared {@link Roll} codec.
+ * {@code Server/RpgStations/Stations/*.json}.
+ *
+ * <p><b>A station is an ORDERED LIST OF SELF-CONTAINED ACTIONS.</b> Everything about HOW work runs
+ * lives inside an {@link ActionDef} entry of {@link #actions}: its own recipe, tool gate, work
+ * cadence, custody, worker presentation, and moments. This asset itself keeps only the four things
+ * that genuinely belong to the STATION rather than to a job:
+ * <ul>
+ *   <li>{@link #identity} - the station IS one thing (name, description, icon).</li>
+ *   <li>{@link #block} - one worker per placed block is a property of the block.</li>
+ *   <li>{@link #requires} - may you use this station AT ALL. It is ANDed with the engaged action's
+ *   own {@code Requires}; it never supplies a default for one.</li>
+ *   <li>{@link #flairs} - a cosmetic lookup table keyed by moment id, consulted by every action.</li>
+ * </ul>
+ * No group here is a per-action default: an action reads its own groups, or the {@code Ref}/native
+ * {@code Parent} base it explicitly names, and nothing else. Truly shared pieces are separate
+ * {@link ActionAsset} files referenced by id.
  *
  * <p><b>Pattern A - full structured asset, the runtime authority.</b> {@link #CODEC} is the
  * single decode schema for this type; every decoded instance folds into
@@ -39,52 +52,21 @@ public final class StationAsset
     private AssetExtraInfo.Data data;
 
     @Nullable private Identity identity;
-    @Nullable private Work work;
-    @Nullable private Recipe recipe;
-    @Nullable private Hold hold;
-    @Nullable private Tool tool;
+    /** Properties of the PLACED BLOCK itself (occupancy), never of a job run at it. */
+    @Nullable private Block block;
     /**
-     * The conditional-lootable declaration - scope-2's unified {@link LootRef} ({@code Lootables}
-     * + inline {@code Rolls}), replacing the old bespoke {@code Loot {Tables, Rolls}} group.
+     * The station-entry gate, ANDed with the engaged action's own {@code Requires} at engage.
+     * Deliberately not a default: an action that authors none is gated by this one alone.
      */
-    @Nullable private LootRef loot;
-    @Nullable private Camera camera;
-    @Nullable private Animation animation;
-    /** The CYCLE-complete presentation moment (sound/particles at the block per finished cycle). */
-    @Nullable private Presentation presentation;
-    /**
-     * The SESSION-COMPLETION presentation moment: the "work complete" beat, played by
-     * {@code StationService#stop} for a NON-SILENT stop with at least one completed cycle.
-     */
-    @Nullable private Presentation completion;
     @Nullable private Requires requires;
-    /**
-     * Session-scoped placed-input custody (design section 9.4, phase-2 leg C): absent means the
-     * classic direct-inventory Consume/Produce flow (phase-1 behavior byte-parity); authored opts
-     * the state-dependent F interaction in - see {@code station.StationService#toggle}.
-     */
-    @Nullable private Custody custody;
-    /**
-     * The puppet presentation route (round-4 design): mount the player, hide their body, and
-     * spawn a skinned visual performing the work instead - see {@link Puppet}'s own javadoc for
-     * the full knob family. Null = the classic in-body worker (this leg's default; opt-in).
-     */
-    @Nullable private Puppet puppet;
     /** Named cosmetic flair overrides, keyed by flair id. */
     @Nullable private Map<String, Flair> flairs;
     /**
-     * The multi-output picker knob group (seam wave, decision 50); null = the default (locked
-     * categories shown greyed). Whole-group overridable per {@link ActionDef}.
+     * The station's actions, in AUTHORED ORDER - which IS selection priority (the first entry whose
+     * {@code Select} matches the context wins). Every station authors at least one; an empty/absent
+     * array leaves the station inert (the validator reports it).
      */
-    @Nullable private Picker picker;
-    /**
-     * Multi-action stations (design section 9.1): named, ordered whole-group overrides of this
-     * asset's own groups. {@code null}/empty means the phase-1 single implicit {@code "work"}
-     * action built from THIS asset's own groups - see {@code station.ActionResolver}. Native
-     * {@code Parent} inheritance composes at this WHOLE-MAP level (inherit-on-omit, own-wins-on-
-     * author), same as {@link #flairs}.
-     */
-    @Nullable private Map<String, ActionDef> actions;
+    @Nullable private ActionDef[] actions;
 
     public static final AssetBuilderCodec<String, StationAsset> CODEC = AssetBuilderCodec.builder(
                     StationAsset.class,
@@ -105,68 +87,24 @@ public final class StationAsset
                     (a, v) -> a.identity = v, a -> a.identity, (a, parent) -> a.identity = parent.identity)
             .documentation("Display name/description localization keys plus the icon item id, shown at the station's engage prompt and any station-listing UI.")
             .metadata(new UIEditorSectionStart("Identity")).add()
-            .appendInherited(new KeyedCodec<>("Work", Work.CODEC, false),
-                    (a, v) -> a.work = v, a -> a.work, (a, parent) -> a.work = parent.work)
-            .documentation("The work-loop cadence, duration/exit bounds, per-cycle contributions, looping flag, and optional idle-practice mode.")
-            .metadata(new UIEditorSectionStart("Work")).add()
-            .appendInherited(new KeyedCodec<>("Recipe", Recipe.CODEC, false),
-                    (a, v) -> a.recipe = v, a -> a.recipe, (a, parent) -> a.recipe = parent.recipe)
-            .documentation("The Convert recipe: authored Conversions and/or a FromCrafting derivation from native recipes.")
-            .metadata(new UIEditorSectionStart("Recipe")).add()
-            .appendInherited(new KeyedCodec<>("Hold", Hold.CODEC, false),
-                    (a, v) -> a.hold = v, a -> a.hold, (a, parent) -> a.hold = parent.hold)
-            .documentation("The movement lock while working: the default self-effect hold, or the Mount knob family (seated/standing mount).")
-            .metadata(new UIEditorSectionStart("Hold")).add()
-            .appendInherited(new KeyedCodec<>("Tool", Tool.CODEC, false),
-                    (a, v) -> a.tool = v, a -> a.tool, (a, parent) -> a.tool = parent.tool)
-            .documentation("The held-tool gate (tag/gather/id match routes), tool-power contribution scaling, durability drain, and minimum-durability start gate.")
-            .metadata(new UIEditorSectionStart("Tool")).add()
-            .appendInherited(new KeyedCodec<>("Loot", LootRef.CODEC, false),
-                    (a, v) -> a.loot = v, a -> a.loot, (a, parent) -> a.loot = parent.loot)
-            .documentation("Conditional loot for the implicit action: a LootRef (referenced Lootables + inline Rolls).")
-            .metadata(new UIEditorSectionStart("Loot")).add()
-            .appendInherited(new KeyedCodec<>("Camera", Camera.CODEC, false),
-                    (a, v) -> a.camera = v, a -> a.camera, (a, parent) -> a.camera = parent.camera)
-            .documentation("The third-person camera pull while working, plus the optional fixed-look FaceBlock preset.")
-            .metadata(new UIEditorSectionStart("Camera")).add()
-            .appendInherited(new KeyedCodec<>("Animation", Animation.CODEC, false),
-                    (a, v) -> a.animation = v, a -> a.animation, (a, parent) -> a.animation = parent.animation)
-            .documentation("The work emote id plus the optional per-swing cadence/impact cue layer.")
-            .metadata(new UIEditorSectionStart("Animation")).add()
-            .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
-                    (a, v) -> a.presentation = v, a -> a.presentation, (a, parent) -> a.presentation = parent.presentation)
-            .documentation("The CYCLE-complete presentation moment: sound/particles/animation cues fired at the block each finished cycle.")
-            .metadata(new UIEditorSectionStart("Presentation")).add()
-            .appendInherited(new KeyedCodec<>("Completion", Presentation.CODEC, false),
-                    (a, v) -> a.completion = v, a -> a.completion, (a, parent) -> a.completion = parent.completion)
-            .documentation("The SESSION-COMPLETION presentation moment, played on a non-silent stop with at least one completed cycle. Null = silent completion.")
-            .metadata(new UIEditorSectionStart("Completion")).add()
+            .appendInherited(new KeyedCodec<>("Block", Block.CODEC, false),
+                    (a, v) -> a.block = v, a -> a.block, (a, parent) -> a.block = parent.block)
+            .documentation("Properties of the PLACED BLOCK: currently just Exclusive, whether one worker at a time owns it.")
+            .metadata(new UIEditorSectionStart("Block")).add()
             .appendInherited(new KeyedCodec<>("Requires", Requires.CODEC, false),
                     (a, v) -> a.requires = v, a -> a.requires, (a, parent) -> a.requires = parent.requires)
-            .documentation("The start gate: an optional permission node plus factor Conditions, evaluated once at engage.")
+            .documentation("The STATION-entry gate (permission plus factor Conditions), evaluated once at engage and ANDed with the engaged action's own Requires. It never supplies a default for an action.")
             .metadata(new UIEditorSectionStart("Requires")).add()
-            .appendInherited(new KeyedCodec<>("Custody", Custody.CODEC, false),
-                    (a, v) -> a.custody = v, a -> a.custody, (a, parent) -> a.custody = parent.custody)
-            .documentation("Session-scoped placed-input custody; null = the classic direct-inventory Consume/Produce flow.")
-            .metadata(new UIEditorSectionStart("Custody")).add()
-            .appendInherited(new KeyedCodec<>("Puppet", Puppet.CODEC, false),
-                    (a, v) -> a.puppet = v, a -> a.puppet, (a, parent) -> a.puppet = parent.puppet)
-            .documentation("The puppet presentation route: mount the player, hide their body, spawn a skinned visual performing the work. Null = the classic in-body worker.")
-            .metadata(new UIEditorSectionStart("Puppet")).add()
             .appendInherited(new KeyedCodec<>("Flairs",
                             new MapCodec<>(Flair.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.flairs = v, a -> a.flairs, (a, parent) -> a.flairs = parent.flairs)
             .documentation("Named cosmetic flair overrides, keyed by flair id; each entry overlays its non-null Moments onto the base presentation when that flair is unlocked for the player.")
             .metadata(new UIEditorSectionStart("Flairs")).add()
             .appendInherited(new KeyedCodec<>("Actions",
-                            new MapCodec<>(ActionDef.CODEC, LinkedHashMap::new), false),
+                            new ArrayCodec<>(ActionDef.CODEC, ActionDef[]::new), false),
                     (a, v) -> a.actions = v, a -> a.actions, (a, parent) -> a.actions = parent.actions)
-            .documentation("Named, authored-order multi-action overrides; null/empty means the single implicit 'work' action built from this station's own groups.")
+            .documentation("This station's actions, in AUTHORED ORDER - the order IS selection priority, so the first entry whose Select matches the held or placed material runs. Each entry is self-contained; nothing is inherited from the station.")
             .metadata(new UIEditorSectionStart("Actions")).add()
-            .appendInherited(new KeyedCodec<>("Picker", Picker.CODEC, false),
-                    (a, v) -> a.picker = v, a -> a.picker, (a, parent) -> a.picker = parent.picker)
-            .documentation("The multi-output picker knob group (decision 50); default = locked categories shown greyed.")
-            .metadata(new UIEditorSectionStart("Picker")).add()
             .build();
 
     public StationAsset() {
@@ -174,53 +112,19 @@ public final class StationAsset
 
     /** Java-side construction path; sets the same fields the codec fills. */
     @Nonnull
-    public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
-            @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
-            @Nullable Animation animation, @Nullable Presentation presentation, @Nullable Requires requires) {
-        return of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires, null);
-    }
-
-    /** Java-side construction path with the optional {@link Loot} override. */
-    @Nonnull
-    public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
-            @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
-            @Nullable Animation animation, @Nullable Presentation presentation,
-            @Nullable Requires requires, @Nullable LootRef loot) {
-        return of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires, loot, null);
-    }
-
-    /** Java-side construction path with the optional {@link Loot} AND {@link Flair} map override. */
-    @Nonnull
-    public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
-            @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
-            @Nullable Animation animation, @Nullable Presentation presentation,
-            @Nullable Requires requires, @Nullable LootRef loot, @Nullable Map<String, Flair> flairs) {
+    public static StationAsset of(@Nonnull String id, @Nullable Identity identity) {
         StationAsset a = new StationAsset();
         a.id = id;
         a.identity = identity;
-        a.work = work;
-        a.recipe = recipe;
-        a.hold = hold;
-        a.tool = tool;
-        a.loot = loot;
-        a.camera = camera;
-        a.animation = animation;
-        a.presentation = presentation;
-        a.requires = requires;
-        a.flairs = flairs;
         return a;
     }
 
-    /** Java-side construction path with the optional {@link Loot}, {@link Flair} map, AND {@link #completion}. */
+    /** Java-side construction path with the station's ordered action list. */
     @Nonnull
-    public static StationAsset of(@Nonnull String id, @Nullable Identity identity, @Nullable Work work,
-            @Nullable Recipe recipe, @Nullable Hold hold, @Nullable Tool tool, @Nullable Camera camera,
-            @Nullable Animation animation, @Nullable Presentation presentation,
-            @Nullable Requires requires, @Nullable LootRef loot, @Nullable Map<String, Flair> flairs,
-            @Nullable Presentation completion) {
-        StationAsset a = of(id, identity, work, recipe, hold, tool, camera, animation, presentation, requires,
-                loot, flairs);
-        a.completion = completion;
+    public static StationAsset of(@Nonnull String id, @Nullable Identity identity,
+            @Nullable ActionDef... actions) {
+        StationAsset a = of(id, identity);
+        a.actions = actions;
         return a;
     }
 
@@ -260,69 +164,16 @@ public final class StationAsset
         return identity;
     }
 
+    /** Placed-block properties (occupancy); null = the reader defaults (exclusive). */
     @Nullable
-    public Work getWork() {
-        return work;
+    public Block getBlock() {
+        return block;
     }
 
-    @Nullable
-    public Recipe getRecipe() {
-        return recipe;
-    }
-
-    @Nullable
-    public Hold getHold() {
-        return hold;
-    }
-
-    @Nullable
-    public Tool getTool() {
-        return tool;
-    }
-
-    /** The conditional-lootable declaration (scope-2 {@link LootRef}); null = none authored. */
-    @Nullable
-    public LootRef getLoot() {
-        return loot;
-    }
-
-    @Nullable
-    public Camera getCamera() {
-        return camera;
-    }
-
-    @Nullable
-    public Animation getAnimation() {
-        return animation;
-    }
-
-    /** The CYCLE-complete presentation moment (sound/particles at the block per finished cycle). */
-    @Nullable
-    public Presentation getPresentation() {
-        return presentation;
-    }
-
-    /** The SESSION-COMPLETION presentation moment; null = silent (no completion flourish). */
-    @Nullable
-    public Presentation getCompletion() {
-        return completion;
-    }
-
+    /** The STATION-entry gate, ANDed with the engaged action's own; null = no station gate. */
     @Nullable
     public Requires getRequires() {
         return requires;
-    }
-
-    /** Session-scoped placed-input custody (design 9.4); null = classic direct-inventory flow. */
-    @Nullable
-    public Custody getCustody() {
-        return custody;
-    }
-
-    /** The puppet presentation route (round-4 design); null = the classic in-body worker. */
-    @Nullable
-    public Puppet getPuppet() {
-        return puppet;
     }
 
     /** Named cosmetic flair overrides, keyed by flair id; null = none authored. */
@@ -331,43 +182,81 @@ public final class StationAsset
         return flairs;
     }
 
-    /** The multi-output picker knob group (decision 50); null = the default (locked categories shown greyed). */
-    @Nullable
-    public Picker getPicker() {
-        return picker;
-    }
-
     /**
-     * Named, authored-order action overrides (design section 9.1); {@code null}/empty means the
-     * single implicit {@code "work"} action - see {@code station.ActionResolver#actionIds}.
+     * This station's actions in AUTHORED ORDER (which IS selection priority); null/empty leaves the
+     * station inert - see {@code station.ActionResolver}.
      */
     @Nullable
-    public Map<String, ActionDef> getActions() {
+    public ActionDef[] getActions() {
         return actions;
     }
 
     /** Java-side test/fixture helper; not part of any codec fold. */
     @Nonnull
-    public StationAsset withActions(@Nullable Map<String, ActionDef> actions) {
+    public StationAsset withActions(@Nullable ActionDef... actions) {
         this.actions = actions;
         return this;
     }
 
     /** Java-side test/fixture helper; not part of any codec fold. */
     @Nonnull
-    public StationAsset withCustody(@Nullable Custody custody) {
-        this.custody = custody;
+    public StationAsset withBlock(@Nullable Block block) {
+        this.block = block;
         return this;
     }
 
     /** Java-side test/fixture helper; not part of any codec fold. */
     @Nonnull
-    public StationAsset withPuppet(@Nullable Puppet puppet) {
-        this.puppet = puppet;
+    public StationAsset withRequires(@Nullable Requires requires) {
+        this.requires = requires;
+        return this;
+    }
+
+    /** Java-side test/fixture helper; not part of any codec fold. */
+    @Nonnull
+    public StationAsset withFlairs(@Nullable Map<String, Flair> flairs) {
+        this.flairs = flairs;
         return this;
     }
 
     // ==================== Nested groups (nullable leaves) ====================
+
+    /**
+     * The PLACED BLOCK's own properties - the one thing a station owns that is not a property of a
+     * job. {@link #exclusive} reader-defaults to {@code true}: one worker at a time owns a placed
+     * station block, so a second player's engage is denied while it is occupied.
+     */
+    public static final class Block {
+        @Nullable protected Boolean exclusive;
+
+        public static final BuilderCodec<Block> CODEC = BuilderCodec.builder(Block.class, Block::new)
+                .appendInherited(new KeyedCodec<>("Exclusive", Codec.BOOLEAN, false),
+                        (o, v) -> o.exclusive = v, o -> o.exclusive, (o, p) -> o.exclusive = p.exclusive)
+                .documentation("Whether one worker at a time owns this placed block (a second player's engage is denied while it is occupied). Reader-defaults to true.").add()
+                .build();
+
+        @Nonnull
+        public static Block of(@Nullable Boolean exclusive) {
+            Block b = new Block();
+            b.exclusive = exclusive;
+            return b;
+        }
+
+        @Nullable
+        public Boolean getExclusive() {
+            return exclusive;
+        }
+
+        /** {@link #exclusive}, reader-defaulted to {@code true} when absent. */
+        public boolean effectiveExclusive() {
+            return exclusive == null || exclusive;
+        }
+
+        /** The reader default for a station that authors no {@code Block} group at all. */
+        public static boolean effectiveExclusive(@Nullable Block block) {
+            return block == null || block.effectiveExclusive();
+        }
+    }
 
     /** Display keys and icon (an item id, per the ability-icon convention). */
     public static final class Identity {
@@ -417,14 +306,14 @@ public final class StationAsset
 
     /**
      * The work-loop cadence and bounds. Reader defaults ({@code StationService}):
-     * {@code CycleMs} 5000, {@code MaxDurationMs} 600000, {@code MaxMoveMeters} 1.5,
-     * {@code Exclusive} true. {@code MaxMoveMeters} is an EXIT trigger, NOT an anti-idle guard.
+     * {@code CycleMs} 5000, {@code MaxDurationMs} 600000, {@code MaxMoveMeters} 1.5.
+     * {@code MaxMoveMeters} is an EXIT trigger, NOT an anti-idle guard. Block occupancy is NOT here:
+     * one worker per placed block is a property of the block ({@link Block#getExclusive()}).
      */
     public static final class Work {
         @Nullable protected Long cycleMs;
         @Nullable protected Long maxDurationMs;
         @Nullable protected Double maxMoveMeters;
-        @Nullable protected Boolean exclusive;
         @Nullable protected Contribution[] perCycleContributions;
         @Nullable protected Idle idle;
         @Nullable protected Boolean looping;
@@ -444,21 +333,17 @@ public final class StationAsset
                         (o, p) -> o.maxMoveMeters = p.maxMoveMeters)
                 .documentation("The walk-off EXIT trigger radius in meters from the engage position (not an anti-idle guard). Reader-defaults to 1.5.")
                 .addValidator(CodecWarnValidators.positive("Work.MaxMoveMeters should be positive.")).add()
-                .appendInherited(new KeyedCodec<>("Exclusive", Codec.BOOLEAN, false),
-                        (o, v) -> o.exclusive = v, o -> o.exclusive, (o, p) -> o.exclusive = p.exclusive)
-                .documentation("Whether the station block is exclusive to one worker at a time (a second player's engage is denied while occupied). Reader-defaults to true.").add()
                 .appendInherited(new KeyedCodec<>("PerCycleContributions",
                                 new ArrayCodec<>(Contribution.CODEC, Contribution[]::new), false),
                         (o, v) -> o.perCycleContributions = v, o -> o.perCycleContributions,
                         (o, p) -> o.perCycleContributions = p.perCycleContributions)
                 .documentation("Amounts posted on every completed cycle, forwarded verbatim on the cycle-completed "
-                        + "event; the engine never interprets a channel itself. SCALED: each Amount is multiplied by "
-                        + "the resolved tool multiplier (Tool.PowerScale) and, on an idle cycle, pre-scaled by "
-                        + "Work.Idle.Fraction. Contrast Roll.Grants.Contributions, which is one-shot and never "
-                        + "scaled.").add()
+                        + "event; the engine never interprets a channel itself. On an IDLE cycle each Amount is "
+                        + "pre-scaled by Work.Idle.Fraction. Contrast Roll.Grants.Contributions, which is one-shot "
+                        + "and never scaled.").add()
                 .appendInherited(new KeyedCodec<>("Idle", Idle.CODEC, false),
                         (o, v) -> o.idle = v, o -> o.idle, (o, p) -> o.idle = p.idle)
-                .documentation("Opt-in no-material idle practice mode; null/absent Enabled = off (a NO_INPUTS start is denied).").add()
+                .documentation("Opt-in no-material idle practice mode: authoring this group at all turns it on; absent = off (a NO_INPUTS start is denied).").add()
                 .appendInherited(new KeyedCodec<>("Looping", Codec.BOOLEAN, false),
                         (o, v) -> o.looping = v, o -> o.looping, (o, p) -> o.looping = p.looping)
                 .documentation("Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape).").add()
@@ -466,23 +351,28 @@ public final class StationAsset
 
         @Nonnull
         public static Work of(@Nullable Long cycleMs, @Nullable Long maxDurationMs,
-                @Nullable Double maxMoveMeters, @Nullable Boolean exclusive,
-                @Nullable Contribution[] perCycleContributions) {
-            return of(cycleMs, maxDurationMs, maxMoveMeters, exclusive, perCycleContributions, null);
+                @Nullable Double maxMoveMeters, @Nullable Contribution[] perCycleContributions) {
+            return of(cycleMs, maxDurationMs, maxMoveMeters, perCycleContributions, null);
         }
 
         @Nonnull
         public static Work of(@Nullable Long cycleMs, @Nullable Long maxDurationMs,
-                @Nullable Double maxMoveMeters, @Nullable Boolean exclusive,
+                @Nullable Double maxMoveMeters,
                 @Nullable Contribution[] perCycleContributions, @Nullable Idle idle) {
             Work w = new Work();
             w.cycleMs = cycleMs;
             w.maxDurationMs = maxDurationMs;
             w.maxMoveMeters = maxMoveMeters;
-            w.exclusive = exclusive;
             w.perCycleContributions = perCycleContributions;
             w.idle = idle;
             return w;
+        }
+
+        /** Java-side test/fixture helper for the looping flag; not part of any codec fold. */
+        @Nonnull
+        public Work withLooping(@Nullable Boolean looping) {
+            this.looping = looping;
+            return this;
         }
 
         @Nullable
@@ -498,11 +388,6 @@ public final class StationAsset
         @Nullable
         public Double getMaxMoveMeters() {
             return maxMoveMeters;
-        }
-
-        @Nullable
-        public Boolean getExclusive() {
-            return exclusive;
         }
 
         /**
@@ -543,10 +428,14 @@ public final class StationAsset
         }
 
         /**
-         * Opt-in no-material idle practice: when the station has no runnable conversion AND
-         * {@link #enabled}, the session keeps cycling and forwards a small FRACTION of the
-         * authored per-cycle contributions instead of stopping (no conversion, no loot). Default
-         * OFF. {@link #cycleMs} reader-defaults to 3x the effective {@code Work.CycleMs}, floored
+         * Opt-in no-material idle practice: when the station has no runnable conversion, the session
+         * keeps cycling and forwards a small FRACTION of the authored per-cycle contributions instead
+         * of stopping (no conversion, no loot). AUTHORING THIS GROUP AT ALL OPTS IN - {@link #enabled}
+         * reader-defaults to {@code true}, the same group-presence-means-on idiom every other
+         * nullable group with an {@code Enabled} leaf uses, so {@code "Idle": {"Fraction": 0.2}} does
+         * what it looks like it does. The leaf survives purely so native {@code Parent} inheritance
+         * can flip idle OFF on a child station while inheriting the rest of the group unchanged.
+         * {@link #cycleMs} reader-defaults to 3x the effective {@code Work.CycleMs}, floored
          * at 2x it; {@link #fraction} reader-defaults to 0.1, clamped to {@code [0, 1]}.
          */
         public static final class Idle {
@@ -557,7 +446,7 @@ public final class StationAsset
             public static final BuilderCodec<Idle> CODEC = BuilderCodec.builder(Idle.class, Idle::new)
                     .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
                             (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled)
-                    .documentation("Opts into no-material idle practice when no conversion is runnable. Default false (a NO_INPUTS start denies).").add()
+                    .documentation("Whether no-material idle practice applies when no conversion is runnable. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's Idle group with practice switched off.").add()
                     .appendInherited(new KeyedCodec<>("CycleMs", Codec.LONG, false),
                             (o, v) -> o.cycleMs = v, o -> o.cycleMs, (o, p) -> o.cycleMs = p.cycleMs)
                     .documentation("Milliseconds per idle cycle. Reader-defaults to 3x the effective Work.CycleMs, floored at 2x it.")
@@ -565,8 +454,7 @@ public final class StationAsset
                     .appendInherited(new KeyedCodec<>("Fraction", Codec.DOUBLE, false),
                             (o, v) -> o.fraction = v, o -> o.fraction, (o, p) -> o.fraction = p.fraction)
                     .documentation("The fraction of a normal cycle's Work.PerCycleContributions amounts an idle cycle "
-                            + "posts (tool multiplier forced to 1.0, no conversion/loot). Reader-defaults to 0.1, "
-                            + "clamped to [0,1].")
+                            + "posts (no conversion, no loot). Reader-defaults to 0.1, clamped to [0,1].")
                     .addValidator(CodecWarnValidators.nonNegative("Work.Idle.Fraction should not be negative.")).add()
                     .build();
 
@@ -582,6 +470,11 @@ public final class StationAsset
             @Nullable
             public Boolean getEnabled() {
                 return enabled;
+            }
+
+            /** {@link #enabled}, reader-defaulted to {@code true} when null (an authored group means on). */
+            public boolean effectiveEnabled() {
+                return enabled == null || enabled;
             }
 
             @Nullable
@@ -601,8 +494,18 @@ public final class StationAsset
     }
 
     /**
-     * The Convert recipe. Its EFFECTIVE conversions ({@code StationCatalog.resolvedConversions})
-     * are authored {@link #conversions} FIRST, then any {@link FromCrafting}-derived conversions.
+     * The ONE transform an action performs: its conversions (authored and/or derived from the
+     * engine's own native crafting recipes) plus the output-quantity {@link Yield}. Its EFFECTIVE
+     * conversions ({@code StationCatalog.resolvedConversions}) are authored {@link #conversions}
+     * FIRST, then any {@link FromCrafting}-derived ones.
+     *
+     * <p><b>One recipe per action.</b> Two transforms means two actions, which is cheap because an
+     * action carries no boilerplate to repeat. There is deliberately no per-recipe tool override:
+     * the ACTION's own {@code Tool} is the gate, so "which tool" and "which transform" are answered
+     * in the same place a reader is already looking.
+     *
+     * <p><b>{@link #yield} belongs to the recipe</b>: what a station yields is a property of the
+     * transform that produces it, not of how that transform was discovered.
      */
     public static final class Recipe {
         @Nullable protected Conversion[] conversions;
@@ -621,7 +524,7 @@ public final class StationAsset
                 .documentation("Derive additional Conversions from the engine's own native crafting/processing recipes; null = no derivation.").add()
                 .appendInherited(new KeyedCodec<>("Yield", Yield.CODEC, false),
                         (o, v) -> o.yield = v, o -> o.yield, (o, p) -> o.yield = p.yield)
-                .documentation("Per-cycle output-quantity transform applied to whichever conversion runs (authored or derived); null = each conversion's own authored quantity, unchanged.").add()
+                .documentation("Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived); null = each conversion's own authored quantity, unchanged.").add()
                 .build();
 
         @Nonnull
@@ -659,6 +562,11 @@ public final class StationAsset
         public Yield getYield() {
             return yield;
         }
+
+        /** True when this recipe can actually produce something (authored conversions or a derive rule). */
+        public boolean isRunnable() {
+            return (conversions != null && conversions.length > 0) || fromCrafting != null;
+        }
     }
 
     /**
@@ -667,36 +575,22 @@ public final class StationAsset
      * it sits on {@link Recipe} rather than inside {@link FromCrafting}: what a station YIELDS is a
      * property of the recipe, not of how that recipe was discovered.
      *
-     * <p><b>Resolution order</b> (all four leaves independent and composable, no mode):
-     * {@code Base} (or the conversion's own authored quantity when {@code Base} is absent) is scaled
-     * by {@code Scale}, then {@code Bonus}'s reached floor adds its {@code Add}, then the result
-     * is clamped into {@code [Min, Max]}. A floor of 1 output is ALWAYS enforced underneath - a
-     * conversion that consumed its inputs and produced nothing is item loss, never a balance choice.
+     * <p><b>Purely DETERMINISTIC, four leaves.</b> {@code Base} (or the conversion's own authored
+     * quantity when {@code Base} is absent) is multiplied by {@code Scale}, floored to a whole item,
+     * then clamped into {@code [Min, Max]}. A floor of 1 output is ALWAYS enforced underneath - a
+     * conversion that consumed its inputs and produced nothing is item loss, never a tuning outcome.
+     * Reading this group tells an author exactly how much a cycle makes, with nothing left to chance.
      *
-     * <p><b>FRACTIONAL yields are real, and land as a STOCHASTIC REMAINDER.</b> {@code Scale} and a
-     * floor's {@code Add} are both doubles, so an effective yield of {@code 2.5} is authorable and
-     * means "two items every cycle, plus a third on a 50% roll" - the whole part is paid out always
-     * and only the remainder is rolled, so the long-run average is exactly the authored number.
-     * This exists because whole-number-only yields force every tool tier onto a shared step: a
-     * mid-ladder tool that should sit BETWEEN two yields would otherwise have to be rounded onto one
-     * of its neighbours, collapsing a rung. The roll is stateless by design (no per-session carry to
-     * persist, lose on a crash, or reason about across a relog), and it draws from the same RNG seam
-     * the loot rolls use, injected so the decision core stays pure.
-     *
-     * <p><b>{@code Bonus} is where the tool ladder lives.</b> It is the same weighted-factor
-     * vocabulary a loot {@code Roll.Ladder} uses ({@code Values} is a {@link FactorRef} array summed
-     * as {@code sum(resolve(Factor,Param) * Weight)}, then looked up against {@code Floors} by
-     * descending {@code Min}), so a yield bonus can key off ANY registered factor - the built-in
-     * {@code hytale:tool_power} plus {@code hytale:tool_quality} /
-     * {@code hytale:tool_item_level} for a "better tools yield
-     * more" curve, a {@code stat} channel, or a fourth party's own {@code yourmod:} factor. Summing
-     * power AND quality is the intended shape for a tool ladder: gather power saturates across a
-     * family's upper tiers while quality keeps separating them, so neither alone ranks a full ladder.
+     * <p><b>Everything conditional or probabilistic is a {@code Roll} instead</b>, in the action's
+     * {@code Bonus} group: a Roll already carries the richer vocabulary ({@code Trigger},
+     * {@code Conditions}, {@code Chance}, {@code Ladder}, {@code Grants}), and its
+     * {@code Grants.OutputItems} grants N ADDITIVE items of the cycle's own primary output. So "a
+     * better tool yields more" and "sometimes you get an extra" are both authored as visible rolls
+     * beside the deterministic number, rather than hidden inside it.
      */
     public static final class Yield {
         @Nullable protected Integer base;
         @Nullable protected Double scale;
-        @Nullable protected Bonus bonus;
         @Nullable protected Integer min;
         @Nullable protected Integer max;
 
@@ -706,13 +600,10 @@ public final class StationAsset
         public static final BuilderCodec<Yield> CODEC = BuilderCodec.builder(Yield.class, Yield::new)
                 .appendInherited(new KeyedCodec<>("Base", Codec.INTEGER, false),
                         (o, v) -> o.base = v, o -> o.base, (o, p) -> o.base = p.base)
-                .documentation("Flat output quantity per conversion BEFORE Scale/Bonus; null = use each conversion's own authored output quantity.").add()
+                .documentation("Flat output quantity per conversion BEFORE Scale; null = use each conversion's own authored output quantity.").add()
                 .appendInherited(new KeyedCodec<>("Scale", Codec.DOUBLE, false),
                         (o, v) -> o.scale = v, o -> o.scale, (o, p) -> o.scale = p.scale)
-                .documentation("Multiplier on the base quantity, rounded to the nearest whole item; reader-defaults to 1.0 (no scaling).").add()
-                .appendInherited(new KeyedCodec<>("Bonus", Bonus.CODEC, false),
-                        (o, v) -> o.bonus = v, o -> o.bonus, (o, p) -> o.bonus = p.bonus)
-                .documentation("Optional factor-driven bonus ladder adding extra output (e.g. a better tool yields more); null = no bonus.").add()
+                .documentation("Multiplier on the base quantity, floored to a whole item; reader-defaults to 1.0 (no scaling).").add()
                 .appendInherited(new KeyedCodec<>("Min", Codec.INTEGER, false),
                         (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
                 .documentation("Lower clamp on the final quantity; null = the engine's own 1-item floor.").add()
@@ -722,12 +613,11 @@ public final class StationAsset
                 .build();
 
         @Nonnull
-        public static Yield of(@Nullable Integer base, @Nullable Double scale, @Nullable Bonus bonus,
+        public static Yield of(@Nullable Integer base, @Nullable Double scale,
                 @Nullable Integer min, @Nullable Integer max) {
             Yield y = new Yield();
             y.base = base;
             y.scale = scale;
-            y.bonus = bonus;
             y.min = min;
             y.max = max;
             return y;
@@ -750,12 +640,6 @@ public final class StationAsset
             return scale != null && Double.isFinite(scale) && scale > 0.0 ? scale : 1.0;
         }
 
-        /** The factor-driven bonus ladder; null = no bonus. */
-        @Nullable
-        public Bonus getBonus() {
-            return bonus;
-        }
-
         @Nullable
         public Integer getMin() {
             return min;
@@ -764,95 +648,6 @@ public final class StationAsset
         @Nullable
         public Integer getMax() {
             return max;
-        }
-
-        /**
-         * The factor-driven yield bonus: sum {@code Values} (a weighted {@link FactorRef} sum, the
-         * SAME composition every other factor site uses), then add the reached {@code Floors} entry's
-         * {@code Add}. Deliberately the {@code Roll.Ladder} shape rather than a new one - a yield
-         * bonus and a loot ladder ask the identical question ("where on this curve is the player") and
-         * must not drift into two vocabularies an author has to learn twice.
-         */
-        public static final class Bonus {
-            @Nullable protected FactorRef[] values;
-            @Nullable protected Floor[] floors;
-
-            public static final BuilderCodec<Bonus> CODEC = BuilderCodec.builder(Bonus.class, Bonus::new)
-                    .appendInherited(new KeyedCodec<>("Values",
-                                    new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
-                            (o, v) -> o.values = v, o -> o.values, (o, p) -> o.values = p.values)
-                    .documentation("Weighted factor references summed into the ladder value (e.g. tool power plus tool quality); empty = a constant 0.").add()
-                    .appendInherited(new KeyedCodec<>("Floors",
-                                    new ArrayCodec<>(Floor.CODEC, Floor[]::new), false),
-                            (o, v) -> o.floors = v, o -> o.floors, (o, p) -> o.floors = p.floors)
-                    .documentation("Thresholds over the summed value; the HIGHEST floor whose Min is reached contributes its Add. Empty = no bonus.").add()
-                    .build();
-
-            @Nonnull
-            public static Bonus of(@Nullable FactorRef[] values, @Nullable Floor[] floors) {
-                Bonus b = new Bonus();
-                b.values = values;
-                b.floors = floors;
-                return b;
-            }
-
-            @Nullable
-            public FactorRef[] getValues() {
-                return values;
-            }
-
-            @Nullable
-            public Floor[] getFloors() {
-                return floors;
-            }
-        }
-
-        /**
-         * One yield-bonus threshold: at or above {@code Min} on the summed value, add {@code Add}
-         * items. {@code Add} is FRACTIONAL on purpose - see {@link Yield}'s own javadoc for how a
-         * remainder is paid out, which is what lets a mid-tier tool sit genuinely between two whole
-         * yields instead of being rounded onto one of its neighbours.
-         */
-        public static final class Floor {
-            @Nullable protected Double min;
-            @Nullable protected Double add;
-
-            public static final BuilderCodec<Floor> CODEC = BuilderCodec.builder(Floor.class, Floor::new)
-                    .appendInherited(new KeyedCodec<>("Min", Codec.DOUBLE, false),
-                            (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
-                    .documentation("The summed factor value at or above which this floor applies; reader-defaults to 0.").add()
-                    .appendInherited(new KeyedCodec<>("Add", Codec.DOUBLE, false),
-                            (o, v) -> o.add = v, o -> o.add, (o, p) -> o.add = p.add)
-                    .documentation("Extra items added when this floor is the reached one; may be fractional (2.5 = two always plus a 50% chance of a third). Reader-defaults to 0.").add()
-                    .build();
-
-            @Nonnull
-            public static Floor of(@Nullable Double min, @Nullable Double add) {
-                Floor f = new Floor();
-                f.min = min;
-                f.add = add;
-                return f;
-            }
-
-            /** Reader-defaulted threshold (0 when absent). */
-            public double effectiveMin() {
-                return min != null && Double.isFinite(min) ? min : 0.0;
-            }
-
-            /** Reader-defaulted addend (0 when absent or non-finite). */
-            public double effectiveAdd() {
-                return add != null && Double.isFinite(add) ? add : 0.0;
-            }
-
-            @Nullable
-            public Double getMin() {
-                return min;
-            }
-
-            @Nullable
-            public Double getAdd() {
-                return add;
-            }
         }
     }
 
@@ -1390,16 +1185,15 @@ public final class StationAsset
      * The held-tool gate: the player must be HOLDING a matching tool to start (and keep)
      * working. Three optional NATIVE match routes; match = ANY route satisfied.
      *
-     * <p>{@link #minDurabilityPercent} is a SEPARATE, orthogonal condition layered on top of the
-     * identity routes: which tool, and how worn it may be, are two independent questions.
+     * <p>{@link Durability#minStartPercent} is a SEPARATE, orthogonal condition layered on top of the
+     * identity routes: which tool, and how worn it may be, are two independent questions. It lives
+     * inside {@link Durability} because it is a wear number, beside the two wear drains.
      */
     public static final class Tool {
         @Nullable protected Map<String, String[]> tags;
         @Nullable protected Gather gather;
         @Nullable protected String[] ids;
-        @Nullable protected PowerScale powerScale;
         @Nullable protected Durability durability;
-        @Nullable protected Double minDurabilityPercent;
 
         public static final BuilderCodec<Tool> CODEC = BuilderCodec.builder(Tool.class, Tool::new)
                 .appendInherited(new KeyedCodec<>("Tags", TagMatch.CODEC, false),
@@ -1411,18 +1205,9 @@ public final class StationAsset
                 .appendInherited(new KeyedCodec<>("Ids", new ArrayCodec<>(Codec.STRING, String[]::new), false),
                         (o, v) -> o.ids = v, o -> o.ids, (o, p) -> o.ids = p.ids)
                 .documentation("The FALLBACK exact/underscore-segment item id match route, for modded tools with no matching tag or gather spec.").add()
-                .appendInherited(new KeyedCodec<>("PowerScale", PowerScale.CODEC, false),
-                        (o, v) -> o.powerScale = v, o -> o.powerScale, (o, p) -> o.powerScale = p.powerScale)
-                .documentation("Maps held-tool power to the multiplier applied to every Work.PerCycleContributions "
-                        + "amount on a real cycle (forwarded as the cycle event's toolMultiplier); forced 1.0 on an "
-                        + "idle cycle. Null = the multiplier stays neutral 1.0 regardless of held tool.").add()
                 .appendInherited(new KeyedCodec<>("Durability", Durability.CODEC, false),
                         (o, v) -> o.durability = v, o -> o.durability, (o, p) -> o.durability = p.durability)
-                .documentation("Opt-in held-tool durability drain per swing and/or per cycle; null = no drain.").add()
-                .appendInherited(new KeyedCodec<>("MinDurabilityPercent", Codec.DOUBLE, false),
-                        (o, v) -> o.minDurabilityPercent = v, o -> o.minDurabilityPercent,
-                        (o, p) -> o.minDurabilityPercent = p.minDurabilityPercent)
-                .documentation("Minimum held-tool durability (0-100) required to START working; null = no wear gate. Checked at engage only, so a session already running is never cut short by wear.").add()
+                .documentation("Opt-in held-tool wear: the per-swing and/or per-cycle drain plus the minimum-durability start gate; null = no wear handling at all.").add()
                 .build();
 
         @Nonnull
@@ -1433,27 +1218,12 @@ public final class StationAsset
 
         @Nonnull
         public static Tool of(@Nullable Map<String, String[]> tags, @Nullable Gather gather,
-                @Nullable String[] ids, @Nullable PowerScale powerScale) {
-            return of(tags, gather, ids, powerScale, null);
-        }
-
-        @Nonnull
-        public static Tool of(@Nullable Map<String, String[]> tags, @Nullable Gather gather,
-                @Nullable String[] ids, @Nullable PowerScale powerScale, @Nullable Durability durability) {
-            return of(tags, gather, ids, powerScale, durability, null);
-        }
-
-        @Nonnull
-        public static Tool of(@Nullable Map<String, String[]> tags, @Nullable Gather gather,
-                @Nullable String[] ids, @Nullable PowerScale powerScale, @Nullable Durability durability,
-                @Nullable Double minDurabilityPercent) {
+                @Nullable String[] ids, @Nullable Durability durability) {
             Tool t = new Tool();
             t.tags = tags;
             t.gather = gather;
             t.ids = ids;
-            t.powerScale = powerScale;
             t.durability = durability;
-            t.minDurabilityPercent = minDurabilityPercent;
             return t;
         }
 
@@ -1473,30 +1243,23 @@ public final class StationAsset
         }
 
         @Nullable
-        public PowerScale getPowerScale() {
-            return powerScale;
-        }
-
-        @Nullable
         public Durability getDurability() {
             return durability;
         }
 
         /**
-         * The minimum held-tool durability PERCENT (0-100) required to start a session; null (or a
-         * non-positive value) = no wear gate. A tool that tracks no durability at all always passes.
-         * Deliberately an ENGAGE-time gate only: the per-heartbeat tool re-check stays about tool
-         * IDENTITY, so wearing a tool down mid-session ends the session at breakage
-         * ({@code TOOL_BROKEN}) exactly as before, never at this threshold.
+         * The minimum held-tool durability PERCENT (0-100) required to start a session
+         * ({@code Tool.Durability.MinStartPercent}); null (or a non-positive value) = no wear gate.
          */
         @Nullable
-        public Double getMinDurabilityPercent() {
-            return minDurabilityPercent;
+        public Double getMinStartPercent() {
+            return durability != null ? durability.getMinStartPercent() : null;
         }
 
         /** True when a wear gate is authored and live (a positive percent). */
         public boolean hasDurabilityGate() {
-            return minDurabilityPercent != null && minDurabilityPercent > 0;
+            Double min = getMinStartPercent();
+            return min != null && min > 0;
         }
 
         /** The functional gather route: a {@code GatherType} plus a {@code MinPower} floor. */
@@ -1534,85 +1297,14 @@ public final class StationAsset
         }
 
         /**
-         * Tool-power contribution scaling: every {@code Work.PerCycleContributions} amount
-         * multiplies by {@code clamp((heldPower / ReferencePower) ^ Exponent, MinMult, MaxMult)}.
-         * OMIT this group and the multiplier stays 1.0. Reader defaults: {@link #exponent} 1.0,
-         * {@link #minMult} 0.5, {@link #maxMult} 2.0.
-         */
-        public static final class PowerScale {
-            @Nullable protected String gatherType;
-            @Nullable protected Double referencePower;
-            @Nullable protected Double exponent;
-            @Nullable protected Double minMult;
-            @Nullable protected Double maxMult;
-
-            public static final BuilderCodec<PowerScale> CODEC = BuilderCodec.builder(PowerScale.class, PowerScale::new)
-                    .appendInherited(new KeyedCodec<>("GatherType", Codec.STRING, false),
-                            (o, v) -> o.gatherType = v, o -> o.gatherType, (o, p) -> o.gatherType = p.gatherType)
-                    .documentation("The native GatherType id whose power is read off the held tool each cycle for this scale.").add()
-                    .appendInherited(new KeyedCodec<>("ReferencePower", Codec.DOUBLE, false),
-                            (o, v) -> o.referencePower = v, o -> o.referencePower,
-                            (o, p) -> o.referencePower = p.referencePower)
-                    .documentation("The tool power treated as the neutral 1.0x baseline the held tool's power is divided by.")
-                    .addValidator(CodecWarnValidators.positive("Tool.PowerScale.ReferencePower should be positive.")).add()
-                    .appendInherited(new KeyedCodec<>("Exponent", Codec.DOUBLE, false),
-                            (o, v) -> o.exponent = v, o -> o.exponent, (o, p) -> o.exponent = p.exponent)
-                    .documentation("The power curve exponent applied to (heldPower / ReferencePower). Reader-defaults to 1.0 (linear).").add()
-                    .appendInherited(new KeyedCodec<>("MinMult", Codec.DOUBLE, false),
-                            (o, v) -> o.minMult = v, o -> o.minMult, (o, p) -> o.minMult = p.minMult)
-                    .documentation("The floor the resolved multiplier clamps to. Reader-defaults to 0.5.")
-                    .addValidator(CodecWarnValidators.positive("Tool.PowerScale.MinMult should be positive.")).add()
-                    .appendInherited(new KeyedCodec<>("MaxMult", Codec.DOUBLE, false),
-                            (o, v) -> o.maxMult = v, o -> o.maxMult, (o, p) -> o.maxMult = p.maxMult)
-                    .documentation("The ceiling the resolved multiplier clamps to. Reader-defaults to 2.0.")
-                    .addValidator(CodecWarnValidators.positive("Tool.PowerScale.MaxMult should be positive.")).add()
-                    .build();
-
-            @Nonnull
-            public static PowerScale of(@Nullable String gatherType, @Nullable Double referencePower,
-                    @Nullable Double exponent, @Nullable Double minMult, @Nullable Double maxMult) {
-                PowerScale x = new PowerScale();
-                x.gatherType = gatherType;
-                x.referencePower = referencePower;
-                x.exponent = exponent;
-                x.minMult = minMult;
-                x.maxMult = maxMult;
-                return x;
-            }
-
-            @Nullable
-            public String getGatherType() {
-                return gatherType;
-            }
-
-            @Nullable
-            public Double getReferencePower() {
-                return referencePower;
-            }
-
-            @Nullable
-            public Double getExponent() {
-                return exponent;
-            }
-
-            @Nullable
-            public Double getMinMult() {
-                return minMult;
-            }
-
-            @Nullable
-            public Double getMaxMult() {
-                return maxMult;
-            }
-        }
-
-        /**
-         * Opt-in held-tool durability drain (both leaves default OFF; either, both, or
-         * neither may be authored).
+         * Opt-in held-tool WEAR: the two drains ({@link #perSwing}/{@link #perCycle}) plus the
+         * start-gate floor ({@link #minStartPercent}). Every leaf defaults OFF and each is
+         * independent - any combination may be authored.
          */
         public static final class Durability {
             @Nullable protected Integer perSwing;
             @Nullable protected Integer perCycle;
+            @Nullable protected Double minStartPercent;
 
             public static final BuilderCodec<Durability> CODEC = BuilderCodec.builder(Durability.class, Durability::new)
                     .appendInherited(new KeyedCodec<>("PerSwing", Codec.INTEGER, false),
@@ -1623,13 +1315,24 @@ public final class StationAsset
                             (o, v) -> o.perCycle = v, o -> o.perCycle, (o, p) -> o.perCycle = p.perCycle)
                     .documentation("Durability points drained from the held tool per completed cycle. Reader-defaults to 0 (off).")
                     .addValidator(CodecWarnValidators.nonNegative("Tool.Durability.PerCycle should not be negative.")).add()
+                    .appendInherited(new KeyedCodec<>("MinStartPercent", Codec.DOUBLE, false),
+                            (o, v) -> o.minStartPercent = v, o -> o.minStartPercent,
+                            (o, p) -> o.minStartPercent = p.minStartPercent)
+                    .documentation("Minimum held-tool durability (0-100) required to START working; null = no wear gate. The name states the semantics: it is checked at engage only, so a session already running is never cut short by wear.").add()
                     .build();
 
             @Nonnull
             public static Durability of(@Nullable Integer perSwing, @Nullable Integer perCycle) {
+                return of(perSwing, perCycle, null);
+            }
+
+            @Nonnull
+            public static Durability of(@Nullable Integer perSwing, @Nullable Integer perCycle,
+                    @Nullable Double minStartPercent) {
                 Durability d = new Durability();
                 d.perSwing = perSwing;
                 d.perCycle = perCycle;
+                d.minStartPercent = minStartPercent;
                 return d;
             }
 
@@ -1642,63 +1345,68 @@ public final class StationAsset
             public Integer getPerCycle() {
                 return perCycle;
             }
+
+            /**
+             * The minimum held-tool durability PERCENT (0-100) required to start a session; null (or a
+             * non-positive value) = no wear gate. A tool that tracks no durability at all always
+             * passes. Deliberately an ENGAGE-time gate only: the per-heartbeat tool re-check stays
+             * about tool IDENTITY, so wearing a tool down mid-session ends the session at breakage
+             * ({@code TOOL_BROKEN}), never at this threshold.
+             */
+            @Nullable
+            public Double getMinStartPercent() {
+                return minStartPercent;
+            }
         }
     }
 
     /**
-     * Camera pull while working. See {@code station/CLAUDE.md} for the FaceBlock hunt history.
-     * {@code FaceBlockMode} is RENAMED {@code Recipe} this leg (design section 9.7; unreleased,
-     * free rename per the design's own binding note - NO deprecated alias, straight rename, no
-     * shipped JSON asset authors this key).
+     * Camera pull while working - three independent knobs, no mode: {@link #enabled} (is there a pull
+     * at all), {@link #locked} (may the player still rotate it), and {@link #recipe} (which
+     * fixed-look preset, if any). See {@code station/CLAUDE.md} for the fixed-look hunt history.
      */
     public static final class Camera {
-        @Nullable protected String mode;
+        @Nullable protected Boolean enabled;
         @Nullable protected Boolean locked;
-        @Nullable protected Boolean faceBlock;
         @Nullable protected String recipe;
 
         public static final BuilderCodec<Camera> CODEC = BuilderCodec.builder(Camera.class, Camera::new)
-                .appendInherited(new KeyedCodec<>("Mode", Codec.STRING, false),
-                        (o, v) -> o.mode = v, o -> o.mode, (o, p) -> o.mode = p.mode)
-                .documentation("The camera route: 'ThirdPerson' (default, the pull applies) or 'None' (no camera pull at all - a mounted station with no authored Camera also defaults to none).")
-                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:camera-mode"))).add()
+                .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
+                        (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled)
+                .documentation("Whether the third-person camera pull applies at all. Reader-defaults to true when this group is authored; a MOUNTED station with no Camera group authored gets no pull.").add()
                 .appendInherited(new KeyedCodec<>("Locked", Codec.BOOLEAN, false),
                         (o, v) -> o.locked = v, o -> o.locked, (o, p) -> o.locked = p.locked)
                 .documentation("Whether the third-person camera is locked in place while working (blocks player-driven camera rotation). Reader-defaults to true.").add()
-                .appendInherited(new KeyedCodec<>("FaceBlock", Codec.BOOLEAN, false),
-                        (o, v) -> o.faceBlock = v, o -> o.faceBlock, (o, p) -> o.faceBlock = p.faceBlock)
-                .documentation("Whether the fixed-look FaceBlock camera preset applies (mouse-driven spin is fully frozen, not just locked). Only takes effect when the camera is applied at all.").add()
                 .appendInherited(new KeyedCodec<>("Recipe", Codec.STRING, false),
                         (o, v) -> o.recipe = v, o -> o.recipe,
                         (o, p) -> o.recipe = p.recipe)
-                .documentation("The StationCameraPreset recipe id the FaceBlock route applies (the exact ServerCameraSettings field combination); null = the engine's default FROZEN recipe.")
+                .documentation("The fixed-look camera preset id (the exact ServerCameraSettings field combination). Authoring it at all applies the fixed look, in which mouse-driven spin is fully frozen rather than merely locked; null = no fixed look, just the plain pull.")
                 .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:camera-presets"))).add()
                 .build();
 
         @Nonnull
-        public static Camera of(@Nullable String mode, @Nullable Boolean locked) {
-            return of(mode, locked, null);
+        public static Camera of(@Nullable Boolean enabled, @Nullable Boolean locked) {
+            return of(enabled, locked, null);
         }
 
         @Nonnull
-        public static Camera of(@Nullable String mode, @Nullable Boolean locked, @Nullable Boolean faceBlock) {
-            return of(mode, locked, faceBlock, null);
-        }
-
-        @Nonnull
-        public static Camera of(@Nullable String mode, @Nullable Boolean locked, @Nullable Boolean faceBlock,
-                @Nullable String recipe) {
+        public static Camera of(@Nullable Boolean enabled, @Nullable Boolean locked, @Nullable String recipe) {
             Camera c = new Camera();
-            c.mode = mode;
+            c.enabled = enabled;
             c.locked = locked;
-            c.faceBlock = faceBlock;
             c.recipe = recipe;
             return c;
         }
 
+        /** Whether the camera pull applies; null = the reader default {@code true} for an authored group. */
         @Nullable
-        public String getMode() {
-            return mode;
+        public Boolean getEnabled() {
+            return enabled;
+        }
+
+        /** {@link #enabled}, reader-defaulted to {@code true} when null (an authored group means on). */
+        public boolean effectiveEnabled() {
+            return enabled == null || enabled;
         }
 
         @Nullable
@@ -1706,15 +1414,18 @@ public final class StationAsset
             return locked;
         }
 
-        @Nullable
-        public Boolean getFaceBlock() {
-            return faceBlock;
-        }
-
-        /** The camera-preset recipe id ({@code StationCameraPreset}), design section 9.7's {@code Camera.Recipe}. */
+        /**
+         * The fixed-look camera preset id ({@code station.StationCameraPreset}). Authored at all =
+         * the fixed-look camera applies; null = no fixed look.
+         */
         @Nullable
         public String getRecipe() {
             return recipe;
+        }
+
+        /** True when a fixed-look preset is authored (a non-blank {@link #recipe}). */
+        public boolean hasRecipe() {
+            return recipe != null && !recipe.isBlank();
         }
     }
 

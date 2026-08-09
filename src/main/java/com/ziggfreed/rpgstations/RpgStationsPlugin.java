@@ -4,10 +4,12 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import com.hypixel.hytale.assetstore.event.LoadedAssetsEvent;
 import com.hypixel.hytale.assetstore.map.DefaultAssetMap;
@@ -22,8 +24,10 @@ import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.events.RemoveWorldEvent;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.asset.AssetStoreRegistrar;
+import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.entity.performer.PerformerIdentityComponent;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.impl.EnhanceStamperRegistryImpl;
@@ -134,6 +138,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerStationRetrieveInteraction();
         registerStationSystems();
         registerTeardownHooks();
+        registerWorldEviction();
         registerPostLoadAudit();
         registerSummaryHudInstall();
         registerPuppetSafetyNet();
@@ -218,31 +223,133 @@ public class RpgStationsPlugin extends JavaPlugin {
      * inventory or were dropped at the block - silently losing them. Hopping to the player's own
      * world before calling {@code stopFor} closes that gap; a null/dead world (already torn down)
      * falls back to the direct call so a shutdown-adjacent disconnect still attempts cleanup.
+     *
+     * <p><b>The session-less claim sweep</b> rides the same hop. Placing input starts NO session, so
+     * a player who loads a station and walks away leaves a claim (and its display prop) that none of
+     * the four claim-removal paths can reach - all of them need a session stop, a block break, or a
+     * press. Those claims used to survive the disconnect and every disconnect after it. The sweep
+     * runs AFTER {@code stopFor} in the SAME task, so the session's own custody return happens first
+     * and the sweep only ever sees what it left behind; claims the player left in OTHER worlds
+     * (worked a station, then travelled) each get their own hop, because the despawn and block-state
+     * reset are world-thread work.
      */
     private void registerTeardownHooks() {
         getEntityStoreRegistry().registerSystem(new StationDeathSystem());
         getEventRegistry().register(PlayerDisconnectEvent.class, event -> {
+            var playerRef = event.getPlayerRef();
+            var uuid = playerRef != null ? playerRef.getUuid() : null;
+            if (uuid == null) {
+                return;
+            }
+            var worldUuid = playerRef.getWorldUuid();
+            // The departure world's own teardown gets its OWN try, so a failure there cannot skip
+            // the cross-world sweep below. World#execute is not merely "throws if the world is
+            // dead": a world stops accepting tasks BEFORE it reports itself dead, so isAlive() can
+            // be true and the submit still throw - and when it did, every claim this player held in
+            // OTHER worlds leaked for the rest of the uptime, because no other removal path can
+            // reach a session-less claim in a world the player is not in.
             try {
-                var playerRef = event.getPlayerRef();
-                var uuid = playerRef != null ? playerRef.getUuid() : null;
-                if (uuid == null) {
-                    return;
-                }
-                var worldUuid = playerRef.getWorldUuid();
                 World world = worldUuid != null ? Universe.get().getWorld(worldUuid) : null;
                 if (world != null && world.isAlive()) {
                     world.execute(() -> {
                         try {
                             StationService.getInstance().stopFor(uuid, StationService.StopReason.DISCONNECTED);
+                            StationService.getInstance().returnClaimsOf(uuid, worldUuid, world);
                         } catch (Throwable t) {
                             Log.warn("Station disconnect teardown failed (world thread): " + t.getMessage());
                         }
                     });
                 } else {
                     StationService.getInstance().stopFor(uuid, StationService.StopReason.DISCONNECTED);
+                    if (worldUuid != null) {
+                        StationService.getInstance().returnClaimsOf(uuid, worldUuid, world);
+                    }
                 }
             } catch (Throwable t) {
                 Log.warn("Station disconnect teardown failed: " + t.getMessage());
+            }
+            try {
+                sweepClaimsInOtherWorlds(uuid, worldUuid);
+            } catch (Throwable t) {
+                Log.warn("Station cross-world claim sweep failed: " + t.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Hands back the disconnecting player's custody claims standing in every world OTHER than the
+     * one they left from, each on its own world thread ({@link #registerTeardownHooks} covers the
+     * departure world inline). A world that is gone or dead falls back to the direct call, which
+     * still releases the bookkeeping even though it can no longer write to that world.
+     */
+    private static void sweepClaimsInOtherWorlds(@Nonnull UUID playerUuid,
+            @Nullable UUID departureWorldUuid) {
+        for (UUID claimWorldUuid : StationService.getInstance().claimWorldsOf(playerUuid)) {
+            if (claimWorldUuid.equals(departureWorldUuid)) {
+                continue;
+            }
+            World claimWorld = Universe.get().getWorld(claimWorldUuid);
+            if (claimWorld != null && claimWorld.isAlive()) {
+                claimWorld.execute(() -> {
+                    try {
+                        StationService.getInstance().returnClaimsOf(playerUuid, claimWorldUuid, claimWorld);
+                    } catch (Throwable t) {
+                        Log.warn("Station cross-world claim sweep failed: " + t.getMessage());
+                    }
+                });
+            } else {
+                StationService.getInstance().returnClaimsOf(playerUuid, claimWorldUuid, claimWorld);
+            }
+        }
+    }
+
+    /**
+     * The world-unload teardown listener this mod OWNS (design: RpgStations depends on
+     * {@code ziggfreed-common} alone and is never a consumer of another mod).
+     *
+     * <p>Two structures inside this engine self-register a per-world evictor at construction (the
+     * session queue partition and the frame-gate map), and both rely on somebody calling
+     * {@code WorldEvictors.onWorldRemoved}. Nothing here ever did - the fan-out only fired at all
+     * when a co-installed mod happened to register its own listener, which made this mod's per-world
+     * cleanup correct only in the presence of another mod. Standalone, an unloaded world's session
+     * queue, its frame gate, and every block-keyed entry naming it survived for the whole uptime,
+     * pinning the {@code World} object itself.
+     *
+     * <p>Ordering is load-bearing: this engine's own teardown runs FIRST (it reads the per-world
+     * session queue the shared fan-out is about to drop), then the shared fan-out. A second
+     * registrant elsewhere in the process is harmless - every evictor is an idempotent removal.
+     *
+     * <p><b>Two limits of this hook, both inherent to the event and stated so they are not
+     * mistaken for guarantees.</b>
+     * <ul>
+     *   <li><b>Cancellation is only observable from listeners that already ran.</b> The
+     *   {@code isCancelled()} check skips teardown for a removal cancelled BEFORE this listener,
+     *   which is the case worth catching; a plugin that cancels AFTER it leaves the world loaded
+     *   with its sessions already stopped. Listener order is not something a plugin can pin, so
+     *   there is no ordering fix - a player in such a world simply re-presses F to work again.</li>
+     *   <li><b>The dispatch thread is not guaranteed to be the removed world's own thread.</b> A
+     *   world removed by the engine's own instance-removal path dispatches from a pool thread,
+     *   precisely because the world thread it is about to stop cannot run the removal. Every store
+     *   touch inside the teardown is individually guarded and degrades to releasing bookkeeping, so
+     *   nothing leaks and no exception escapes; what it cannot do is hand placed input back, which
+     *   is why this path releases claims rather than returning them (the world and its entity store
+     *   are going away, so there is nowhere in it to return them TO). Hopping to the world thread
+     *   is not an alternative here: a world mid-removal has already stopped accepting tasks.</li>
+     * </ul>
+     */
+    private void registerWorldEviction() {
+        getEventRegistry().registerGlobal(RemoveWorldEvent.class, event -> {
+            try {
+                if (event.isCancelled()) {
+                    return;
+                }
+                World removed = event.getWorld();
+                if (removed != null) {
+                    StationService.getInstance().onWorldRemoved(removed);
+                    WorldEvictors.onWorldRemoved(removed);
+                }
+            } catch (Throwable t) {
+                Log.warn("Station world-removal teardown failed: " + t.getMessage());
             }
         });
     }

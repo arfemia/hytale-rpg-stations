@@ -29,7 +29,7 @@ public class FlairCatalogTest {
     }
 
     private static StationAsset stationWithInlineFlairs(Map<String, StationAsset.Flair> flairs) {
-        return StationAsset.of(STATION_ID, null, null, null, null, null, null, null, null, null, null, flairs);
+        return StationAsset.of(STATION_ID, null).withFlairs(flairs);
     }
 
     @Test
@@ -57,7 +57,7 @@ public class FlairCatalogTest {
         Map<String, Map<String, Presentation>> result = FlairCatalog.getInstance().effectiveFlairsFor(STATION_ID, a);
 
         assertEquals(1, result.size());
-        assertEquals("SFX_Inline", result.get("inline_flair").get("cycle").getSound());
+        assertEquals("SFX_Inline", result.get("inline_flair").get("cycle").getSounds()[0]);
     }
 
     @Test
@@ -71,8 +71,8 @@ public class FlairCatalogTest {
         Map<String, Map<String, Presentation>> result = FlairCatalog.getInstance().effectiveFlairsFor(STATION_ID, a);
 
         assertEquals(2, result.size());
-        assertEquals("SFX_Inline", result.get("inline_flair").get("cycle").getSound());
-        assertEquals("SFX_Golden", result.get("golden_saw").get("swing").getSound());
+        assertEquals("SFX_Inline", result.get("inline_flair").get("cycle").getSounds()[0]);
+        assertEquals("SFX_Golden", result.get("golden_saw").get("swing").getSounds()[0]);
     }
 
     @Test
@@ -108,7 +108,7 @@ public class FlairCatalogTest {
         Map<String, Map<String, Presentation>> result = FlairCatalog.getInstance().effectiveFlairsFor(STATION_ID, a);
 
         assertEquals(1, result.size());
-        assertEquals("SFX_Asset_Golden", result.get("golden_saw").get("cycle").getSound(),
+        assertEquals("SFX_Asset_Golden", result.get("golden_saw").get("cycle").getSounds()[0],
                 "the FlairAsset entry folds ONTO the inline one for the same flair id - it wins");
     }
 }

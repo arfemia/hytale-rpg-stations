@@ -22,13 +22,13 @@ import com.ziggfreed.rpgstations.asset.Roll;
  *       (unresolvable factor, or resolved value outside {@code Min}/{@code Max}) means the
  *       WHOLE roll produces nothing.</li>
  *   <li>{@link Roll#getChance()} - a probabilistic gate over the WHOLE roll INCLUDING its
- *       {@link Roll#getLadder()} (M3 fix 4); absent = deterministic pass. A failed roll means
- *       the Ladder is never even evaluated.</li>
- *   <li>Top-level {@link Roll#getGrants()} applies whenever step 1+2 both pass (regardless of
+ *       {@link Roll#getLadder()}; absent = deterministic pass. A failed roll means the Ladder is
+ *       never even evaluated.</li>
+ *   <li>Top-level {@link Roll#getGrants()} applies whenever steps 1 and 2 both pass (regardless of
  *       whether a Ladder floor is also reached).</li>
- *   <li>{@link Roll#getLadder()}, if present, resolves its {@code Value} factor and finds the
- *       HIGHEST reached floor; that floor's OWN {@code Grants} applies TOO (M3 fix 3 - top and
- *       floor grants STACK, they are not exclusive alternatives).</li>
+ *   <li>{@link Roll#getLadder()}, if present, sums its {@code Factors} and finds the HIGHEST
+ *       reached floor through the shared {@link FactorLadder} core; that floor's OWN {@code Grants}
+ *       applies TOO (top and floor grants STACK, they are not exclusive alternatives).</li>
  * </ol>
  */
 public final class RollEvaluator {
@@ -139,16 +139,18 @@ public final class RollEvaluator {
 
     /**
      * Absent = always (deterministic pass); {@code effective = clamp(BasePercent + sum(resolve(f) *
-     * f.Weight for f in AddFactors), 0, CapPercent)}. Scope-2: {@code AddFactors} entries are now
-     * weighted {@link com.ziggfreed.rpgstations.asset.FactorRef}s summed via {@link FactorMath}.
+     * f.Weight for f in Factors), 0, CapPercent)}. Public because it is the ONE chance-gate
+     * authority in this mod: every {@code Roll.Chance} in the schema - an action's {@code Bonus},
+     * a standalone lootable's rolls, a step's own {@code Roll} phase - reuses this exact type AND
+     * this exact evaluation, so a chance authored at any site behaves identically.
      */
-    static boolean chancePasses(@Nullable Roll.Chance chance, @Nonnull FactorLookup lookup,
+    public static boolean chancePasses(@Nullable Roll.Chance chance, @Nonnull FactorLookup lookup,
             @Nonnull DoubleSupplier chanceRoll) {
         if (chance == null) {
             return true;
         }
         double base = chance.getBasePercent() != null ? chance.getBasePercent() : 0.0;
-        double sum = FactorMath.sum(chance.getAddFactors(), lookup::resolve);
+        double sum = FactorMath.sum(chance.getFactors(), lookup::resolve);
         double cap = chance.getCapPercent() != null ? chance.getCapPercent() : 100.0;
         double effective = clamp(base + sum, 0.0, cap);
         if (effective <= 0.0) {
@@ -158,39 +160,28 @@ public final class RollEvaluator {
     }
 
     /**
-     * The highest-floor {@link Roll.Ladder.Floor} whose {@code Min <= resolved value}
-     * (deliberately UNCAPPED); {@code null} when the value factor is unresolvable, no floor is
-     * reached, or {@code floors} is null/empty. A malformed floor ({@code Min} null/nonpositive)
-     * is SKIPPED, not thrown on - the validator catches the authoring mistake ahead of runtime.
+     * The reached {@link Roll.Ladder.Floor}, resolved through the ONE shared {@link FactorLadder}
+     * core so a loot ladder and an action's {@code ContributionScale} ladder behave identically on
+     * identical JSON:
+     * the ladder value is the weighted {@code Factors} sum (an absent/empty array resolving to
+     * {@code 0}), each floor's threshold is its reader-defaulted {@code effectiveMin()} (so a
+     * {@code Min: 0} baseline tier IS reachable), and an equal-{@code Min} tie goes to the LAST
+     * authored floor. {@code null} when {@code floors} is null/empty or nothing is reached.
      */
     @Nullable
     static Roll.Ladder.Floor highestFloor(@Nonnull Roll.Ladder ladder, @Nonnull FactorLookup lookup) {
-        com.ziggfreed.rpgstations.asset.FactorRef[] values = ladder.getValues();
-        if (values == null || values.length == 0) {
-            return null;
-        }
-        // Scope-2: the ladder value is the SUMMED weighted FactorRefs (Ladder.Value -> Ladder.Values[]).
-        double resolved = FactorMath.sum(values, lookup::resolve);
         Roll.Ladder.Floor[] floors = ladder.getFloors();
         if (floors == null || floors.length == 0) {
             return null;
         }
-        Roll.Ladder.Floor best = null;
-        double bestFloor = Double.NEGATIVE_INFINITY;
-        for (Roll.Ladder.Floor f : floors) {
-            if (f == null) {
-                continue;
-            }
-            Double min = f.getMin();
-            if (min == null || min <= 0.0) {
-                continue;
-            }
-            if (min <= resolved && min > bestFloor) {
-                best = f;
-                bestFloor = min;
-            }
+        double resolved = FactorLadder.value(ladder.getFactors(), lookup::resolve);
+        double[] mins = new double[floors.length];
+        for (int i = 0; i < floors.length; i++) {
+            // A null hole can never win: push its threshold above every reachable value.
+            mins[i] = floors[i] != null ? floors[i].effectiveMin() : Double.POSITIVE_INFINITY;
         }
-        return best;
+        int index = FactorLadder.highestFloorIndex(mins, resolved);
+        return index == FactorLadder.NO_FLOOR ? null : floors[index];
     }
 
     private static double clamp(double v, double min, double max) {

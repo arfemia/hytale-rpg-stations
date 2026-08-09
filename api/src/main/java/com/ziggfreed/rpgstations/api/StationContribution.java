@@ -14,7 +14,7 @@ import javax.annotation.Nullable;
  *
  * <p><b>Which list a contribution arrives on decides its scaling</b>, never a flag on the record:
  * {@code StationCycleCompletedEvent.contributions()} entries are the station's own per-cycle posts
- * (multiply each by {@code toolMultiplier()}; an idle cycle already pre-scaled them by the idle
+ * (an idle cycle already pre-scaled them by the idle
  * fraction), while {@code oneShotContributions()} entries are find grants that must be posted at
  * their stated amount with no multiplier at all.
  *

@@ -70,6 +70,22 @@ public interface RpgStationsApi {
     Collection<StationView> stations();
 
     /**
+     * How many stations are currently folded - the cheap answer for a caller that only wants a
+     * count or a presence check ({@code stationCount() > 0}).
+     *
+     * <p>{@link #stations()} builds a fresh {@link StationView} per station, and each of those
+     * eagerly resolves the station's actions and merges its contribution and flair sets, so
+     * answering "is anything installed" through it does real work per call. Station content cannot
+     * appear after the asset load, and this counts the folded catalog directly.
+     *
+     * <p>Default-bodied per the additive growth policy; the shipped implementation overrides it with
+     * the direct catalog size and never materializes a view.
+     */
+    default int stationCount() {
+        return stations().size();
+    }
+
+    /**
      * Installed by the RpgStations plugin at {@code setup()}. Not for external callers - a
      * third-party mod only ever calls {@link #get()}.
      */

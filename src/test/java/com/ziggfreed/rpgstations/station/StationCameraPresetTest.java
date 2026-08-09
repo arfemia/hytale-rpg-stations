@@ -29,14 +29,14 @@ public class StationCameraPresetTest {
 
     @Test
     void fromId_knownIds_matchTheBriefedPresetNames() {
-        assertSame(StationCameraPreset.FROZEN, StationCameraPreset.fromId("frozen"));
-        assertSame(StationCameraPreset.FREE_NULL, StationCameraPreset.fromId("free_null"));
-        assertSame(StationCameraPreset.FREE_DIR, StationCameraPreset.fromId("free_dir"));
-        assertSame(StationCameraPreset.LOOK_ROT, StationCameraPreset.fromId("look_rot"));
-        assertSame(StationCameraPreset.LOOK_ROT_BLEND, StationCameraPreset.fromId("look_rot_blend"));
-        assertSame(StationCameraPreset.LOOK_ROT_NO_TARGET, StationCameraPreset.fromId("look_rot_no_target"));
-        assertSame(StationCameraPreset.LOOK_ROT_ATTACHED, StationCameraPreset.fromId("look_rot_attached"));
-        assertSame(StationCameraPreset.CUSTOM_SEED, StationCameraPreset.fromId("custom_seed"));
+        assertSame(StationCameraPreset.FROZEN, StationCameraPreset.fromId("Frozen"));
+        assertSame(StationCameraPreset.FREE_NULL, StationCameraPreset.fromId("FreeNull"));
+        assertSame(StationCameraPreset.FREE_DIR, StationCameraPreset.fromId("FreeDir"));
+        assertSame(StationCameraPreset.LOOK_ROT, StationCameraPreset.fromId("LookRot"));
+        assertSame(StationCameraPreset.LOOK_ROT_BLEND, StationCameraPreset.fromId("LookRotBlend"));
+        assertSame(StationCameraPreset.LOOK_ROT_NO_TARGET, StationCameraPreset.fromId("LookRotNoTarget"));
+        assertSame(StationCameraPreset.LOOK_ROT_ATTACHED, StationCameraPreset.fromId("LookRotAttached"));
+        assertSame(StationCameraPreset.CUSTOM_SEED, StationCameraPreset.fromId("CustomSeed"));
     }
 
     @Test
@@ -48,29 +48,29 @@ public class StationCameraPresetTest {
 
     @Test
     void id_isLowerCasedEnumName() {
-        assertEquals("frozen", StationCameraPreset.FROZEN.id());
-        assertEquals("free_null", StationCameraPreset.FREE_NULL.id());
-        assertEquals("free_dir", StationCameraPreset.FREE_DIR.id());
-        assertEquals("look_rot", StationCameraPreset.LOOK_ROT.id());
-        assertEquals("look_rot_blend", StationCameraPreset.LOOK_ROT_BLEND.id());
-        assertEquals("look_rot_no_target", StationCameraPreset.LOOK_ROT_NO_TARGET.id());
-        assertEquals("look_rot_attached", StationCameraPreset.LOOK_ROT_ATTACHED.id());
-        assertEquals("custom_seed", StationCameraPreset.CUSTOM_SEED.id());
+        assertEquals("Frozen", StationCameraPreset.FROZEN.id());
+        assertEquals("FreeNull", StationCameraPreset.FREE_NULL.id());
+        assertEquals("FreeDir", StationCameraPreset.FREE_DIR.id());
+        assertEquals("LookRot", StationCameraPreset.LOOK_ROT.id());
+        assertEquals("LookRotBlend", StationCameraPreset.LOOK_ROT_BLEND.id());
+        assertEquals("LookRotNoTarget", StationCameraPreset.LOOK_ROT_NO_TARGET.id());
+        assertEquals("LookRotAttached", StationCameraPreset.LOOK_ROT_ATTACHED.id());
+        assertEquals("CustomSeed", StationCameraPreset.CUSTOM_SEED.id());
     }
 
     @Test
     void resolve_explicitOverride_alwaysWins() {
         assertSame(StationCameraPreset.FREE_DIR,
-                StationCameraPreset.resolve(StationCameraPreset.FREE_DIR, "look_rot"));
+                StationCameraPreset.resolve(StationCameraPreset.FREE_DIR, "LookRot"));
         assertSame(StationCameraPreset.FROZEN,
-                StationCameraPreset.resolve(StationCameraPreset.FROZEN, "custom_seed"));
+                StationCameraPreset.resolve(StationCameraPreset.FROZEN, "CustomSeed"));
     }
 
     @Test
     void resolve_noOverride_usesAssetDefault() {
-        assertSame(StationCameraPreset.FROZEN, StationCameraPreset.resolve(null, "frozen"));
-        assertSame(StationCameraPreset.CUSTOM_SEED, StationCameraPreset.resolve(null, "custom_seed"));
-        assertSame(StationCameraPreset.LOOK_ROT_BLEND, StationCameraPreset.resolve(null, "look_rot_blend"));
+        assertSame(StationCameraPreset.FROZEN, StationCameraPreset.resolve(null, "Frozen"));
+        assertSame(StationCameraPreset.CUSTOM_SEED, StationCameraPreset.resolve(null, "CustomSeed"));
+        assertSame(StationCameraPreset.LOOK_ROT_BLEND, StationCameraPreset.resolve(null, "LookRotBlend"));
     }
 
     @Test

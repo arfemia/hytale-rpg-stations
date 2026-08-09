@@ -1,38 +1,49 @@
 {
-  "$Comment": "A standing work station using an Entity-surface mount (Hold.Mount.Surface: 'Entity') instead of a block seat: the player attaches directly to a spawned anchor entity rather than sitting on the block, so they stay upright while working. Reuses the Sawmill's Work/Recipe/Custody shape (WoodPlanks input, no Tool requirement) with only the Hold.Mount group swapped to Entity/Offset. Camera is set to third person so the player can see their own body while mounted. Entity.VisibleAnchorItemId attaches a dropped-item-style marker to the anchor entity so the mount point is visible in world.",
+  "$Comment": "A standing work station using an Entity-surface mount (Worker.Hold.Mount.Surface: 'Entity') instead of a block seat: the player attaches directly to a spawned anchor entity rather than sitting on the block, so they stay upright while working. Its one action, 'Work', reuses the Sawmill's Work/Recipe/Custody shape (WoodPlanks input, no Tool gate) with only the Hold.Mount group swapped to Entity/Offset. Camera is set to third person so the player can see their own body while mounted. Entity.VisibleAnchorItemId attaches a dropped-item-style marker to the anchor entity so the mount point is visible in world.",
   "Identity": {
     "NameKey": "rpgstations.station.mountspike.name",
     "DescKey": "rpgstations.station.mountspike.desc"
   },
-  "Work": {
-    "CycleMs": 4665,
-    "MaxDurationMs": 600000,
-    "MaxMoveMeters": 1.5,
+  "Block": {
     "Exclusive": true
   },
-  "Recipe": {
-    "FromCrafting": { "Categories": ["WoodPlanks"] }
-  },
-  "Custody": {
-    "MaxQuantity": 100,
-    "States": { "Empty": "Default", "Loaded": "Loaded" }
-  },
-  "Camera": {
-    "Recipe": "look_rot"
-  },
-  "Hold": {
-    "MovementLock": true,
-    "EffectId": "RPG_Station_Hold",
-    "InterruptOnDamage": true,
-    "Mount": {
-      "Surface": "Entity",
-      "Entity": {
-        "Offset": { "X": 0.0, "Y": 0.0, "Z": 0.6 },
-        "VisibleAnchorItemId": "RPG_Station_MountSpike"
+  "Actions": [
+    {
+      "Id": "Work",
+      "Recipe": {
+        "FromCrafting": { "Categories": ["WoodPlanks"] }
+      },
+      "Work": {
+        "CycleMs": 4665,
+        "MaxDurationMs": 600000,
+        "MaxMoveMeters": 1.5
+      },
+      "Custody": {
+        "MaxQuantity": 100,
+        "States": { "Empty": "Default", "Loaded": "Loaded" }
+      },
+      "Worker": {
+        "Hold": {
+          "MovementLock": true,
+          "EffectId": "RPG_Station_Hold",
+          "InterruptOnDamage": true,
+          "Mount": {
+            "Surface": "Entity",
+            "Entity": {
+              "Offset": { "X": 0.0, "Y": 0.0, "Z": 0.6 },
+              "VisibleAnchorItemId": "RPG_Station_MountSpike"
+            }
+          }
+        },
+        "Camera": {
+          "Recipe": "LookRot"
+        }
+      },
+      "Moments": {
+        "Cycle": {
+          "Sounds": ["SFX_Wood_Break"]
+        }
       }
     }
-  },
-  "Presentation": {
-    "Sound": "SFX_Wood_Break"
-  }
+  ]
 }

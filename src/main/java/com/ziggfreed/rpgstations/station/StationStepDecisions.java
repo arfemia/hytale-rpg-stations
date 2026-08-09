@@ -46,7 +46,7 @@ final class StationStepDecisions {
 
     /**
      * A step's per-step iteration count (design 2.1): {@code Repeat.Times} (fixed), or
-     * {@code clamp(round(Min + factorContribution), Min, Max)} via {@code Repeat.AddFactors} - the
+     * {@code clamp(round(Min + factorContribution), Min, Max)} via {@code Repeat.Factors} - the
      * caller supplies {@code factorContribution} (already {@code sum(resolve(f) * f.Weight)}, e.g.
      * via {@link #repeatFactorContribution}). A {@code null} {@code repeat} = a single iteration.
      * Never returns below 1. Delegates to {@link StationStep.Repeat#resolveCount(double)}, the
@@ -61,8 +61,8 @@ final class StationStepDecisions {
 
     /**
      * The {@code sum(resolve(f.Factor, f.Param) * f.Weight)} contribution a {@code Repeat}'s
-     * {@code AddFactors} weighted references add to its {@code Min} floor (0 for a fixed
-     * {@code Times}, an absent {@code AddFactors}, or a null {@code repeat}) - the ONE weighted-sum
+     * {@code Factors} weighted references add to its {@code Min} floor (0 for a fixed
+     * {@code Times}, an absent {@code Factors}, or a null {@code repeat}) - the ONE weighted-sum
      * vocabulary ({@link FactorMath}) every factor-consuming array shares.
      */
     static double repeatFactorContribution(@Nullable StationStep.Repeat repeat,
@@ -70,7 +70,7 @@ final class StationStepDecisions {
         if (repeat == null || repeat.isFixed()) {
             return 0.0;
         }
-        return FactorMath.sum(repeat.getAddFactors(), lookup);
+        return FactorMath.sum(repeat.getFactors(), lookup);
     }
 
     // ==================== Conditions gate (design 2.1's "Branch is NOT a step type" mechanism) ====================

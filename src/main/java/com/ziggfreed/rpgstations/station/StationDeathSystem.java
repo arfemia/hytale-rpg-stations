@@ -8,6 +8,7 @@ import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.component.query.Query;
 import com.hypixel.hytale.server.core.modules.entity.damage.DeathComponent;
 import com.hypixel.hytale.server.core.modules.entity.damage.DeathSystems;
+import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -19,10 +20,16 @@ import com.ziggfreed.rpgstations.util.Log;
  */
 public class StationDeathSystem extends DeathSystems.OnDeathSystem {
 
+    /**
+     * PLAYERS ONLY - the same query {@code StationCustodyBreakSystem}/{@code StationBlockPlaceSystem}
+     * already use. Only a player can hold a work session, so every mob death (the overwhelming
+     * majority of deaths in a populated world) used to pay a dispatch plus a session lookup for a
+     * question whose answer could only ever be "no".
+     */
     @Nonnull
     @Override
     public Query<EntityStore> getQuery() {
-        return Query.any();
+        return PlayerRef.getComponentType();
     }
 
     @Override

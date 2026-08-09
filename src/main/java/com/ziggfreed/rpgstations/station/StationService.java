@@ -6,8 +6,10 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -97,6 +99,7 @@ import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.rpgstations.asset.Roll;
+import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.common.codec.Vec3;
@@ -127,10 +130,10 @@ import com.ziggfreed.rpgstations.util.Log;
  * self-sufficient summary panel - {@link #rollCompletionLoot}, {@link #showSessionSummary} over
  * {@code loot.LootEngine} / {@code ui.StationSummaryHud}, with the per-cycle Roll pass living in
  * {@code StationStepHandlers}' Roll phase). It owns NO progression: {@link #onCycleCompleted}
- * fires {@code StationCycleCompletedEvent} carrying the station's authored contributions plus the
- * resolved tool multiplier, and whichever mod declared a channel decides what a post means. Extra
- * summary rows and cross-jar theming arrive the same way, through the api's
- * {@code SummaryEnricherRegistry} union.
+ * fires {@code StationCycleCompletedEvent} carrying the running action's authored contributions,
+ * already pre-scaled, plus the multiplier that was applied for display; whichever mod declared a
+ * channel decides what a post means. Extra summary rows and cross-jar theming arrive the same way,
+ * through the api's {@code SummaryEnricherRegistry} union.
  */
 public final class StationService {
 
@@ -141,12 +144,6 @@ public final class StationService {
     private static final long DEFAULT_MAX_DURATION_MS = 600_000L;
     private static final double DEFAULT_MAX_MOVE_METERS = 1.5;
     private static final String DEFAULT_HOLD_EFFECT = "RPG_Station_Hold";
-
-    /**
-     * The implicit single-action id (design section 3.1); phase 2's multi-action stations add
-     * named ids on top - see {@link ActionResolver#ACTION_WORK} (the shared constant).
-     */
-    private static final String ACTION_WORK = ActionResolver.ACTION_WORK;
 
     /** Round-5 refinement 3: the "lucky grant" notification color (distinct from {@link #toast}'s plain YELLOW). */
     private static final Color GOLD = new Color(0xFFD700);
@@ -352,7 +349,8 @@ public final class StationService {
         }
 
         UUID worldUuid = playerRef.getWorldUuid();
-        String blockKey = worldUuid + ":" + blockX + ":" + blockY + ":" + blockZ;
+        String worldPrefix = StationAnchors.worldPrefix(String.valueOf(worldUuid));
+        String blockKey = worldPrefix + blockX + ":" + blockY + ":" + blockZ;
         World world;
         try {
             world = WorldEvictors.worldOf(ref);
@@ -366,12 +364,10 @@ public final class StationService {
         // mapping for place-event indexing + the bounded ring scan).
         registerKnownStationBlock(blockKey, asset.getId(), blockItemIdAt(world, blockX, blockY, blockZ));
 
-        // 2) Diegetic action selection (design section 9.1, phase 2 leg E) - BEFORE Requires, so a
-        // per-action Requires override (design 9.1) gates the RIGHT action. A loaded claim already
-        // owned by this player commits to ITS OWN action (re-pressing F with a different item held
-        // must never switch a ritual already in progress mid-flight); otherwise select by the
-        // currently held stack. A single-action station (no Actions map) always resolves
-        // ACTION_WORK, byte-identical to phase 1.
+        // 2) Action selection - BEFORE Requires, so the RIGHT action's own gate is the one checked.
+        // A loaded claim already owned by this player commits to ITS OWN action (re-pressing F with
+        // a different item held must never switch a ritual already in progress mid-flight);
+        // otherwise the station's ordered Actions list is walked front to back.
         StationCustodyClaim preClaim = custodyByBlock.get(blockKey);
         String selectedActionId = (preClaim != null && preClaim.ownerId.equals(playerUuid) && !preClaim.isEmpty())
                 ? preClaim.actionId
@@ -391,9 +387,11 @@ public final class StationService {
         }
         ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, selectedActionId);
 
-        // 2.5) Requires gate (RpgStations' own Permission + Conditions, design section 4.4.2) -
-        // the RESOLVED action's own override when authored, else the station-level default.
-        if (!checkRequires(action.getRequires(), playerRef, asset)) {
+        // 2.5) Requires gate (Permission + factor Conditions), ANDed: the STATION's own entry gate
+        // AND the selected action's own. Neither defaults the other - an action that authors none is
+        // gated by the station's alone, and vice versa.
+        if (!checkRequires(asset.getRequires(), playerRef, asset, action)
+                || !checkRequires(action.getRequires(), playerRef, asset, action)) {
             toast(playerRef, RpgMsg.tr("ui.station.locked"));
             return;
         }
@@ -431,6 +429,18 @@ public final class StationService {
                 ItemStack heldForPlacement = hotbarComp != null ? hotbarComp.getActiveItem() : null;
                 int moved = 0;
                 if (custodyAccepts(custody, asset, action, heldForPlacement, claim)) {
+                    // Owner ceiling on how many stations may hold placed input at once in this
+                    // world (Settings.Limits.MaxCustodyClaimsPerWorld). Checked HERE, at the
+                    // placement itself, rather than at the top of the branch: only a press that
+                    // actually OPENS a claim counts against the ceiling, so a press with nothing
+                    // acceptable to place keeps its own honest denial and an idle-capable station
+                    // still falls through to practice. Topping up a claim that already stands adds
+                    // no bookkeeping and no prop entity, so it is never denied and a player is
+                    // never locked out of material they already placed.
+                    if (claim == null && atCustodyClaimCap(worldPrefix)) {
+                        toast(playerRef, RpgMsg.tr("ui.station.storage_full"));
+                        return;
+                    }
                     moved = placeIntoCustody(store, ref, commandBuffer, blockKey, playerUuid, asset.getId(),
                             action.getActionId(), hotbarComp.getInventory(), hotbarComp.getActiveSlot(),
                             heldForPlacement, custody, blockX, blockY, blockZ);
@@ -443,6 +453,11 @@ public final class StationService {
                     InventoryMatch found = findFirstCustodyMatchInInventory(store, ref, custody, asset, action,
                             hotbarComp.getActiveSlot(), claim);
                     if (found != null) {
+                        // Same ceiling, same reason, at the backpack-sourced placement site.
+                        if (claim == null && atCustodyClaimCap(worldPrefix)) {
+                            toast(playerRef, RpgMsg.tr("ui.station.storage_full"));
+                            return;
+                        }
                         moved = placeIntoCustody(store, ref, commandBuffer, blockKey, playerUuid, asset.getId(),
                                 action.getActionId(), found.container(), found.slot(), found.stack(), custody,
                                 blockX, blockY, blockZ);
@@ -479,9 +494,9 @@ public final class StationService {
             // an empty idle-capable station: fall through to engage below.
         }
 
-        // 3) Exclusive occupancy - the RESOLVED action's own Work override when authored.
+        // 3) Exclusive occupancy - a property of the placed BLOCK, not of the job run at it.
         StationAsset.Work work = action.getWork();
-        boolean exclusive = work == null || work.getExclusive() == null || work.getExclusive();
+        boolean exclusive = StationAsset.Block.effectiveExclusive(asset.getBlock());
         if (exclusive) {
             UUID occupant = byBlock.get(blockKey);
             if (occupant != null && !occupant.equals(playerUuid)) {
@@ -490,52 +505,49 @@ public final class StationService {
             }
         }
 
-        // 4) Held-tool gate - the RESOLVED action's own Tool override when authored.
-        if (!heldToolMatches(player, action.getTool())) {
+        // 4) Held-tool gate: the ACTION's own Tool is THE gate, checked once here and re-checked for
+        // identity every heartbeat. A null gate means no tool is required.
+        StationAsset.Tool toolGate = action.getTool();
+        if (!heldToolMatches(player, toolGate)) {
             toast(playerRef, RpgMsg.tr("ui.station.wrong_tool"));
             return;
         }
-        // 4b) Tool WEAR gate (decision 74), orthogonal to the identity routes above and checked at
-        // ENGAGE only - the per-heartbeat re-check stays about tool identity, so a session already
-        // running still ends at breakage (TOOL_BROKEN) rather than at this threshold.
-        StationAsset.Tool toolGate = action.getTool();
+        // 4b) Tool WEAR gate, orthogonal to the identity routes above and checked at ENGAGE only -
+        // the per-heartbeat re-check stays about tool identity, so a session already running still
+        // ends at breakage (TOOL_BROKEN) rather than at this threshold.
         if (toolGate != null && toolGate.hasDurabilityGate()
-                && resolveHeldToolDurabilityPercent(player) < toolGate.getMinDurabilityPercent()) {
+                && resolveHeldToolDurabilityPercent(player) < toolGate.getMinStartPercent()) {
             toast(playerRef, RpgMsg.tr("ui.station.tool_worn"));
             return;
         }
 
-        // 5) Viability: a Steps-authored action (design 9.3, phase 2 leg E - no Recipe/Convert
-        // check applies) is runnable exactly when its OWN Custody governs and already holds
-        // something (an ungoverned Steps action, no Custody authored, is always runnable - nothing
-        // gates its engagement); a classic Recipe-driven action runs the Convert check
-        // (custody-sourced when Custody governs), or idle practice when the station opts in.
+        // 5) Viability: a Steps-authored action (no Recipe/Convert check applies) is runnable
+        // exactly when its OWN Custody governs and already holds something (an ungoverned Steps
+        // action, no Custody authored, is always runnable - nothing gates its engagement); a classic
+        // Recipe-driven action runs the conversion selection (custody-sourced when Custody governs),
+        // or idle practice when the action opts in.
         boolean stepsProgram = action.getSteps() != null && action.getSteps().length > 0;
+        // The program this session will actually run (authored steps plus any extension
+        // insertions). Read raw one line above for the FLAVOR decision on purpose - an extension
+        // may add beats to a program, never conjure one - and merged from here down, so the
+        // engage-time derivations below see exactly the steps the dispatch will walk.
+        List<StationStep> programSteps = effectiveProgramSteps(asset, action);
         StationAsset.Work.Idle idleGroup = work != null ? work.getIdle() : null;
-        boolean idleEnabled = !stepsProgram && idleGroup != null
-                && idleGroup.getEnabled() != null && idleGroup.getEnabled();
-        // Selection wave (decision 56): consume any pending picker choice made (sneak+F) at THIS
-        // block into the session's chosen output category. Null = no choice (the byte-identical
-        // all-categories behavior); a stale choice for another block is ignored by consumePending.
-        String chosenCategory = consumePendingCategory(playerUuid, blockKey);
+        boolean idleEnabled = !stepsProgram && idleGroup != null && idleGroup.effectiveEnabled();
+        // Selection wave (decision 56): the pending picker choice made (sneak+F) at THIS block
+        // becomes the session's chosen output category. PEEKED, never consumed, until the engage
+        // below actually commits - a denied press must leave the selection standing, or the player
+        // silently loses the category they picked and the next plain F mills the default instead.
+        // Null = no choice (the byte-identical all-categories behavior); a stale choice for another
+        // block is ignored by peekPendingCategory.
+        String chosenCategory = peekPendingCategory(playerUuid, blockKey);
         ConversionCheck check;
         if (stepsProgram) {
             boolean runnable = custody == null || (preClaim != null && !preClaim.isEmpty());
             check = new ConversionCheck(runnable ? ConversionState.RUNNABLE : ConversionState.NO_INPUTS);
         } else {
-            StationAsset.Conversion[] conversions =
-                    StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
-            // Narrow to the EFFECTIVE output category (decision 56/57): the player's explicit picker
-            // choice when one was made, else the station's first-authored default for a multi-category
-            // station (decision 57 - plain-F = the first FromCrafting.Categories entry), else null =
-            // all (byte-identical to the pre-selection engine for a single-category station).
-            StationAsset.FromCrafting fromCrafting =
-                    action.getRecipe() != null ? action.getRecipe().getFromCrafting() : null;
-            conversions = conversionsForCategory(conversions,
-                    effectiveCategory(chosenCategory, fromCrafting, conversions));
-            check = custody != null
-                    ? firstRunnableConversionFromCustody(preClaim, player, conversions)
-                    : firstRunnableConversion(player, conversions);
+            check = selectConversion(asset, action, player, custody != null ? preClaim : null,
+                    custody != null, chosenCategory);
         }
         boolean startIdle = false;
         if (check.state == ConversionState.NO_INPUTS) {
@@ -550,6 +562,18 @@ public final class StationService {
             return;
         }
 
+        // 5b) Owner ceiling on concurrent sessions in this world
+        // (Settings.Limits.MaxSessionsPerWorld). Placed LAST among the denials on purpose: a press
+        // that only loads material into a station starts no session and returns above, so a busy
+        // world never blocks placement, and every reason specific to THIS press (wrong tool, no
+        // materials, no room) is reported first rather than being masked by a server-wide one. It
+        // also sits before the anchor claims below, so a denial here has nothing to roll back.
+        // Unlimited by default: the check costs one null read until an owner sets it.
+        if (atSessionCap(world)) {
+            toast(playerRef, RpgMsg.tr("ui.station.server_busy"));
+            return;
+        }
+
         // 6) Engage.
         TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
         if (transform == null) {
@@ -561,8 +585,8 @@ public final class StationService {
         // anchor atomically (first-wins), self included. A deny leaves ZERO claims
         // (resolveAndClaimAnchors rolls back its own partial claims on every deny path); the only
         // engage return AFTER this point (seat-mount failure) releases them explicitly.
-        AnchorResolution anchorRes = resolveAndClaimAnchors(world, worldUuid, playerUuid, action, transform,
-                store, blockX, blockY, blockZ, blockKey);
+        AnchorResolution anchorRes = resolveAndClaimAnchors(world, worldUuid, playerUuid, action, programSteps,
+                transform, store, blockX, blockY, blockZ, blockKey);
         if (anchorRes.denied()) {
             toast(playerRef, anchorRes.denyToast);
             return;
@@ -627,6 +651,12 @@ public final class StationService {
             toast(playerRef, RpgMsg.tr("ui.station.seat_unavailable"));
             return;
         }
+        // Past the LAST engage denial: the session is committed, so the picker choice this engage
+        // used is now genuinely spent and can be cleared. Every earlier return above leaves it
+        // standing for the player's next press.
+        if (chosenCategory != null) {
+            clearPendingCategory(playerUuid, blockKey);
+        }
 
         StationAsset.Hold.Mount.Entity entityGroup = s.entityMountMode ? mountGroup.getEntity() : null;
         s.entitySteerable = entityGroup != null && entityGroup.effectiveSteerable();
@@ -674,13 +704,22 @@ public final class StationService {
         // engage/swing puppet clip is suppressed for it (never double-fired on top). A non-stepped
         // session, or a stepped program with no step clips, keeps its one generic engage swing.
         s.stepProgramAuthorsClip = stepsProgram
-                && StationStepDecisions.programAuthorsAnyStepClip(Arrays.asList(action.getSteps()));
+                && StationStepDecisions.programAuthorsAnyStepClip(programSteps);
 
         // Puppet presentation (round-4 design, doc section 4.2): spawn + hide AFTER the mount
         // attach above - the puppet layers on WHATEVER hold/mount the real player already has
         // (seat, standing mount, or effect-mode movement lock), never replacing it. Non-fatal on
         // failure: s.puppetActive stays false and the session continues in-body.
-        StationPuppetController.spawnAndHide(s, commandBuffer, world, action.getPuppet(), player);
+        // Owner ceiling on live puppets in this world (Settings.Limits.MaxPuppetsPerWorld): past it
+        // the session starts and runs exactly as normal, it just performs in the player's own body -
+        // the same degradation a failed spawn already takes, so no engage is ever denied over
+        // presentation.
+        if (atPuppetCap(world)) {
+            Log.fine("STATION puppet ceiling reached in world " + world.getName()
+                    + " - this session performs in-body");
+        } else {
+            StationPuppetController.spawnAndHide(s, commandBuffer, world, action.getPuppet(), player);
+        }
         // Performer orphan-reconcile at engage (seam wave decision 48/55): despawn any stale double
         // left AT THIS block by a prior crashed session (a persistent performer whose owner is not
         // the engaging player). Deferred one tick via world.execute so the native performer sweep
@@ -690,13 +729,16 @@ public final class StationService {
         reconcileStalePerformersAtEngage(world, store, s.playerUuid, s.blockKey);
 
         StationAsset.Camera camera = action.getCamera();
-        String cameraMode = camera != null && camera.getMode() != null ? camera.getMode() : "ThirdPerson";
         boolean mountDefaultNoCamera = mounted && camera == null;
-        s.cameraApplied = !mountDefaultNoCamera && !"None".equalsIgnoreCase(cameraMode);
+        s.cameraApplied = !mountDefaultNoCamera && (camera == null || camera.effectiveEnabled());
         s.cameraLocked = camera == null || camera.getLocked() == null || camera.getLocked();
-        s.faceBlock = s.cameraApplied && camera != null && camera.getFaceBlock() != null && camera.getFaceBlock();
+        // Authoring Camera.Recipe at all IS the fixed-look opt-in: the preset names which
+        // ServerCameraSettings combination applies, so a second boolean gating it could only ever
+        // make an authored preset silently inert.
+        s.faceBlock = s.cameraApplied && camera != null && camera.hasRecipe();
         s.cameraRecipe = camera != null ? camera.getRecipe() : null;
-        s.toolReq = action.getTool();
+        // The action's own gate drives the heartbeat identity re-check and the wear drain.
+        s.toolReq = toolGate;
 
         StationAsset.Tool.Durability durability = s.toolReq != null ? s.toolReq.getDurability() : null;
         s.durabilityPerSwing = StationToolScaling.resolvedDurabilityAmount(
@@ -764,7 +806,7 @@ public final class StationService {
         // driver there, so an engage loop would double-fire on top of the first step's entry clip.
         if (s.puppetActive) {
             if (!s.stepProgramAuthorsClip) {
-                StationPuppetController.playLoop(s, store);
+                StationPuppetController.playLoop(s, store, player);
             }
         } else if (!s.seatMode) {
             StationHoldController.playEmote(s, store);
@@ -947,19 +989,12 @@ public final class StationService {
         }
 
         Custody custody = action.getCustody();
-        StationAsset.Conversion[] conversions =
-                StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
-        // Selection wave (decision 56/57): honor the session's EFFECTIVE output category every cycle -
-        // the explicit choice when one was made, else the station's first-authored default (decision
-        // 57); null = all (byte-identical to the pre-selection engine). The same one helper both the
-        // engage viability check and this per-cycle filter resolve through.
-        StationAsset.FromCrafting fromCrafting =
-                action.getRecipe() != null ? action.getRecipe().getFromCrafting() : null;
-        conversions = conversionsForCategory(conversions,
-                effectiveCategory(s.chosenOutputCategory, fromCrafting, conversions));
-        ConversionCheck check = custody != null
-                ? firstRunnableConversionFromCustody(custodyByBlock.get(s.blockKey), player, conversions)
-                : firstRunnableConversion(player, conversions);
+        // The SAME conversion selection the engage check ran, re-resolved every cycle because
+        // materials run out mid-session and the session's chosen output category still narrows the
+        // recipe's derived conversions.
+        ConversionCheck check = selectConversion(asset, action, player,
+                custody != null ? custodyByBlock.get(s.blockKey) : null, custody != null,
+                s.chosenOutputCategory);
         if (check.state == ConversionState.RUNNABLE) {
             if (s.idleMode) {
                 s.idleMode = false;
@@ -986,7 +1021,7 @@ public final class StationService {
                 exitWorkingState(s);
             }
             s.nextCycleAtMs = System.currentTimeMillis() + s.idleCycleMs;
-            return runIdleCycle(s, store, commandBuffer, action);
+            return runIdleCycle(s, store, commandBuffer, action, player);
         } else if (check.state == ConversionState.NO_INPUTS) {
             stop(s, StopReason.OUT_OF_INPUTS, store, commandBuffer);
             return false;
@@ -1020,62 +1055,93 @@ public final class StationService {
         // Decision 73: the chosen conversion's FULL Ingredient arrays drive the implicit program, so
         // a multi-input recipe stays ONE atomic Consume/Produce step pair.
         StationStep.Consume consumeStep = StationStep.Consume.of(check.inputs, consumeFrom);
-        // Recipe.Yield: the per-cycle output-quantity transform (StationYield). Resolved HERE, at the
-        // one point a chosen conversion becomes a live produce phase, because a yield keyed off the
-        // worker's held tool cannot be baked into the derived conversion at asset-fold time. ONE
-        // snapshot serves both this and the cycle's loot rolls (passed into dispatchProgram below), so
-        // a Yield ladder and a Roll ladder reading the same factor can never disagree.
-        StationAsset.Recipe effectiveRecipe = action.getRecipe();
-        StationAsset.Yield yield = effectiveRecipe != null ? effectiveRecipe.getYield() : null;
+        // Recipe.Yield: the per-cycle output-quantity transform (StationYield), DETERMINISTIC end to
+        // end. ONE FactorSnapshot still serves the whole cycle (the Bonus rolls below and any Stamp
+        // phase read it), so two ladders reading the same factor can never disagree.
+        StationAsset.Yield yield = check.recipe != null ? check.recipe.getYield() : null;
         FactorSnapshot snapshot = new FactorSnapshot(
                 buildFactorContext(s, store, player, action, attemptCycleIndex));
-        double yieldLadder = StationYield.ladderValue(yield, snapshot::resolve);
-        // A fractional yield pays its whole part always and rolls only the remainder, so 2.5 averages
-        // exactly 2.5 over many cycles. Same injected-DoubleSupplier seam LootEngine uses for a
-        // Chance roll, so the decision core stays pure and testable.
-        DoubleSupplier remainderRoll = () -> ThreadLocalRandom.current().nextDouble();
-        Ingredient[] yieldedOutputs = StationYield.applyToOutputs(yield, check.outputs, yieldLadder,
-                remainderRoll);
+        Ingredient[] yieldedOutputs = StationYield.applyToOutputs(yield, check.outputs);
+        recordYieldBreakdown(s, check.outputs, yieldedOutputs);
+        // A Bonus roll's Grants.OutputItems adds whole EXTRA items of this cycle's own primary
+        // output; the roll phase reports the count and applyGrantResult grants that many of this id.
+        Ingredient primaryOutput = yieldedOutputs.length > 0 ? yieldedOutputs[0] : null;
+        s.cycleOutputItemId = primaryOutput != null ? primaryOutput.getItemId() : null;
         StationStep.Produce produceStep = StationStep.Produce.of(yieldedOutputs,
                 StationStep.Produce.TO_INVENTORY);
-        // Scope-2 (design 1.8): fold Station/Action-targeted ExtensionAsset Loot into the cycle's
-        // effective loot refs (a pack extension's appended lootables and rolls land here).
-        LootRef effectiveLoot = ExtensionCatalog.getInstance().applyToStationLoot(s.stationId, action.getLoot());
-        String lootActionTarget = actionTargetIdFor(s, action.getActionId());
-        if (lootActionTarget != null) {
-            effectiveLoot = ExtensionCatalog.getInstance().applyToActionLoot(lootActionTarget, effectiveLoot);
-        }
-        Roll[] resolvedRolls = LootEngine.resolveRolls(effectiveLoot).toArray(new Roll[0]);
+        // The action's effective Bonus rolls ride the implicit program's own Roll phase, so this
+        // route resolves them at BUILD time rather than at completion.
+        Roll[] resolvedRolls = effectiveBonusRolls(asset, action).toArray(new Roll[0]);
         List<StationStep> steps = ImplicitProgram.build(consumeStep, produceStep, resolvedRolls,
                 action.getPresentation());
-        // Roll.Grants.BonusOutputCopies duplicates the cycle's PRIMARY output (the first authored
-        // one) - a multi-output conversion's byproducts are not bonus-copied. It reads the quantity
-        // the produce phase above ALREADY resolved rather than re-resolving it: a bonus copy
-        // duplicates the whole produced stack, so sourcing it pre-yield would hand out a smaller copy
-        // than the cycle produced, and re-rolling a FRACTIONAL yield here would let the copy disagree
-        // with the stack it is supposed to be a copy of.
-        ItemStack cycleOutput = new ItemStack(check.primaryOutputItem(),
-                yieldedOutputs.length > 0 && yieldedOutputs[0] != null
-                        ? yieldedOutputs[0].effectiveQuantity() : check.primaryOutputCount());
-        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, cycleOutput,
-                attemptCycleIndex, 0, false, snapshot);
+        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps,
+                attemptCycleIndex, 0, false, snapshot, false);
     }
 
     /**
      * An AUTHORED {@code Steps} program cycle attempt (design 9.3/9.5, phase 2 leg E): unlike
      * {@link #runRealCycle}, there is no live {@code ConversionCheck} - the program's own steps
      * (Consume/Produce/Roll/Stamp/...) validate and mutate whatever they individually need
-     * (custody, inventory, reagents), so {@link #dispatchProgram} is called with a {@code null}
-     * cycle output (a Roll step's {@code BonusOutputCopies} stays inert for an authored program
-     * with no live conversion output, same as today's Completion-trigger pass - design 4.5.1's
-     * existing rule, not a new one).
+     * (custody, inventory, reagents).
      */
     private boolean runAuthoredProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player) {
-        List<StationStep> steps = Arrays.asList(action.getSteps());
+        List<StationStep> steps = effectiveProgramSteps(asset, action);
         int attemptCycleIndex = s.cyclesDone + 1;
-        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, null, attemptCycleIndex, 0, false);
+        // An authored program has no single "cycle output", so an OutputItems grant has nothing to
+        // add to and is dropped (LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT flags the authoring).
+        s.cycleOutputItemId = null;
+        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, attemptCycleIndex, 0, false);
+    }
+
+    /**
+     * The program an action ACTUALLY runs: its own authored {@code Steps}, plus any insertions an
+     * {@code Action}-targeted {@code ExtensionAsset} contributes, in apply order. Empty for an
+     * action that authors no program at all.
+     *
+     * <p>The merge lives HERE, at the read, rather than on {@code ResolvedAction.getSteps()} - see
+     * that accessor's javadoc for why. The rule this placement buys: an insertion can only ADD
+     * beats to a program the action already authors, never conjure one, so which engine an action
+     * runs (authored program versus the recipe-driven convert loop) stays entirely base-owned.
+     * Every read of "the program this session will run" routes through here so the engage-time
+     * derivations (walk-anchor reachability, whether the program drives its own puppet clips) and
+     * the dispatch itself can never disagree about which steps exist.
+     */
+    @Nonnull
+    static List<StationStep> effectiveProgramSteps(@Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action) {
+        StationStep[] authored = action.getSteps();
+        if (authored == null || authored.length == 0) {
+            return List.of();
+        }
+        List<StationStep> base = Arrays.asList(authored);
+        String target = ActionResolver.actionTargetId(asset, action.getActionId());
+        return target != null
+                ? ExtensionCatalog.getInstance().applyToActionSteps(asset.getId(), target, base) : base;
+    }
+
+    /**
+     * The action's EFFECTIVE {@code Bonus} rolls: its own group, plus every matching
+     * {@code ExtensionAsset}'s appended lootables and inline rolls, expanded through
+     * {@link LootEngine#resolveRolls}. The ONE resolution all THREE Bonus read sites share - the
+     * implicit convert cycle (which folds them into its program's own Roll phase), an authored
+     * program's completed pass, and the session's Completion pass - so no route can ever see a
+     * different effective Bonus than another for the same action.
+     *
+     * <p>Trigger filtering is deliberately NOT done here: {@link LootEngine#rollAndGrant} takes the
+     * trigger and skips every roll that does not carry it, so one resolution serves the
+     * {@code Cycle} and {@code Completion} passes alike.
+     */
+    @Nonnull
+    static List<Roll> effectiveBonusRolls(@Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action) {
+        LootRef bonus = action.getBonus();
+        String target = ActionResolver.actionTargetId(asset, action.getActionId());
+        if (target != null) {
+            bonus = ExtensionCatalog.getInstance().applyToActionBonus(asset.getId(), target, bonus);
+        }
+        return LootEngine.resolveRolls(bonus);
     }
 
     /**
@@ -1084,9 +1150,7 @@ public final class StationService {
      * passes - bypassing the normal {@code Work.CycleMs} cadence gate entirely while suspended.
      * Rebuilds NOTHING from live inventory state (the whole point of {@link StationSession}'s
      * {@code activeProgram*} snapshot fields, design 9.3: a resume must never re-derive WHICH
-     * conversion is running, since the live inventory may have changed mid-suspension). A
-     * {@code null} {@code activeProgramCycleOutput} is LEGAL here (an authored program's own
-     * cycle output, phase 2 leg E - only a missing {@code steps} snapshot is an error).
+     * conversion is running, since the live inventory may have changed mid-suspension).
      */
     private boolean resumeCycleProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
                                        @Nonnull CommandBuffer<EntityStore> commandBuffer) {
@@ -1107,7 +1171,7 @@ public final class StationService {
             return false;
         }
         ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, s.actionId);
-        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, s.activeProgramCycleOutput,
+        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps,
                 s.activeProgramCycleIndex, s.programIndex, true);
     }
 
@@ -1120,8 +1184,7 @@ public final class StationService {
      * step's placeholder + factor-context substitution sees, and the value the cycle-completed
      * event fires with below) is {@code s.cyclesDone + 1}, computed ONCE by the caller before the
      * walk starts so it stays stable across a suspend/resume pair without persisting the counter
-     * early. {@code cycleOutput} is nullable (an authored program with no live Convert check,
-     * design 9.3/9.5's Steps programs, phase 2 leg E).
+     * early.
      *
      * <p>{@code Work.Looping: false} (design 9.3's "one completed program run completes the
      * SESSION" - the anvil's Enhance ritual): a COMPLETED program under a non-repeating action
@@ -1146,9 +1209,12 @@ public final class StationService {
     private boolean dispatchProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
-            @Nullable ItemStack cycleOutput, int attemptCycleIndex, int startIndex, boolean resuming) {
-        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, cycleOutput,
-                attemptCycleIndex, startIndex, resuming, null);
+            int attemptCycleIndex, int startIndex, boolean resuming) {
+        // The AUTHORED-program entry (a fresh pass and a resume alike): such a program carries no
+        // implicit Roll phase for the action's own Bonus, so its Cycle-trigger pass runs at
+        // completion instead - see rollCycleBonus.
+        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps,
+                attemptCycleIndex, startIndex, resuming, null, true);
     }
 
     /**
@@ -1157,12 +1223,20 @@ public final class StationService {
      * this cycle's loot rolls read the IDENTICAL resolved factor numbers - the "one aggregation, two
      * consumers" invariant {@code FactorSnapshot} exists for, which a second snapshot per cycle would
      * quietly break (a factor is free to vary between two resolutions within one cycle).
+     *
+     * <p>{@code bonusAtCompletion} says WHERE this dispatch's action-level {@code Bonus} pass
+     * happens, which is the ONE thing the two program shapes genuinely differ on: the implicit
+     * convert program embeds the action's rolls as its own Roll phase and passes {@code false} (a
+     * second pass here would double every cycle's loot), while an authored program has no such
+     * phase and passes {@code true} so its completed pass still resolves the SAME
+     * {@code Cycle}-trigger moment. Either way the moment is "this action completed a cycle", fired
+     * exactly once per completed pass.
      */
     private boolean dispatchProgram(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
-            @Nullable ItemStack cycleOutput, int attemptCycleIndex, int startIndex, boolean resuming,
-            @Nullable FactorSnapshot presetSnapshot) {
+            int attemptCycleIndex, int startIndex, boolean resuming,
+            @Nullable FactorSnapshot presetSnapshot, boolean bonusAtCompletion) {
         if (!resuming) {
             // A FRESH cycle attempt explicitly zeroes the suspend deadline AND the per-step
             // iteration counter before the walk starts, so a fresh program's very first Duration
@@ -1173,22 +1247,20 @@ public final class StationService {
         }
         FactorSnapshot snapshot = presetSnapshot != null ? presetSnapshot
                 : new FactorSnapshot(buildFactorContext(s, store, player, action, attemptCycleIndex));
-        StationStepContext ctx = new StationStepContext(s, store, commandBuffer, player, asset, action, snapshot,
-                steps, attemptCycleIndex, cycleOutput);
+        StationStepContext ctx = new StationStepContext(s, store, commandBuffer, player, action, snapshot,
+                steps, attemptCycleIndex);
 
         CastKernel.Walk<StationStepResult> walk = StationStepKernel.runResumable(ctx, startIndex);
         if (walk instanceof CastKernel.Walk.Suspended<StationStepResult> suspended) {
             s.programSuspended = true;
             s.programIndex = suspended.resumeIndex();
             s.activeProgramSteps = steps;
-            s.activeProgramCycleOutput = cycleOutput;
             s.activeProgramCycleIndex = attemptCycleIndex;
             return true;
         }
         s.programSuspended = false;
         s.programIndex = 0;
         s.activeProgramSteps = null;
-        s.activeProgramCycleOutput = null;
         if (walk instanceof CastKernel.Walk.Failed<StationStepResult> failed) {
             StationStepResult.Fail fail = (StationStepResult.Fail) failed.result();
             Log.warn("STATION step program failed for '" + s.stationId + "' at step index "
@@ -1205,13 +1277,20 @@ public final class StationService {
         if (s.durabilityPerCycle > 0) {
             drainHeldToolDurability(store, s.ref, player, s.durabilityPerCycle);
         }
-        // FIX ROUND: both reads below now resolve off the RESOLVED action, not the station-level
-        // asset - mirroring the action.getWork().effectiveLooping() read two lines down. Before this
-        // fix a multi-action station whose Work groups live entirely under Actions.* (the anvil's
-        // convert/enhance) forwarded ZERO contributions: asset.getWork() was null, so the forwarded
-        // list was empty on the cycle event for every real cycle.
-        double toolMult = resolveToolMultiplier(player, action.getTool());
-        onCycleCompleted(s, store, commandBuffer, action, toolMult, false, s.cyclesDone);
+        // An authored program's Cycle-trigger Bonus pass, against the snapshot THIS dispatch pass
+        // ran on. On a fresh single-pass program that IS the snapshot the whole walk used; on a
+        // RESUMED one it is a fresh snapshot this pass built (the 8-arg overload passes no preset),
+        // so a factor that moves while the program is suspended reads differently here than it did
+        // for the legs before the hold - accepted, not papered over. BEFORE the cycle-completed
+        // event, so a granted Roll.Grants.Contributions rides THIS cycle's event exactly as it does
+        // on the implicit route (where the Roll phase ran inside the walk that just finished).
+        if (bonusAtCompletion) {
+            rollCycleBonus(s, store, asset, action, player, snapshot, attemptCycleIndex);
+        }
+        // The action's ContributionScale ladder, resolved against the SAME snapshot this dispatch
+        // pass already built - one factor aggregation, every consumer.
+        double scale = ContributionScaling.multiplier(action.getContributionScale(), snapshot::resolve);
+        onCycleCompleted(s, store, commandBuffer, action, false, s.cyclesDone, scale);
 
         StationAsset.Work work = action.getWork();
         if (work != null && !work.effectiveLooping()) {
@@ -1219,6 +1298,38 @@ public final class StationService {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Records ONE real cycle's DETERMINISTIC yield per produced item, for the summary panel's
+     * per-produced-row breakdown line ({@link StationSession.YieldBreakdown}). The bonus half of that
+     * line is filled in separately, by whatever {@code Roll.Grants.OutputItems} the cycle's Bonus
+     * rolls hand over ({@link StationSession.YieldBreakdown#addBonus}).
+     *
+     * <p>It records {@code changed = false} for a cycle whose yield did not move the number - a
+     * starter tool producing exactly the conversion's own quantity leaves the breakdown line
+     * hidden. A recipe with NO {@code Yield} group is still recorded (every cycle contributing
+     * {@code changed = false}), because {@code Yield} is not the only thing that can move the
+     * number: a Bonus roll's {@code Grants.OutputItems} adds bonus copies to a recipe that authors
+     * no {@code Yield} at all, and skipping the record here left {@link StationSession.YieldBreakdown
+     * #addBonus} with no entry to fill - so exactly the case the breakdown line exists to explain
+     * ("your tool is earning you extra") was the one case it never rendered.
+     */
+    static void recordYieldBreakdown(@Nonnull StationSession s, @Nullable Ingredient[] authored,
+            @Nonnull Ingredient[] produced) {
+        if (authored == null) {
+            return;
+        }
+        for (int i = 0; i < produced.length && i < authored.length; i++) {
+            Ingredient out = produced[i];
+            Ingredient src = authored[i];
+            if (out == null || src == null || out.getItemId() == null || out.getItemId().isBlank()) {
+                continue;
+            }
+            int quantity = out.effectiveQuantity();
+            s.producedYield.computeIfAbsent(out.getItemId(), k -> new StationSession.YieldBreakdown())
+                    .add(quantity, quantity != src.effectiveQuantity());
+        }
     }
 
     /**
@@ -1316,8 +1427,13 @@ public final class StationService {
      */
     private boolean runIdleCycle(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
                                  @Nonnull CommandBuffer<EntityStore> commandBuffer,
-                                 @Nonnull ActionResolver.ResolvedAction action) {
-        onCycleCompleted(s, store, commandBuffer, action, 1.0, true, s.cyclesDone);
+                                 @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player) {
+        // An idle cycle scales the same way a real one does, off its own fresh snapshot (no cycle
+        // program ran to build one): amount x idleFraction x contributionScale.
+        FactorSnapshot snapshot = new FactorSnapshot(
+                buildFactorContext(s, store, player, action, s.cyclesDone + 1));
+        double scale = ContributionScaling.multiplier(action.getContributionScale(), snapshot::resolve);
+        onCycleCompleted(s, store, commandBuffer, action, true, s.cyclesDone, scale);
 
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
         emitMoment(store, s, StationFlairs.MOMENT_CYCLE, action.getPresentation(), blockPos);
@@ -1326,22 +1442,15 @@ public final class StationService {
     }
 
     /**
-     * Fires {@code StationCycleCompletedEvent} (design section 3.1/7.2): forwards this cycle's
-     * {@code Work.PerCycleContributions} (idle-scaled by {@code Work.Idle.Fraction} when
-     * {@code idle}) plus the resolved tool multiplier (forced {@code 1.0} for an idle cycle).
-     * Whichever mod declared a channel decides what a post on it means; this engine never
-     * interprets one.
+     * Fires {@code StationCycleCompletedEvent}: forwards this cycle's
+     * {@code Work.PerCycleContributions}, PRE-SCALED, plus the multiplier that was applied. Whichever
+     * mod declared a channel decides what a post on it means; this engine never interprets one.
      *
-     * <p><b>FIX ROUND:</b> takes the RESOLVED {@code action}, not the station-level
-     * {@code StationAsset} - a multi-action station whose {@code Work} groups live entirely under
-     * {@code Actions.*} (the anvil's {@code convert}/{@code enhance}, both authoring contributions
-     * with NO station-level {@code Work} group at all) forwarded ZERO of them before this fix
-     * ({@code asset.getWork()} resolved {@code null}, so {@link #contributions} always returned
-     * {@code List.of()}) and the event always carried {@code actionId="work"} regardless of which
-     * action actually ran. {@code action.getActionId()}/{@code action.getWork()} carry the fix -
-     * see {@link ActionResolver#resolve} for why this is safe for every single-action station too
-     * (a station with no {@code Actions} map resolves {@code action}'s groups to the station-level
-     * ones verbatim, byte-identical to before).
+     * <p><b>Scaling order, applied here and documented on the event:</b>
+     * {@code amount x Work.Idle.Fraction (idle cycles only) x contributionScale}. The engine
+     * pre-scales so a listener cannot forget to multiply (under-award) or multiply again
+     * (over-award); {@code contributionScale} rides the event for DISPLAY only. A one-shot
+     * {@code Roll.Grants.Contributions} find bypasses BOTH and rides its own list verbatim.
      *
      * <p>{@code commandBuffer} is GUARANTEED non-null here: both call sites (the real-cycle path
      * in {@link #runRealCycle} and the idle-cycle path in {@link #runIdleCycle}) run inside the
@@ -1350,47 +1459,31 @@ public final class StationService {
      */
     private static void onCycleCompleted(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull ActionResolver.ResolvedAction action,
-            double toolMultiplier, boolean idle, int cycleIndex) {
-        // Scope-2 (design 1.8): fold any Station/Action-targeted ExtensionAsset contributions into
-        // the forwarded list so an extension authoring a genuinely-new one reaches a listener
-        // exactly as if it were authored inline on Work.PerCycleContributions (decision 27).
-        // Append-only over the base, never a re-add of a (Channel, Param) pair the base already
-        // posts (that would double it - A8 review M1).
-        Contribution[] base = action.getWork() != null ? action.getWork().getPerCycleContributions() : null;
-        Contribution[] merged = ExtensionCatalog.getInstance().applyToStationContributions(s.stationId, base);
+            boolean idle, int cycleIndex, double contributionScale) {
+        // Fold any Action-targeted ExtensionAsset contributions into the forwarded list so an
+        // extension authoring a genuinely-new one reaches a listener exactly as if it were authored
+        // inline on Work.PerCycleContributions. Append-only over the base, never a re-add of a
+        // (Channel, Param) pair the base already posts (that would double it - the validator warns).
+        Contribution[] merged = action.getWork() != null ? action.getWork().getPerCycleContributions() : null;
         String actionTarget = actionTargetIdFor(s, action.getActionId());
         if (actionTarget != null) {
-            merged = ExtensionCatalog.getInstance().applyToActionContributions(actionTarget, merged);
+            merged = ExtensionCatalog.getInstance().applyToActionContributions(s.stationId, actionTarget, merged);
         }
-        List<StationContribution> perCycle = contributionsFrom(merged, idle, s.idleFraction);
+        List<StationContribution> perCycle = contributionsFrom(merged, idle, s.idleFraction, contributionScale);
         // A one-shot Roll.Grants.Contributions find rides its OWN list, never the scaled one - it
-        // must not pick up toolMultiplier (applied listener-side to the per-cycle list) or the idle
-        // fraction (pre-applied above). Drained here so each grant is forwarded exactly once.
+        // must not pick up the idle fraction or the contribution scale (both pre-applied above).
+        // Drained here so each grant is forwarded exactly once.
         List<StationContribution> oneShot = s.pendingOneShotContributions.isEmpty()
                 ? List.of() : List.copyOf(s.pendingOneShotContributions);
         s.pendingOneShotContributions.clear();
         StationEvents.fireCycleCompleted(store, commandBuffer, s.playerRef, s.playerUuid, s.sessionId,
-                s.stationId, action.getActionId(), cycleIndex, idle, perCycle, oneShot, toolMultiplier);
+                s.stationId, action.getActionId(), cycleIndex, idle, perCycle, oneShot, contributionScale);
     }
 
     /**
-     * The forwarded {@code Work.PerCycleContributions} for one cycle-completed event (design
-     * section 4.4.1): a real cycle forwards the RAW authored {@code Amount} (the listener
-     * multiplies by {@link StationCycleCompletedEvent#toolMultiplier()}); an idle cycle pre-scales
-     * each amount by {@code idleFraction} and the caller forces {@code toolMultiplier} to
-     * {@code 1.0} (matching idle semantics: a fraction of the usual posts, no conversion, no
-     * loot). {@code work} MUST be the resolved action's own {@code Work} group (FIX ROUND) - the
-     * station-level {@code StationAsset.getWork()} is null for a station like the anvil whose
-     * every {@code Work} group lives under {@code Actions.*}.
-     */
-    @Nonnull
-    private static List<StationContribution> contributions(@Nullable StationAsset.Work work, boolean idle,
-            double idleFraction) {
-        return contributionsFrom(work != null ? work.getPerCycleContributions() : null, idle, idleFraction);
-    }
-
-    /**
-     * The {@link #contributions} core over an already-resolved (extension-merged) array.
+     * The forwarded {@code Work.PerCycleContributions} for one cycle-completed event, over an
+     * already-resolved (extension-merged) array. Scaling order:
+     * {@code amount x idleFraction (idle cycles only) x contributionScale}.
      *
      * <p>The per-cycle filter is deliberately WEAKER than {@code Contribution.isPostable()} (the
      * one-shot grants-site gate): only a blank {@code Channel} is skipped, and a null
@@ -1400,7 +1493,7 @@ public final class StationService {
      */
     @Nonnull
     static List<StationContribution> contributionsFrom(@Nullable Contribution[] posts, boolean idle,
-            double idleFraction) {
+            double idleFraction, double contributionScale) {
         if (posts == null || posts.length == 0) {
             return List.of();
         }
@@ -1410,37 +1503,45 @@ public final class StationService {
                 continue;
             }
             double amount = c.getAmount() != null ? c.getAmount() : 0.0;
-            out.add(new StationContribution(c.getChannel(), c.getParam(),
-                    idle ? amount * idleFraction : amount));
+            if (idle) {
+                amount *= idleFraction;
+            }
+            out.add(new StationContribution(c.getChannel(), c.getParam(), amount * contributionScale));
         }
         return out;
     }
 
     /**
-     * Station-level contribution {@code Param}s keyed by channel, in authoring order (for
-     * {@link FactorContext#contributionParams(String)}) - used only by {@link #checkRequires}
-     * (pre-session, no resolved action exists yet) and {@link #rollCompletionLoot} (post-session,
-     * station-level {@code Loot}, not per-action). Delegates to the
-     * {@link #contributionParams(StationAsset.Work)} overload every per-cycle/action-aware caller
-     * uses instead (FIX ROUND).
+     * The running action's EFFECTIVE contribution {@code Param}s keyed by channel: the action's own
+     * {@code Work.PerCycleContributions} PLUS whatever an {@code Action}-targeted
+     * {@code ExtensionAsset} appends, through the same {@code applyToActionContributions} merge the
+     * cycle-completed event and the api station view read. Resolving the raw base here left an
+     * extension-declared {@code Param} invisible to a no-{@code Param} factor read while the very
+     * same pair was already riding the cycle event - one channel vocabulary, two answers.
+     *
+     * <p>{@code actionTargetId} is the caller's already-resolved {@code Target:{Action}} identity
+     * ({@code null} for the implicit action of a no-{@code Actions} station, which an Action target
+     * deliberately never reaches); {@code stationId} is what decides whether a station-SCOPED
+     * extension applies. Both are values every call site already holds.
      */
     @Nonnull
-    private static Map<String, List<String>> contributionParams(@Nonnull StationAsset asset) {
-        return contributionParams(asset.getWork());
+    static Map<String, List<String>> contributionParams(@Nullable String stationId,
+            @Nullable String actionTargetId, @Nullable StationAsset.Work work) {
+        Contribution[] posts = work != null ? work.getPerCycleContributions() : null;
+        if (actionTargetId != null) {
+            posts = ExtensionCatalog.getInstance().applyToActionContributions(stationId, actionTargetId, posts);
+        }
+        return contributionParams(posts);
     }
 
     /**
-     * {@code Work}-overriding form (FIX ROUND): {@link #buildFactorContext}'s action-aware
-     * overload passes the RESOLVED action's own {@code Work} group here - a multi-action
-     * station's per-cycle factor context must see the ACTUAL running action's contribution
-     * channels, not the (possibly {@code Work}-less) station-level default the anvil authors.
-     * Channel keys are lowercased by {@code FactorContext} itself on copy; a blank {@code Param}
-     * is dropped, so a channel posted to with no params answers an empty list rather than
-     * disappearing.
+     * The PURE keyed projection of an already-resolved contribution array, in authoring order (for
+     * {@link FactorContext#contributionParams(String)}). Channel keys are lowercased by
+     * {@code FactorContext} itself on copy; a blank {@code Param} is dropped, so a channel posted to
+     * with no params answers an empty list rather than disappearing.
      */
     @Nonnull
-    private static Map<String, List<String>> contributionParams(@Nullable StationAsset.Work work) {
-        Contribution[] posts = work != null ? work.getPerCycleContributions() : null;
+    private static Map<String, List<String>> contributionParams(@Nullable Contribution[] posts) {
         if (posts == null || posts.length == 0) {
             return Map.of();
         }
@@ -1458,22 +1559,47 @@ public final class StationService {
     }
 
     /**
-     * The Completion-trigger loot pass (design section 4.5.1's {@code "Completion"} trigger,
-     * non-silent, {@code cyclesDone >= 1}): runs BEFORE {@link #showSessionSummary} in {@link
-     * #stop} so any items it grants still appear in the session's item ledger. No live cycle
-     * output exists here ({@code cycleOutput} null), so a {@code Grants.BonusOutputCopies}
-     * authored under a Completion roll is silently inert (the validator warns at author time,
-     * M3 fix 5).
+     * The {@code Cycle}-trigger Bonus pass for an AUTHORED step program's completed pass. The
+     * implicit convert program reaches the same moment through its own embedded Roll phase; an
+     * authored program has none, so without this an action's {@code Bonus} was live under one
+     * program shape and inert under the other, for no reason an author could see.
+     * {@code Trigger: Cycle} means THE action's cycle-completed moment, whatever program shape it
+     * runs.
+     *
+     * <p>Same snapshot, same {@link #applyGrantResult} handoff, and the same effective
+     * {@link #effectiveBonusRolls} the other two routes read. {@code Grants.OutputItems} is the one
+     * thing that still lands nowhere here: an authored program has no single cycle output to add
+     * copies of ({@code s.cycleOutputItemId} stays null and
+     * {@link #grantBonusOutputItems} no-ops), which is exactly what the
+     * {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT} validator warning tells the author at authoring
+     * time. Every OTHER grant kind - droplists, commands, effects, contributions, the reached
+     * floor's presentation - now applies.
+     */
+    private static void rollCycleBonus(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
+            @Nonnull FactorSnapshot snapshot, int cycleIndex) {
+        List<Roll> rolls = effectiveBonusRolls(asset, action);
+        if (rolls.isEmpty()) {
+            return;
+        }
+        LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, snapshot, player,
+                s.playerRef, s.stationId, action.getActionId(), cycleIndex, store, s.blockX, s.blockY, s.blockZ);
+        applyGrantResult(s, store, player, result);
+    }
+
+    /**
+     * The Completion-trigger Bonus pass (non-silent, {@code cyclesDone >= 1}): runs BEFORE
+     * {@link #showSessionSummary} in {@link #stop} so any items it grants still appear in the
+     * session's item ledger. Reads the SESSION's own action - the same {@code Bonus} group the
+     * per-cycle pass reads, just filtered to the {@code Completion} trigger.
      */
     private void rollCompletionLoot(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
         StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
-        if (asset == null) {
+        if (asset == null || s.actionId == null) {
             return;
         }
-        // Scope-2 (design 1.8): the Completion pass reads the STATION-level loot (not per-action),
-        // so only Station-targeted extension loot merges here.
-        LootRef effectiveLoot = ExtensionCatalog.getInstance().applyToStationLoot(s.stationId, asset.getLoot());
-        List<Roll> rolls = LootEngine.resolveRolls(effectiveLoot);
+        ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, s.actionId);
+        List<Roll> rolls = effectiveBonusRolls(asset, action);
         if (rolls.isEmpty()) {
             return;
         }
@@ -1481,28 +1607,26 @@ public final class StationService {
         if (player == null) {
             return;
         }
-        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, asset));
+        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, action, s.cyclesDone));
         LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_COMPLETION, snapshot, player,
-                null, s.playerRef, s.stationId, ACTION_WORK, s.cyclesDone, store, s.blockX, s.blockY, s.blockZ);
-        applyGrantResult(s, store, result);
+                s.playerRef, s.stationId, s.actionId, s.cyclesDone, store, s.blockX, s.blockY, s.blockZ);
+        applyGrantResult(s, store, player, result);
     }
 
     /**
      * Folds a {@link LootEngine.GrantResult} into the session's item ledger, plays every
      * reached floor's {@code Presentation} through {@link #emitMoment} on {@link
      * StationFlairs#MOMENT_RARE_FIND}, and fires a round-5 item-specific GOLD "what you gained"
-     * notification ({@link #notifyItemGain}, {@code lucky=true}) per distinct item id in EITHER
-     * grant kind - REPLACES the old generic {@code ui.station.lucky}/{@code ui.station.rare_find}
+     * notification ({@link #notifyItemGain}, {@code lucky=true}) per distinct granted item id -
+     * REPLACES the old generic {@code ui.station.lucky}/{@code ui.station.rare_find}
      * toasts (design 4.5.1), which no longer fire from here.
      */
     static void applyGrantResult(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
-            @Nonnull LootEngine.GrantResult result) {
+            @Nullable Player player, @Nonnull LootEngine.GrantResult result) {
         if (!result.anyGranted()) {
             return;
         }
-        for (Map.Entry<String, Integer> e : result.getBonusCopyItems().entrySet()) {
-            s.luckItems.merge(e.getKey(), e.getValue(), Integer::sum);
-        }
+        grantBonusOutputItems(s, store, player, result.getOutputItems());
         for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
             s.luckItems.merge(e.getKey(), e.getValue(), Integer::sum);
         }
@@ -1519,9 +1643,6 @@ public final class StationService {
             emitMoment(store, s, StationFlairs.MOMENT_RARE_FIND, p, blockPos);
         }
         if (s.playerRef != null) {
-            for (Map.Entry<String, Integer> e : result.getBonusCopyItems().entrySet()) {
-                notifyItemGain(s.playerRef, e.getKey(), e.getValue(), true);
-            }
             for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
                 notifyItemGain(s.playerRef, e.getKey(), e.getValue(), true);
             }
@@ -1548,6 +1669,46 @@ public final class StationService {
                     (effectId, durMs) -> durMs != null && durMs > 0
                             ? NativeEffectUtil.applyFor(store, s.ref, effectId, durMs / 1000f, OverlapBehavior.OVERWRITE)
                             : NativeEffectUtil.apply(store, s.ref, effectId));
+        }
+    }
+
+    /**
+     * Grants {@code count} ADDITIVE items of THIS cycle's primary output (a Bonus roll's
+     * {@code Grants.OutputItems}), through the same {@code util.ItemGrantUtil} seam every other
+     * station grant uses, and folds them into BOTH the produced ledger and the produced row's
+     * yield breakdown - so the summary reads "deterministic yield plus what the rolls added".
+     *
+     * <p>Deliberately SILENT: these are more of the item the cycle was already producing, and the
+     * produce phase's own gain notification already fired for it - a second toast per cycle would be
+     * noise. The summary's produced row (and its breakdown line) is where the extra shows up.
+     *
+     * <p>A no-op when the cycle has no primary output to add to (an authored Steps program, whose
+     * "cycle output" is undefined - {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT} flags that authoring)
+     * or when nothing was granted. That no-op is load-bearing rather than defensive: an authored
+     * program's completed pass DOES run the action's {@code Cycle}-trigger Bonus rolls, so an
+     * {@code OutputItems} count genuinely reaches here with no item id to spend it on, and must
+     * fail quietly instead of grabbing a stale one.
+     */
+    static void grantBonusOutputItems(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nullable Player player, int count) {
+        if (count <= 0) {
+            return;
+        }
+        String itemId = s.cycleOutputItemId;
+        if (itemId == null || itemId.isBlank() || player == null) {
+            Log.fine("STATION Bonus OutputItems had no cycle output to add to at station '" + s.stationId + "'");
+            return;
+        }
+        try {
+            ItemGrantUtil.grant(player, new ItemStack(itemId, count), store, s.blockX, s.blockY, s.blockZ);
+        } catch (Throwable t) {
+            Log.fine("STATION Bonus OutputItems grant failed: " + t.getMessage());
+            return;
+        }
+        s.producedItems.merge(itemId, count, Integer::sum);
+        StationSession.YieldBreakdown breakdown = s.producedYield.get(itemId);
+        if (breakdown != null) {
+            breakdown.addBonus(count);
         }
     }
 
@@ -1584,56 +1745,16 @@ public final class StationService {
 
     /**
      * Per-cycle api {@link FactorContext} for the built-in {@code rpgstations:} factors ({@code
-     * api.impl.FactorRegistryImpl#registerBuiltins}) plus every other registered provider:
-     * session seconds elapsed, the CURRENT (already-incremented) cycle index, and the
-     * currently-held item's tool power / durability percent - read fresh, mirroring {@link
-     * #resolveToolMultiplier}'s no-snapshot convention. Station-level (no resolved action) - used
-     * only by {@link #rollCompletionLoot} (post-session, station-level {@code Loot}, not
-     * per-action; every real/idle cycle instead uses the {@link #buildFactorContext(StationSession,
-     * Store, Player, ActionResolver.ResolvedAction, int)} action-aware overload, FIX ROUND).
-     */
-    @Nonnull
-    private static FactorContext buildFactorContext(@Nonnull StationSession s, @Nullable Store<EntityStore> store,
-            @Nonnull Player player, @Nonnull StationAsset asset) {
-        return buildFactorContext(s, store, player, asset, s.cyclesDone);
-    }
-
-    /**
-     * {@code cycleIndex}-overriding, station-level form (no resolved action) - {@link
-     * #buildFactorContext(StationSession, Store, Player, StationAsset)} delegates here.
-     */
-    private static FactorContext buildFactorContext(@Nonnull StationSession s, @Nullable Store<EntityStore> store,
-            @Nonnull Player player, @Nonnull StationAsset asset, int cycleIndex) {
-        long sessionSeconds = Math.max(0L, (System.currentTimeMillis() - s.startedAtMs) / 1000L);
-        return FactorContext.builder()
-                .store(store)
-                .playerRef(s.playerRef)
-                .playerId(s.playerUuid)
-                .stationId(s.stationId)
-                .actionId(ACTION_WORK)
-                .sessionSeconds(sessionSeconds)
-                .cycleIndex(cycleIndex)
-                .toolPower(resolveHeldToolPower(player, asset.getTool()))
-                .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
-                .toolPowers(resolveHeldToolPowers(player))
-                .toolQuality(resolveHeldToolQuality(player))
-                .toolItemLevel(resolveHeldToolItemLevel(player))
-                .contributions(contributionParams(asset))
-                .build();
-    }
-
-    /**
-     * ACTION-AWARE form (FIX ROUND): {@link #dispatchProgram} passes the RESOLVED action here
-     * instead of the station-level {@code asset} - a Roll/Stamp step's factor context must report
-     * the ACTUAL running action id and its OWN contribution channels (mirroring
-     * {@link #contributions}' same correction), not the station-level default. The anvil's
-     * {@code convert}/{@code enhance} author NO station-level {@code Work} at all, so
-     * {@code contributionParams(asset)} always
-     * resolved empty here and every step saw {@code actionId="work"} instead of {@code "convert"}/
-     * {@code "enhance"} before this fix. {@code cycleIndex} is the ATTEMPT index (design section
-     * 9.3 - {@code s.cyclesDone + 1}, computed before {@code s.cyclesDone} itself advances) so a
-     * Roll step's factor context sees the cycle it is actually running, not the last COMPLETED
-     * one.
+     * api.impl.FactorRegistryImpl#registerBuiltins}) plus every other registered provider: session
+     * seconds elapsed, the cycle index, and the currently-held item's tool power / quality / item
+     * level / durability percent, all read fresh each cycle rather than snapshotted at engage.
+     *
+     * <p>ALWAYS action-anchored: the running action owns the tool gate and the contribution
+     * channels, so the context reports ITS id and ITS EFFECTIVE channels - extension-appended
+     * entries included, exactly as the completed cycle will post them
+     * ({@link #contributionParams(String, String, StationAsset.Work)}). {@code cycleIndex} is the ATTEMPT
+     * index ({@code s.cyclesDone + 1}, computed before {@code s.cyclesDone} itself advances) so a
+     * Roll step's factor context sees the cycle it is actually running, not the last COMPLETED one.
      */
     @Nonnull
     private static FactorContext buildFactorContext(@Nonnull StationSession s, @Nullable Store<EntityStore> store,
@@ -1652,16 +1773,14 @@ public final class StationService {
                 .toolPowers(resolveHeldToolPowers(player))
                 .toolQuality(resolveHeldToolQuality(player))
                 .toolItemLevel(resolveHeldToolItemLevel(player))
-                .contributions(contributionParams(action.getWork()))
+                .contributions(contributionParams(s.stationId, actionTargetIdFor(s, action.getActionId()),
+                        action.getWork()))
                 .build();
     }
 
     /**
      * The held tool's power for the station's effective gather type ({@code Tool.Gather.GatherType}
-     * only - unlike {@link #resolveToolMultiplier}, this reads regardless of whether {@code
-     * Tool.PowerScale} is authored, since {@code hytale:tool_power} is a general-purpose
-     * factor, not a contribution multiplier). 0 when no gather type resolves or no matching spec
-     * is held.
+     * only). 0 when no gather type resolves or no matching spec is held.
      */
     private static double resolveHeldToolPower(@Nonnull Player player, @Nullable StationAsset.Tool tool) {
         StationAsset.Tool.Gather gather = tool != null ? tool.getGather() : null;
@@ -1813,7 +1932,8 @@ public final class StationService {
         }
         for (Map.Entry<String, Integer> e : s.producedItems.entrySet()) {
             Message line = RpgMsg.tr("ui.station.summary.item_produced", itemNameMsg(e.getKey()), e.getValue());
-            rows.add(new StationSummaryHud.LedgerRow(e.getKey(), e.getValue(), line, SummaryRow.Kind.PRODUCED));
+            rows.add(new StationSummaryHud.LedgerRow(e.getKey(), e.getValue(), line, SummaryRow.Kind.PRODUCED,
+                    yieldBreakdownLine(s.producedYield.get(e.getKey()))));
         }
         for (Map.Entry<String, Integer> e : s.luckItems.entrySet()) {
             Message line = Msg.cat(
@@ -1823,6 +1943,37 @@ public final class StationService {
         }
         rows.addAll(enhanceLedgerRows(s.enhanceOutcomes));
         return rows;
+    }
+
+    /**
+     * The optional SECOND line under a PRODUCED ledger row: the per-cycle yield decomposition then
+     * the cycle count, e.g. "1 base + 3 tool  x 12 cycles" explaining a 48-plank row.
+     *
+     * <p>Returns {@code null} - so the row collapses back to one line - whenever the yield did not
+     * actually change the number ({@code Scale} neutral and no bonus reached) or nothing was
+     * recorded. That is deliberate: a starter tool producing exactly its base yield gets NO second
+     * line, so the line's presence is itself the signal that the tool is earning something.
+     *
+     * <p>Deliberately NOT applied to LUCKY, CONSUMED, or ENHANCE rows: none of those is a yield, and
+     * a luck grant's quantity comes from a native drop list this engine does not decompose.
+     */
+    @Nullable
+    private static Message yieldBreakdownLine(@Nullable StationSession.YieldBreakdown breakdown) {
+        if (breakdown == null || !breakdown.changed || breakdown.cycles <= 0) {
+            return null;
+        }
+        return RpgMsg.tr("ui.station.summary.produced_breakdown",
+                formatYieldTerm(breakdown.basePerCycle()),
+                formatYieldTerm(breakdown.bonusPerCycle()),
+                breakdown.cycles);
+    }
+
+    /** Formats one breakdown term: a whole number drops its trailing {@code .0}, a rung keeps its fraction. */
+    @Nonnull
+    private static String formatYieldTerm(double amount) {
+        double rounded = Math.round(amount * 100.0) / 100.0;
+        return rounded == Math.rint(rounded)
+                ? NumberFormatter.grouped((long) rounded) : String.valueOf(rounded);
     }
 
     /**
@@ -1862,7 +2013,7 @@ public final class StationService {
     /**
      * The ONE presentation-playback choke point: every station moment funnels through here.
      * Resolves the effective presentation through {@link StationFlairs#effective} FIRST, then
-     * plays {@code Sound}, {@code Particles}, and (new this leg) {@code Shake} - see
+     * plays {@code Sounds} (in authored order), {@code Particles}, and {@code Shake} - see
      * {@link Presentation.Shake}'s javadoc for the exact {@code CameraShakeService} parameter
      * shape this leaf was verified against (critique m6 binding fix). Shake needs the player
      * SPECIFICALLY (not "nearby players" like Sound3D/ModelParticleService), so it reads
@@ -1880,8 +2031,13 @@ public final class StationService {
         if (p == null) {
             return;
         }
-        if (p.getSound() != null && !p.getSound().isBlank()) {
-            Sound3D.play(p.getSound(), targetPos, store, "STATION");
+        String[] sounds = p.getSounds();
+        if (sounds != null) {
+            for (String sound : sounds) {
+                if (sound != null && !sound.isBlank()) {
+                    Sound3D.play(sound, targetPos, store, "STATION");
+                }
+            }
         }
         spawnMomentParticles(store, s, p.getParticles(), targetPos);
         Presentation.Shake shake = p.getShake();
@@ -2056,38 +2212,6 @@ public final class StationService {
         return pendingImpactAtMs > 0 && nowMs >= pendingImpactAtMs;
     }
 
-    /**
-     * The tool-power multiplier for THIS cycle: resolves {@code tool}'s EFFECTIVE gather type,
-     * reads the held item's max matching {@code ItemToolSpec} power, and delegates the clamp
-     * formula to {@link StationToolScaling}. Returns 1.0 when {@code tool} authors no
-     * {@code Tool.PowerScale}, or when neither gather type resolves.
-     *
-     * <p><b>FIX ROUND:</b> {@code tool} is the RESOLVED action's own {@code Tool} group ({@code
-     * action.getTool()}), not the station-level {@code asset.getTool()} - the same
-     * station-vs-action smell {@link #onCycleCompleted}/{@link #buildFactorContext} had. Harmless
-     * for every shipped station today (none override {@code Tool} per-action - the anvil's
-     * {@code convert}/{@code enhance} both inherit the station-level {@code Tool.Ids} gate, and
-     * neither authors a {@code PowerScale}), but a future multi-action station with a per-action
-     * {@code Tool.PowerScale} would silently read the wrong one without this fix.
-     */
-    private static double resolveToolMultiplier(@Nonnull Player player, @Nullable StationAsset.Tool tool) {
-        StationAsset.Tool.PowerScale scale = tool != null ? tool.getPowerScale() : null;
-        if (scale == null) {
-            return 1.0;
-        }
-        String gatherType = scale.getGatherType() != null && !scale.getGatherType().isBlank()
-                ? scale.getGatherType()
-                : (tool.getGather() != null ? tool.getGather().getGatherType() : null);
-        if (gatherType == null || gatherType.isBlank()) {
-            return 1.0;
-        }
-        ItemStack held = InventoryAccess.activeHotbarItemOf(player);
-        Item item = held != null ? held.getItem() : null;
-        ItemTool itemTool = item != null ? item.getTool() : null;
-        ItemToolSpec[] specs = itemTool != null ? itemTool.getSpecs() : null;
-        double heldPower = StationToolScaling.heldPowerFor(toolPowers(specs), gatherType);
-        return StationToolScaling.multiplier(heldPower, scale);
-    }
 
     /**
      * Every native {@code GatherType} the active hotbar item has a tool spec for, mapped to that
@@ -2146,14 +2270,14 @@ public final class StationService {
     }
 
     /**
-     * The session-completion presentation moment itself: plays the station's
-     * {@link StationAsset#getCompletion} through the SAME {@link #emitMoment} choke point, on
-     * the {@link StationFlairs#MOMENT_COMPLETION} moment id. Plays at the PLAYER's position, not
-     * the block (completion celebrates the player).
+     * The session-completion presentation moment itself: plays the SESSION's own action's
+     * {@code Moments.Completion} through the SAME {@link #emitMoment} choke point, on the
+     * {@link StationFlairs#MOMENT_COMPLETION} moment id. Plays at the PLAYER's position, not the
+     * block (completion celebrates the player).
      */
     private static void playCompletionMoment(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
         StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
-        if (asset == null) {
+        if (asset == null || s.actionId == null) {
             return;
         }
         TransformComponent transform = store.getComponent(s.ref, TransformComponent.getComponentType());
@@ -2161,7 +2285,8 @@ public final class StationService {
             return;
         }
         Vector3d playerPos = transform.getPosition();
-        emitMoment(store, s, StationFlairs.MOMENT_COMPLETION, asset.getCompletion(), playerPos);
+        emitMoment(store, s, StationFlairs.MOMENT_COMPLETION,
+                ActionResolver.resolve(asset, s.actionId).getCompletion(), playerPos);
     }
 
     /**
@@ -2211,8 +2336,8 @@ public final class StationService {
         releaseAnchorClaims(s, commandBuffer);
 
         StationAsset stopAsset = StationCatalog.getInstance().getStation(s.stationId);
-        String stopActionId = s.actionId != null ? s.actionId : ACTION_WORK;
-        Custody stopCustody = stopAsset != null ? ActionResolver.resolve(stopAsset, stopActionId).getCustody() : null;
+        Custody stopCustody = stopAsset != null && s.actionId != null
+                ? ActionResolver.resolve(stopAsset, s.actionId).getCustody() : null;
         returnCustody(s, stopCustody, commandBuffer);
 
         // Actively-working block state (Custody.States.Working): work has stopped by definition, so
@@ -2325,16 +2450,45 @@ public final class StationService {
      */
     public void onDamage(@Nonnull Ref<EntityStore> victimRef, @Nonnull Store<EntityStore> store,
             @Nullable CommandBuffer<EntityStore> commandBuffer) {
+        StationSession s = sessionOf(victimRef, store);
+        if (s != null && s.interruptOnDamage) {
+            stop(s, StopReason.DAMAGED, store, commandBuffer);
+        }
+    }
+
+    /**
+     * The live session belonging to the entity {@code ref} points at, or {@code null} when it has
+     * none. ONE map lookup: {@link #byPlayer} is already keyed by player uuid, and the victim's own
+     * {@code PlayerRef} component carries that uuid - the damage/death hooks used to linear-scan
+     * every live session purely because they held a {@code Ref} instead of a uuid, an un-indexed
+     * product of (damage-or-death events per second) x (live sessions) that grew with both axes at
+     * once.
+     *
+     * <p>The identity re-check ({@code getStore()}/{@code getIndex()}) preserves the pre-lookup
+     * semantic exactly: only the session's OWN entity counts, so a stale ref left by a respawn or a
+     * relog never resolves. Never throws.
+     */
+    @Nullable
+    private StationSession sessionOf(@Nonnull Ref<EntityStore> ref, @Nonnull Store<EntityStore> store) {
         if (byPlayer.isEmpty()) {
-            return;
+            return null;
         }
-        for (StationSession s : byPlayer.values()) {
-            if (s.ref != null && s.ref.getStore() == store
-                    && s.ref.getIndex() == victimRef.getIndex() && s.interruptOnDamage) {
-                stop(s, StopReason.DAMAGED, store, commandBuffer);
-                return;
-            }
+        PlayerRef playerRef;
+        try {
+            playerRef = store.getComponent(ref, PlayerRef.getComponentType());
+        } catch (Throwable t) {
+            Log.fine("STATION session lookup failed: " + t.getMessage());
+            return null;
         }
+        UUID uuid = playerRef != null ? playerRef.getUuid() : null;
+        if (uuid == null) {
+            return null;
+        }
+        StationSession s = byPlayer.get(uuid);
+        if (s == null || s.ref == null || s.ref.getStore() != store || s.ref.getIndex() != ref.getIndex()) {
+            return null;
+        }
+        return s;
     }
 
     /**
@@ -2347,11 +2501,9 @@ public final class StationService {
      */
     public void stopForRef(@Nonnull Ref<EntityStore> ref, @Nonnull Store<EntityStore> store,
                            @Nonnull StopReason reason, @Nullable CommandBuffer<EntityStore> commandBuffer) {
-        for (StationSession s : byPlayer.values()) {
-            if (s.ref != null && s.ref.getStore() == store && s.ref.getIndex() == ref.getIndex()) {
-                stop(s, reason, store, commandBuffer);
-                return;
-            }
+        StationSession s = sessionOf(ref, store);
+        if (s != null) {
+            stop(s, reason, store, commandBuffer);
         }
     }
 
@@ -2363,10 +2515,270 @@ public final class StationService {
         }
     }
 
-    /** Server shutdown: best-effort teardown of every live session. */
+    /**
+     * Server shutdown: best-effort teardown of every live session, then a drain of every claim no
+     * session was behind.
+     *
+     * <p>A claim is minted by placing input and walking away - no session required - so the session
+     * sweep above can only ever reach a subset of them. The rest used to sit in the block-keyed maps
+     * until the process exited, holding their entity refs with them. Draining is a pure release
+     * here, not a hand-back: placed input is explicitly never persisted (a restart or crash loses an
+     * in-flight claim, the documented contract this whole feature is built on), and the display
+     * props are {@code NonSerialized} so they cannot outlive the process either. Touching a dying
+     * world's entity store from the shutdown thread would risk a throw for something no player can
+     * observe.
+     */
     public void stopAll(@Nonnull StopReason reason) {
         for (StationSession s : new ArrayList<>(byPlayer.values())) {
             stop(s, reason, null, null);
+        }
+        int drained = forgetBlockKeyedState(key -> true);
+        if (drained > 0) {
+            Log.fine("STATION shutdown drained " + drained + " session-less custody claim(s)");
+        }
+    }
+
+    // ==================== Owner ceilings (Settings.Limits) ====================
+
+    /**
+     * The owner's authored per-world ceilings, or {@code null} when none were authored. Read live
+     * (never cached) so a settings reload takes effect on the next press, exactly like the engine
+     * master switch beside it.
+     */
+    @Nullable
+    private static RpgStationsSettingsAsset.Limits limits() {
+        return SettingsCatalog.getInstance().current().getLimits();
+    }
+
+    /** True when {@code world} already runs as many sessions as the owner allows. */
+    private boolean atSessionCap(@Nonnull World world) {
+        RpgStationsSettingsAsset.Limits l = limits();
+        return l != null && RpgStationsSettingsAsset.Limits.atCapacity(l.getMaxSessionsPerWorld(),
+                () -> countLiveSessions(world, s -> true));
+    }
+
+    /** True when {@code world} already carries as many live worker doubles as the owner allows. */
+    private boolean atPuppetCap(@Nonnull World world) {
+        RpgStationsSettingsAsset.Limits l = limits();
+        return l != null && RpgStationsSettingsAsset.Limits.atCapacity(l.getMaxPuppetsPerWorld(),
+                () -> countLiveSessions(world, s -> s.puppetActive));
+    }
+
+    /** True when the world behind {@code worldPrefix} already holds as many claims as the owner allows. */
+    private boolean atCustodyClaimCap(@Nonnull String worldPrefix) {
+        RpgStationsSettingsAsset.Limits l = limits();
+        return l != null && RpgStationsSettingsAsset.Limits.atCapacity(l.getMaxCustodyClaimsPerWorld(),
+                () -> countClaimsInWorld(worldPrefix));
+    }
+
+    /**
+     * How many NOT-yet-stopped sessions in {@code world} satisfy {@code match}. Counts the world's
+     * own session queue rather than the global player map, so the answer is per-world by
+     * construction; a stopped session still awaiting its frame drain is excluded, so the count
+     * tracks what is genuinely live rather than what has not been swept yet.
+     */
+    private int countLiveSessions(@Nonnull World world, @Nonnull Predicate<StationSession> match) {
+        ConcurrentLinkedQueue<StationSession> queued = sessionsByWorld.peek(world);
+        if (queued == null) {
+            return 0;
+        }
+        int live = 0;
+        for (StationSession s : queued) {
+            if (!s.stopped.get() && match.test(s)) {
+                live++;
+            }
+        }
+        return live;
+    }
+
+    /** How many custody claims stand in the world behind {@code worldPrefix}. */
+    private int countClaimsInWorld(@Nonnull String worldPrefix) {
+        int claims = 0;
+        for (String key : custodyByBlock.keySet()) {
+            if (key.startsWith(worldPrefix)) {
+                claims++;
+            }
+        }
+        return claims;
+    }
+
+    // ==================== World unload / disconnect eviction ====================
+
+    /**
+     * World-unload teardown, driven by {@code RpgStationsPlugin}'s own {@code RemoveWorldEvent}
+     * listener: stop every session still running in {@code world}, then forget every block-keyed
+     * entry that named it.
+     *
+     * <p>Every one of this engine's block-keyed maps is GLOBAL and keyed by a composite
+     * {@code "<worldUuid>:<x>:<y>:<z>"} string rather than partitioned per world, so nothing about
+     * unloading a world removed their entries: a fleet that creates and destroys instance worlds
+     * accumulated them for the whole uptime, and each surviving claim pinned its display entity ref.
+     * The world-uuid prefix the key already carries is the whole sweep.
+     *
+     * <p>Runs BEFORE the shared {@code WorldEvictors} fan-out at the call site, deliberately: that
+     * fan-out drops the per-world session queue this method reads. Claims are released rather than
+     * handed back - the world and its entity store are going away, and custody is never persisted.
+     * Never throws.
+     */
+    public void onWorldRemoved(@Nonnull World world) {
+        try {
+            ConcurrentLinkedQueue<StationSession> queued = sessionsByWorld.peek(world);
+            if (queued != null) {
+                for (StationSession s : new ArrayList<>(queued)) {
+                    try {
+                        stop(s, StopReason.WORLD_CHANGED, null, null);
+                    } catch (Throwable t) {
+                        Log.warn("STATION world-unload session stop failed: " + t.getMessage());
+                    }
+                }
+            }
+            String worldUuid = worldUuidTextOf(world);
+            if (worldUuid == null) {
+                return;
+            }
+            String prefix = StationAnchors.worldPrefix(worldUuid);
+            // Belt and braces: a session whose world queue entry was already drained is still in
+            // byPlayer, and its block key names this world. stop() is idempotent, so a session
+            // reached twice costs nothing.
+            for (StationSession s : new ArrayList<>(byPlayer.values())) {
+                if (s.blockKey != null && s.blockKey.startsWith(prefix)) {
+                    try {
+                        stop(s, StopReason.WORLD_CHANGED, null, null);
+                    } catch (Throwable t) {
+                        Log.warn("STATION world-unload session stop failed: " + t.getMessage());
+                    }
+                }
+            }
+            int forgotten = forgetBlockKeyedState(key -> key.startsWith(prefix));
+            if (forgotten > 0) {
+                Log.fine("STATION world unload released " + forgotten + " custody claim(s) in world "
+                        + world.getName());
+            }
+        } catch (Throwable t) {
+            Log.warn("STATION world-unload teardown failed: " + t.getMessage(), t);
+        }
+    }
+
+    /**
+     * The distinct world uuids that currently hold at least one custody claim owned by
+     * {@code playerUuid} - what a disconnect handler needs in order to hop onto the right world
+     * thread for each one. Empty (never null) when the player has no claims anywhere.
+     */
+    @Nonnull
+    public Set<UUID> claimWorldsOf(@Nonnull UUID playerUuid) {
+        Set<UUID> worlds = new LinkedHashSet<>();
+        for (Map.Entry<String, StationCustodyClaim> e : custodyByBlock.entrySet()) {
+            if (!e.getValue().ownerId.equals(playerUuid)) {
+                continue;
+            }
+            String worldUuid = StationAnchors.worldUuidOf(e.getKey());
+            if (worldUuid == null) {
+                continue;
+            }
+            try {
+                worlds.add(UUID.fromString(worldUuid));
+            } catch (IllegalArgumentException ignored) {
+                // A malformed key can never be resolved to a world; the shutdown drain reclaims it.
+            }
+        }
+        return worlds;
+    }
+
+    /**
+     * Hands back every custody claim {@code playerUuid} left standing in {@code worldUuid} - the
+     * disconnect sweep for placed input with NO session behind it (place logs, walk away, log off:
+     * the four existing claim-removal paths all need a session stop, a block break, or a press, so
+     * none of them ever fired for that shape and both the claim and its display prop leaked for the
+     * whole server uptime).
+     *
+     * <p><b>World thread only</b> - the caller hops via {@code World#execute} first, which is what
+     * makes the display despawn and the block-state reset safe here. It holds no command buffer at
+     * that point, so the despawn takes the live-{@code Store} route. Items drop at the block rather
+     * than going to the owner's inventory: the owner is leaving, and a disconnecting player's
+     * inventory is not a reachable destination. Never throws.
+     */
+    public void returnClaimsOf(@Nonnull UUID playerUuid, @Nonnull UUID worldUuid, @Nullable World world) {
+        String prefix = StationAnchors.worldPrefix(worldUuid.toString());
+        Store<EntityStore> store = null;
+        if (world != null) {
+            try {
+                store = world.getEntityStore().getStore();
+            } catch (Throwable t) {
+                Log.fine("STATION disconnect claim sweep could not resolve a store: " + t.getMessage());
+            }
+        }
+        for (Map.Entry<String, StationCustodyClaim> e : custodyByBlock.entrySet()) {
+            String blockKey = e.getKey();
+            StationCustodyClaim claim = e.getValue();
+            if (!blockKey.startsWith(prefix) || !claim.ownerId.equals(playerUuid)) {
+                continue;
+            }
+            // Whoever wins this removal owns the hand-back, exactly as returnCustody /
+            // onCustodyBlockBroken already arbitrate between themselves.
+            if (!custodyByBlock.remove(blockKey, claim)) {
+                continue;
+            }
+            byBlock.remove(blockKey, playerUuid);
+            try {
+                StationCustodyDisplay.despawn(claim.displayRef(), store);
+                giveClaimToOwner(store, null, claim, claim.blockX, claim.blockY, claim.blockZ);
+                resetCustodyStateFor(world, claim);
+            } catch (Throwable t) {
+                Log.warn("STATION disconnect claim sweep failed at " + blockKey + ": " + t.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Resets {@code claim}'s block to its Empty custody state, resolving the same {@code Custody}
+     * group the claim's own station/action authored (the {@link #retrieveCustody} flip, reused).
+     * A no-op when the world is unreachable or that action authors no {@code States}.
+     */
+    private static void resetCustodyStateFor(@Nullable World world, @Nonnull StationCustodyClaim claim) {
+        if (world == null) {
+            return;
+        }
+        StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
+        Custody custody = asset != null ? ActionResolver.resolve(asset, claim.actionId).getCustody() : null;
+        if (custody != null) {
+            flipCustodyState(world, claim.blockX, claim.blockY, claim.blockZ, custody, false);
+        }
+    }
+
+    /**
+     * Drops every entry whose block key {@code keyMatches} - the claim map, the occupancy map, the
+     * discovered-block index, and any pending picker choice made at such a block - and returns how
+     * many CLAIMS went with it (the count worth logging; the rest are pure index entries).
+     *
+     * <p>{@code stationBlockItemToId} is deliberately NOT swept: it maps a block ITEM id to a station
+     * id, is derived from the loaded assets, and is the same in every world, so a world unload has
+     * nothing to say about it.
+     *
+     * <p>Pure bookkeeping: no entity, world, or block write happens here, because both callers are
+     * teardown paths where the owning world is already going away.
+     */
+    private int forgetBlockKeyedState(@Nonnull Predicate<String> keyMatches) {
+        int claims = 0;
+        for (String key : new ArrayList<>(custodyByBlock.keySet())) {
+            if (keyMatches.test(key) && custodyByBlock.remove(key) != null) {
+                claims++;
+            }
+        }
+        byBlock.keySet().removeIf(keyMatches);
+        knownStationBlocks.keySet().removeIf(keyMatches);
+        pendingByPlayer.values().removeIf(p -> keyMatches.test(p.blockKey()));
+        return claims;
+    }
+
+    /** {@code world}'s own uuid as the text a block key carries, or {@code null} when unreadable. */
+    @Nullable
+    private static String worldUuidTextOf(@Nonnull World world) {
+        try {
+            UUID uuid = world.getWorldConfig().getUuid();
+            return uuid != null ? uuid.toString() : null;
+        } catch (Throwable t) {
+            Log.fine("STATION could not read a world uuid for eviction: " + t.getMessage());
+            return null;
         }
     }
 
@@ -2442,6 +2854,11 @@ public final class StationService {
         @Nullable final Ingredient[] inputs;
         @Nullable final Ingredient[] outputs;
         /**
+         * The action's {@code Recipe}, carried through so the produce phase reads its {@code Yield};
+         * null for a non-runnable check or a Steps program (which has no recipe at all).
+         */
+        @Nullable StationAsset.Recipe recipe;
+        /**
          * The chosen conversion's effective per-cycle pace override in ms (seam wave decision 52's
          * {@code Conversion.DurationMs}, incl. a baked {@code FromCrafting.NativeTime} transform), or
          * {@code <= 0} when this conversion authors none - the engine then falls to {@code
@@ -2462,16 +2879,57 @@ public final class StationService {
             this.durationMs = durationMs;
         }
 
-        /** The FIRST output item id, for the bonus-copy source + the session's cycle-output read. */
-        @Nullable
-        String primaryOutputItem() {
-            return outputs != null && outputs.length > 0 ? outputs[0].getItemId() : null;
+        /** Fluent: attach the action's recipe to a RUNNABLE check. */
+        @Nonnull
+        ConversionCheck withRecipe(@Nullable StationAsset.Recipe recipe) {
+            this.recipe = recipe;
+            return this;
         }
+    }
 
-        /** The FIRST output's count, paired with {@link #primaryOutputItem()}. */
-        int primaryOutputCount() {
-            return outputs != null && outputs.length > 0 ? outputs[0].effectiveQuantity() : 0;
+    /**
+     * The CONVERSION selection for one cycle: narrow the action's ONE {@code Recipe} to the chosen
+     * output category (the picker's choice, else the recipe's own first-authored default) and return
+     * the first conversion whose inputs are available, carrying the recipe on the returned check so
+     * the produce phase reads its {@code Yield}.
+     *
+     * <p>There is no tool arm here: the ACTION's {@code Tool} is the one gate, already checked at
+     * engage and re-checked every heartbeat. Two transforms behind two different tools are two
+     * ACTIONS, and the ordered {@code Actions} list picks between them.
+     */
+    @Nonnull
+    private ConversionCheck selectConversion(@Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
+            @Nullable StationCustodyClaim claim, boolean fromCustody, @Nullable String chosenCategory) {
+        StationAsset.Recipe recipe = action.getRecipe();
+        if (recipe == null) {
+            return new ConversionCheck(ConversionState.NO_INPUTS);
         }
+        StationAsset.Conversion[] conversions = StationCatalog.getInstance()
+                .resolvedConversions(asset, action.getActionId(), recipe);
+        conversions = conversionsForCategory(conversions,
+                effectiveCategory(chosenCategory, recipe.getFromCrafting(), conversions));
+        ConversionCheck check = fromCustody
+                ? firstRunnableConversionFromCustody(claim, player, conversions)
+                : firstRunnableConversion(player, conversions);
+        return check.state == ConversionState.RUNNABLE ? check.withRecipe(recipe) : check;
+    }
+
+    /**
+     * Every conversion the action's own {@code Recipe} resolves to, in derived order. Used by the
+     * reads that ask "what can this action make/accept at all" rather than "what runs this cycle" -
+     * the sneak+F picker's category strip and custody's derived acceptance matcher.
+     */
+    @Nonnull
+    private static StationAsset.Conversion[] allConversionsFor(@Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action) {
+        StationAsset.Recipe recipe = action.getRecipe();
+        if (recipe == null) {
+            return new StationAsset.Conversion[0];
+        }
+        StationAsset.Conversion[] one = StationCatalog.getInstance()
+                .resolvedConversions(asset, action.getActionId(), recipe);
+        return one != null ? one : new StationAsset.Conversion[0];
     }
 
     // ==================== Multi-output selection (selection wave, decision 50/56) ====================
@@ -2726,14 +3184,15 @@ public final class StationService {
             @Nonnull Ref<EntityStore> ref, @Nonnull PlayerRef playerRef, @Nonnull Player player,
             @Nonnull UUID playerUuid, @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action,
             @Nullable StationCustodyClaim claim, int blockX, int blockY, int blockZ) {
-        StationAsset.Conversion[] conversions =
-                StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
+        StationAsset.Conversion[] conversions = allConversionsFor(asset, action);
         List<String> categories = distinctConversionCategories(conversions);
         if (decideRoute(true, categories.size()) != Route.PICKER) {
             return false;
         }
         String blockKey = playerRef.getWorldUuid() + ":" + blockX + ":" + blockY + ":" + blockZ;
-        boolean showLocked = pickerShowLocked(asset);
+        // No engine path produces a LOCKED output category (no per-category tool gate exists), so
+        // every tab renders unlocked; the page keeps its own knob for whenever one does.
+        boolean showLocked = true;
         String previewInputItemId = pickerPreviewInputItemId(claim, player);
         List<PickerCategories.Category> tabs = buildPickerCategories(conversions, categories, previewInputItemId,
                 liveResourceTypeIdsOf(previewInputItemId));
@@ -2808,8 +3267,9 @@ public final class StationService {
     /**
      * The picker's {@code onSelect} callback (runs on a page-event thread with no command buffer):
      * record the choice as this player's PENDING selection at that block. The player's next plain-F
-     * engage at the same block consumes it ({@link #consumePendingCategory}) into the new session's
-     * {@code chosenOutputCategory}. A localized toast advertises "press F to begin".
+     * engage at the same block reads it ({@link #peekPendingCategory}) into the new session's
+     * {@code chosenOutputCategory}, and clears it only once that engage commits
+     * ({@link #clearPendingCategory}). A localized toast advertises "press F to begin".
      */
     private void onPickerSelect(@Nonnull Ref<EntityStore> ref, @Nonnull Store<EntityStore> store,
             @Nonnull UUID playerUuid, @Nonnull String blockKey, @Nonnull String categoryId) {
@@ -2821,30 +3281,29 @@ public final class StationService {
     }
 
     /**
-     * Consume this player's pending picker choice IFF it was made at {@code blockKey} (a stale
-     * choice for another block is left in place, not applied). Returns the chosen category id, or
-     * null when there is no matching pending choice (the all-categories default).
+     * READ this player's pending picker choice IFF it was made at {@code blockKey} (a stale choice
+     * for another block is left in place, not applied). Returns the chosen category id, or null
+     * when there is no matching pending choice (the all-categories default).
+     *
+     * <p>Deliberately a PEEK, paired with {@link #clearPendingCategory} once an engage commits. A
+     * press can still be denied for half a dozen reasons after the choice is read (no materials,
+     * inventory full, world at its session ceiling, a busy or unreachable anchor, no seat), and
+     * consuming the selection on the way past those denials silently threw away what the player
+     * picked: their next plain-F press then ran the first-authored default instead, with nothing
+     * said.
      */
     @Nullable
-    private String consumePendingCategory(@Nonnull UUID playerUuid, @Nonnull String blockKey) {
+    private String peekPendingCategory(@Nonnull UUID playerUuid, @Nonnull String blockKey) {
         PendingSelection pending = pendingByPlayer.get(playerUuid);
-        if (pending == null || !pending.blockKey().equals(blockKey)) {
-            return null;
-        }
-        pendingByPlayer.remove(playerUuid, pending);
-        return pending.category();
+        return pending != null && pending.blockKey().equals(blockKey) ? pending.category() : null;
     }
 
-    /**
-     * The effective {@code Picker.ShowLocked} for this station (the station-level {@code Picker}
-     * group, else the reader default {@code true}). No per-category tool gate exists yet, so no
-     * locked tabs are produced this leg - the knob is threaded through for the moment the content
-     * leg adds one. (The per-action {@code ActionDef.Picker} override is decoded but not yet folded
-     * into {@code ActionResolver.ResolvedAction}; dormant, no shipped content authors it.)
-     */
-    private static boolean pickerShowLocked(@Nonnull StationAsset asset) {
-        com.ziggfreed.rpgstations.asset.Picker picker = asset.getPicker();
-        return picker == null || picker.effectiveShowLocked();
+    /** Drop this player's pending picker choice once a session at {@code blockKey} has committed to it. */
+    private void clearPendingCategory(@Nonnull UUID playerUuid, @Nonnull String blockKey) {
+        PendingSelection pending = pendingByPlayer.get(playerUuid);
+        if (pending != null && pending.blockKey().equals(blockKey)) {
+            pendingByPlayer.remove(playerUuid, pending);
+        }
     }
 
     /** PURE: a conversion's effective per-cycle pace override in ms, or {@code 0} when it authors none. */
@@ -3021,6 +3480,31 @@ public final class StationService {
         return blockKey != null ? custodyByBlock.get(blockKey) : null;
     }
 
+    /**
+     * Is ANY live session working {@code blockKey} right now - as its primary block, or as one of
+     * its claimed anchors?
+     *
+     * <p>{@link #byBlock} alone cannot answer this. The engage claim only writes that map for an
+     * EXCLUSIVE station's primary block (a {@code Block.Exclusive: false} station legitimately
+     * allows two concurrent sessions at one block, which a single-owner map cannot represent), so
+     * a shared bench governed by {@code Custody} had NOTHING standing between a press-F retrieval
+     * and the materials its own running session was mid-way through consuming. The occupancy map
+     * stays the fast path; the live-session sweep is the correctness backstop, run once per press
+     * over sessions that have not stopped - a cold path bounded by the players online.
+     */
+    private boolean sessionWorkingAt(@Nonnull String blockKey) {
+        if (byBlock.containsKey(blockKey)) {
+            return true;
+        }
+        for (StationSession s : byPlayer.values()) {
+            if (!s.stopped.get()
+                    && (blockKey.equals(s.blockKey) || s.anchorBlocks.containsValue(blockKey))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ==================== Multi-station anchors (scope-2 wave 3, design 2.2/2.4/2.6) ====================
 
     /**
@@ -3194,7 +3678,7 @@ public final class StationService {
             @Nonnull String wantStationId, int radius) {
         String want = wantStationId.toLowerCase(java.util.Locale.ROOT);
         long radiusSq = (long) radius * radius;
-        String worldPrefix = worldUuid.toString() + ":";
+        String worldPrefix = StationAnchors.worldPrefix(worldUuid.toString());
         // 1) the lazy index (cheap): nearest matching seen block in this world within the radius.
         String bestKey = null;
         long bestDistSq = Long.MAX_VALUE;
@@ -3279,7 +3763,8 @@ public final class StationService {
      */
     @Nonnull
     private AnchorResolution resolveAndClaimAnchors(@Nonnull World world, @Nonnull UUID worldUuid,
-            @Nonnull UUID playerUuid, @Nonnull ActionResolver.ResolvedAction action, @Nonnull TransformComponent transform,
+            @Nonnull UUID playerUuid, @Nonnull ActionResolver.ResolvedAction action,
+            @Nonnull List<StationStep> programSteps, @Nonnull TransformComponent transform,
             @Nonnull Store<EntityStore> store, int px, int py, int pz, @Nonnull String primaryBlockKey) {
         Map<String, ActionDef.Anchor> declared = action.getAnchors();
         Map<String, String> resolved = new java.util.LinkedHashMap<>();
@@ -3287,7 +3772,10 @@ public final class StationService {
         if (declared == null || declared.isEmpty()) {
             return AnchorResolution.ok(resolved);
         }
-        java.util.Set<String> walkTargets = walkTargetAnchorIds(action.getSteps());
+        // Over the EFFECTIVE program, not the raw authored one: a step an extension inserted can
+        // target an anchor too, and an unchecked walk target fails mid-ritual instead of denying
+        // the engage cleanly.
+        java.util.Set<String> walkTargets = walkTargetAnchorIds(programSteps);
         Vector3d from = new Vector3d(transform.getPosition());
         List<String> claimed = new ArrayList<>();
         for (Map.Entry<String, ActionDef.Anchor> e : declared.entrySet()) {
@@ -3354,7 +3842,7 @@ public final class StationService {
 
     /** The lowercased anchor ids any {@code Walk} step in {@code steps} targets ({@code "self"} excluded - always reachable). */
     @Nonnull
-    private static java.util.Set<String> walkTargetAnchorIds(@Nullable StationStep[] steps) {
+    private static java.util.Set<String> walkTargetAnchorIds(@Nullable List<StationStep> steps) {
         java.util.Set<String> out = new java.util.HashSet<>();
         if (steps == null) {
             return out;
@@ -3422,7 +3910,7 @@ public final class StationService {
         }
         StationCustodyClaim claim = custodyByBlock.get(blockKey);
         if (claim == null) {
-            claim = new StationCustodyClaim(s.playerUuid, s.stationId, s.actionId != null ? s.actionId : ACTION_WORK,
+            claim = new StationCustodyClaim(s.playerUuid, s.stationId, s.actionId,
                     coords[0], coords[1], coords[2]);
             custodyByBlock.put(blockKey, claim);
         }
@@ -3434,9 +3922,12 @@ public final class StationService {
             Custody.Display displayGroup = displayCustody != null ? displayCustody.getDisplay() : null;
             if (displayGroup != null) {
                 ItemStack visualStack = claim.uniqueStack() != null ? claim.uniqueStack() : new ItemStack(itemId, 1);
-                Ref<EntityStore> displayRef = StationCustodyDisplay.spawn(commandBuffer, visualStack, displayGroup,
-                        coords[0], coords[1], coords[2]);
-                claim.setDisplayRef(displayRef);
+                StationCustodyDisplay.Spawned spawned = StationCustodyDisplay.spawn(commandBuffer, visualStack,
+                        displayGroup, coords[0], coords[1], coords[2]);
+                // Ref AND network id together, so press-F retrieval can match this prop with no
+                // live component read (see StationCustodyClaim#displayNetworkId).
+                claim.setDisplay(spawned != null ? spawned.ref() : null,
+                        spawned != null ? spawned.networkId() : null);
             }
         }
         return true;
@@ -3444,10 +3935,12 @@ public final class StationService {
 
     /**
      * The {@code Custody} group governing an anchor, for whichever nested group the caller needs:
-     * for a named anchor, the ANCHOR station's own resolved {@code "work"}-action Custody (its own
+     * for a named anchor, the ANCHOR station's own FIRST AUTHORED action's Custody (its own
      * {@code Display}/{@code States} knobs) when that Custody actually CARRIES the wanted group,
-     * else the running action's Custody (always, for the reserved {@code "self"}). A best-effort
-     * lookup - a missing/unknown anchor station falls back to the running action's Custody.
+     * else the running action's Custody (always, for the reserved {@code "self"}). The first
+     * authored action is the anchor station's own primary job, which is the one whose block
+     * vocabulary a visiting program should honour. A best-effort lookup - a missing/unknown anchor
+     * station falls back to the running action's Custody.
      *
      * <p>{@code carriesGroup} is the per-caller "does the anchor's own Custody answer this
      * question" predicate ({@code c -> c.getDisplay() != null} for the placed-as-entity visual,
@@ -3473,8 +3966,9 @@ public final class StationService {
         String anchorStationId = blockKey != null ? knownStationBlocks.get(blockKey) : null;
         if (anchorStationId != null) {
             StationAsset anchorAsset = StationCatalog.getInstance().getStation(anchorStationId);
-            if (anchorAsset != null) {
-                Custody custody = ActionResolver.resolve(anchorAsset, ACTION_WORK).getCustody();
+            String anchorActionId = anchorAsset != null ? ActionResolver.firstActionId(anchorAsset) : null;
+            if (anchorActionId != null) {
+                Custody custody = ActionResolver.resolve(anchorAsset, anchorActionId).getCustody();
                 if (custody != null && carriesGroup.test(custody)) {
                     return custody;
                 }
@@ -3696,8 +4190,8 @@ public final class StationService {
      * True when {@code held} satisfies {@code action}'s custody placement matcher: an explicit
      * {@link Custody#getInput()} when authored, else ANY of the RESOLVED action's
      * {@code Recipe.Conversions} inputs (the sawmill's "logs by ResourceTypeId family" - zero
-     * extra authoring; the anvil's Enhance action always authors an explicit {@link Custody#getInput()}
-     * instead, since it has no {@code Recipe} at all).
+     * extra authoring; an action with no {@code Recipe} at all must author an explicit
+     * {@link Custody#getInput()} instead).
      */
     private static boolean custodyAccepts(@Nonnull Custody custody, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nullable ItemStack held,
@@ -3718,9 +4212,8 @@ public final class StationService {
             return StationCustody.matchesInput(matcher, heldItemId, heldResourceTypeIds, liveRawTagsOf(heldItemId),
                     liveFunctionOf(heldItemId));
         }
-        StationAsset.Conversion[] conversions =
-                StationCatalog.getInstance().resolvedConversions(asset, action.getActionId(), action.getRecipe());
-        return conversions != null && conversions.length > 0
+        StationAsset.Conversion[] conversions = allConversionsFor(asset, action);
+        return conversions.length > 0
                 && StationCustody.matchesAnyConversionInput(conversions, heldItemId, heldResourceTypeIds);
     }
 
@@ -3846,9 +4339,12 @@ public final class StationService {
         Custody.Display displayGroup = custody.getDisplay();
         if (displayGroup != null && claim.displayRef() == null) {
             ItemStack visualStack = claim.uniqueStack() != null ? claim.uniqueStack() : new ItemStack(itemId, 1);
-            Ref<EntityStore> displayRef = StationCustodyDisplay.spawn(commandBuffer, visualStack, displayGroup,
-                    blockX, blockY, blockZ);
-            claim.setDisplayRef(displayRef);
+            StationCustodyDisplay.Spawned spawned = StationCustodyDisplay.spawn(commandBuffer, visualStack,
+                    displayGroup, blockX, blockY, blockZ);
+            // Both halves land together: the ref AND the network id the prop was built with, so
+            // press-F retrieval never has to read a live NetworkId component back off the entity.
+            claim.setDisplay(spawned != null ? spawned.ref() : null,
+                    spawned != null ? spawned.networkId() : null);
         }
         return moveCount;
     }
@@ -3977,7 +4473,9 @@ public final class StationService {
      * StationCustodyDisplay}). Resolves the clicked entity back to its owning block key by
      * NETWORK ID (comparing {@code NetworkId} values rather than {@code Ref} identity keeps the
      * matching decision core engine-free and unit-testable - see {@link StationCustodyRetrieval}),
-     * then routes the eligibility decision through {@link StationCustodyRetrieval#decide}:
+     * scoped to the PRESSER'S OWN WORLD because a network id is per-world and repeats across
+     * worlds ({@link StationCustodyRetrieval#owns}), then routes the eligibility decision through
+     * {@link StationCustodyRetrieval#decide}:
      * owner-only (the SAME ownership gate {@link #toggle}'s custody-placement branch already
      * enforces), and a NO-OP keyed toast while a session is ACTIVELY working that station - the
      * session owns its own input for the whole duration of a program run; yanking materials out
@@ -3992,27 +4490,32 @@ public final class StationService {
             @Nonnull Ref<EntityStore> targetEntity) {
         try {
             UUID playerUuid = playerRef.getUuid();
-            if (playerUuid == null) {
+            UUID worldUuid = playerRef.getWorldUuid();
+            if (playerUuid == null || worldUuid == null) {
                 return;
             }
             NetworkId targetNetworkId = store.getComponent(targetEntity, NetworkId.getComponentType());
             if (targetNetworkId == null) {
                 return;
             }
-            Map<String, Integer> snapshot = new HashMap<>();
+            // WORLD-SCOPED match (see StationCustodyRetrieval#owns): a network id comes from a
+            // per-world counter that starts at 1 in every world, so an unscoped comparison can
+            // resolve a claim in a DIFFERENT world and hand over its contents. The block key already
+            // encodes the world uuid, so the presser's own prefix is the whole guard - and because
+            // each claim carries the id its prop was built with, this walk reads no components at
+            // all (it used to fetch NetworkId off every claim's entity, across every world, per
+            // press).
+            String worldPrefix = StationAnchors.worldPrefix(worldUuid.toString());
+            int targetId = targetNetworkId.getId();
+            String blockKey = null;
             for (Map.Entry<String, StationCustodyClaim> e : custodyByBlock.entrySet()) {
-                Ref<EntityStore> displayRef = e.getValue().displayRef();
-                if (displayRef == null || !displayRef.isValid()) {
-                    continue;
-                }
-                NetworkId id = store.getComponent(displayRef, NetworkId.getComponentType());
-                if (id != null) {
-                    snapshot.put(e.getKey(), id.getId());
+                if (StationCustodyRetrieval.owns(e.getKey(), worldPrefix, e.getValue().displayNetworkId(), targetId)) {
+                    blockKey = e.getKey();
+                    break;
                 }
             }
-            String blockKey = StationCustodyRetrieval.findOwningBlockKey(snapshot, targetNetworkId.getId());
             StationCustodyClaim claim = blockKey != null ? custodyByBlock.get(blockKey) : null;
-            boolean hasActiveSession = blockKey != null && byBlock.containsKey(blockKey);
+            boolean hasActiveSession = blockKey != null && sessionWorkingAt(blockKey);
             boolean isOwner = claim != null && claim.ownerId.equals(playerUuid);
             boolean claimNonEmpty = claim != null && !claim.isEmpty();
             StationCustodyRetrieval.Outcome outcome =
@@ -4367,17 +4870,14 @@ public final class StationService {
     }
 
     /**
-     * The diegetic action-selection choke point (design section 9.1, phase 2 leg E): resolves
-     * {@code asset}'s effective action id against the player's CURRENTLY HELD active-hotbar stack
-     * (item id, EVERY resolved resource-type family, native raw tags, and the functional route -
-     * {@link #liveFunctionOf}). A single-action station (no {@code Actions} map) always resolves
-     * {@link ActionResolver#ACTION_WORK} with zero live-item reads, byte-identical to phase 1.
+     * The action-selection choke point: walks {@code asset}'s ORDERED {@code Actions} list and
+     * returns the first action whose {@code Select} is absent or matches the player's CURRENTLY HELD
+     * active-hotbar stack (item id, EVERY resolved resource-type family, native raw tags, and the
+     * functional route - {@link #liveFunctionOf}). {@code null} when nothing matches, or when the
+     * station authors no actions at all.
      */
     @Nullable
     private static String selectActionForHeld(@Nonnull StationAsset asset, @Nonnull Player player) {
-        if (asset.getActions() == null || asset.getActions().isEmpty()) {
-            return ActionResolver.ACTION_WORK;
-        }
         ItemStack held = InventoryAccess.activeHotbarItemOf(player);
         String heldItemId = held != null ? held.getItemId() : null;
         return ActionResolver.selectActionByFamily(asset, heldItemId, liveResourceTypeIdsOf(heldItemId),
@@ -4416,14 +4916,18 @@ public final class StationService {
      * Checks {@code reqs} against {@code playerRef}: a blank/absent {@link Requires#getPermission()}
      * always passes; a null/empty {@link Requires#getConditions()} always passes. Every
      * condition must pass (see {@link #conditionPasses}), resolved against a fresh pre-session
-     * {@link FactorContext} (design section 3.2's api {@link FactorRegistryImpl}, leg 4 - a
-     * degenerate context since no session exists yet: {@code sessionSeconds}/{@code cycleIndex}
-     * 0, held-tool power/durability not read here since no shipped station authors a tool-power
-     * gate condition; a player-standing condition needs only {@code playerId}). A null
-     * {@code reqs} always passes.
+     * {@link FactorContext} (the api {@link FactorRegistryImpl} - a degenerate context since no
+     * session exists yet: {@code sessionSeconds}/{@code cycleIndex} 0, held-tool power/durability
+     * not read here since no shipped station authors a tool-power gate condition; a player-standing
+     * condition needs only {@code playerId}). A null {@code reqs} always passes.
+     *
+     * <p>Called TWICE at engage - once with the station's own entry gate and once with the selected
+     * action's - because the two are ANDed and neither defaults the other. {@code action} anchors the
+     * context either way: the running action owns the contribution channels a condition may read,
+     * extension-appended entries included.
      */
     private static boolean checkRequires(@Nullable Requires reqs, @Nonnull PlayerRef playerRef,
-            @Nonnull StationAsset asset) {
+            @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action) {
         if (reqs == null || reqs.isEmpty()) {
             return true;
         }
@@ -4443,10 +4947,11 @@ public final class StationService {
                 .playerRef(playerRef)
                 .playerId(playerId)
                 .stationId(asset.getId())
-                .actionId(ACTION_WORK)
+                .actionId(action.getActionId())
                 .sessionSeconds(0L)
                 .cycleIndex(0)
-                .contributions(contributionParams(asset))
+                .contributions(contributionParams(asset.getId(),
+                        ActionResolver.actionTargetId(asset, action.getActionId()), action.getWork()))
                 .build();
         FactorLookup lookup = (factorId, param) -> FactorRegistryImpl.getInstance().resolve(factorId, param, ctx);
         for (Condition c : conditions) {

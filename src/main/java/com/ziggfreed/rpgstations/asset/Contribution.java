@@ -22,12 +22,10 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  * <p><b>Two authoring sites, two documented meanings, one record.</b> Scaling is decided by WHERE
  * an entry is authored, never by a flag on the entry itself:
  * <ul>
- *   <li>{@code Work.PerCycleContributions[]} - posted on EVERY completed cycle and SCALED: each
- *   {@code Amount} is multiplied by the resolved tool multiplier ({@code Tool.PowerScale}) and, on
- *   an idle cycle, pre-scaled by {@code Work.Idle.Fraction}.
- *   <li>{@code Roll.Grants.Contributions[]} - posted ONCE when a roll grants, VERBATIM: it inherits
- *   neither the tool multiplier nor the idle fraction, so a rare find is worth the same whatever
- *   tool the player happens to hold.
+ *   <li>{@code Work.PerCycleContributions[]} - posted on EVERY completed cycle, and on an IDLE cycle
+ *   pre-scaled by {@code Work.Idle.Fraction}.
+ *   <li>{@code Roll.Grants.Contributions[]} - posted ONCE when a roll grants, VERBATIM: it does not
+ *   inherit the idle fraction, so a rare find is worth the same on a practice cycle as on a real one.
  * </ul>
  * The group key at the {@code Work} site says {@code PerCycle} out loud precisely so the two sites
  * never read as the same blob in an author's eye. A {@code Scaled} knob on this record is

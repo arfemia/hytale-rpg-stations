@@ -14,7 +14,6 @@ import javax.annotation.Nullable;
 
 import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.api.StationView;
-import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.station.ActionResolver;
@@ -40,31 +39,23 @@ final class StationViewImpl implements StationView {
         // (which the derived per-channel map below cannot represent) - that shape is exactly what
         // a channel owner's own validation wants to flag, so it must stay visible here.
         //
-        // The EFFECTIVE union, not the station-level Work alone: every resolved action's own Work
-        // (a whole-group override can author its own contributions) plus the Station- and
-        // Action-targeted extension appends - the same reads the cycle event forwards from. An
-        // action inheriting the station Work whole-group re-yields the same entries, so the walk
-        // de-duplicates on the (Channel, Param, Amount) triple.
+        // The EFFECTIVE union over the station's ORDERED actions: each action's own Work plus the
+        // Action-targeted extension appends - the same reads the cycle event forwards from. A
+        // station holds no contributions of its own, so there is nothing else to walk. Two actions
+        // authoring an identical entry de-duplicate on the (Channel, Param, Amount) triple.
         List<StationContribution> posts = new ArrayList<>();
         Map<String, List<String>> params = new LinkedHashMap<>();
         Set<String> seen = new LinkedHashSet<>();
         ExtensionCatalog extensions = ExtensionCatalog.getInstance();
-        StationAsset.Work stationWork = asset.getWork();
-        collect(extensions.applyToStationContributions(id,
-                stationWork != null ? stationWork.getPerCycleContributions() : null), posts, params, seen);
-        Map<String, ActionDef> actions = asset.getActions();
-        if (actions != null) {
-            for (String actionId : actions.keySet()) {
-                ActionResolver.ResolvedAction resolved = ActionResolver.resolve(asset, actionId);
-                StationAsset.Work actionWork = resolved != null ? resolved.getWork() : null;
-                Contribution[] merged = extensions.applyToStationContributions(id,
-                        actionWork != null ? actionWork.getPerCycleContributions() : null);
-                String target = ActionResolver.actionTargetId(asset, actionId);
-                if (target != null) {
-                    merged = extensions.applyToActionContributions(target, merged);
-                }
-                collect(merged, posts, params, seen);
+        for (String actionId : ActionResolver.actionIds(asset)) {
+            ActionResolver.ResolvedAction resolved = ActionResolver.resolve(asset, actionId);
+            StationAsset.Work actionWork = resolved.getWork();
+            Contribution[] merged = actionWork != null ? actionWork.getPerCycleContributions() : null;
+            String target = ActionResolver.actionTargetId(asset, actionId);
+            if (target != null) {
+                merged = extensions.applyToActionContributions(id, target, merged);
             }
+            collect(merged, posts, params, seen);
         }
         this.contributions = List.copyOf(posts);
         Map<String, List<String>> frozen = new LinkedHashMap<>(params.size());

@@ -82,10 +82,11 @@ public final class FlairCatalog {
             for (Map.Entry<String, StationAsset.Flair> e : inline.entrySet()) {
                 String flairId = e.getKey();
                 StationAsset.Flair flair = e.getValue();
-                if (flairId == null || flair == null || flair.getMoments() == null || flair.getMoments().isEmpty()) {
+                if (flairId == null || flairId.isBlank() || flair == null
+                        || flair.getMoments() == null || flair.getMoments().isEmpty()) {
                     continue;
                 }
-                out.put(flairId, flair.getMoments());
+                out.put(flairId.toLowerCase(Locale.ROOT), lowercaseMomentKeys(flair.getMoments()));
             }
         }
         for (FlairAsset fa : flairAssets.values()) {
@@ -93,7 +94,26 @@ public final class FlairCatalog {
                     || !fa.appliesTo(stationId)) {
                 continue;
             }
-            out.put(fa.getId(), fa.getMoments());
+            out.put(fa.getId().toLowerCase(Locale.ROOT), lowercaseMomentKeys(fa.getMoments()));
+        }
+        return out;
+    }
+
+    /**
+     * {@code moments} re-keyed to lowercase. Moment ids are matched by EXACT map key at play time, so
+     * canonicalizing here (with {@code StationFlairs} lowercasing the lookup side to match) is what
+     * makes a key authored {@code "Cycle"} actually fire instead of validating as a known id and then
+     * silently never matching. A later duplicate under a different casing wins, the same later-wins
+     * rule the rest of this schema follows.
+     */
+    @Nonnull
+    private static Map<String, Presentation> lowercaseMomentKeys(@Nonnull Map<String, Presentation> moments) {
+        Map<String, Presentation> out = new LinkedHashMap<>(moments.size());
+        for (Map.Entry<String, Presentation> e : moments.entrySet()) {
+            if (e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
+                continue;
+            }
+            out.put(e.getKey().toLowerCase(Locale.ROOT), e.getValue());
         }
         return out;
     }

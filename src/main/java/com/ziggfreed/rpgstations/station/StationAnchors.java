@@ -188,6 +188,31 @@ final class StationAnchors {
     }
 
     /**
+     * The world-scoping PREFIX of every block key belonging to {@code worldUuid} (the uuid plus its
+     * trailing separator). The one place that spelling is built, so a per-world sweep of any
+     * block-keyed map - custody claims, occupancy, the discovered-block index - and the
+     * world-scoped custody-retrieval match all agree on it by construction.
+     */
+    @Nonnull
+    static String worldPrefix(@Nonnull String worldUuid) {
+        return worldUuid + ":";
+    }
+
+    /**
+     * The world-uuid text a {@code "<worldUuid>:<x>:<y>:<z>"} key starts with (everything before the
+     * FIRST colon - the uuid's own canonical form contains none). {@code null} on a malformed or
+     * prefix-less key; never throws.
+     */
+    @Nullable
+    static String worldUuidOf(@Nullable String blockKey) {
+        if (blockKey == null) {
+            return null;
+        }
+        int sep = blockKey.indexOf(':');
+        return sep > 0 ? blockKey.substring(0, sep) : null;
+    }
+
+    /**
      * Parses the {@code x/y/z} block coordinates out of a {@code "<worldUuid>:<x>:<y>:<z>"} key
      * (the world uuid may itself contain no colon-free guarantee, so the LAST three colon-delimited
      * fields are the coords). Returns {@code null} on a malformed key (never throws).

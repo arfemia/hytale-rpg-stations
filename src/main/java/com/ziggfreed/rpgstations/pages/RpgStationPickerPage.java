@@ -42,9 +42,11 @@ import com.ziggfreed.rpgstations.util.Log;
  *   station never shows a picker at all.</li>
  *   <li>NEVER auto-open it - the player must explicitly request the picker (sneak+F on the
  *   station; plain F engages work as today per the round-3 selector-entity fallback pattern).</li>
- *   <li>{@code showLocked} is the authored {@code Picker.ShowLocked} knob (default true): true
- *   keeps every category visible with the locked ones greyed + labeled with the required tool;
- *   false drops locked categories from the strip entirely.</li>
+ *   <li>{@code showLocked}: true keeps every category visible with the locked ones greyed + labeled
+ *   with the required tool; false drops locked categories from the strip entirely. NO authored knob
+ *   backs it - the `Picker.ShowLocked` asset group was deleted before 0.1.0 because no engine path
+ *   produces a locked category, so both values rendered identically; the caller passes true and this
+ *   parameter stays as the seam for whenever a locked-category producer exists.</li>
  * </ul>
  *
  * <p>This page owns rendering + selection ONLY - it has no opinion on how a category id maps to

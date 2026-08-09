@@ -16,12 +16,12 @@ import com.hypixel.hytale.codec.builder.BuilderField;
 import com.ziggfreed.common.codec.Vec3;
 
 /**
- * Schema/DX review round, proposal P6 (decision 78): every {@code KeyedCodec} leaf on the seven
- * Pattern A asset types (and every nested {@code BuilderCodec} group they reach) must carry a
- * non-blank {@code .documentation(...)} string, so the codec-autogen'd docsite schema reference
- * ships with the whole authoring surface explained rather than a partially-blank table. Decision
- * 16 makes this a hard prerequisite for the docsite; decision 54 sequences this seam wave BEFORE
- * that docsite wave so the documentation is captured against the FINAL leaf names exactly once.
+ * TWO guards over the same walk, both about the shipped documentation surface: every
+ * {@code KeyedCodec} leaf on the seven Pattern A asset types (and every nested {@code BuilderCodec}
+ * group they reach) must carry a non-blank {@code .documentation(...)} string, AND no such string may
+ * narrate this project's own internal process. Both matter because a documentation string ships in
+ * the jar schema and is the source of the generated schema reference, so it is read by pack authors
+ * who have no way to decode an internal label.
  *
  * <p>Pure public-API walk, no {@code java.lang.reflect}: {@link BuilderCodec#getEntries()} and
  * {@link BuilderField#getDocumentation()} are both public, and a nested group codec is reached by
@@ -36,26 +36,58 @@ import com.ziggfreed.common.codec.Vec3;
  */
 class AssetDocumentationCoverageTest {
 
+    /**
+     * Fragments that mean something to whoever BUILT this schema and nothing at all to whoever
+     * AUTHORS content against it. A {@code .documentation(...)} string ships in the jar's schema and
+     * is the source of the generated schema reference, so it is a PUBLIC surface: it may explain what
+     * a leaf does, but never how the project got there.
+     */
+    private static final String[] PROCESS_NARRATION = {
+            "decision ", "ruling ", "critique", "handoff", "maintainer",
+            " wave", "wave ", "leg ", " m1 ", " m2 ", " m3 ", " m4 ", " m5 ",
+            "(m1", "(m2", "(m3", "(m4", "(m5", "m2 rule", "m3 fix", ".claude/",
+    };
+
     @Test
     void everyLeafOnTheSevenPatternATypesAndTheirNestedGroupsIsDocumented() {
         List<String> undocumented = new ArrayList<>();
-        Set<BuilderCodec<?>> visited = new HashSet<>();
-
-        walk("StationAsset", StationAsset.CODEC, undocumented, visited);
-        walk("ActionAsset", ActionAsset.CODEC, undocumented, visited);
-        walk("LootableAsset", LootableAsset.CODEC, undocumented, visited);
-        walk("RollPool", RollPool.CODEC, undocumented, visited);
-        walk("FlairAsset", FlairAsset.CODEC, undocumented, visited);
-        walk("ExtensionAsset", ExtensionAsset.CODEC, undocumented, visited);
-        walk("RpgStationsSettingsAsset", RpgStationsSettingsAsset.CODEC, undocumented, visited);
+        List<String> narrated = new ArrayList<>();
+        walkEveryPatternAType(undocumented, narrated);
 
         assertTrue(undocumented.isEmpty(),
-                "Codec leaves missing .documentation(\"...\") (schema/DX review decision 78):\n"
-                        + String.join("\n", undocumented));
+                "Codec leaves missing .documentation(\"...\"):\n" + String.join("\n", undocumented));
+    }
+
+    /**
+     * The class of finding, not the instances: a leaf's shipped documentation must not narrate the
+     * project's own process. Caught here rather than by review because these strings reach the public
+     * schema reference, where a reader has no way to decode an internal label.
+     */
+    @Test
+    void noLeafDocumentationNarratesInternalProcess() {
+        List<String> undocumented = new ArrayList<>();
+        List<String> narrated = new ArrayList<>();
+        walkEveryPatternAType(undocumented, narrated);
+
+        assertTrue(narrated.isEmpty(),
+                "Codec documentation strings carrying internal process narration (they ship in the jar"
+                        + " schema and the generated schema reference, so they are PUBLIC):\n"
+                        + String.join("\n", narrated));
+    }
+
+    private static void walkEveryPatternAType(List<String> undocumented, List<String> narrated) {
+        Set<BuilderCodec<?>> visited = new HashSet<>();
+        walk("StationAsset", StationAsset.CODEC, undocumented, narrated, visited);
+        walk("ActionAsset", ActionAsset.CODEC, undocumented, narrated, visited);
+        walk("LootableAsset", LootableAsset.CODEC, undocumented, narrated, visited);
+        walk("RollPool", RollPool.CODEC, undocumented, narrated, visited);
+        walk("FlairAsset", FlairAsset.CODEC, undocumented, narrated, visited);
+        walk("ExtensionAsset", ExtensionAsset.CODEC, undocumented, narrated, visited);
+        walk("RpgStationsSettingsAsset", RpgStationsSettingsAsset.CODEC, undocumented, narrated, visited);
     }
 
     private static void walk(String path, BuilderCodec<?> codec, List<String> undocumented,
-            Set<BuilderCodec<?>> visited) {
+            List<String> narrated, Set<BuilderCodec<?>> visited) {
         // Identity-based: a shared leaf codec (Vec3.CODEC, Condition.CODEC, Presentation.CODEC, ...)
         // reached from several owners is checked once, not re-flagged per reference site.
         if (!visited.add(codec)) {
@@ -68,10 +100,17 @@ class AssetDocumentationCoverageTest {
                 String doc = field.getDocumentation();
                 if (doc == null || doc.isBlank()) {
                     undocumented.add(here);
+                } else {
+                    String lower = doc.toLowerCase(java.util.Locale.ROOT);
+                    for (String fragment : PROCESS_NARRATION) {
+                        if (lower.contains(fragment)) {
+                            narrated.add(here + " contains \"" + fragment.trim() + "\": " + doc);
+                        }
+                    }
                 }
                 BuilderCodec<?> nested = unwrapToBuilderCodec(field.getCodec().getChildCodec());
                 if (nested != null) {
-                    walk(here, nested, undocumented, visited);
+                    walk(here, nested, undocumented, narrated, visited);
                 }
             }
         }

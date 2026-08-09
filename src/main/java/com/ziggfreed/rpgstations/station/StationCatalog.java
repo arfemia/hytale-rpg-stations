@@ -28,8 +28,9 @@ public final class StationCatalog {
 
     private final ConcurrentHashMap<String, StationAsset> stations = new ConcurrentHashMap<>();
     /**
-     * Per-station cache of the effective (authored + {@code FromCrafting}-derived) conversions,
-     * keyed by lowercase station id. Computed lazily on first use and dropped on {@link #fold}.
+     * Cache of the effective (authored + {@code FromCrafting}-derived) conversions, keyed
+     * {@code "<stationId>::<actionId>"} - one recipe per action, so the action id alone identifies
+     * it. Computed lazily on first use and dropped on {@link #fold}.
      */
     private final ConcurrentHashMap<String, StationAsset.Conversion[]> resolvedConversions =
             new ConcurrentHashMap<>();
@@ -44,7 +45,7 @@ public final class StationCatalog {
 
     /**
      * Replace (when {@code replace} is {@code true}) or add to the catalog with {@code layer}
-     * (already keyed lowercase by the caller). Any fold can change a station's {@code Recipe},
+     * (already keyed lowercase by the caller). Any fold can change an action's {@code Recipe},
      * so the derived conversion cache is invalidated here.
      */
     public void fold(@Nonnull Map<String, StationAsset> layer, boolean replace) {
@@ -52,40 +53,54 @@ public final class StationCatalog {
             stations.clear();
         }
         stations.putAll(layer);
+        invalidateResolvedConversions();
+    }
+
+    /**
+     * Drops the derived-conversion cache without touching the station map. Called by
+     * {@link ExtensionCatalog#fold} and {@link ActionCatalog#fold} as well as {@link #fold}: an
+     * {@code Action}-targeted {@code ExtensionAsset} appends to the very array cached here and a
+     * {@code Ref}'d {@code ActionAsset} owns the {@code Recipe} it is derived from, and the three
+     * stores fold in no guaranteed order, so a layer arriving after the first conversion resolve
+     * would otherwise never be seen.
+     */
+    public void invalidateResolvedConversions() {
         resolvedConversions.clear();
     }
 
     /**
-     * The station's EFFECTIVE conversions - authored {@code Conversions} FIRST, then any
-     * {@code FromCrafting}-derived conversions - computed lazily ONCE per station and cached
-     * until the next {@link #fold}. See {@link StationRecipeDeriver}.
-     */
-    @Nonnull
-    public StationAsset.Conversion[] resolvedConversions(@Nonnull StationAsset asset) {
-        String id = asset.getId();
-        if (id == null) {
-            return StationRecipeDeriver.resolve(asset.getRecipe(), StationRecipeDeriver.liveCandidates());
-        }
-        return resolvedConversions.computeIfAbsent(id.toLowerCase(Locale.ROOT),
-                k -> StationRecipeDeriver.resolve(asset.getRecipe(), StationRecipeDeriver.liveCandidates()));
-    }
-
-    /**
-     * The ACTION-AWARE sibling of {@link #resolvedConversions(StationAsset)} (design section 9.1,
-     * phase 2 leg E): a multi-action station's per-action {@code Recipe} override (e.g. the
-     * anvil's "convert" action) needs its OWN derived-conversion cache entry, distinct from the
-     * station-level one - {@code actionRecipe} is the caller's ALREADY {@code ActionResolver}-resolved
-     * group (whole-group-override applied), never re-derived here. Cached under a
-     * {@code "<stationId>::<actionId>"} key so the single-action ({@code ACTION_WORK}) case never
-     * collides with (or invalidates) the plain per-station cache entry above.
+     * ONE action's EFFECTIVE conversions - its recipe's authored {@code Conversions} FIRST, then any
+     * {@code FromCrafting}-derived ones (see {@link StationRecipeDeriver}), then any appended by an
+     * {@code Action}-targeted {@code ExtensionAsset} - computed lazily and cached until the next
+     * {@link #fold} or {@link #invalidateResolvedConversions}.
+     *
+     * <p>{@code recipe} is the caller's ALREADY {@code ActionResolver}-resolved {@code Recipe},
+     * never re-derived here. The cache key is {@code "<stationId>::<actionId>"}: one recipe per
+     * action, so an action id fully identifies the entry.
+     *
+     * <p>Extension conversions are folded in INSIDE the cache load, so the append is paid once per
+     * action rather than on every per-cycle read; the correctness of that depends entirely on both
+     * fold paths clearing this cache, which is why {@link #invalidateResolvedConversions} exists.
+     * They land LAST, after the derived ones, so an appended conversion never displaces the base
+     * recipe's first-authored default output category.
      */
     @Nonnull
     public StationAsset.Conversion[] resolvedConversions(@Nonnull StationAsset asset, @Nonnull String actionId,
-            @Nullable StationAsset.Recipe actionRecipe) {
+            @Nullable StationAsset.Recipe recipe) {
         String id = asset.getId();
-        String cacheKey = (id != null ? id.toLowerCase(Locale.ROOT) : "?") + "::" + actionId.toLowerCase(Locale.ROOT);
-        return resolvedConversions.computeIfAbsent(cacheKey,
-                k -> StationRecipeDeriver.resolve(actionRecipe, StationRecipeDeriver.liveCandidates()));
+        String cacheKey = (id != null ? id.toLowerCase(Locale.ROOT) : "?")
+                + "::" + actionId.toLowerCase(Locale.ROOT);
+        return resolvedConversions.computeIfAbsent(cacheKey, k -> {
+            StationAsset.Conversion[] derived =
+                    StationRecipeDeriver.resolve(recipe, StationRecipeDeriver.liveCandidates());
+            String target = ActionResolver.actionTargetId(asset, actionId);
+            if (target == null) {
+                return derived;
+            }
+            StationAsset.Conversion[] merged =
+                    ExtensionCatalog.getInstance().applyToActionConversions(id, target, derived);
+            return merged != null ? merged : derived;
+        });
     }
 
     @Nullable

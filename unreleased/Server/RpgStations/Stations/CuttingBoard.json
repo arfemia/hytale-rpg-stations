@@ -1,26 +1,31 @@
 {
-  "$Comment": "The primary station of the fish-prep multi-station exemplar, jar-layer content carrying zero progression. Deliberately thin - the only action is 'prepfish', attached by Ref to the standalone Server/RpgStations/Actions/PrepFish.json, which owns every mechanical group (Custody/Tool/Work/Anchors/Steps). Puppet is authored here at station level (the default for the resolved 'prepfish' action per Puppet's own per-station-default/per-action-override rule - ActionDef.Puppet stays null on PrepFish.json so it inherits this group wholesale): a station whose action authors any Walk step requires Puppet enabled (validator WALK_REQUIRES_PUPPET) - the player stays hidden/held here while the puppet walks to the cooking-fire anchor and back. Hold/Camera mirror the Anvil's proven effect-mode default (the Entity standing-mount spike stays unverified elsewhere in this mod, not reused here).",
+  "$Comment": "The primary station of the fish-prep multi-station exemplar, jar-layer content carrying zero progression. Deliberately thin - its one action, 'Prep', is attached by Ref to the standalone Server/RpgStations/Actions/PrepFish.json, which owns every mechanical group (Select/Custody/Tool/Work/Anchors/Steps). Own-asset references are authored PascalCase, matching the referenced file's own name; matching stays case-insensitive so a casing slip never breaks content. Worker is the one group this entry authors itself, and it REPLACES the Ref base's Worker wholesale (a Ref overlay is group-wise): PrepFish authors no Worker at all, so this is purely additive in practice. It must carry Puppet, because an action authoring any Walk step requires an enabled Puppet (validator WALK_REQUIRES_PUPPET) - the player stays hidden and held here while the puppet walks to the cooking-fire anchor and back. Hold/Camera ride the same group and use the effect-mode default (the Entity standing-mount route stays unverified elsewhere in this mod, not reused here).",
   "Identity": {
     "NameKey": "rpgstations.station.cuttingboard.name",
     "DescKey": "rpgstations.station.cuttingboard.desc"
   },
-  "Hold": {
-    "MovementLock": true,
-    "EffectId": "RPG_Station_Hold",
-    "InterruptOnDamage": true
-  },
-  "Camera": {
-    "Recipe": "look_rot"
-  },
-  "Puppet": {
-    "Enabled": true,
-    "Hide": { "Route": "Scale" },
-    "Look": { "Source": "PlayerClone" },
-    "Offset": { "X": 0.0, "Y": -0.4, "Z": 0.6 },
-    "Yaw": 0.0,
-    "Prop": { "Source": "MirrorHeld", "Slot": "Hotbar" }
-  },
-  "Actions": {
-    "prepfish": { "Ref": "prepfish" }
-  }
+  "Actions": [
+    {
+      "Id": "Prep",
+      "Ref": "PrepFish",
+      "Worker": {
+        "Hold": {
+          "MovementLock": true,
+          "EffectId": "RPG_Station_Hold",
+          "InterruptOnDamage": true
+        },
+        "Camera": {
+          "Recipe": "LookRot"
+        },
+        "Puppet": {
+          "Enabled": true,
+          "Hide": { "Route": "Scale" },
+          "Look": { "Source": "PlayerClone" },
+          "Offset": { "X": 0.0, "Y": -0.4, "Z": 0.6 },
+          "Yaw": 0.0,
+          "Prop": { "Source": "MirrorHeld", "Slot": "Hotbar" }
+        }
+      }
+    }
+  ]
 }

@@ -27,7 +27,7 @@ public final class RpgStationsApiImpl implements RpgStationsApi {
     private static final RpgStationsApiImpl INSTANCE = new RpgStationsApiImpl();
 
     /** Bumped additively per {@code api/CLAUDE.md}'s growth policy; never on a signature change. */
-    private static final int API_VERSION = 2;
+    private static final int API_VERSION = 3;
 
     private RpgStationsApiImpl() {
     }
@@ -89,5 +89,14 @@ public final class RpgStationsApiImpl implements RpgStationsApi {
             }
         }
         return out;
+    }
+
+    /**
+     * The folded catalog's own size - no {@link StationView} is built, so a presence check costs a
+     * map size read instead of a full per-station action resolve and contribution/flair merge.
+     */
+    @Override
+    public int stationCount() {
+        return StationCatalog.getInstance().size();
     }
 }

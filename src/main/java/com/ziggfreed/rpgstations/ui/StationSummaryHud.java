@@ -98,18 +98,30 @@ public final class StationSummaryHud extends KeyedCustomHud {
         super(playerRef, HUD_KEY);
     }
 
-    /** One item-ledger row: the already-composed client-resolved text line + its semantic {@link SummaryRow.Kind}. */
+    /**
+     * One item-ledger row: the already-composed client-resolved text line, its semantic
+     * {@link SummaryRow.Kind}, and an OPTIONAL smaller second line ({@link #subLine}) rendered
+     * beneath it at {@code @LedgerSubStyle}. A null {@link #subLine} collapses the row back to one
+     * line, so a row only grows when it has something extra to say.
+     */
     public static final class LedgerRow {
         @Nonnull final String itemId;
         final int quantity;
         @Nonnull final Message line;
         @Nonnull final SummaryRow.Kind kind;
+        @Nullable final Message subLine;
 
         public LedgerRow(@Nonnull String itemId, int quantity, @Nonnull Message line, @Nonnull SummaryRow.Kind kind) {
+            this(itemId, quantity, line, kind, null);
+        }
+
+        public LedgerRow(@Nonnull String itemId, int quantity, @Nonnull Message line,
+                @Nonnull SummaryRow.Kind kind, @Nullable Message subLine) {
             this.itemId = itemId;
             this.quantity = quantity;
             this.line = line;
             this.kind = kind;
+            this.subLine = subLine;
         }
 
         @Nonnull
@@ -129,6 +141,12 @@ public final class StationSummaryHud extends KeyedCustomHud {
         @Nonnull
         public SummaryRow.Kind kind() {
             return kind;
+        }
+
+        /** The optional smaller second line; null = a single-line row. */
+        @Nullable
+        public Message subLine() {
+            return subLine;
         }
     }
 
@@ -231,9 +249,10 @@ public final class StationSummaryHud extends KeyedCustomHud {
      *
      * <p>Rows are rendered in the TWO-LINE form ({@link #SUB_LABEL_ID}): a row carrying a {@code
      * SummaryRow.subText} shows it beneath its headline at the smaller {@code @LedgerSubStyle},
-     * and a row without one collapses back to a single line. This mod's own item rows never set a
-     * second line; an enricher's rows may (a contribution channel's breakdown belongs to whichever
-     * mod owns that channel's vocabulary, so what a second line SAYS is never decided here).
+     * and a row without one collapses back to a single line. This mod's own PRODUCED rows use it for
+     * the per-cycle yield decomposition; an enricher's rows may use it too (a contribution channel's
+     * breakdown belongs to whichever mod owns that channel's vocabulary, so what THEIR second line
+     * says is never decided here).
      */
     private static void renderLedger(@Nonnull UICommandBuilder cmd, @Nonnull List<SummaryRow> extraRows,
             @Nonnull List<LedgerRow> ledgerRows) {
@@ -267,14 +286,15 @@ public final class StationSummaryHud extends KeyedCustomHud {
         // the engine's own durability row bakes its accent at composition - so its Message renders
         // verbatim. Every other kind bakes a per-kind color onto its line.
         if (row.kind == SummaryRow.Kind.ENHANCE) {
-            return new SummaryRow(row.itemId, row.line, row.kind);
+            return new SummaryRow(row.itemId, row.line, row.subLine, row.kind);
         }
         Color color = switch (row.kind) {
             case CONSUMED -> CONSUMED_ROW_COLOR;
             case LUCKY -> LUCKY_ROW_COLOR;
             default -> PRODUCED_ROW_COLOR;
         };
-        return new SummaryRow(row.itemId, row.line.color(color), row.kind);
+        Message sub = row.subLine != null ? row.subLine.color(color) : null;
+        return new SummaryRow(row.itemId, row.line.color(color), sub, row.kind);
     }
 
     /** The scheduled hide: a no-op when a newer {@link #showSummary} already re-armed. */

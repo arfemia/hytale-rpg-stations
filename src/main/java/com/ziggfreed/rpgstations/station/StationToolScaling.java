@@ -5,33 +5,27 @@ import java.util.Collection;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
- * PURE decision cores for two station knobs, kept out of {@link StationService} so both are
+ * PURE decision cores for a few station knobs, kept out of {@link StationService} so each is
  * unit-testable without the store, the live item map, or a running session.
  *
  * <ul>
- *   <li><b>Tool-power contribution scaling:</b> {@link #multiplier} implements
- *       {@code clamp((heldPower / ReferencePower) ^ Exponent, MinMult, MaxMult)} over a
- *       station's {@link StationAsset.Tool.PowerScale}; {@link #heldPowerFor} is the pure spec
- *       scan that {@code StationService} feeds from the held item's live
- *       {@code ItemTool.getSpecs()}.</li>
+ *   <li><b>Held-tool power read:</b> {@link #heldPowerFor} is the pure spec scan that
+ *       {@code StationService} feeds from the held item's live {@code ItemTool.getSpecs()} to answer
+ *       the built-in {@code hytale:tool_power} factor. The engine holds no baked power CURVE of its
+ *       own: a station that wants "a better tool yields more" composes that factor into an authored
+ *       ladder - a {@code Bonus} roll granting {@code Grants.OutputItems}, or the action's
+ *       {@code ContributionScale} - where the numbers are authored and visible.</li>
  *   <li><b>Idle practice cadence/fraction:</b> {@link #resolvedIdleCycleMs} and
  *       {@link #resolvedIdleFraction} apply {@code Work.Idle}'s reader defaults/floor/clamp.</li>
+ *   <li><b>Durability drain:</b> {@link #resolvedDurabilityAmount} applies the opt-in-only default.</li>
  * </ul>
- *
- * <p>Zero-authoring neutrality throughout: a null/inactive {@link StationAsset.Tool.PowerScale}
- * or a held tool with no matching spec both resolve to multiplier 1.0.
  */
 public final class StationToolScaling {
 
     /** {@link #heldPowerFor} sentinel: no spec matched the requested gather type. */
     static final double NO_MATCH = -1.0;
-
-    static final double DEFAULT_EXPONENT = 1.0;
-    static final double DEFAULT_MIN_MULT = 0.5;
-    static final double DEFAULT_MAX_MULT = 2.0;
 
     static final double DEFAULT_IDLE_FRACTION = 0.1;
 
@@ -56,27 +50,7 @@ public final class StationToolScaling {
         }
     }
 
-    // ==================== Tool-power contribution scaling ====================
-
-    /**
-     * {@code clamp((heldPower / ReferencePower) ^ Exponent, MinMult, MaxMult)}. Neutral (1.0)
-     * for a null {@code scale}, a null/nonpositive {@code ReferencePower}, or a nonpositive
-     * {@code heldPower} (the {@link #NO_MATCH} sentinel from {@link #heldPowerFor}).
-     */
-    static double multiplier(double heldPower, @Nullable StationAsset.Tool.PowerScale scale) {
-        if (scale == null || heldPower <= 0.0) {
-            return 1.0;
-        }
-        Double referencePower = scale.getReferencePower();
-        if (referencePower == null || referencePower <= 0.0) {
-            return 1.0;
-        }
-        double exponent = scale.getExponent() != null ? scale.getExponent() : DEFAULT_EXPONENT;
-        double minMult = scale.getMinMult() != null ? scale.getMinMult() : DEFAULT_MIN_MULT;
-        double maxMult = scale.getMaxMult() != null ? scale.getMaxMult() : DEFAULT_MAX_MULT;
-        double raw = Math.pow(heldPower / referencePower, exponent);
-        return Math.max(minMult, Math.min(maxMult, raw));
-    }
+    // ==================== Held-tool power read ====================
 
     /**
      * The MAX {@code power} across every entry in {@code specs} whose {@code gatherType}

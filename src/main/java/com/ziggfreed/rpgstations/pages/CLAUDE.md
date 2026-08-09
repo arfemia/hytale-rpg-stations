@@ -11,7 +11,11 @@ overlays only (`StationSummaryHud`, no player interaction).
   full-width card per available output category (`.ui`: `Pages/RpgStationPicker.ui` + the per-card
   `Pages/RpgStationPickerTab.ui` template, both in `Common/UI/Custom/Pages/`), locked categories
   greyed (`.Enabled = false`, no click binding) + a lock-reason line naming the required tool,
-  gated on the authored `Picker.ShowLocked` knob. Selection closes the page THEN calls back
+  gated on the page's own `showLocked` parameter. **That parameter has no authored knob behind it:**
+  the `Picker`/`Picker.ShowLocked` asset group was deleted in the pre-release sweep because no engine
+  path produces a locked category (no per-category tool gate exists), so both of its values rendered
+  identically. `StationService` passes `true`; the page keeps the parameter as the seam for whenever a
+  locked-category producer does exist. Selection closes the page THEN calls back
   (`PickerCallback.onSelect`) with the chosen category id - the page has zero opinion on what a
   category id means; the caller (the station engine, resolving native recipe categories per
   decision 49's rider) supplies the ordered `Category` list and owns everything downstream

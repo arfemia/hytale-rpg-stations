@@ -2,7 +2,9 @@ package com.ziggfreed.rpgstations.station;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,7 +14,8 @@ import com.ziggfreed.common.codec.Vec3;
 /**
  * Pure tests for {@link StationPuppetController}'s unit-JVM-safe decision cores (round-4
  * puppet-presentation design, doc section 3.6): the per-step clip-override resolution
- * ({@link StationPuppetController#resolveEffectiveClip}), the effective prop item id
+ * ({@link StationPuppetController#resolveEffectiveClip}), the swing SLOT choice that resolution
+ * feeds ({@link StationPuppetController#useActionSlotForPuppetSwing}), the effective prop item id
  * ({@link StationPuppetController#resolveEffectivePropItemId}), and (round-3 smoke) the
  * FACING-RELATIVE placement composition ({@link StationPuppetController#resolveWorldOffset}/
  * {@link StationPuppetController#resolveYawRadians}) - the placed block's facing enters as a plain
@@ -130,6 +133,36 @@ class StationPuppetControllerTest {
     @Test
     void resolveEffectiveClip_neitherAuthored_null() {
         assertNull(StationPuppetController.resolveEffectiveClip(null, null));
+    }
+
+    // ==================== useActionSlotForPuppetSwing (the swing SLOT choice) ====================
+
+    @Test
+    void puppetSwing_noEmoteClipAuthored_ridesActionSlot() {
+        // The shipped station shape: Animation authors no EmoteId at all, so the work animation is
+        // the held item's own Action-slot clip.
+        assertTrue(StationPuppetController.useActionSlotForPuppetSwing(null));
+    }
+
+    @Test
+    void puppetSwing_blankEmoteClip_ridesActionSlot() {
+        assertTrue(StationPuppetController.useActionSlotForPuppetSwing(""));
+        assertTrue(StationPuppetController.useActionSlotForPuppetSwing("   "));
+    }
+
+    @Test
+    void puppetSwing_emoteClipAuthored_staysOnEmoteSlot() {
+        // EmoteId is the opt-in full-body override, so it wins the slot when authored.
+        assertFalse(StationPuppetController.useActionSlotForPuppetSwing("RPG_Emote_Saw"));
+    }
+
+    @Test
+    void puppetSwing_stepClipOverride_staysOnEmoteSlot() {
+        // A step's own Puppet.Clip resolves through resolveEffectiveClip FIRST, so an emote-less
+        // station still keeps its step-synced clips on the Emote slot - the composition the two
+        // cores make together, which is what the swing route actually feeds.
+        String effective = StationPuppetController.resolveEffectiveClip("Hammer_Strike", null);
+        assertFalse(StationPuppetController.useActionSlotForPuppetSwing(effective));
     }
 
     // ==================== resolveEffectivePropItemId ====================

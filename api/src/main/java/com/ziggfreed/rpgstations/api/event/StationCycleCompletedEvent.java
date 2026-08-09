@@ -15,10 +15,9 @@ import com.ziggfreed.rpgstations.api.StationContribution;
 /**
  * Fired synchronously on the shared Hytale event bus after every completed work cycle (real OR
  * idle), on the world thread from {@code StationService}'s cycle path - AFTER the loot roll for
- * a real cycle. An idle cycle fires this too, with {@link #idle()} true,
- * {@link #contributions()} already scaled by the station's {@code Work.Idle.Fraction}, and {@link
- * #toolMultiplier()} forced {@code 1.0} (idle practice produces nothing and earns no tool bonus,
- * matching the fractional-output/no-progress semantics of practising without materials).
+ * a real cycle. An idle cycle fires this too, with {@link #idle()} true and
+ * {@link #contributions()} already scaled by the station's {@code Work.Idle.Fraction} (idle practice
+ * produces nothing, matching the fractional-output semantics of practising without materials).
  *
  * <p><b>{@link #commandBuffer()} is GUARANTEED non-null on every firing path.</b> The engine's
  * only two cycle-firing call sites - the real-cycle path and the
@@ -29,15 +28,20 @@ import com.ziggfreed.rpgstations.api.StationContribution;
  * with no live-{@code Store} fallback needed.
  *
  * <p><b>Two contribution lists, deliberately separate:</b> {@link #contributions()} carries the
- * station's own {@code Work.PerCycleContributions}, which a listener multiplies by
- * {@link #toolMultiplier()} (and which an idle cycle already pre-scaled);
- * {@link #oneShotContributions()} carries {@code Roll.Grants.Contributions} find grants, which
- * bypass BOTH scalings and must be posted verbatim. A listener MUST filter both lists by
- * {@link StationContribution#channel()} - a channel it did not declare belongs to someone else.
+ * station's own {@code Work.PerCycleContributions} (which an idle cycle already pre-scaled by the
+ * idle fraction); {@link #oneShotContributions()} carries {@code Roll.Grants.Contributions} find
+ * grants, which bypass that scaling and must be posted verbatim. A listener MUST filter both lists
+ * by {@link StationContribution#channel()} - a channel it did not declare belongs to someone else.
+ *
+ * <p><b>Amounts arrive ALREADY SCALED; grant them verbatim.</b> The engine applies the action's own
+ * {@code ContributionScale} ladder before dispatch and reports the resolved multiplier on
+ * {@link #contributionScale()} for DISPLAY only. That removes the footgun in both directions: a
+ * listener that forgets to multiply cannot under-award, and one that multiplies again cannot
+ * over-award.
  *
  * <p><b>Plain data</b> ({@link #playerId()}, {@link #sessionId()}, {@link #stationId()},
  * {@link #actionId()}, {@link #cycleIndex()}, {@link #idle()}, {@link #contributions()},
- * {@link #oneShotContributions()}, {@link #toolMultiplier()}) is always safe to retain. <b>Live
+ * {@link #oneShotContributions()}) is always safe to retain. <b>Live
  * world-thread context</b> ({@link #store()}, {@link #commandBuffer()}, {@link #playerRef()}) is
  * valid ONLY synchronously during dispatch; a listener that defers work must capture the plain
  * fields and re-resolve.
@@ -55,13 +59,13 @@ public final class StationCycleCompletedEvent implements IEvent<Void> {
     private final boolean idle;
     @Nonnull private final List<StationContribution> contributions;
     @Nonnull private final List<StationContribution> oneShotContributions;
-    private final double toolMultiplier;
+    private final double contributionScale;
 
     public StationCycleCompletedEvent(@Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull PlayerRef playerRef,
             @Nonnull UUID playerId, @Nonnull UUID sessionId, @Nonnull String stationId, @Nonnull String actionId,
             int cycleIndex, boolean idle, @Nonnull List<StationContribution> contributions,
-            @Nonnull List<StationContribution> oneShotContributions, double toolMultiplier) {
+            @Nonnull List<StationContribution> oneShotContributions, double contributionScale) {
         this.store = store;
         this.commandBuffer = commandBuffer;
         this.playerRef = playerRef;
@@ -73,7 +77,7 @@ public final class StationCycleCompletedEvent implements IEvent<Void> {
         this.idle = idle;
         this.contributions = List.copyOf(contributions);
         this.oneShotContributions = List.copyOf(oneShotContributions);
-        this.toolMultiplier = toolMultiplier;
+        this.contributionScale = contributionScale;
     }
 
     @Nonnull
@@ -122,9 +126,10 @@ public final class StationCycleCompletedEvent implements IEvent<Void> {
     }
 
     /**
-     * The station's authored {@code Work.PerCycleContributions} for this cycle; a listener
-     * multiplies each amount by {@link #toolMultiplier()}. On an idle cycle the amounts are
-     * ALREADY pre-scaled by {@code Work.Idle.Fraction}.
+     * The action's {@code Work.PerCycleContributions} for this cycle, forwarded ALREADY SCALED -
+     * grant each amount verbatim. The engine has applied both multipliers before dispatch: an idle
+     * cycle's {@code Work.Idle.Fraction}, and the action's {@code ContributionScale} ladder (which
+     * rides along on {@link #contributionScale()} for DISPLAY only, never to re-apply).
      */
     @Nonnull
     public List<StationContribution> contributions() {
@@ -134,8 +139,8 @@ public final class StationCycleCompletedEvent implements IEvent<Void> {
     /**
      * One-shot contributions posted during this cycle by a {@code Roll.Grants.Contributions} entry
      * (a conditional-lootable find), SEPARATE because they are DELIBERATELY UNSCALED: post each at
-     * its stated amount without applying {@link #toolMultiplier()}; the engine never pre-scales
-     * them by the idle fraction either. Empty on most cycles.
+     * its stated amount; the engine never pre-scales them by the idle fraction. Empty on most
+     * cycles.
      */
     @Nonnull
     public List<StationContribution> oneShotContributions() {
@@ -143,10 +148,16 @@ public final class StationCycleCompletedEvent implements IEvent<Void> {
     }
 
     /**
-     * The resolved tool-power multiplier for a real cycle; forced {@code 1.0} for an idle cycle.
-     * Applies to {@link #contributions()} ONLY, never {@link #oneShotContributions()}.
+     * The multiplier the engine ALREADY applied to every {@link #contributions()} amount (the
+     * action's own {@code ContributionScale} ladder, resolved against this cycle's factor values;
+     * {@code 1.0} when none is authored or no floor was reached).
+     *
+     * <p><b>DISPLAY ONLY.</b> Grant {@link #contributions()} verbatim - the amounts are already
+     * scaled. Multiplying by this number again would double-count; ignoring it cannot under-award.
+     * It is exposed purely so a listener can SHOW why a cycle was worth what it was worth (a "x2.5
+     * tool" line in a summary). {@link #oneShotContributions()} is never touched by it.
      */
-    public double toolMultiplier() {
-        return toolMultiplier;
+    public double contributionScale() {
+        return contributionScale;
     }
 }

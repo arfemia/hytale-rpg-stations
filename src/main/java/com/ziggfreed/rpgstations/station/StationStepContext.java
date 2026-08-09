@@ -8,9 +8,8 @@ import javax.annotation.Nullable;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
-import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
-import com.ziggfreed.rpgstations.asset.StationAsset;
+
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.FactorSnapshot;
 
@@ -28,7 +27,6 @@ final class StationStepContext {
     @Nonnull final Store<EntityStore> store;
     @Nonnull final CommandBuffer<EntityStore> commandBuffer;
     @Nonnull final Player player;
-    @Nonnull final StationAsset asset;
     @Nonnull final ActionResolver.ResolvedAction action;
     @Nonnull final FactorSnapshot snapshot;
     @Nonnull final List<StationStep> steps;
@@ -43,29 +41,17 @@ final class StationStepContext {
      */
     final int cycleIndex;
 
-    /**
-     * This program run's live cycle output, for a {@code Roll} step's
-     * {@code Grants.BonusOutputCopies} (design 4.5.1's "THIS cycle's Output" - the implicit
-     * program's Produce step already chose it via {@code ConversionCheck} before the walk
-     * started; an authored program with no live conversion leaves this {@code null}, so
-     * {@code BonusOutputCopies} is silently inert there, same as today's Completion-trigger
-     * pass with no cycle output).
-     */
-    @Nullable final ItemStack cycleOutputForBonusCopies;
-
     StationStepContext(@Nonnull StationSession session, @Nonnull Store<EntityStore> store,
-            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull Player player, @Nonnull StationAsset asset,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull Player player,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull FactorSnapshot snapshot,
-            @Nonnull List<StationStep> steps, int cycleIndex, @Nullable ItemStack cycleOutputForBonusCopies) {
+            @Nonnull List<StationStep> steps, int cycleIndex) {
         this.session = session;
         this.store = store;
         this.commandBuffer = commandBuffer;
         this.player = player;
-        this.asset = asset;
         this.action = action;
         this.snapshot = snapshot;
         this.steps = steps;
         this.cycleIndex = cycleIndex;
-        this.cycleOutputForBonusCopies = cycleOutputForBonusCopies;
     }
 }

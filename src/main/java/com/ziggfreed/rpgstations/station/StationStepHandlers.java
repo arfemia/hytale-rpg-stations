@@ -1,7 +1,6 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,12 +30,10 @@ import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.LootRef;
-import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.CommandRewardExecutor;
 import com.ziggfreed.rpgstations.loot.LootEngine;
-import com.ziggfreed.rpgstations.loot.LootableCatalog;
 import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
@@ -605,32 +602,18 @@ final class StationStepHandlers {
         if (ref == null || ref.isEmpty()) {
             return null;
         }
-        List<Roll> rolls = new ArrayList<>();
-        String[] lootables = ref.getLootables();
-        if (lootables != null) {
-            for (String lootableId : lootables) {
-                if (lootableId == null || lootableId.isBlank()) {
-                    continue;
-                }
-                LootableAsset table = LootableCatalog.getInstance().get(lootableId);
-                if (table != null && table.getRolls() != null) {
-                    rolls.addAll(Arrays.asList(table.getRolls()));
-                } else {
-                    Log.fine("STATION Roll step '" + step.getId() + "' references unknown lootable '" + lootableId + "'");
-                }
-            }
-        }
-        if (ref.getRolls() != null) {
-            rolls.addAll(Arrays.asList(ref.getRolls()));
-        }
+        // The SAME resolution an action's Bonus uses (referenced tables' effective rolls, incl. any
+        // Lootable-targeted extension's appended ones, then the ref's own inline rolls) - a step's
+        // Roll phase must never see a narrower view of a shared table than a Bonus does.
+        List<Roll> rolls = LootEngine.resolveRolls(ref, "Roll step '" + step.getId() + "'");
         if (rolls.isEmpty()) {
             return null;
         }
         LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, ctx.snapshot,
-                ctx.player, ctx.cycleOutputForBonusCopies, ctx.session.playerRef, ctx.session.stationId,
+                ctx.player, ctx.session.playerRef, ctx.session.stationId,
                 ctx.action.getActionId(), ctx.cycleIndex, ctx.store,
                 ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
-        StationService.applyGrantResult(ctx.session, ctx.store, result);
+        StationService.applyGrantResult(ctx.session, ctx.store, ctx.player, result);
         return null;
     }
 

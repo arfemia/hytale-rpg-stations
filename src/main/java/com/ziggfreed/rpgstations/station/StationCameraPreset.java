@@ -29,58 +29,74 @@ import javax.annotation.Nullable;
 public enum StationCameraPreset {
 
     /** The pre-hunt shipped recipe: body held, camera frozen too (both channels locked). */
-    FROZEN,
+    FROZEN("Frozen"),
 
     /** All three first-party {@code ServerCameraSettings} senders' shape: free camera, body NOT held. */
-    FREE_NULL,
+    FREE_NULL("FreeNull"),
 
     /** The known-FAILED attempt-1 control: free camera, body NOT held (populated movementForceRotation alone). */
-    FREE_DIR,
+    FREE_DIR("FreeDir"),
 
     /** The core win: {@code ApplyLookType.Rotation} holds the body, but the camera pins too. */
-    LOOK_ROT,
+    LOOK_ROT("LookRot"),
 
     /** Round-2 hybrid 1: {@link #LOOK_ROT} plus an explicit {@code lookMultiplier=(1,1)} (untested field). */
-    LOOK_ROT_BLEND,
+    LOOK_ROT_BLEND("LookRotBlend"),
 
     /** Round-2 hybrid 2: {@link #LOOK_ROT} with {@code rotation} left null (isolates the mode-switch from the target). */
-    LOOK_ROT_NO_TARGET,
+    LOOK_ROT_NO_TARGET("LookRotNoTarget"),
 
     /** Round-2 hybrid 3: {@link #LOOK_ROT} plus an EXPLICIT {@code rotationType=AttachedToPlusOffset} (defensive check). */
-    LOOK_ROT_ATTACHED,
+    LOOK_ROT_ATTACHED("LookRotAttached"),
 
     /** Round-2 hybrid 4: body-lock channel + a formally-Custom camera rotation, WITHOUT the mouse-lock or applyLookType. */
-    CUSTOM_SEED;
+    CUSTOM_SEED("CustomSeed");
 
-    /** The command-listing display fallback for an unset player - NOT the runtime FaceBlock default (see {@link #resolve}). */
+    /**
+     * The command-listing display fallback for an unset player - NOT the runtime fixed-look default
+     * (see {@link #resolve}).
+     */
     public static final StationCameraPreset DEFAULT = FROZEN;
 
-    /** Parse a preset id (case-insensitive, matches the enum name lower-cased), or {@code null} for an unknown id. */
+    @Nonnull private final String id;
+
+    StationCameraPreset(@Nonnull String id) {
+        this.id = id;
+    }
+
+    /**
+     * Parse a preset id, case-insensitively, or {@code null} for an unknown one. The authored spelling
+     * is PascalCase ({@code "LookRot"}), matching this schema's one convention for a closed union
+     * value; matching stays case-insensitive so a casing slip never breaks content.
+     */
     @Nullable
     public static StationCameraPreset fromId(@Nullable String id) {
         if (id == null) {
             return null;
         }
-        String trimmed = id.trim().toLowerCase(Locale.ROOT);
+        String trimmed = id.trim();
         for (StationCameraPreset preset : values()) {
-            if (preset.id().equals(trimmed)) {
+            if (preset.id.equalsIgnoreCase(trimmed)) {
                 return preset;
             }
         }
         return null;
     }
 
-    /** The machine id used in command args/chat output (the enum name, lower-cased). */
+    /**
+     * The machine id authored on {@code Camera.Recipe} and echoed in command args/chat output:
+     * PascalCase, deliberately NOT the lower-cased enum name, so every closed union value in this
+     * schema reads the same way.
+     */
     @Nonnull
     public String id() {
-        return name().toLowerCase(Locale.ROOT);
+        return id;
     }
 
     /**
-     * The ONE precedence choke point for which preset a {@code FaceBlock}-enabled session
-     * actually uses: the player's EXPLICIT camera-preference override wins when present
-     * ({@code explicitOverride} non-null); otherwise the station asset's own
-     * {@code Camera.Recipe} leaf (design 9.7's rename of {@code FaceBlockMode}), parsed via
+     * The ONE precedence choke point for which preset a fixed-look session actually uses: the
+     * player's EXPLICIT camera-preference override wins when present ({@code explicitOverride}
+     * non-null); otherwise the station asset's own {@code Camera.Recipe} leaf, parsed via
      * {@link #fromId}; otherwise {@link #LOOK_ROT} when the asset leaf is absent, blank, or fails
      * to parse.
      */

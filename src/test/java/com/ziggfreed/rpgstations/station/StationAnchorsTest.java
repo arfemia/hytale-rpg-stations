@@ -117,6 +117,35 @@ class StationAnchorsTest {
     }
 
     @Test
+    void worldPrefix_isTheKeysOwnLeadingSegment() {
+        // The prefix is what every per-world sweep and the world-scoped custody-retrieval match
+        // compare against, so it MUST be exactly what blockKey puts in front of the coordinates.
+        String key = StationAnchors.blockKey("world-uuid-1234", 10, 64, -7);
+        assertTrue(key.startsWith(StationAnchors.worldPrefix("world-uuid-1234")));
+        assertFalse(key.startsWith(StationAnchors.worldPrefix("world-uuid-9999")));
+    }
+
+    @Test
+    void worldPrefix_doesNotMatchAWorldWhoseUuidIsAPrefixOfAnother() {
+        // The trailing separator is what stops "world-1" from matching "world-12"'s keys.
+        String key = StationAnchors.blockKey("world-12", 1, 2, 3);
+        assertFalse(key.startsWith(StationAnchors.worldPrefix("world-1")));
+    }
+
+    @Test
+    void worldUuidOf_readsBackWhatBlockKeyWroteIn() {
+        assertEquals("world-uuid-1234",
+                StationAnchors.worldUuidOf(StationAnchors.blockKey("world-uuid-1234", 10, 64, -7)));
+    }
+
+    @Test
+    void worldUuidOf_malformedIsNull() {
+        assertNull(StationAnchors.worldUuidOf(null));
+        assertNull(StationAnchors.worldUuidOf("nocolonhere"));
+        assertNull(StationAnchors.worldUuidOf(":1:2:3"));
+    }
+
+    @Test
     void horizontalDistSq_ignoresY() {
         assertEquals(0L, StationAnchors.horizontalDistSq(5, 5, 5, 5));
         assertEquals(25L, StationAnchors.horizontalDistSq(0, 0, 3, 4));

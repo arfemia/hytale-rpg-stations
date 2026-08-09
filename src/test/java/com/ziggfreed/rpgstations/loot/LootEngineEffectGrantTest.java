@@ -24,14 +24,14 @@ class LootEngineEffectGrantTest {
     @Test
     void applyGrants_collectsEveryAuthoredEffect_droppingBlankIds() {
         LootEngine.GrantResult result = new LootEngine.GrantResult();
-        Roll.Grants grants = Roll.Grants.of(null, null, null, new EffectRef[] {
+        Roll.Grants grants = Roll.Grants.of(null, null, new EffectRef[] {
                 EffectRef.of("Root", null),
                 EffectRef.of("Slow", 3000L),
                 EffectRef.of("", null),   // blank id - dropped
                 null                       // null entry - dropped
         });
 
-        LootEngine.applyGrants(grants, NULL_PLAYER, null, null, result, null, 0, 0, 0, true);
+        LootEngine.applyGrants(grants, NULL_PLAYER, null, result, null, 0, 0, 0, true);
 
         assertEquals(2, result.getEffectGrants().size(), "both non-blank effects surface");
         assertEquals("Root", result.getEffectGrants().get(0).getId());
@@ -43,7 +43,7 @@ class LootEngineEffectGrantTest {
     @Test
     void applyGrants_noEffects_collectsNothing() {
         LootEngine.GrantResult result = new LootEngine.GrantResult();
-        LootEngine.applyGrants(Roll.Grants.of(null, null, null), NULL_PLAYER, null, null, result, null, 0, 0, 0, true);
+        LootEngine.applyGrants(Roll.Grants.of(null, null), NULL_PLAYER, null, result, null, 0, 0, 0, true);
         assertTrue(result.getEffectGrants().isEmpty());
     }
 }

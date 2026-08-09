@@ -17,6 +17,7 @@ import javax.annotation.Nullable;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Contribution;
+import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
@@ -36,13 +37,32 @@ import com.ziggfreed.rpgstations.util.Log;
  * wiring (always additive, no {@code PackControlAsset} infra); generalizes the {@code FlairCatalog
  * .effectiveFlairsFor} "resolve at read against the folded set, cached per fold generation" pattern.
  *
- * <p>{@link #applyToStationLoot}/{@link #applyToStationContributions}/... are the read-side entry
+ * <p>{@link #applyToActionBonus}/{@link #applyToActionContributions}/... are the read-side entry
  * points: they consult the extensions targeting a given id (sorted into
  * {@link ExtensionAsset#APPLY_ORDER}) and merge their payloads onto a base per the deterministic
  * rules. The PURE merge cores
  * ({@link #mergeContributions}/{@link #mergeLoot}/{@link #mergeConversions}/{@link #mergeRolls}/
- * {@link #mergeEntries}/{@link #mergeActions}/{@link #mergeSteps}) are unit-tested without a live
- * catalog: same input set, any fold order -&gt; identical merged result.
+ * {@link #mergeEntries}/{@link #mergeActions}/{@link #mergeAnchors}/{@link #mergeSteps}) are
+ * unit-tested without a live catalog: same input set, any fold order -&gt; identical merged result.
+ *
+ * <p><b>Where each payload is applied</b> (every one of them IS, there is no decode-only payload):
+ * {@code Puppet}/{@code Custody}/{@code ContributionScale}/{@code Anchors} layer inside
+ * {@code ActionResolver}'s own resolve choke point, so every reader of a {@code ResolvedAction}
+ * sees them at once; {@code Bonus}/{@code PerCycleContributions} apply at {@code StationService}'s
+ * per-cycle read sites; {@code Steps} applies where a session's authored program is read for
+ * dispatch; {@code Conversions} applies inside {@code StationCatalog.resolvedConversions} before
+ * that derivation is cached; {@code Actions} applies in {@code ActionResolver.effectiveActions};
+ * {@code Rolls} applies where {@code loot.LootEngine.resolveRolls} reads a referenced lootable
+ * table, and {@code Entries} where {@code StampCapEngine} gathers a Stamp step's candidate pool
+ * entries. Those last two read their catalog per call and derive nothing, so unlike
+ * {@code Conversions} they need no cache-invalidation companion.
+ *
+ * <p><b>The station context ({@code stationId} on every {@code applyToAction*}).</b> An
+ * {@link ExtensionAsset.Target} may SCOPE an Action target to one station
+ * ({@code {Station, Action}}), so "which extensions target this action" is only answerable
+ * together with "on which station is it being read". Every Action-targeted call site therefore
+ * threads the station it resolved the action from, and {@link #extensionsFor} keys its cache on
+ * that context as well - a bare target still matches every station, a scoped one only its own.
  *
  * <p><b>Merge rules (design 1.8, decision 37):</b> ADDITIVE only; keyed collections (Actions,
  * Anchors) the BASE always wins a collision; unkeyed arrays (PerCycleContributions, Conversions,
@@ -51,8 +71,9 @@ import com.ziggfreed.rpgstations.util.Log;
  * anchor on earlier-inserted step ids), a dangling {@code After}/{@code Before} anchor degrading to
  * {@code AtEnd}.
  *
- * <p><b>The presentation overlays ({@code Puppet}/{@code Custody}, {@link ExtensionAsset}'s rule
- * 5)</b> are the one NON-collection payload shape, so they merge PER LEAF instead of appending:
+ * <p><b>The per-leaf overlays ({@code Puppet}/{@code Custody}/{@code ContributionScale},
+ * {@link ExtensionAsset}'s rule 5)</b> are the NON-collection payload shape, so they merge PER LEAF
+ * instead of appending:
  * {@link #overlayPuppet}/{@link #overlayCustody} walk the group recursively and, at every nesting
  * depth, take the OVERLAY's leaf when it is authored and the BASE's when it is not
  * ({@link #firstNonNull} is the ONE rule, applied everywhere). Consequences worth stating because
@@ -84,6 +105,12 @@ public final class ExtensionCatalog {
     /**
      * Fold {@code layer} in (always additive), invalidate the per-target cache, and log ONE INFO
      * {@code EXTENSION_APPLIED} summary line per distinct target (design 1.8's boot visibility).
+     *
+     * <p>Also drops {@link StationCatalog}'s derived-conversion cache, which is load-bearing rather
+     * than defensive: {@link #applyToActionConversions} is folded in BEFORE that cache stores an
+     * entry, and boot fold order between the Stations store and the Extensions store is not
+     * guaranteed - without this, an extension folded after the first conversion resolve would be
+     * silently dropped for the rest of the uptime.
      */
     public void fold(@Nonnull Map<String, ExtensionAsset> layer, boolean replace) {
         if (replace) {
@@ -91,6 +118,7 @@ public final class ExtensionCatalog {
         }
         extensions.putAll(layer);
         forTargetCache.clear();
+        StationCatalog.getInstance().invalidateResolvedConversions();
         logAppliedSummary();
     }
 
@@ -109,16 +137,36 @@ public final class ExtensionCatalog {
     }
 
     /**
-     * The extensions targeting {@code (targetType, targetId)}, sorted into
-     * {@link ExtensionAsset#APPLY_ORDER}. Case-insensitive on the target id. Cached per fold
-     * generation (the cache clears on {@link #fold}).
+     * The extensions targeting {@code (targetType, targetId)} with NO station context, sorted into
+     * {@link ExtensionAsset#APPLY_ORDER}. The Station/Lootable/RollPool entry point - a scoped
+     * {@code {Station, Action}} target can never match here, since it resolves as an Action target
+     * and this overload names no station to match its scope against.
      */
     @Nonnull
     public List<ExtensionAsset> extensionsFor(@Nonnull String targetType, @Nullable String targetId) {
+        return extensionsFor(targetType, targetId, null);
+    }
+
+    /**
+     * The extensions targeting {@code (targetType, targetId)} in the context of
+     * {@code stationId}, sorted into {@link ExtensionAsset#APPLY_ORDER}. Case-insensitive on both
+     * ids. Cached per fold generation (the cache clears on {@link #fold}).
+     *
+     * <p>{@code stationId} is what makes the scoped {@code Target:{Station, Action}} form
+     * resolvable: a BARE target matches any context (its whole point is reaching every station that
+     * resolves the id), a SCOPED one only its own station. The cache key therefore carries the
+     * station context too - two stations sharing one {@code Ref}'d action legitimately see
+     * DIFFERENT extension lists, and a single key per {@code (type, id)} would hand the second
+     * station whichever list the first one warmed.
+     */
+    @Nonnull
+    public List<ExtensionAsset> extensionsFor(@Nonnull String targetType, @Nullable String targetId,
+            @Nullable String stationId) {
         if (targetId == null || targetId.isBlank()) {
             return List.of();
         }
-        String key = targetType + "::" + targetId.toLowerCase(Locale.ROOT);
+        String key = targetType + "::" + targetId.toLowerCase(Locale.ROOT)
+                + "::" + (stationId == null ? "" : stationId.toLowerCase(Locale.ROOT));
         return forTargetCache.computeIfAbsent(key, k -> {
             List<ExtensionAsset> matched = new ArrayList<>();
             for (ExtensionAsset ext : extensions.values()) {
@@ -127,7 +175,7 @@ public final class ExtensionCatalog {
                     continue;
                 }
                 String rid = t.resolvedId();
-                if (rid != null && rid.equalsIgnoreCase(targetId)) {
+                if (rid != null && rid.equalsIgnoreCase(targetId) && t.matchesStationScope(stationId)) {
                     matched.add(ext);
                 }
             }
@@ -136,75 +184,105 @@ public final class ExtensionCatalog {
     }
 
     // ==================== Read-side apply entry points (consult the folded set) ====================
+    //
+    // Every Action-targeted applyTo* below threads the station the action is being read ON
+    // (stationId, nullable only when a caller genuinely has none), because that is what decides
+    // whether a SCOPED Target:{Station, Action} extension applies. Each stays identity-preserving
+    // with no extension in play, so the zero-extension path costs nothing.
 
-    /** The station's effective loot: {@code base} plus every {@code Station}-targeted extension's {@code Loot} (design 1.8). */
+    /** An action's effective {@code Bonus}: {@code base} plus every matching extension's own. */
     @Nullable
-    public LootRef applyToStationLoot(@Nonnull String stationId, @Nullable LootRef base) {
-        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.STATION, stationId);
+    public LootRef applyToActionBonus(@Nullable String stationId, @Nonnull String actionId, @Nullable LootRef base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
         return exts.isEmpty() ? base : mergeLoot(base, exts);
     }
 
-    /** An action's effective loot: {@code base} plus every {@code Action}-targeted extension's {@code Loot}. */
-    @Nullable
-    public LootRef applyToActionLoot(@Nonnull String actionId, @Nullable LootRef base) {
-        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId);
-        return exts.isEmpty() ? base : mergeLoot(base, exts);
-    }
-
     /**
-     * The station's effective per-cycle contributions: {@code base} plus every
-     * {@code Station}-targeted extension's own {@code PerCycleContributions}.
+     * An action's effective per-cycle contributions: {@code base} plus every matching extension's
+     * own {@code PerCycleContributions}.
      */
     @Nullable
-    public Contribution[] applyToStationContributions(@Nonnull String stationId, @Nullable Contribution[] base) {
-        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.STATION, stationId);
+    public Contribution[] applyToActionContributions(@Nullable String stationId, @Nonnull String actionId,
+            @Nullable Contribution[] base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
         return exts.isEmpty() ? base : mergeContributions(base, exts);
     }
 
-    /**
-     * An action's effective per-cycle contributions: {@code base} plus every
-     * {@code Action}-targeted extension's own {@code PerCycleContributions}.
-     */
+    /** An action's effective {@code Puppet} group: {@code base} with every matching extension's {@code Puppet} overlaid PER LEAF. */
     @Nullable
-    public Contribution[] applyToActionContributions(@Nonnull String actionId, @Nullable Contribution[] base) {
-        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId);
-        return exts.isEmpty() ? base : mergeContributions(base, exts);
-    }
-
-    /**
-     * The station's effective {@code Puppet} group: {@code base} with every {@code Station}-targeted
-     * extension's {@code Puppet} overlaid PER LEAF, in {@link ExtensionAsset#APPLY_ORDER}. Returns
-     * {@code base} unchanged when no extension authors one.
-     */
-    @Nullable
-    public Puppet applyToStationPuppet(@Nonnull String stationId, @Nullable Puppet base) {
-        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.STATION, stationId);
+    public Puppet applyToActionPuppet(@Nullable String stationId, @Nonnull String actionId, @Nullable Puppet base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
         return exts.isEmpty() ? base : mergePuppet(base, exts);
     }
 
-    /** An action's effective {@code Puppet} group: {@code base} with every {@code Action}-targeted extension's {@code Puppet} overlaid PER LEAF. */
+    /** An action's effective {@code Custody} group: {@code base} with every matching extension's {@code Custody} overlaid PER LEAF. */
     @Nullable
-    public Puppet applyToActionPuppet(@Nonnull String actionId, @Nullable Puppet base) {
-        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId);
-        return exts.isEmpty() ? base : mergePuppet(base, exts);
+    public Custody applyToActionCustody(@Nullable String stationId, @Nonnull String actionId, @Nullable Custody base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
+        return exts.isEmpty() ? base : mergeCustody(base, exts);
     }
 
     /**
-     * The station's effective {@code Custody} group: {@code base} with every {@code Station}-targeted
-     * extension's {@code Custody} overlaid PER LEAF, in {@link ExtensionAsset#APPLY_ORDER}. An overlay
-     * carrying only {@code Display} never clobbers {@code States}/{@code MaxQuantity}/{@code Input}.
+     * An action's effective {@code ContributionScale}: {@code base} with every matching extension's
+     * own overlaid PER LEAF, so an extension authoring only {@code Floors} keeps the base action's
+     * {@code Factors}.
      */
     @Nullable
-    public Custody applyToStationCustody(@Nonnull String stationId, @Nullable Custody base) {
-        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.STATION, stationId);
-        return exts.isEmpty() ? base : mergeCustody(base, exts);
+    public ContributionScale applyToActionContributionScale(@Nullable String stationId, @Nonnull String actionId,
+            @Nullable ContributionScale base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
+        return exts.isEmpty() ? base : mergeContributionScale(base, exts);
     }
 
-    /** An action's effective {@code Custody} group: {@code base} with every {@code Action}-targeted extension's {@code Custody} overlaid PER LEAF. */
+    /**
+     * An action's effective {@code Recipe.Conversions}: {@code base} plus every matching extension's
+     * own {@code Conversions}, appended in {@link ExtensionAsset#APPLY_ORDER}. {@code base} is the
+     * already-derived array (authored conversions plus any {@code FromCrafting}-derived ones), so an
+     * appended conversion always sorts AFTER everything the base action can already make - it can
+     * never displace the base's first-authored default output category.
+     */
     @Nullable
-    public Custody applyToActionCustody(@Nonnull String actionId, @Nullable Custody base) {
-        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId);
-        return exts.isEmpty() ? base : mergeCustody(base, exts);
+    public StationAsset.Conversion[] applyToActionConversions(@Nullable String stationId, @Nonnull String actionId,
+            @Nullable StationAsset.Conversion[] base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
+        return exts.isEmpty() ? base : mergeConversions(base, exts);
+    }
+
+    /**
+     * An action's effective step program: {@code base} with every matching extension's
+     * {@code Steps} insertions applied in {@link ExtensionAsset#APPLY_ORDER}.
+     *
+     * <p><b>{@code base} is the action's OWN authored program, never a synthesized one.</b> An
+     * insertion ADDS beats to a program the action already authors; it can never turn a
+     * recipe-driven convert action into a step-programmed one, because the flavor decision
+     * ({@code Steps} authored or not) is read straight off the action and stays base-owned. That is
+     * what "additive only" means for this payload: an extension changes what a ritual DOES, never
+     * which engine runs it.
+     */
+    @Nonnull
+    public List<StationStep> applyToActionSteps(@Nullable String stationId, @Nonnull String actionId,
+            @Nonnull List<StationStep> base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
+        return exts.isEmpty() ? base : mergeSteps(base, exts);
+    }
+
+    /**
+     * An action's effective declared-anchor map: {@code base} plus every matching extension's NEW
+     * anchor keys. The BASE wins a key collision (the entry is skipped), matching every other keyed
+     * collection here.
+     */
+    @Nullable
+    public Map<String, ActionDef.Anchor> applyToActionAnchors(@Nullable String stationId, @Nonnull String actionId,
+            @Nullable Map<String, ActionDef.Anchor> base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
+        return exts.isEmpty() ? base : mergeAnchors(base, exts);
+    }
+
+    /** The station's effective action list: {@code base} plus every {@code Station}-targeted extension's NEW actions. */
+    @Nullable
+    public ActionDef[] applyToStationActions(@Nonnull String stationId, @Nullable ActionDef[] base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.STATION, stationId);
+        return exts.isEmpty() ? base : mergeActions(base, exts);
     }
 
     /** A lootable's effective rolls: {@code base} plus every {@code Lootable}-targeted extension's {@code Rolls}. */
@@ -238,7 +316,7 @@ public final class ExtensionCatalog {
         return out.isEmpty() ? base : out.toArray(new Contribution[0]);
     }
 
-    /** Union {@code base}'s lootable refs + inline rolls with every extension's {@code Loot} (append order = APPLY_ORDER). */
+    /** Union {@code base}'s lootable refs + inline rolls with every extension's {@code Bonus} (append order = APPLY_ORDER). */
     @Nullable
     static LootRef mergeLoot(@Nullable LootRef base, @Nonnull List<ExtensionAsset> exts) {
         List<String> lootables = new ArrayList<>();
@@ -248,7 +326,7 @@ public final class ExtensionCatalog {
             appendAll(rolls, base.getRolls());
         }
         for (ExtensionAsset ext : exts) {
-            LootRef l = ext.getLoot();
+            LootRef l = ext.getBonus();
             if (l != null) {
                 appendAll(lootables, l.getLootables());
                 appendAll(rolls, l.getRolls());
@@ -370,6 +448,7 @@ public final class ExtensionCatalog {
         }
         return Puppet.Look.of(
                 firstNonNull(overlay.getSource(), base.getSource()),
+                firstNonNull(overlay.getFallbackModelId(), base.getFallbackModelId()),
                 overlayLookModel(base.getModel(), overlay.getModel()),
                 overlayLookRole(base.getRole(), overlay.getRole()));
     }
@@ -382,9 +461,7 @@ public final class ExtensionCatalog {
         if (base == null) {
             return overlay;
         }
-        return Puppet.Model.of(
-                firstNonNull(overlay.getModelId(), base.getModelId()),
-                firstNonNull(overlay.getFallbackModelId(), base.getFallbackModelId()));
+        return Puppet.Model.of(firstNonNull(overlay.getModelId(), base.getModelId()));
     }
 
     @Nullable
@@ -414,6 +491,40 @@ public final class ExtensionCatalog {
                 firstNonNull(overlay.getSource(), base.getSource()),
                 firstNonNull(overlay.getItemId(), base.getItemId()),
                 firstNonNull(overlay.getSlot(), base.getSlot()));
+    }
+
+    /**
+     * Overlay every extension's {@code ContributionScale} onto {@code base}, in {@code exts} order
+     * (already APPLY_ORDER-sorted, so the later/higher-priority extension wins a same-leaf contest).
+     */
+    @Nullable
+    static ContributionScale mergeContributionScale(@Nullable ContributionScale base,
+            @Nonnull List<ExtensionAsset> exts) {
+        ContributionScale out = base;
+        for (ExtensionAsset ext : exts) {
+            out = overlayContributionScale(out, ext.getContributionScale());
+        }
+        return out;
+    }
+
+    /**
+     * ONE per-leaf {@code ContributionScale} overlay (PURE): an overlay authoring only
+     * {@code Floors} keeps the base's {@code Factors}, and vice versa - the same
+     * {@link #firstNonNull} rule the two presentation overlays use. Each leaf is a whole array, so
+     * an authored one replaces wholesale (arrays are leaves here, never merged element-wise).
+     */
+    @Nullable
+    static ContributionScale overlayContributionScale(@Nullable ContributionScale base,
+            @Nullable ContributionScale overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return ContributionScale.of(
+                firstNonNull(overlay.getFactors(), base.getFactors()),
+                firstNonNull(overlay.getFloors(), base.getFloors()));
     }
 
     /**
@@ -549,42 +660,119 @@ public final class ExtensionCatalog {
     }
 
     /**
-     * Merge NEW actions from every extension onto {@code base} (Station target): the BASE always
-     * wins a key collision ({@code EXTENSION_KEY_COLLISION}); among extensions the earlier in
-     * APPLY_ORDER wins a new key (later duplicates skipped). Insertion-ordered.
+     * Append every extension's NEW actions onto {@code base} (Station target): APPENDED, so a base
+     * action always keeps its higher selection priority, and the BASE wins an {@code Id} collision
+     * ({@code EXTENSION_KEY_COLLISION}, entry skipped). Among extensions the LATER in APPLY_ORDER
+     * wins a contested id - its entry REPLACES the earlier claimant's, in the slot (array position)
+     * the first claim established - the same later-wins rule every other contest in this schema
+     * follows (overlay leaf contests, ladder floor ties, the pack-over-defaults layer order).
      */
     @Nonnull
-    static Map<String, ActionDef> mergeActions(@Nullable Map<String, ActionDef> base,
-            @Nonnull List<ExtensionAsset> exts) {
-        Map<String, ActionDef> out = new LinkedHashMap<>();
+    static ActionDef[] mergeActions(@Nullable ActionDef[] base, @Nonnull List<ExtensionAsset> exts) {
+        List<ActionDef> out = new ArrayList<>();
+        Set<String> baseIds = new LinkedHashSet<>();
+        Map<String, Integer> extSlotById = new LinkedHashMap<>();
         if (base != null) {
-            out.putAll(base);
+            for (int i = 0; i < base.length; i++) {
+                if (base[i] == null) {
+                    continue;
+                }
+                out.add(base[i]);
+                baseIds.add(ActionResolver.effectiveActionId(base[i], i).toLowerCase(Locale.ROOT));
+            }
         }
         for (ExtensionAsset ext : exts) {
-            Map<String, ActionDef> add = ext.getActions();
+            ActionDef[] add = ext.getActions();
             if (add == null) {
                 continue;
             }
-            for (Map.Entry<String, ActionDef> e : add.entrySet()) {
-                if (e.getKey() == null || e.getValue() == null) {
+            for (int i = 0; i < add.length; i++) {
+                ActionDef def = add[i];
+                if (def == null) {
                     continue;
                 }
-                out.putIfAbsent(e.getKey(), e.getValue()); // base + earlier extension win a key.
+                String id = ActionResolver.effectiveActionId(def, out.size()).toLowerCase(Locale.ROOT);
+                if (baseIds.contains(id)) {
+                    continue;
+                }
+                Integer slot = extSlotById.get(id);
+                if (slot != null) {
+                    out.set(slot, def);
+                } else {
+                    extSlotById.put(id, out.size());
+                    out.add(def);
+                }
             }
         }
-        return out;
+        return out.toArray(new ActionDef[0]);
     }
 
     /**
-     * Merge ordered step insertions into {@code baseSteps} for {@code actionId} (design 1.8, m2):
-     * every extension's {@link ExtensionAsset.StepInsertion} whose {@code Action} matches
-     * {@code actionId} (or is omitted) applies in {@code exts} order (APPLY_ORDER) against a live
-     * working list, so later extensions can anchor on earlier-inserted step ids. Co-anchored
+     * Fold every extension's NEW anchor declarations into {@code base} (Action target): a
+     * {@link LinkedHashMap} preserving the base's own declaration order first, then each
+     * extension's new keys in APPLY_ORDER. The BASE always wins a key collision
+     * ({@code EXTENSION_KEY_COLLISION}, entry skipped) and among extensions the LATER in
+     * APPLY_ORDER wins a contested key - its anchor REPLACES the earlier claimant's VALUE while
+     * the first claim keeps the slot's map position and authored spelling - the same later-wins
+     * rule {@link #mergeActions} applies, so one contest rule holds across the whole schema.
+     * Case-insensitive on the key, so an extension cannot shadow a base anchor by re-casing it.
+     * A null/empty base with no extension anchors returns {@code base} unchanged (identity), so
+     * the zero-extension path costs nothing.
+     */
+    @Nullable
+    static Map<String, ActionDef.Anchor> mergeAnchors(@Nullable Map<String, ActionDef.Anchor> base,
+            @Nonnull List<ExtensionAsset> exts) {
+        Map<String, ActionDef.Anchor> out = new LinkedHashMap<>();
+        Set<String> baseKeys = new LinkedHashSet<>();
+        Map<String, String> extKeyByLower = new LinkedHashMap<>();
+        if (base != null) {
+            for (Map.Entry<String, ActionDef.Anchor> e : base.entrySet()) {
+                if (e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
+                    continue;
+                }
+                out.put(e.getKey(), e.getValue());
+                baseKeys.add(e.getKey().toLowerCase(Locale.ROOT));
+            }
+        }
+        for (ExtensionAsset ext : exts) {
+            Map<String, ActionDef.Anchor> add = ext.getAnchors();
+            if (add == null) {
+                continue;
+            }
+            for (Map.Entry<String, ActionDef.Anchor> e : add.entrySet()) {
+                if (e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
+                    continue;
+                }
+                String lower = e.getKey().toLowerCase(Locale.ROOT);
+                if (baseKeys.contains(lower)) {
+                    continue;
+                }
+                String slotKey = extKeyByLower.get(lower);
+                if (slotKey != null) {
+                    out.put(slotKey, e.getValue());
+                } else {
+                    extKeyByLower.put(lower, e.getKey());
+                    out.put(e.getKey(), e.getValue());
+                }
+            }
+        }
+        return out.isEmpty() ? base : out;
+    }
+
+    /**
+     * Merge ordered step insertions into {@code baseSteps} (design 1.8, m2): every extension's
+     * {@link ExtensionAsset.StepInsertion} applies in {@code exts} order (APPLY_ORDER) against a
+     * live working list, so later extensions can anchor on earlier-inserted step ids. Co-anchored
      * insertions land in APPLY_ORDER. A dangling {@code After}/{@code Before} step id degrades to
      * {@code AtEnd}.
+     *
+     * <p>WHICH action's program these insertions reach is decided upstream by the extension's own
+     * {@code Target} (bare {@code {Action}} everywhere that id resolves, {@code {Station, Action}}
+     * on one station's copy), so an insertion carries no action guard of its own and every
+     * insertion in {@code exts} applies here.
      */
     @Nonnull
-    static List<StationStep> mergeSteps(@Nonnull List<StationStep> baseSteps, @Nonnull String actionId,
+    static List<StationStep> mergeSteps(@Nonnull List<StationStep> baseSteps,
             @Nonnull List<ExtensionAsset> exts) {
         List<StationStep> working = new ArrayList<>(baseSteps);
         Map<String, Integer> afterOffset = new HashMap<>();
@@ -597,10 +785,6 @@ public final class ExtensionCatalog {
             for (ExtensionAsset.StepInsertion ins : insertions) {
                 if (ins == null || ins.getInsert() == null || ins.getInsert().length == 0) {
                     continue;
-                }
-                String insAction = ins.getAction();
-                if (insAction != null && !insAction.isBlank() && !insAction.equalsIgnoreCase(actionId)) {
-                    continue; // targets a different action's program
                 }
                 List<StationStep> block = new ArrayList<>();
                 for (StationStep s : ins.getInsert()) {
@@ -617,12 +801,22 @@ public final class ExtensionCatalog {
         return working;
     }
 
-    /** Insert {@code block} at {@code anchor}'s resolved position; returns the updated {@code atStartOffset}. */
+    /**
+     * Insert {@code block} at {@code anchor}'s resolved position; returns the updated
+     * {@code atStartOffset}.
+     *
+     * <p>The {@code afterOffset} ledger (what keeps two co-anchored After insertions in APPLY_ORDER
+     * instead of stacking the later one in front of the earlier) is keyed on the LOWERCASED anchor
+     * id, because {@link #indexOfStep} matches the anchor case-INSENSITIVELY: keying the ledger on
+     * the raw authored id filed {@code "base1"} and {@code "Base1"} as two anchors, and the second
+     * extension then read an offset of 0 and landed AHEAD of the first one's block.
+     */
     private static int insertBlock(@Nonnull List<StationStep> working,
             @Nullable ExtensionAsset.StepInsertion.Anchor anchor, @Nonnull List<StationStep> block,
             @Nonnull Map<String, Integer> afterOffset, int atStartOffset) {
         String placement = anchor != null ? anchor.effectivePlacement() : ExtensionAsset.StepInsertion.Anchor.AT_END;
         String anchorStepId = anchor != null ? anchor.anchorStepId() : null;
+        String anchorKey = anchorStepId == null ? null : anchorStepId.toLowerCase(Locale.ROOT);
         switch (placement) {
             case ExtensionAsset.StepInsertion.Anchor.AT_START -> {
                 working.addAll(atStartOffset, block);
@@ -634,9 +828,9 @@ public final class ExtensionCatalog {
                     working.addAll(block); // degrade to AtEnd
                     return atStartOffset;
                 }
-                int off = afterOffset.getOrDefault(anchorStepId, 0);
+                int off = afterOffset.getOrDefault(anchorKey, 0);
                 working.addAll(idx + 1 + off, block);
-                afterOffset.merge(anchorStepId, block.size(), Integer::sum);
+                afterOffset.merge(anchorKey, block.size(), Integer::sum);
                 return atStartOffset;
             }
             case ExtensionAsset.StepInsertion.Anchor.BEFORE -> {
@@ -689,10 +883,13 @@ public final class ExtensionCatalog {
         if (ext.getPerCycleContributions() != null && ext.getPerCycleContributions().length > 0) {
             out.add(ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS);
         }
-        if (ext.getLoot() != null) {
-            out.add(ExtensionAsset.PAYLOAD_LOOT);
+        if (ext.getBonus() != null) {
+            out.add(ExtensionAsset.PAYLOAD_BONUS);
         }
-        if (ext.getActions() != null && !ext.getActions().isEmpty()) {
+        if (ext.getContributionScale() != null) {
+            out.add(ExtensionAsset.PAYLOAD_CONTRIBUTION_SCALE);
+        }
+        if (ext.getActions() != null && ext.getActions().length > 0) {
             out.add(ExtensionAsset.PAYLOAD_ACTIONS);
         }
         if (ext.getConversions() != null && ext.getConversions().length > 0) {
@@ -729,7 +926,10 @@ public final class ExtensionCatalog {
             if (type == null || id == null) {
                 continue;
             }
-            String key = type + " " + id;
+            // A scoped target renders its qualifier, so a server owner can tell "this action
+            // everywhere" from "this action on that one station" in the boot log.
+            String scope = t.scopedStation();
+            String key = type + " " + id + (scope != null ? " on Station " + scope : "");
             counts.merge(key, 1, Integer::sum);
             kinds.computeIfAbsent(key, k -> new LinkedHashSet<>()).addAll(authoredPayloadKinds(ext));
         }

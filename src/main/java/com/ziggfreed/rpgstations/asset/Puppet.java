@@ -12,10 +12,9 @@ import com.ziggfreed.common.codec.Vec3;
 /**
  * The puppet presentation route (round-4 design, "mount the player, hide their player model, and
  * spawn/display a visual of their character model performing the steps" - the maintainer's
- * verbatim proposal): a top-level {@link StationAsset#getPuppet()} group, sibling to {@code Hold}/
- * {@code Camera}/{@code Animation}/{@code Custody}, whole-GROUP overridable per {@link ActionDef}
- * (design doc's section 2 rationale - the puppet is ORTHOGONAL to which mount holds the real
- * player, so it is never nested under {@code Hold}). See
+ * verbatim proposal): one of an action's four {@link ActionDef.Worker} groups, sibling to
+ * {@code Hold}/{@code Camera}/{@code Animation} (the puppet is ORTHOGONAL to which mount holds the
+ * real player, so it is never nested under {@code Hold}). See
  * {@code .claude/research/raw/rpg-stations-puppet-presentation-design-2026-07-22.md} sections 3
  * (this schema) and the round-4 maintainer decisions this leg locks in:
  *
@@ -36,10 +35,10 @@ import com.ziggfreed.common.codec.Vec3;
  *   own javadoc.
  * </ul>
  *
- * <p>Per-station default -&gt; per-action override (design 3.1): the station-level {@code Puppet}
- * group is the default for the implicit {@code "work"} action; an authored {@link ActionDef#getPuppet()}
- * REPLACES the whole group wholesale (design 9.1's whole-group rule, resolved through
- * {@code station.ActionResolver#resolve}), never a per-leaf merge. A {@code StationStep} carries
+ * <p>Every action owns its OWN puppet: there is no station-level default to inherit, and an
+ * inline {@code Actions} entry authoring a {@code Worker} group replaces its {@code Ref} base's
+ * wholesale (resolved through {@code station.ActionResolver#resolve}), never a per-leaf merge. An
+ * {@code ExtensionAsset} targeting the action is the per-LEAF re-skin route. A {@code StationStep} carries
  * its OWN small per-step override (see {@code StationStep.PuppetOverride}) for the moment-to-
  * moment {@code Clip}/{@code Prop} only - the hide/look/spawn knobs stay session-scoped, set once
  * at engage.
@@ -260,16 +259,18 @@ public final class Puppet {
      * registered look) extends this union without a schema break - a new consumer only teaches the
      * engine-side resolver a new {@link #source} string.
      *
-     * <p><b>Nesting symmetry (decision 47):</b> the flat {@code ModelId}/{@code FallbackModelId}
-     * leaves retro-nest into the cohesive {@link Model} group (read only when {@link #source} is
-     * {@link #LOOK_SOURCE_MODEL}); the NpcRole arm's own configuration is the parallel {@link Role}
-     * group (read only when {@link #source} is {@link #LOOK_SOURCE_NPC_ROLE}). Each arm's group is
-     * ignored by the other arms, orthogonal knobs never a mode. {@link Model#getFallbackModelId()}
-     * doubles as the resolution-ladder fallback for the whole Look (any-source: an unresolvable
-     * primary look -&gt; {@code FallbackModelId} -&gt; the engine's default rig, never a red-X).
+     * <p><b>Nesting symmetry:</b> the fixed-model arm's configuration is the cohesive {@link Model}
+     * group (read only when {@link #source} is {@link #LOOK_SOURCE_MODEL}); the NpcRole arm's own
+     * configuration is the parallel {@link Role} group (read only when {@link #source} is
+     * {@link #LOOK_SOURCE_NPC_ROLE}). Each arm's group is ignored by the other arms, orthogonal knobs
+     * never a mode. {@link #fallbackModelId} sits at THIS level rather than inside either arm's own
+     * group, because it is the resolution-ladder fallback for the whole Look whatever the source is:
+     * an unresolvable primary look -&gt; {@code FallbackModelId} -&gt; the engine's default rig, never
+     * a red-X.
      */
     public static final class Look {
         @Nullable protected String source;
+        @Nullable protected String fallbackModelId;
         @Nullable protected Model model;
         @Nullable protected Role role;
 
@@ -278,9 +279,13 @@ public final class Puppet {
                         (o, v) -> o.source = v, o -> o.source, (o, p) -> o.source = p.source)
                 .documentation("The puppet appearance discriminator: 'PlayerClone' (default), 'Model' (Look.Model), or 'NpcRole' (Look.Role).")
                 .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:look-source"))).add()
+                .appendInherited(new KeyedCodec<>("FallbackModelId", Codec.STRING, false),
+                        (o, v) -> o.fallbackModelId = v, o -> o.fallbackModelId,
+                        (o, p) -> o.fallbackModelId = p.fallbackModelId)
+                .documentation("The resolution-ladder fallback model id used when the primary look is unresolvable, whatever Source is. Read for every arm, which is why it sits here rather than inside one arm's group.").add()
                 .appendInherited(new KeyedCodec<>("Model", Model.CODEC, false),
                         (o, v) -> o.model = v, o -> o.model, (o, p) -> o.model = p.model)
-                .documentation("The fixed-model appearance group (read only when Source is 'Model'); also carries the any-source FallbackModelId.").add()
+                .documentation("The fixed-model appearance group (read only when Source is 'Model').").add()
                 .appendInherited(new KeyedCodec<>("Role", Role.CODEC, false),
                         (o, v) -> o.role = v, o -> o.role, (o, p) -> o.role = p.role)
                 .documentation("The NpcRole performer configuration group (read only when Source is 'NpcRole').").add()
@@ -288,8 +293,15 @@ public final class Puppet {
 
         @Nonnull
         public static Look of(@Nullable String source, @Nullable Model model, @Nullable Role role) {
+            return of(source, null, model, role);
+        }
+
+        @Nonnull
+        public static Look of(@Nullable String source, @Nullable String fallbackModelId,
+                @Nullable Model model, @Nullable Role role) {
             Look l = new Look();
             l.source = source;
+            l.fallbackModelId = fallbackModelId;
             l.model = model;
             l.role = role;
             return l;
@@ -298,12 +310,21 @@ public final class Puppet {
         /** Convenience: a fixed-model look ({@code Source: "Model"} + a {@link Model} group). */
         @Nonnull
         public static Look model(@Nullable String modelId, @Nullable String fallbackModelId) {
-            return of(LOOK_SOURCE_MODEL, Model.of(modelId, fallbackModelId), null);
+            return of(LOOK_SOURCE_MODEL, fallbackModelId, Model.of(modelId), null);
         }
 
         @Nullable
         public String getSource() {
             return source;
+        }
+
+        /**
+         * The any-source resolution-ladder fallback model id; null = the ladder ends at the engine's
+         * own default rig.
+         */
+        @Nullable
+        public String getFallbackModelId() {
+            return fallbackModelId;
         }
 
         /** The fixed-model appearance group; null = none authored (read only when {@link #effectiveSource()} is {@link #LOOK_SOURCE_MODEL}). */
@@ -336,43 +357,30 @@ public final class Puppet {
     }
 
     /**
-     * The fixed-model appearance group (decision 47's retro-nest of the old flat {@code ModelId}/
-     * {@code FallbackModelId} leaves). {@link #modelId} backs {@link #LOOK_SOURCE_MODEL} (a fixed
-     * authored look, e.g. an apprentice/golem regardless of who works); {@link #fallbackModelId} is
-     * the resolution-ladder fallback for the WHOLE Look (any source) when the primary look is
-     * unreadable/unresolvable ({@code PlayerClone} clone fails, a dangling {@code ModelId} or role,
-     * ...) - the ladder ends at the engine's default rig, never a red-X or a crash.
+     * The fixed-model appearance group: {@link #modelId} backs {@link #LOOK_SOURCE_MODEL} (a fixed
+     * authored look, e.g. an apprentice or golem regardless of who works). The any-source fallback
+     * lives one level up as {@code Look.FallbackModelId}, because it is read for EVERY arm and so
+     * must not sit inside this one's group.
      */
     public static final class Model {
         @Nullable protected String modelId;
-        @Nullable protected String fallbackModelId;
 
         public static final BuilderCodec<Model> CODEC = BuilderCodec.builder(Model.class, Model::new)
                 .appendInherited(new KeyedCodec<>("ModelId", Codec.STRING, false),
                         (o, v) -> o.modelId = v, o -> o.modelId, (o, p) -> o.modelId = p.modelId)
                 .documentation("The fixed model asset id used when Look.Source is 'Model'.").add()
-                .appendInherited(new KeyedCodec<>("FallbackModelId", Codec.STRING, false),
-                        (o, v) -> o.fallbackModelId = v, o -> o.fallbackModelId,
-                        (o, p) -> o.fallbackModelId = p.fallbackModelId)
-                .documentation("The any-source resolution-ladder fallback model id when the primary look is unresolvable.").add()
                 .build();
 
         @Nonnull
-        public static Model of(@Nullable String modelId, @Nullable String fallbackModelId) {
+        public static Model of(@Nullable String modelId) {
             Model m = new Model();
             m.modelId = modelId;
-            m.fallbackModelId = fallbackModelId;
             return m;
         }
 
         @Nullable
         public String getModelId() {
             return modelId;
-        }
-
-        @Nullable
-        public String getFallbackModelId() {
-            return fallbackModelId;
         }
     }
 

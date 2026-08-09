@@ -111,7 +111,11 @@ public final class FactorContext {
         return stationId;
     }
 
-    /** The resolved action id ({@code "work"} for a station with no {@code Actions} map). */
+    /**
+     * The id of the station action this evaluation belongs to - the {@code Actions} entry the
+     * session selected. Every station declares its actions explicitly, so this is always one of
+     * them; there is no implicit default action to branch on.
+     */
     @Nonnull
     public String actionId() {
         return actionId;
@@ -220,7 +224,8 @@ public final class FactorContext {
         @Nullable private PlayerRef playerRef;
         @Nullable private UUID playerId;
         @Nullable private String stationId;
-        @Nonnull private String actionId = "work";
+        /** Placeholder keeping the field non-null for a context built without one; every engine-built context sets a real action id. */
+        @Nonnull private String actionId = "";
         private long sessionSeconds;
         private int cycleIndex;
         private double toolPower;

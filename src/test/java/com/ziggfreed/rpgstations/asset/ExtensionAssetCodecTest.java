@@ -35,7 +35,7 @@ public class ExtensionAssetCodecTest {
                 new AssetExtraInfo<>(new AssetExtraInfo.Data(ExtensionAsset.class, "fixture", null)));
     }
 
-    // ==================== id + Target exactly-one-of ====================
+    // ==================== id + Target legality ====================
 
     @Test
     void id_isLowercasedAtDecode() throws Exception {
@@ -44,11 +44,12 @@ public class ExtensionAssetCodecTest {
     }
 
     @Test
-    void target_exactlyOneOf_resolvesTypeAndId() throws Exception {
+    void target_oneLeaf_resolvesTypeAndId() throws Exception {
         ExtensionAsset e = decodeAnon("{ \"Target\": { \"Station\": \"sawmill\" } }");
-        assertTrue(e.getTarget().hasExactlyOneTarget());
+        assertTrue(e.getTarget().hasLegalTarget());
         assertEquals(ExtensionAsset.Target.STATION, e.getTarget().resolvedType());
         assertEquals("sawmill", e.getTarget().resolvedId());
+        assertNull(e.getTarget().scopedStation(), "a bare Station target is a target, not a qualifier");
 
         ExtensionAsset action = decodeAnon("{ \"Target\": { \"Action\": \"prepfish\" } }");
         assertEquals(ExtensionAsset.Target.ACTION, action.getTarget().resolvedType());
@@ -56,35 +57,79 @@ public class ExtensionAssetCodecTest {
     }
 
     @Test
-    void target_zeroOrTwoLeaves_isNotExactlyOne() throws Exception {
+    void target_zeroLeavesOrAnIllegalPairing_resolvesNothing() throws Exception {
         ExtensionAsset none = decodeAnon("{ \"Target\": {} }");
-        assertFalse(none.getTarget().hasExactlyOneTarget());
+        assertFalse(none.getTarget().hasLegalTarget());
         assertNull(none.getTarget().resolvedType());
 
         ExtensionAsset two = decodeAnon("{ \"Target\": { \"Station\": \"s\", \"Lootable\": \"l\" } }");
-        assertFalse(two.getTarget().hasExactlyOneTarget());
+        assertFalse(two.getTarget().hasLegalTarget(), "a table id takes no qualifier");
         assertNull(two.getTarget().resolvedId());
+
+        ExtensionAsset actionAndPool = decodeAnon("{ \"Target\": { \"Action\": \"a\", \"RollPool\": \"p\" } }");
+        assertFalse(actionAndPool.getTarget().hasLegalTarget());
+
+        ExtensionAsset three = decodeAnon(
+                "{ \"Target\": { \"Station\": \"s\", \"Action\": \"a\", \"Lootable\": \"l\" } }");
+        assertFalse(three.getTarget().hasLegalTarget(), "the scoped pair plus a table is still two targets");
+    }
+
+    // ==================== The SCOPED Station+Action target ====================
+
+    @Test
+    void scopedTarget_resolvesAsAnActionTargetCarryingItsStationQualifier() throws Exception {
+        ExtensionAsset e = decodeAnon("{ \"Target\": { \"Station\": \"Sawmill\", \"Action\": \"Mill\" } }");
+        assertTrue(e.getTarget().hasLegalTarget(), "Station beside Action is the one legal pairing");
+        assertEquals(ExtensionAsset.Target.ACTION, e.getTarget().resolvedType(),
+                "it carries the Action payload set, so it resolves as an Action target");
+        assertEquals("Mill", e.getTarget().resolvedId());
+        assertEquals("Sawmill", e.getTarget().scopedStation());
+    }
+
+    @Test
+    void scopedTarget_matchesOnlyItsOwnStation_bareMatchesEveryContext() throws Exception {
+        ExtensionAsset scoped = decodeAnon("{ \"Target\": { \"Station\": \"Sawmill\", \"Action\": \"Mill\" } }");
+        assertTrue(scoped.getTarget().matchesStationScope("sawmill"), "case-insensitive on the station id");
+        assertFalse(scoped.getTarget().matchesStationScope("OtherBench"));
+        assertFalse(scoped.getTarget().matchesStationScope(null),
+                "a caller that can name no station never picks up a scoped extension");
+
+        ExtensionAsset bare = decodeAnon("{ \"Target\": { \"Action\": \"Mill\" } }");
+        assertTrue(bare.getTarget().matchesStationScope("sawmill"));
+        assertTrue(bare.getTarget().matchesStationScope("anything-else"));
+        assertTrue(bare.getTarget().matchesStationScope(null));
+    }
+
+    @Test
+    void scopedTarget_carriesTheFullActionPayloadSet() throws Exception {
+        // Legality is decided by the RESOLVED type, so a scoped target accepts exactly what a bare
+        // Action target does - and still refuses a Station-only payload.
+        ExtensionAsset scoped = decodeAnon("{ \"Target\": { \"Station\": \"Sawmill\", \"Action\": \"Mill\" },"
+                + " \"PerCycleContributions\": [ { \"Channel\": \"yourmod:test\", \"Amount\": 1 } ] }");
+        String type = scoped.getTarget().resolvedType();
+        assertTrue(ExtensionAsset.payloadAllowedFor(type, ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS));
+        assertTrue(ExtensionAsset.payloadAllowedFor(type, ExtensionAsset.PAYLOAD_STEPS));
+        assertFalse(ExtensionAsset.payloadAllowedFor(type, ExtensionAsset.PAYLOAD_ACTIONS));
     }
 
     // ==================== payload decode + legality ====================
 
     @Test
-    void stationTargetPayload_decodes() throws Exception {
-        ExtensionAsset e = decodeAnon("{ \"Target\": { \"Station\": \"sawmill\" }, \"Priority\": 5,"
+    void actionTargetPayload_decodes() throws Exception {
+        ExtensionAsset e = decodeAnon("{ \"Target\": { \"Action\": \"mill\" }, \"Priority\": 5,"
                 + " \"PerCycleContributions\": [ { \"Channel\": \"yourmod:test\", \"Param\": \"ALPHA\","
                 + "   \"Amount\": 12 } ],"
-                + " \"Loot\": { \"Lootables\": [\"sawmillluck\"] },"
+                + " \"Bonus\": { \"Lootables\": [\"sawmillluck\"] },"
                 + " \"Conversions\": [ { \"Input\": [{ \"ResourceTypeId\": \"Wood_Hardwood_Trunk\", \"Quantity\": 1 }],"
                 + "   \"Output\": [{ \"ItemId\": \"Wood_Hardwood_Planks\", \"Quantity\": 2 }] } ],"
-                + " \"Steps\": [ { \"Action\": \"work\", \"Anchor\": { \"After\": \"roll\" },"
+                + " \"Steps\": [ { \"Anchor\": { \"After\": \"roll\" },"
                 + "   \"Insert\": [ { \"Id\": \"extra\", \"Commands\": [\"say hi\"] } ] } ] }");
         assertEquals(5, e.effectivePriority());
         assertEquals("yourmod:test", e.getPerCycleContributions()[0].getChannel());
         assertEquals("ALPHA", e.getPerCycleContributions()[0].getParam());
-        assertEquals("sawmillluck", e.getLoot().getLootables()[0]);
+        assertEquals("sawmillluck", e.getBonus().getLootables()[0]);
         assertEquals("Wood_Hardwood_Planks", e.getConversions()[0].primaryOutput().getItemId());
         ExtensionAsset.StepInsertion ins = e.getSteps()[0];
-        assertEquals("work", ins.getAction());
         assertEquals(ExtensionAsset.StepInsertion.Anchor.AFTER, ins.getAnchor().effectivePlacement());
         assertEquals("roll", ins.getAnchor().anchorStepId());
         assertEquals("extra", ins.getInsert()[0].getId());
@@ -92,9 +137,14 @@ public class ExtensionAssetCodecTest {
 
     @Test
     void payloadAllowedFor_matchesTheDesignTable() {
-        assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.STATION, ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS));
+        // A station holds no job group any more, so adding a WHOLE new action is its only payload.
         assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.STATION, ExtensionAsset.PAYLOAD_ACTIONS));
+        assertFalse(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.STATION, ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS));
+        assertFalse(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.STATION, ExtensionAsset.PAYLOAD_BONUS));
         assertFalse(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.STATION, ExtensionAsset.PAYLOAD_ENTRIES));
+        assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.ACTION, ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS));
+        assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.ACTION, ExtensionAsset.PAYLOAD_BONUS));
+        assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.ACTION, ExtensionAsset.PAYLOAD_CONTRIBUTION_SCALE));
         assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.LOOTABLE, ExtensionAsset.PAYLOAD_ROLLS));
         assertFalse(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.LOOTABLE, ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS));
         assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.ROLLPOOL, ExtensionAsset.PAYLOAD_ENTRIES));

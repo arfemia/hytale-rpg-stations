@@ -85,14 +85,14 @@ public final class StatRollEntry {
     /**
      * The point value range a hit on this entry rolls within (inclusive; {@code Min==Max} = fixed),
      * plus optional weighted factor SCALING (scope-2 design 1.6/decision 20): rolled points =
-     * {@code uniform(Min, Max) + sum(resolve(f.Factor, f.Param) * f.Weight for f in AddFactors)},
+     * {@code uniform(Min, Max) + sum(resolve(f.Factor, f.Param) * f.Weight for f in Factors)},
      * clamped by the Stamp caps as today. The same {@link FactorRef} vocabulary that drives loot
      * chances now drives roll magnitudes.
      */
     public static final class Points {
         @Nullable protected Double min;
         @Nullable protected Double max;
-        @Nullable protected FactorRef[] addFactors;
+        @Nullable protected FactorRef[] factors;
 
         public static final BuilderCodec<Points> CODEC = BuilderCodec.builder(Points.class, Points::new)
                 .appendInherited(new KeyedCodec<>("Min", Codec.DOUBLE, false),
@@ -101,8 +101,8 @@ public final class StatRollEntry {
                 .appendInherited(new KeyedCodec<>("Max", Codec.DOUBLE, false),
                         (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max)
                 .documentation("Inclusive upper bound of the rolled point value (reader-defaults to Min - a fixed value).").add()
-                .appendInherited(new KeyedCodec<>("AddFactors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
-                        (o, v) -> o.addFactors = v, o -> o.addFactors, (o, p) -> o.addFactors = p.addFactors)
+                .appendInherited(new KeyedCodec<>("Factors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
+                        (o, v) -> o.factors = v, o -> o.factors, (o, p) -> o.factors = p.factors)
                 .documentation("Weighted factor references summed ONTO the rolled points: sum(resolve(Factor, Param) * Weight).").add()
                 .build();
 
@@ -112,11 +112,11 @@ public final class StatRollEntry {
         }
 
         @Nonnull
-        public static Points of(@Nullable Double min, @Nullable Double max, @Nullable FactorRef[] addFactors) {
+        public static Points of(@Nullable Double min, @Nullable Double max, @Nullable FactorRef[] factors) {
             Points p = new Points();
             p.min = min;
             p.max = max;
-            p.addFactors = addFactors;
+            p.factors = factors;
             return p;
         }
 
@@ -132,8 +132,8 @@ public final class StatRollEntry {
 
         /** Weighted factor references summed onto the rolled points (scope-2 magnitude scaling); null = none. */
         @Nullable
-        public FactorRef[] getAddFactors() {
-            return addFactors;
+        public FactorRef[] getFactors() {
+            return factors;
         }
 
         /** {@link #min}, reader-defaulted to 1.0 when null. */

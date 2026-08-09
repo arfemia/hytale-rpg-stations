@@ -10,10 +10,12 @@ import java.util.Map;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Rotation3f;
 import com.hypixel.hytale.protocol.InteractionType;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.entity.component.Interactable;
+import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
 import com.hypixel.hytale.server.core.modules.interaction.Interactions;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.entity.ItemPropEntityService;
@@ -87,6 +89,35 @@ final class StationCustodyDisplay {
     }
 
     /**
+     * A committed display entity: its {@link Ref} plus the {@code NetworkId} value it was built
+     * with. Both are recorded on the owning {@link StationCustodyClaim} so press-F retrieval can
+     * match a clicked prop against its claim with no live component read - see
+     * {@link StationCustodyRetrieval#owns} for why the id alone is not enough (it is per-world).
+     */
+    record Spawned(@Nonnull Ref<EntityStore> ref, int networkId) {
+    }
+
+    /**
+     * The holder's own {@code NetworkId} value, adding one when the build route left it out.
+     *
+     * <p>The two prop routes differ: the loose-item route stamps a {@code NetworkId} while building
+     * the holder, while the block-shaped route relies on the engine's own {@code BlockEntity} setup
+     * system to stamp one at add time. That setup system only stamps when the archetype does not
+     * already carry the component, so pre-stamping here is safe on both routes and is what lets the
+     * id be recorded on the claim at spawn instead of being read back off a live entity later.
+     */
+    private static int ensureNetworkId(@Nonnull CommandBuffer<EntityStore> commandBuffer,
+            @Nonnull Holder<EntityStore> holder) {
+        NetworkId existing = holder.getComponent(NetworkId.getComponentType());
+        if (existing != null) {
+            return existing.getId();
+        }
+        int id = commandBuffer.getExternalData().takeNextNetworkId();
+        holder.addComponent(NetworkId.getComponentType(), new NetworkId(id));
+        return id;
+    }
+
+    /**
      * Marks {@code holder} press-F interactable for retrieval (new feature): the two components
      * {@code UseEntityInteraction} needs together - {@link Interactable} (a pure marker; its
      * presence is what tells the CLIENT this entity can be F-interacted) and {@link Interactions}
@@ -119,7 +150,7 @@ final class StationCustodyDisplay {
      * ({@link StationCustodyClaim#displayRef()}).
      */
     @Nullable
-    static Ref<EntityStore> spawn(@Nonnull CommandBuffer<EntityStore> commandBuffer, @Nullable ItemStack visualStack,
+    static Spawned spawn(@Nonnull CommandBuffer<EntityStore> commandBuffer, @Nullable ItemStack visualStack,
             @Nonnull Custody.Display display, int blockX, int blockY, int blockZ) {
         if (visualStack == null) {
             return null;
@@ -150,11 +181,13 @@ final class StationCustodyDisplay {
                 return null;
             }
             addRetrieveInteraction(holder);
+            int networkId = ensureNetworkId(commandBuffer, holder);
             Ref<EntityStore> ref = ItemPropEntityService.spawn(commandBuffer, holder);
             if (ref == null) {
                 Log.warn("STATION custody display spawn produced no entity for '" + itemId + "'");
+                return null;
             }
-            return ref;
+            return new Spawned(ref, networkId);
         } catch (Throwable t) {
             Log.warn("STATION custody display spawn failed for '" + itemId + "': " + t.getMessage(), t);
             return null;
@@ -171,6 +204,28 @@ final class StationCustodyDisplay {
      */
     static void despawn(@Nullable Ref<EntityStore> displayRef, @Nullable CommandBuffer<EntityStore> commandBuffer) {
         ItemPropEntityService.despawn(displayRef, commandBuffer);
+    }
+
+    /**
+     * Despawns {@code displayRef} through a live {@code Store} instead of a {@code CommandBuffer} -
+     * the route for a claim swept OUTSIDE any tick or interaction handler (the disconnect claim
+     * sweep, which hops onto the owning world's thread via {@code World#execute} and therefore holds
+     * no command buffer at all). Never throws; a no-op on a null store or an already-gone ref.
+     *
+     * <p>Deliberately NOT usable from inside a tick/interaction context: a direct
+     * {@code store.removeEntity} there throws {@code IllegalStateException("Store is currently
+     * processing!")}, which is exactly why the {@code CommandBuffer} overload above exists and stays
+     * the default for every in-engine call site.
+     */
+    static void despawn(@Nullable Ref<EntityStore> displayRef, @Nullable Store<EntityStore> store) {
+        if (displayRef == null || store == null) {
+            return;
+        }
+        try {
+            ItemPropEntityService.despawn(displayRef, store);
+        } catch (Throwable t) {
+            Log.fine("STATION custody display despawn failed: " + t.getMessage());
+        }
     }
 
     /**

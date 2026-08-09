@@ -111,7 +111,7 @@ final class StampCapEngine {
             double value = max > min ? min + rng.next() * (max - min) : min;
             // Scope-2 (decision 20): weighted FactorRef magnitude scaling summed onto the roll.
             if (pts != null) {
-                value += FactorMath.sum(pts.getAddFactors(), factorLookup::resolve);
+                value += FactorMath.sum(pts.getFactors(), factorLookup::resolve);
             }
             int points = (int) Math.round(value);
             if (points > 0) {
@@ -194,16 +194,31 @@ final class StampCapEngine {
         return min;
     }
 
+    /**
+     * The candidate entries one {@code Stamp.Stats} rolls over: the referenced {@link RollPool}'s
+     * EFFECTIVE entries first, then the step's own inline {@code Entries}.
+     *
+     * <p>"Effective" is what a {@code Target:{RollPool}} {@code ExtensionAsset} adds to: its
+     * appended {@code Entries} land here, at the pool READ, so a fourth party widens a shared pool
+     * for every Stamp step referencing it without owning the pool's file. They append AFTER the
+     * pool's own entries and never replace one, so an extended pool keeps every base outcome
+     * reachable at its authored weight. The catalog read is per call and derives nothing, so the
+     * append needs no cache-invalidation companion.
+     */
     @Nonnull
     private static List<StatRollEntry> candidateEntries(@Nonnull StationStep.Stamp.Stats stats) {
         List<StatRollEntry> out = new ArrayList<>();
         String poolId = stats.getPool();
         if (poolId != null && !poolId.isBlank()) {
             RollPool pool = RollPoolCatalog.getInstance().get(poolId);
-            if (pool != null && pool.getEntries() != null) {
-                out.addAll(Arrays.asList(pool.getEntries()));
-            } else {
+            if (pool == null) {
                 Log.fine("STAMP Stats references unknown RollPool '" + poolId + "'");
+            } else {
+                StatRollEntry[] entries =
+                        ExtensionCatalog.getInstance().applyToRollPoolEntries(poolId, pool.getEntries());
+                if (entries != null) {
+                    out.addAll(Arrays.asList(entries));
+                }
             }
         }
         if (stats.getEntries() != null) {

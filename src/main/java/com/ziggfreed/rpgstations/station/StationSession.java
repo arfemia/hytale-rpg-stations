@@ -49,15 +49,14 @@ final class StationSession {
     PlayerRef playerRef;
     String stationId;
     /**
-     * The action id this session resolved at engage (design section 9.1, phase 2 leg E):
-     * {@link ActionResolver#ACTION_WORK} for a single-action station (unchanged behavior); a
-     * multi-action station's diegetic input-matched selection otherwise. Fixed for the WHOLE
-     * session (re-selected only on the next fresh engage, never mid-session) - every
+     * The action id this session resolved at engage: the first entry of the station's ordered
+     * {@code Actions} list whose {@code Select} matched the held or placed material. Fixed for the
+     * WHOLE session (re-selected only on the next fresh engage, never mid-session) - every
      * {@code ActionResolver.resolve(asset, ...)} call this session's own code paths make MUST use
-     * this field, never the bare {@code ACTION_WORK} constant, once a session exists.
+     * this field once a session exists.
      */
     String actionId;
-    /** Occupancy key: {@code "<worldUuid>:<x>:<y>:<z>"} (enforces {@code Work.Exclusive}). */
+    /** Occupancy key: {@code "<worldUuid>:<x>:<y>:<z>"} (enforces {@code Block.Exclusive}). */
     String blockKey;
     int blockX;
     int blockY;
@@ -146,7 +145,8 @@ final class StationSession {
      * {@code null} for a single-category station (every shipped station today - the sawmill authors
      * one {@code FromCrafting.Categories} entry, the anvil none) and for a plain-F engage. LIVE this
      * wave: the sneak+F picker's {@code onSelect} records a pending choice, the next plain-F engage
-     * consumes it into this field (see {@code StationService#consumePendingCategory}), and both the
+     * reads it into this field and clears the pending record only once that engage COMMITS (see
+     * {@code StationService#peekPendingCategory}, so a denied press keeps the choice), and both the
      * engage viability check AND every runtime cycle narrow the derived conversions to it via the
      * pure {@code StationService#conversionsForCategory} filter ({@code null} = all, byte-identical
      * to the pre-selection engine). Session-scoped: {@code stop()} clears it, so it never bleeds
@@ -229,11 +229,10 @@ final class StationSession {
 
     // The IN-FLIGHT program's rebuild-avoiding snapshot, set only while programSuspended (design
     // 9.3): a resume must NOT re-derive which conversion is running (the live inventory may have
-    // changed since the program started), so the fresh-start path snapshots its built steps /
-    // cycle output / attempt index here, and the resume path reads them back verbatim. Cleared
+    // changed since the program started), so the fresh-start path snapshots its built steps and
+    // attempt index here, and the resume path reads them back verbatim. Cleared
     // (nulled) the instant the program stops being suspended (Completed or Failed).
     @Nullable List<StationStep> activeProgramSteps;
-    @Nullable ItemStack activeProgramCycleOutput;
     int activeProgramCycleIndex;
 
     // Puppet presentation (round-4 design, doc section 4 - "mount the player, hide their player
@@ -337,6 +336,61 @@ final class StationSession {
     final Map<String, Integer> luckItems = new LinkedHashMap<>();
 
     /**
+     * Per-produced-item YIELD BREAKDOWN, keyed by the same item ids {@link #producedItems} uses:
+     * enough to say "1 base + 3 tool  x 12 cycles" on the summary panel's second row line instead of
+     * only the bare total, which cannot tell a player whether their tool is doing anything.
+     * Accumulated where the yield is resolved (one entry per output per real cycle) and read once by
+     * {@code StationService#ledgerRows}. Session-scoped, never persisted.
+     */
+    final Map<String, YieldBreakdown> producedYield = new LinkedHashMap<>();
+
+    /**
+     * The accumulating decomposition behind ONE produced item id: how many cycles produced it, and
+     * how much of the total came from the recipe's own deterministic {@code Yield} versus the
+     * additive {@code Roll.Grants.OutputItems} a Bonus roll handed over.
+     *
+     * <p>{@link #changed} records whether the yield ever actually MOVED the number on any of those
+     * cycles - a neutral {@code Scale} with no bonus reached leaves it false, which is what lets the
+     * summary omit the breakdown line entirely for a starter tool. The line's presence is therefore
+     * itself the signal that the tool is earning something.
+     */
+    static final class YieldBreakdown {
+        int cycles;
+        double baseSum;
+        double bonusSum;
+        boolean changed;
+
+        /** One cycle's DETERMINISTIC produced quantity for this item id. */
+        void add(double base, boolean yieldChangedIt) {
+            cycles++;
+            baseSum += base;
+            changed |= yieldChangedIt;
+        }
+
+        /**
+         * Extra items a {@code Roll.Grants.OutputItems} handed over on top of this cycle's
+         * deterministic quantity. Always recorded AFTER {@link #add} for the same cycle (the roll
+         * phase runs after the produce phase), so it lands on the cycle it belongs to.
+         */
+        void addBonus(double bonus) {
+            if (bonus > 0.0) {
+                bonusSum += bonus;
+                changed = true;
+            }
+        }
+
+        /** The mean base quantity per cycle; 0 when nothing was recorded. */
+        double basePerCycle() {
+            return cycles > 0 ? baseSum / cycles : 0.0;
+        }
+
+        /** The mean bonus quantity per cycle; 0 when nothing was recorded. */
+        double bonusPerCycle() {
+            return cycles > 0 ? bonusSum / cycles : 0.0;
+        }
+    }
+
+    /**
      * One-shot {@code Roll.Grants.Contributions} posts that landed during the CURRENT cycle,
      * buffered here between the cycle's Roll phase and the cycle-completed event that forwards them
      * on {@code StationCycleCompletedEvent.oneShotContributions}. Drained (and cleared) by
@@ -344,6 +398,15 @@ final class StationSession {
      * iterations and delivers everything with the completing cycle. Session-scoped, never persisted.
      */
     final List<StationContribution> pendingOneShotContributions = new ArrayList<>();
+
+    /**
+     * The item id of the CURRENT cycle's primary output, set by the real-convert path just before
+     * the program dispatches and read by a {@code Roll.Grants.OutputItems} grant (which adds whole
+     * extra items of that same output). {@code null} for an authored Steps program, whose "primary
+     * output" is undefined - an OutputItems grant there is dropped with a fine log. Session-scoped,
+     * never persisted.
+     */
+    @Nullable String cycleOutputItemId;
 
     /**
      * Committed enhancement stamps this session (design section 9.5, phase 2 round-7 D-6): appended

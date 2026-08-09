@@ -31,15 +31,12 @@ import org.junit.jupiter.api.Test;
  *   {@code Server/RpgStations/**.json}, every {@code .lang}, the {@code .ui} documents.
  * </ul>
  *
- * <p><b>The docsite source IS scanned</b> ({@code docs-site/rpg-stations-docs/src}, the tsx/ts/md
- * pages): it is the public authoring surface, and the worst realized leaks lived there (a tutorial
- * teaching the foreign vocabulary). ONE line is allowlisted, and it is the only entry the
- * allowlist will ever deliberately hold: the Known-integrations page may NAME the companion
- * progression mod with an outbound link - naming a neighbor once, on the page whose whole job is
- * naming neighbors, is sanctioned; describing its vocabulary anywhere else is not. The generated
- * {@code reference/schema.json} inside that tree is skipped by name: it is generated FROM the
- * {@code .documentation()} strings this test already scans, and a second gate there would fight
- * the regenerate-then-drift-check ordering.
+ * <p><b>The in-repo docs source IS scanned</b> ({@code docs}, the prose guide markdown pages): it
+ * is the public authoring surface, and the worst realized leaks lived there (a tutorial teaching
+ * the foreign vocabulary). ONE line is allowlisted, and it is the only entry the allowlist will
+ * ever deliberately hold: the Add-ons &amp; Integrations page may NAME the companion progression
+ * mod with an outbound link - naming a neighbor once, on the page whose whole job is naming
+ * neighbors, is sanctioned; describing its vocabulary anywhere else is not.
  *
  * <p><b>Deliberately NOT scanned.</b> {@code src/test} is out of scope: fixture values are
  * author-owned, a fixture ships nothing, and a test that names a concrete foreign id while
@@ -58,12 +55,12 @@ import org.junit.jupiter.api.Test;
  */
 public class MmoAgnosticismTest {
 
-    /** Source roots this jar ships or compiles from, plus the public docsite source. */
+    /** Source roots this jar ships or compiles from, plus the public in-repo docs source. */
     private static final List<Path> ROOTS = List.of(
             Path.of("src", "main", "java"),
             Path.of("api", "src", "main", "java"),
             Path.of("src", "main", "resources"),
-            Path.of("docs-site", "rpg-stations-docs", "src"));
+            Path.of("docs"));
 
     /** File extensions worth reading (anything else under the roots is binary or generated). */
     private static final List<String> SCANNED_EXTENSIONS =
@@ -108,24 +105,20 @@ public class MmoAgnosticismTest {
     }
 
     /**
-     * The ONE sanctioned mention (see the class javadoc): the Known-integrations page naming the
-     * companion progression mod - its display name and its outbound link target, nothing else.
-     * Everything else that matches is a finding.
+     * The ONE sanctioned mention (see the class javadoc): the Add-ons &amp; Integrations page
+     * naming the companion progression mod - its display name and its outbound link target,
+     * nothing else. Everything else that matches is a finding.
      */
     private static boolean isSanctioned(Path file, String line) {
-        return file.toString().replace('\\', '/').endsWith("docs/integrations/page.tsx")
+        return file.toString().replace('\\', '/').endsWith("docs/integrations.md")
                 && (line.contains("MMO Skill Tree") || line.contains("mmo-skill-tree-docs.ziggfreed.com"));
     }
 
     private static boolean isScanned(Path file) {
         String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
-        // The excluded prose surfaces (class javadoc), wherever they live - the docsite mirrors
-        // CURSEFORGE.md under src/data/, and a mirror inherits its original's scope.
+        // The excluded prose surfaces (class javadoc): CURSEFORGE.md and CHANGELOG.md state and
+        // narrate this rule's own history, so they must be able to quote the retired vocabulary.
         if (ROUTER_FILENAME.equals(name) || "curseforge.md".equals(name) || "changelog.md".equals(name)) {
-            return false;
-        }
-        // The generated schema reference: covered transitively via the .documentation() strings.
-        if (file.toString().replace('\\', '/').endsWith("data/reference/schema.json")) {
             return false;
         }
         return SCANNED_EXTENSIONS.stream().anyMatch(name::endsWith);

@@ -585,7 +585,7 @@ public class StationServiceTest {
         // must still reach a listener so it can render as a visible zero row in a breakdown rather
         // than vanishing without explanation.
         List<StationContribution> out = StationService.contributionsFrom(
-                new Contribution[]{Contribution.of("yourmod:test", "ALPHA", 0.0)}, false, 0.1);
+                new Contribution[]{Contribution.of("yourmod:test", "ALPHA", 0.0)}, false, 0.1, 1.0);
         assertEquals(1, out.size());
         assertEquals("yourmod:test", out.get(0).channel());
         assertEquals("ALPHA", out.get(0).param());
@@ -595,7 +595,7 @@ public class StationServiceTest {
     @Test
     void contributionsFrom_nullAmountReadsAsZero() {
         List<StationContribution> out = StationService.contributionsFrom(
-                new Contribution[]{Contribution.of("yourmod:test", null, null)}, false, 0.1);
+                new Contribution[]{Contribution.of("yourmod:test", null, null)}, false, 0.1, 1.0);
         assertEquals(1, out.size());
         assertNull(out.get(0).param());
         assertEquals(0.0, out.get(0).amount(), 1e-9);
@@ -605,7 +605,7 @@ public class StationServiceTest {
     void contributionsFrom_blankChannelIsSkipped() {
         List<StationContribution> out = StationService.contributionsFrom(new Contribution[]{
                 Contribution.of("  ", "ALPHA", 5.0),
-                Contribution.of("yourmod:test", "BETA", 5.0)}, false, 0.1);
+                Contribution.of("yourmod:test", "BETA", 5.0)}, false, 0.1, 1.0);
         assertEquals(1, out.size());
         assertEquals("BETA", out.get(0).param());
     }
@@ -613,7 +613,39 @@ public class StationServiceTest {
     @Test
     void contributionsFrom_idleCyclePreScalesByTheIdleFraction() {
         List<StationContribution> out = StationService.contributionsFrom(
-                new Contribution[]{Contribution.of("yourmod:test", "ALPHA", 8.0)}, true, 0.25);
+                new Contribution[]{Contribution.of("yourmod:test", "ALPHA", 8.0)}, true, 0.25, 1.0);
         assertEquals(2.0, out.get(0).amount(), 1e-9);
+    }
+
+    // ==================== Produced-row yield breakdown ====================
+
+    @Test
+    void recordYieldBreakdown_recordsACycleEvenWithNoYieldGroup_soABonusCanStillExplainItself() {
+        StationSession s = new StationSession();
+        Ingredient[] authored = {Ingredient.item("Fixture_Plank", 2)};
+        // No Yield group authored: the produced quantity is the conversion's own, untouched.
+        StationService.recordYieldBreakdown(s, authored, authored);
+
+        StationSession.YieldBreakdown breakdown = s.producedYield.get("Fixture_Plank");
+        assertEquals(1, breakdown.cycles);
+        assertFalse(breakdown.changed, "nothing moved the number yet, so the summary line stays hidden");
+
+        // A Bonus roll's Grants.OutputItems hands over extra copies - the case the breakdown line
+        // exists to explain. Without the recorded entry above there was nothing for it to land on.
+        breakdown.addBonus(3);
+        assertTrue(breakdown.changed, "bonus copies alone must be enough to render the breakdown line");
+        assertEquals(3.0, breakdown.bonusPerCycle(), 1e-9);
+    }
+
+    @Test
+    void contributionsFrom_preScalesByTheContributionScaleAfterTheIdleFraction() {
+        // The documented order: amount x idleFraction x contributionScale. The engine pre-scales so a
+        // listener grants the forwarded amount verbatim.
+        assertEquals(20.0, StationService.contributionsFrom(
+                new Contribution[]{Contribution.of("yourmod:test", "ALPHA", 8.0)}, false, 0.25, 2.5)
+                .get(0).amount(), 1e-9);
+        assertEquals(5.0, StationService.contributionsFrom(
+                new Contribution[]{Contribution.of("yourmod:test", "ALPHA", 8.0)}, true, 0.25, 2.5)
+                .get(0).amount(), 1e-9);
     }
 }

@@ -36,6 +36,7 @@ import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Contribution;
+import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
@@ -79,7 +80,8 @@ import com.ziggfreed.rpgstations.validation.Severity;
  * {@code EXTENSION_KEY_COLLISION}, {@code EXTENSION_ANCHOR_MISSING},
  * {@code EXTENSION_STEP_MISSING_ID}, {@code ANCHOR_STATION_UNKNOWN},
  * {@code WALK_TARGET_UNKNOWN_ANCHOR}, {@code STEP_AT_UNKNOWN_ANCHOR}, {@code WALK_REQUIRES_PUPPET},
- * and {@code LOOT_DUPLICATE_FACTOR} (INFO). The multi-station seam ({@code Walk}/{@code At}/
+ * {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT}, and {@code LOOT_DUPLICATE_FACTOR} (INFO). The
+ * multi-station seam ({@code Walk}/{@code At}/
  * {@code Produce.To:Custody}) EXECUTES as of scope-2 wave 3, so the temporary {@code WAVE3_PENDING}
  * warn was removed - these anchor/walk checks are the live discovery-time coverage. Dropped (their reserved fields no longer
  * exist): {@code UNIMPLEMENTED_STEP_TYPE}, {@code UNIMPLEMENTED_CONSUME_SOURCE},
@@ -462,9 +464,14 @@ public final class StationValidator {
         if (p == null) {
             return;
         }
-        if (notBlank(p.getSound()) && !soundKnownLive(p.getSound())) {
-            out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_SOUND",
-                    label + " Sound '" + p.getSound() + "' is not a known SoundEvent id - check for a typo", id));
+        String[] sounds = p.getSounds();
+        if (sounds != null) {
+            for (String sound : sounds) {
+                if (notBlank(sound) && !soundKnownLive(sound)) {
+                    out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_SOUND",
+                            label + " Sounds entry '" + sound + "' is not a known SoundEvent id - check for a typo", id));
+                }
+            }
         }
         Presentation.ModelParticle[] particles = p.getParticles();
         if (particles != null) {
@@ -604,19 +611,8 @@ public final class StationValidator {
             String label = "Station '" + id + "'";
 
             checkIdentity(a, id, label, langKeyKnown, out);
-            checkRecipe(a, id, label, factorKnown, out);
-            checkWork(a, id, label, out);
-            checkTool(a, id, label, out);
-            checkLoot(a, id, label, dropListKnown, factorKnown, lootableKnown, out);
-            checkRequires(a, id, label, factorKnown, out);
-            checkAnimation(a, id, label, out);
-            checkPresentationRefs(a, id, label, out);
-            checkCamera(a, id, label, out);
-            checkMount(a, id, label, out);
-            checkCompletion(a, id, label, out);
+            checkRequiresGroup(a.getRequires(), id, label + " Requires", factorKnown, out);
             checkFlairs(a, id, label, out);
-            checkCustody(a.getCustody(), a.getRecipe(), false, label, id, out);
-            checkPuppet(a.getPuppet(), a.getHold(), label, id, modelKnown, out);
             checkActions(a, id, label, dropListKnown, factorKnown, lootableKnown, rollPoolKnown, modelKnown,
                     stationKnown, actionAssetKnown, out);
         }
@@ -646,8 +642,7 @@ public final class StationValidator {
             }
             String id = asset.getId() == null || asset.getId().isBlank() ? "(unnamed)" : asset.getId();
             String label = "ActionAsset '" + id + "'";
-            ActionDef body = asset.getBody();
-            checkActionBody(body, body.getPuppet(), body.getHold(), body.getRecipe(), label, id,
+            checkActionBody(asset.getBody(), label, id,
                     dropListKnown, factorKnown, lootableKnown, rollPoolKnown, modelKnown, stationKnown, out);
         }
         return out;
@@ -655,8 +650,8 @@ public final class StationValidator {
 
     /**
      * {@link ExtensionAsset} coverage (scope-2 design 1.8/1.9): {@code EXTENSION_TARGET_UNKNOWN}
-     * (an ambiguous {@code Target} or an unresolved target id against {@code stations}/
-     * {@code actionAssets}/{@code lootableKnown}/{@code rollPoolKnown}), {@code
+     * (an ambiguous {@code Target}, or a target id resolving against none of {@code stations}/
+     * the standalone-plus-inline action ids/{@code lootableKnown}/{@code rollPoolKnown}), {@code
      * EXTENSION_PAYLOAD_MISMATCH} (a payload group the resolved target type cannot carry, via the
      * pure {@link ExtensionAsset#payloadAllowedFor}), {@code EXTENSION_KEY_COLLISION} (a NEW
      * {@code Actions}/{@code Anchors} key colliding with the BASE target's own key - base always
@@ -668,14 +663,30 @@ public final class StationValidator {
      * {@code Rolls}/{@code Entries} payload is ALSO run through the shared {@link #checkRoll}/
      * {@link #checkFactorRefs} cores, same as everywhere else those vocabularies appear.
      *
-     * <p><b>Documented limitation</b>: the BASE-collision half of {@code EXTENSION_KEY_COLLISION}
-     * for a {@code Target:{Station}} extension's {@code Anchors} payload only checks against that
-     * station's own explicit {@code "work"} action entry (the implicit-action anchor set a
-     * {@code Actions}-less station would resolve to is an engine-fold concern, leg A3's
-     * {@code ExtensionCatalog}). {@code EXTENSION_ANCHOR_MISSING} for a dangling {@code After}/
-     * {@code Before} step id is checked ONLY when the target step program is resolvable from the
-     * passed-in {@code stations}/{@code actionAssets} collections (an ambiguous/missing placement
-     * leaf is ALWAYS checked regardless). Wired into the live {@link #validate()} full pass (over
+     * <p><b>Action targets resolve exactly the way the runtime resolves them</b>
+     * ({@link #actionBodiesByTargetId}): a standalone {@link ActionAsset} id, OR a station's own
+     * INLINE action id. Both are legal Action targets - with no standalone action assets installed,
+     * the inline id is the only shape a pack can target at all - so every base-resolution check
+     * below ({@code EXTENSION_KEY_COLLISION} against base anchors,
+     * {@code EXTENSION_CONTRIBUTION_DUPLICATE} against base contributions,
+     * {@code EXTENSION_ANCHOR_MISSING} against the base step program) reads that ONE union rather
+     * than the standalone collection alone.
+     *
+     * <p><b>The SCOPED Action target</b> ({@code Target:{Station, Action}}) resolves as "that
+     * station exists AND resolves an action answering to that id"
+     * ({@link #stationResolvesActionTarget}, the runtime's own {@code actionTargetId} rule), and its
+     * base body comes from THAT station first ({@link #resolveTargetActionBody}) - the id-keyed
+     * union cannot distinguish two stations' same-named inline actions, which is precisely the case
+     * the scoped form is authored for. Its cross-extension claims are bucketed by target key alone
+     * and partitioned by SCOPE at report time ({@link #claimKey} + {@link #overlapGroups}), so two
+     * extensions claiming one key on the same action id but on DIFFERENT stations are still not
+     * reported as colliding, while a BARE claim and a scoped one on that key - which genuinely do
+     * both apply on the scoped station - now are.
+     *
+     * <p><b>Documented limitation</b>: {@code EXTENSION_ANCHOR_MISSING} for a dangling
+     * {@code After}/{@code Before} step id is checked only when the target action resolves from the
+     * passed-in collections and authors a step program (an ambiguous/missing placement leaf is
+     * ALWAYS checked regardless). Wired into the live {@link #validate()} full pass (over
      * {@code ExtensionCatalog} + the folded station/action collections); NOT into
      * {@link #validateStructural()} - see this class's header javadoc.
      */
@@ -700,16 +711,19 @@ public final class StationValidator {
                 actionAssetsById.put(act.getId().toLowerCase(Locale.ROOT), act);
             }
         }
+        Map<String, ActionDef> actionBodiesById = actionBodiesByTargetId(stations, actionAssetsById);
 
-        // Cross-extension key-collision tracking, in APPLY_ORDER (last claimant wins).
-        Map<String, List<ExtensionAsset>> actionKeyClaims = new LinkedHashMap<>();
-        Map<String, List<ExtensionAsset>> anchorKeyClaims = new LinkedHashMap<>();
+        // Cross-extension key-collision tracking, in APPLY_ORDER (last claimant wins). Each bucket
+        // is keyed on the target IDENTITY plus the claimed key with NO station scope in it; the
+        // scope rides each Claim and overlapGroups decides which claimants actually meet.
+        Map<String, List<Claim>> actionKeyClaims = new LinkedHashMap<>();
+        Map<String, List<Claim>> anchorKeyClaims = new LinkedHashMap<>();
         // Cross-extension (Channel, Param) tracking (P8 ruling 75's added check): unlike
         // Actions/Anchors above, PerCycleContributions is an UNKEYED array
         // ExtensionCatalog#mergeContributions APPENDS, so two claimants of the same
         // (target, channel, param) both apply and their amounts genuinely sum - see
         // reportContributionDuplicates for the deliberately different wording.
-        Map<String, List<ExtensionAsset>> channelParamClaims = new LinkedHashMap<>();
+        Map<String, List<Claim>> channelParamClaims = new LinkedHashMap<>();
 
         for (ExtensionAsset ext : ExtensionAsset.sortedForApply(extensions)) {
             if (ext == null) {
@@ -719,19 +733,26 @@ public final class StationValidator {
             String label = "Extension '" + extId + "'";
 
             ExtensionAsset.Target target = ext.getTarget();
-            if (target == null || !target.hasExactlyOneTarget()) {
+            if (target == null || !target.hasLegalTarget()) {
                 out.add(Finding.error(DOMAIN, "EXTENSION_TARGET_UNKNOWN",
-                        label + " authors no Target or more than one target leaf - exactly one of"
-                                + " Station|Action|Lootable|RollPool is required", extId));
+                        label + " authors no Target, or a combination that names no single target - author"
+                                + " ONE of Station|Action|Lootable|RollPool, or the Station plus Action pair"
+                                + " that scopes an action extension to a single station", extId));
                 continue;
             }
             String targetType = target.resolvedType();
             String targetId = target.resolvedId();
+            // The station a SCOPED Target:{Station, Action} narrows to; null for every other shape.
+            String scopedStation = target.scopedStation();
+            // The targeted action's base body, resolved ONCE (scope-aware) for the three
+            // base-resolution checks below.
+            ActionDef targetBody = resolveTargetActionBody(target, stationsById, actionBodiesById);
             boolean targetKnown = switch (targetType) {
                 case ExtensionAsset.Target.STATION ->
                         targetId != null && stationsById.containsKey(targetId.toLowerCase(Locale.ROOT));
-                case ExtensionAsset.Target.ACTION ->
-                        targetId != null && actionAssetsById.containsKey(targetId.toLowerCase(Locale.ROOT));
+                case ExtensionAsset.Target.ACTION -> scopedStation != null
+                        ? stationResolvesActionTarget(stationsById.get(scopedStation.toLowerCase(Locale.ROOT)), targetId)
+                        : targetId != null && actionBodiesById.containsKey(targetId.toLowerCase(Locale.ROOT));
                 case ExtensionAsset.Target.LOOTABLE ->
                         targetId != null && lootableKnown.test(targetId.toLowerCase(Locale.ROOT));
                 case ExtensionAsset.Target.ROLLPOOL ->
@@ -740,16 +761,22 @@ public final class StationValidator {
             };
             if (!targetKnown) {
                 out.add(Finding.warning(DOMAIN, "EXTENSION_TARGET_UNKNOWN",
-                        label + " Target." + targetType + " references unknown " + targetType.toLowerCase(Locale.ROOT)
-                                + " '" + targetId + "'", extId));
+                        scopedStation != null
+                                ? label + " Target scopes Action '" + targetId + "' to station '" + scopedStation
+                                        + "', which is unknown or resolves no action with that id"
+                                : label + " Target." + targetType + " references unknown "
+                                        + targetType.toLowerCase(Locale.ROOT) + " '" + targetId + "'",
+                        extId));
             }
 
             checkExtensionPayload(ext.getPerCycleContributions() != null
                             && ext.getPerCycleContributions().length > 0,
                     ExtensionAsset.PAYLOAD_PER_CYCLE_CONTRIBUTIONS, targetType, label, extId, out);
-            checkExtensionPayload(ext.getLoot() != null && !ext.getLoot().isEmpty(), ExtensionAsset.PAYLOAD_LOOT,
+            checkExtensionPayload(ext.getBonus() != null && !ext.getBonus().isEmpty(), ExtensionAsset.PAYLOAD_BONUS,
                     targetType, label, extId, out);
-            checkExtensionPayload(ext.getActions() != null && !ext.getActions().isEmpty(),
+            checkExtensionPayload(ext.getContributionScale() != null,
+                    ExtensionAsset.PAYLOAD_CONTRIBUTION_SCALE, targetType, label, extId, out);
+            checkExtensionPayload(ext.getActions() != null && ext.getActions().length > 0,
                     ExtensionAsset.PAYLOAD_ACTIONS, targetType, label, extId, out);
             checkExtensionPayload(ext.getConversions() != null && ext.getConversions().length > 0,
                     ExtensionAsset.PAYLOAD_CONVERSIONS, targetType, label, extId, out);
@@ -776,9 +803,13 @@ public final class StationValidator {
             if (ext.getCustody() != null) {
                 checkCustody(ext.getCustody(), null, true, label + ".Custody", extId, out);
             }
+            if (ext.getContributionScale() != null) {
+                checkContributionScale(ext.getContributionScale(), extId, label + ".ContributionScale",
+                        factorKnown, out);
+            }
 
-            if (ext.getLoot() != null) {
-                checkLootRef(ext.getLoot(), extId, label + ".Loot", dropListKnown, factorKnown, lootableKnown, out);
+            if (ext.getBonus() != null) {
+                checkLootRef(ext.getBonus(), extId, label + ".Bonus", dropListKnown, factorKnown, lootableKnown, out);
             }
             if (ext.getRolls() != null) {
                 Roll[] rolls = ext.getRolls();
@@ -791,36 +822,36 @@ public final class StationValidator {
                 for (int i = 0; i < entries.length; i++) {
                     StatRollEntry e = entries[i];
                     if (e != null && e.getPoints() != null) {
-                        checkFactorRefs(e.getPoints().getAddFactors(),
-                                label + ".Entries[" + i + "].Points.AddFactors", extId, factorKnown, out);
+                        checkFactorRefs(e.getPoints().getFactors(),
+                                label + ".Entries[" + i + "].Points.Factors", extId, factorKnown, out);
                     }
                 }
             }
 
-            if (ext.getActions() != null && !ext.getActions().isEmpty()
+            if (ext.getActions() != null && ext.getActions().length > 0
                     && ExtensionAsset.Target.STATION.equals(targetType)) {
                 StationAsset base = targetId != null ? stationsById.get(targetId.toLowerCase(Locale.ROOT)) : null;
-                Set<String> baseKeys = base != null && base.getActions() != null
-                        ? lowercaseKeySet(base.getActions().keySet()) : Set.of();
-                for (String key : ext.getActions().keySet()) {
-                    if (key == null || key.isBlank()) {
+                Set<String> baseKeys = base != null
+                        ? lowercaseSet(ActionResolver.actionIds(base)) : Set.of();
+                ActionDef[] added = ext.getActions();
+                for (int i = 0; i < added.length; i++) {
+                    if (added[i] == null) {
                         continue;
                     }
+                    String key = ActionResolver.effectiveActionId(added[i], i);
                     String lower = key.toLowerCase(Locale.ROOT);
                     if (baseKeys.contains(lower)) {
                         out.add(Finding.warning(DOMAIN, "EXTENSION_KEY_COLLISION",
                                 label + " Actions['" + key + "'] collides with station '" + targetId
                                         + "'s own base action - the base always wins, this entry is skipped", extId));
                     } else {
-                        actionKeyClaims.computeIfAbsent(targetType + ":" + targetId + ":" + lower,
-                                k -> new ArrayList<>()).add(ext);
+                        recordClaim(actionKeyClaims, target, lower, ext);
                     }
                 }
             }
 
             if (ext.getAnchors() != null && !ext.getAnchors().isEmpty()) {
-                Map<String, ActionDef.Anchor> baseAnchors =
-                        resolveBaseAnchors(targetType, targetId, stationsById, actionAssetsById);
+                Map<String, ActionDef.Anchor> baseAnchors = resolveBaseAnchors(targetBody);
                 Set<String> baseAnchorKeys = baseAnchors != null ? lowercaseKeySet(baseAnchors.keySet()) : Set.of();
                 for (String key : ext.getAnchors().keySet()) {
                     if (key == null || key.isBlank()) {
@@ -832,8 +863,7 @@ public final class StationValidator {
                                 label + " Anchors['" + key + "'] collides with " + targetType + " '" + targetId
                                         + "'s own base anchor - the base always wins, this entry is skipped", extId));
                     } else {
-                        anchorKeyClaims.computeIfAbsent(targetType + ":" + targetId + ":" + lower,
-                                k -> new ArrayList<>()).add(ext);
+                        recordClaim(anchorKeyClaims, target, lower, ext);
                     }
                 }
             }
@@ -841,8 +871,7 @@ public final class StationValidator {
             if (ext.getPerCycleContributions() != null && ext.getPerCycleContributions().length > 0) {
                 checkContributionChannels(ext.getPerCycleContributions(),
                         label + " PerCycleContributions", extId, out);
-                Set<String> basePairs = resolveBaseContributionKeys(targetType, targetId, stationsById,
-                        actionAssetsById);
+                Set<String> basePairs = resolveBaseContributionKeys(targetBody);
                 Set<String> seenInThisExtension = new HashSet<>();
                 for (Contribution post : ext.getPerCycleContributions()) {
                     if (post == null || post.getChannel() == null || post.getChannel().isBlank()) {
@@ -861,14 +890,13 @@ public final class StationValidator {
                                         + " never overrides by channel), so the amounts SUM unless deliberate",
                                 extId));
                     } else {
-                        channelParamClaims.computeIfAbsent(targetType + ":" + targetId + ":" + pair,
-                                k -> new ArrayList<>()).add(ext);
+                        recordClaim(channelParamClaims, target, pair, ext);
                     }
                 }
             }
 
             if (ext.getSteps() != null) {
-                Set<String> targetStepIds = resolveTargetStepIds(targetType, targetId, stationsById, actionAssetsById);
+                Set<String> targetStepIds = resolveTargetStepIds(targetBody);
                 ExtensionAsset.StepInsertion[] insertions = ext.getSteps();
                 for (int i = 0; i < insertions.length; i++) {
                     ExtensionAsset.StepInsertion insertion = insertions[i];
@@ -911,6 +939,111 @@ public final class StationValidator {
         return out;
     }
 
+    /**
+     * ONE cross-extension claim on one payload key: the claiming extension plus the station scope it
+     * applies under ({@code null} = every station, the bare-target case). The scope lives HERE rather
+     * than in {@link #claimKey} so {@link #overlapGroups} can decide which claimants genuinely meet.
+     */
+    private record Claim(@Nonnull ExtensionAsset ext, @Nullable String scope) {
+    }
+
+    /** Records {@code ext}'s claim on {@code claimed} under its target identity, scope attached. */
+    private static void recordClaim(@Nonnull Map<String, List<Claim>> claims,
+            @Nonnull ExtensionAsset.Target target, @Nonnull String claimed, @Nonnull ExtensionAsset ext) {
+        String scope = target.scopedStation();
+        claims.computeIfAbsent(claimKey(target, claimed), k -> new ArrayList<>())
+                .add(new Claim(ext, scope == null ? null : scope.toLowerCase(Locale.ROOT)));
+    }
+
+    /**
+     * The cross-extension claim key for one payload key on one target: the target TYPE and ID plus
+     * the claimed key, with NO {@code Station} scope segment.
+     *
+     * <p>The scope used to be part of the key, which correctly kept two extensions claiming one key
+     * on the same action id but on DIFFERENT stations from reading as a collision - and silently
+     * bought that by filing a BARE claim and a SCOPED claim on the same target under two different
+     * keys, so the pair that genuinely DOES overlap (both apply on the scoped station) never
+     * reported at all. The scope rides the {@link Claim} instead: one bucket per target key,
+     * partitioned by {@link #overlapGroups} into the sets that actually meet at runtime.
+     */
+    @Nonnull
+    private static String claimKey(@Nonnull ExtensionAsset.Target target, @Nonnull String claimed) {
+        return target.resolvedType() + ":"
+                + (target.resolvedId() == null ? "" : target.resolvedId().toLowerCase(Locale.ROOT))
+                + ":" + claimed;
+    }
+
+    /** One set of claims that genuinely meet, and WHERE ({@code null} = on every station). */
+    private record ClaimGroup(@Nullable String scope, @Nonnull List<Claim> claims) {
+    }
+
+    /**
+     * Partitions one bucket of claims into the sets that genuinely MEET at runtime, preserving each
+     * set's APPLY_ORDER. A bare (unscoped) claim applies on every station, a scoped one only on its
+     * own, so:
+     * <ul>
+     *   <li>no scoped claim in the bucket - ONE unscoped group, the bucket itself (the common case,
+     *   and identical to the pre-scope behavior);
+     *   <li>otherwise ONE group per distinct scope, each the bare claims plus that scope's own. Two
+     *   claims scoped to different stations therefore never share a group, while a bare claim meets
+     *   every scoped one.
+     * </ul>
+     *
+     * <p>Deliberate narrowing in the mixed case: when a bucket holds BOTH two bare claims and a
+     * scoped one, the bare pair is reported inside the scoped group rather than a second time on its
+     * own. It is still reported, naming both extensions; only the "where" reads as that one station
+     * instead of everywhere. One finding per real overlap beats a duplicate pair of them.
+     */
+    @Nonnull
+    private static List<ClaimGroup> overlapGroups(@Nonnull List<Claim> claims) {
+        List<String> scopes = new ArrayList<>();
+        for (Claim c : claims) {
+            if (c.scope() != null && !scopes.contains(c.scope())) {
+                scopes.add(c.scope());
+            }
+        }
+        if (scopes.isEmpty()) {
+            return List.of(new ClaimGroup(null, claims));
+        }
+        List<ClaimGroup> groups = new ArrayList<>(scopes.size());
+        for (String scope : scopes) {
+            List<Claim> group = new ArrayList<>();
+            for (Claim c : claims) {
+                if (c.scope() == null || c.scope().equals(scope)) {
+                    group.add(c);
+                }
+            }
+            groups.add(new ClaimGroup(scope, group));
+        }
+        return groups;
+    }
+
+    /** An extension's id for author-facing text, never blank. */
+    @Nonnull
+    private static String extLabel(@Nonnull ExtensionAsset ext) {
+        return ext.getId() == null || ext.getId().isBlank() ? "(unnamed)" : ext.getId();
+    }
+
+    /**
+     * Whether {@code station} resolves an action answering to {@code targetId}, by the SAME rule the
+     * runtime matches a scoped {@code Target:{Station, Action}} extension with
+     * ({@code ActionResolver#actionTargetId} per authored action: the {@code Ref}'d
+     * {@link ActionAsset} id when the entry Refs one, else its own effective id). A null station (an
+     * unknown scope id) resolves nothing.
+     */
+    private static boolean stationResolvesActionTarget(@Nullable StationAsset station, @Nullable String targetId) {
+        if (station == null || targetId == null || targetId.isBlank()) {
+            return false;
+        }
+        for (String actionId : ActionResolver.actionIds(station)) {
+            String resolved = ActionResolver.actionTargetId(station, actionId);
+            if (resolved != null && resolved.equalsIgnoreCase(targetId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static void checkExtensionPayload(boolean authored, @Nonnull String payloadKey,
             @Nullable String targetType, @Nonnull String label, @Nonnull String extId, @Nonnull List<Finding> out) {
         if (authored && !ExtensionAsset.payloadAllowedFor(targetType, payloadKey)) {
@@ -921,6 +1054,11 @@ public final class StationValidator {
 
     @Nonnull
     private static Set<String> lowercaseKeySet(@Nonnull Set<String> keys) {
+        return lowercaseSet(keys);
+    }
+
+    @Nonnull
+    private static Set<String> lowercaseSet(@Nonnull Collection<String> keys) {
         Set<String> out = new HashSet<>();
         for (String k : keys) {
             if (k != null && !k.isBlank()) {
@@ -931,58 +1069,117 @@ public final class StationValidator {
     }
 
     /**
-     * The base target's own Anchors map for a collision check: for a {@code Target:{Action}}
-     * extension, the referenced {@link ActionAsset}'s own body; for a {@code Target:{Station}}
-     * extension, that station's explicit {@code "work"} action entry ONLY (see this method's
-     * caller's documented limitation - the implicit-action anchor set is an engine-fold concern).
+     * Every {@link ActionDef} body an {@code Action}-targeted extension can address, keyed by the
+     * id the RUNTIME resolves that target by ({@code ActionResolver#actionTargetId}): the
+     * {@code Ref}'d {@link ActionAsset} id when an inline entry {@code Ref}s one, else the inline
+     * entry's OWN effective id.
+     *
+     * <p>Resolving against the standalone {@link ActionAsset} collection alone is what made the
+     * shipped pack's own progression extension report {@code EXTENSION_TARGET_UNKNOWN} against a
+     * station's inline action, while applying perfectly at runtime - and, more quietly, made the
+     * three base-resolution checks below no-op for the only target shape a pack can currently
+     * author at all. A {@code Ref}'d inline entry is deliberately NOT keyed under its own id: its
+     * target identity IS the {@code Ref} id, already present from the standalone half (a dangling
+     * {@code Ref} is {@code ACTION_REF_UNKNOWN}'s business, not this map's). The standalone body
+     * wins if an inline entry happens to reuse a standalone asset's id, matching the runtime's own
+     * {@code Ref}-first precedence. The implicit action of an {@code Actions}-less station stays
+     * untargetable by design.
+     */
+    @Nonnull
+    private static Map<String, ActionDef> actionBodiesByTargetId(@Nonnull Collection<StationAsset> stations,
+            @Nonnull Map<String, ActionAsset> actionAssetsById) {
+        Map<String, ActionDef> out = new HashMap<>();
+        for (StationAsset s : stations) {
+            ActionDef[] defs = s != null ? ActionResolver.effectiveActions(s) : null;
+            if (defs == null) {
+                continue;
+            }
+            for (int i = 0; i < defs.length; i++) {
+                if (defs[i] != null && !defs[i].hasRef()) {
+                    out.put(ActionResolver.effectiveActionId(defs[i], i).toLowerCase(Locale.ROOT), defs[i]);
+                }
+            }
+        }
+        for (Map.Entry<String, ActionAsset> e : actionAssetsById.entrySet()) {
+            ActionDef body = e.getValue() != null ? e.getValue().getBody() : null;
+            if (body != null) {
+                out.put(e.getKey(), body);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The base target's own Anchors map for a collision check. Only a {@code Target:{Action}}
+     * extension can carry an {@code Anchors} payload at all (a station holds none), so this resolves
+     * the targeted action's own body - standalone or inline, per
+     * {@link #actionBodiesByTargetId} - and nothing else.
      */
     @Nullable
-    private static Map<String, ActionDef.Anchor> resolveBaseAnchors(@Nullable String targetType,
-            @Nullable String targetId, @Nonnull Map<String, StationAsset> stationsById,
-            @Nonnull Map<String, ActionAsset> actionAssetsById) {
-        if (targetId == null) {
+    private static Map<String, ActionDef.Anchor> resolveBaseAnchors(@Nullable ActionDef body) {
+        return body != null ? body.getAnchors() : null;
+    }
+
+    /**
+     * The targeted action's {@link ActionDef} body, or null for a non-Action target / unknown id.
+     * Resolved ONCE per extension and handed to the three base-resolution checks below.
+     *
+     * <p>A SCOPED {@code Target:{Station, Action}} resolves against ITS OWN station first, which is
+     * the whole reason the scoped form exists: two stations may each author an inline action under
+     * the same id, and {@link #actionBodiesByTargetId}'s id-keyed union can only hold one of them.
+     * A scoped entry that {@code Ref}s a standalone {@link ActionAsset} falls through to that shared
+     * union, where the {@code Ref}'d body already lives under the id the runtime targets it by.
+     */
+    @Nullable
+    private static ActionDef resolveTargetActionBody(@Nonnull ExtensionAsset.Target target,
+            @Nonnull Map<String, StationAsset> stationsById, @Nonnull Map<String, ActionDef> actionBodiesById) {
+        String targetId = target.resolvedId();
+        if (targetId == null || !ExtensionAsset.Target.ACTION.equals(target.resolvedType())) {
             return null;
         }
-        String lower = targetId.toLowerCase(Locale.ROOT);
-        if (ExtensionAsset.Target.ACTION.equals(targetType)) {
-            ActionAsset a = actionAssetsById.get(lower);
-            return a != null ? a.getBody().getAnchors() : null;
-        }
-        if (ExtensionAsset.Target.STATION.equals(targetType)) {
-            StationAsset s = stationsById.get(lower);
-            if (s == null || s.getActions() == null) {
-                return null;
+        String scope = target.scopedStation();
+        if (scope != null) {
+            ActionDef own = stationActionBody(stationsById.get(scope.toLowerCase(Locale.ROOT)), targetId);
+            if (own != null) {
+                return own;
             }
-            ActionDef work = s.getActions().get("work");
-            return work != null ? work.getAnchors() : null;
+        }
+        return actionBodiesById.get(targetId.toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * {@code station}'s own INLINE action body answering to {@code targetId}. A {@code Ref}'d entry
+     * is skipped: its base is the standalone {@link ActionAsset} the {@code Ref} names, which the
+     * caller resolves from the shared union instead.
+     */
+    @Nullable
+    private static ActionDef stationActionBody(@Nullable StationAsset station, @Nonnull String targetId) {
+        ActionDef[] defs = station != null ? ActionResolver.effectiveActions(station) : null;
+        if (defs == null) {
+            return null;
+        }
+        for (int i = 0; i < defs.length; i++) {
+            ActionDef def = defs[i];
+            if (def != null && !def.hasRef()
+                    && ActionResolver.effectiveActionId(def, i).equalsIgnoreCase(targetId)) {
+                return def;
+            }
         }
         return null;
     }
 
     /**
      * The known step ids of the resolved target's step program, for dangling {@code After}/
-     * {@code Before} anchor detection - resolvable only for a {@code Target:{Action}} extension
-     * (the referenced {@link ActionAsset}'s own {@code Steps}) or a {@code Target:{Station}}
-     * extension whose {@code StepInsertion.Action} names one of that station's authored actions.
-     * Returns {@code null} when unresolvable (fails open - a dangling reference simply goes
-     * unchecked rather than false-flagging every insertion).
+     * {@code Before} anchor detection - resolvable for a {@code Target:{Action}} extension, whose
+     * target action's own {@code Steps} come from {@link #actionBodiesByTargetId} (standalone
+     * {@link ActionAsset} or a station's inline entry alike). Returns {@code null} when
+     * unresolvable (fails open - a dangling reference simply goes unchecked rather than
+     * false-flagging every insertion), which is also the {@code Target:{Station}} case: only
+     * {@code Actions} is legal there, so no step insertion reaches this check.
      */
     @Nullable
-    private static Set<String> resolveTargetStepIds(@Nullable String targetType, @Nullable String targetId,
-            @Nonnull Map<String, StationAsset> stationsById, @Nonnull Map<String, ActionAsset> actionAssetsById) {
-        if (targetId == null) {
-            return null;
-        }
-        String lower = targetId.toLowerCase(Locale.ROOT);
-        StationStep[] steps = null;
-        if (ExtensionAsset.Target.ACTION.equals(targetType)) {
-            ActionAsset a = actionAssetsById.get(lower);
-            steps = a != null ? a.getBody().getSteps() : null;
-        }
-        // A Target:{Station} extension's StepInsertion.Action names WHICH station action to
-        // insert into; without that per-insertion context here, the station form is left
-        // unresolved (null) rather than guessed - the ambiguous/missing-placement check above
-        // still runs regardless.
+    private static Set<String> resolveTargetStepIds(@Nullable ActionDef body) {
+        StationStep[] steps = body != null ? body.getSteps() : null;
         if (steps == null) {
             return null;
         }
@@ -1001,29 +1198,16 @@ public final class StationValidator {
      * (P8 ruling 75's added check - the gap the review verdict flagged as worse than described:
      * nothing but a hand-written {@code $Comment} in a pack's own extension stood between an author
      * and a silently doubled amount): for a {@code Target:{Action}} extension, the referenced
-     * {@link ActionAsset}'s OWN body {@code Work} contributions (an action's {@code Work} group is a
-     * WHOLE-GROUP override over the station's, per {@code ActionResolver} - it does not inherit the
-     * station's list); for a {@code Target:{Station}} extension, that station's own. An empty result
-     * (unresolved target, or a target that posts nothing at all) degrades to "nothing to collide
-     * with" rather than skipping the cross-extension half of the check below.
+     * targeted action's OWN body {@code Work} contributions, resolved through
+     * {@link #actionBodiesByTargetId} so a station's INLINE action counts too. Only an Action
+     * target can carry a {@code PerCycleContributions} payload, so there is no station arm. An
+     * empty result (unresolved target, or a target that posts nothing at all) degrades to "nothing
+     * to collide with" rather than skipping the cross-extension half of the check below.
      */
     @Nonnull
-    private static Set<String> resolveBaseContributionKeys(@Nullable String targetType, @Nullable String targetId,
-            @Nonnull Map<String, StationAsset> stationsById, @Nonnull Map<String, ActionAsset> actionAssetsById) {
-        if (targetId == null) {
-            return Set.of();
-        }
-        String lower = targetId.toLowerCase(Locale.ROOT);
-        Contribution[] posts = null;
-        if (ExtensionAsset.Target.ACTION.equals(targetType)) {
-            ActionAsset a = actionAssetsById.get(lower);
-            StationAsset.Work work = a != null ? a.getBody().getWork() : null;
-            posts = work != null ? work.getPerCycleContributions() : null;
-        } else if (ExtensionAsset.Target.STATION.equals(targetType)) {
-            StationAsset s = stationsById.get(lower);
-            StationAsset.Work work = s != null ? s.getWork() : null;
-            posts = work != null ? work.getPerCycleContributions() : null;
-        }
+    private static Set<String> resolveBaseContributionKeys(@Nullable ActionDef body) {
+        StationAsset.Work work = body != null ? body.getWork() : null;
+        Contribution[] posts = work != null ? work.getPerCycleContributions() : null;
         if (posts == null) {
             return Set.of();
         }
@@ -1066,50 +1250,80 @@ public final class StationValidator {
      * ({@code Actions}/{@code Anchors}, base-wins-collision semantics) but false here -
      * {@code ExtensionCatalog#mergeContributions} APPENDS every extension's entries onto the base
      * array, so every claimant listed below actually applies and their amounts sum.
+     *
+     * <p>Reported per {@link #overlapGroups} set, so the claimants named in one finding are exactly
+     * the ones whose amounts genuinely stack somewhere, and the finding says where when that
+     * somewhere is one station.
      */
-    private static void reportContributionDuplicates(@Nonnull Map<String, List<ExtensionAsset>> claims,
+    private static void reportContributionDuplicates(@Nonnull Map<String, List<Claim>> claims,
             @Nonnull List<Finding> out) {
-        for (Map.Entry<String, List<ExtensionAsset>> entry : claims.entrySet()) {
-            List<ExtensionAsset> claimants = entry.getValue();
-            if (claimants.size() < 2) {
-                continue;
-            }
+        for (Map.Entry<String, List<Claim>> entry : claims.entrySet()) {
             String key = entry.getKey();
-            String pair = key.substring(key.lastIndexOf(':') + 1);
-            StringBuilder ids = new StringBuilder();
-            for (int i = 0; i < claimants.size(); i++) {
-                ExtensionAsset ext = claimants.get(i);
-                String extId = ext.getId() == null ? "(unnamed)" : ext.getId();
-                if (i > 0) {
-                    ids.append(", ");
+            // The claim key is "<type>:<targetId>:<pair>" (claimKey), and the pair itself may
+            // contain ':' inside a namespaced Channel id - so skip exactly the two identity
+            // separators from the front rather than searching from the end, which would truncate
+            // the channel to its post-namespace half in the warning text.
+            int cut = -1;
+            for (int i = 0; i < 2 && cut != key.length(); i++) {
+                int next = key.indexOf(':', cut + 1);
+                if (next < 0) {
+                    cut = -1;
+                    break;
                 }
-                ids.append('\'').append(extId).append('\'');
+                cut = next;
             }
-            String firstId = claimants.get(0).getId() == null ? "(unnamed)" : claimants.get(0).getId();
-            out.add(Finding.warning(DOMAIN, "EXTENSION_CONTRIBUTION_DUPLICATE",
-                    "Extensions " + ids + " all append a Contributions entry for (Channel|Param) '" + pair
-                            + "' to the same target - PerCycleContributions arrays are additive, so ALL of them"
-                            + " apply and the amounts SUM across every one of them", firstId));
+            String pair = cut >= 0 ? key.substring(cut + 1) : key;
+            for (ClaimGroup group : overlapGroups(entry.getValue())) {
+                List<Claim> claimants = group.claims();
+                if (claimants.size() < 2) {
+                    continue;
+                }
+                StringBuilder ids = new StringBuilder();
+                for (int i = 0; i < claimants.size(); i++) {
+                    if (i > 0) {
+                        ids.append(", ");
+                    }
+                    ids.append('\'').append(extLabel(claimants.get(i).ext())).append('\'');
+                }
+                out.add(Finding.warning(DOMAIN, "EXTENSION_CONTRIBUTION_DUPLICATE",
+                        "Extensions " + ids + " all append a Contributions entry for (Channel|Param) '" + pair
+                                + "' to the same target"
+                                + (group.scope() == null ? "" : " on station '" + group.scope() + "'")
+                                + " - PerCycleContributions arrays are additive, so ALL of them"
+                                + " apply and the amounts SUM across every one of them",
+                        extLabel(claimants.get(0).ext())));
+            }
         }
     }
 
-    private static void reportCrossExtensionCollisions(@Nonnull Map<String, List<ExtensionAsset>> claims,
+    /**
+     * The keyed-collection half: one finding per losing claimant, naming the LAST claimant that
+     * actually applies beside it. Walks {@link #overlapGroups} so a bare and a station-scoped claim
+     * on one key report each other while two differently-scoped ones stay silent; a loser that
+     * meets the same winner in several groups is reported once.
+     */
+    private static void reportCrossExtensionCollisions(@Nonnull Map<String, List<Claim>> claims,
             @Nonnull String payloadName, @Nonnull List<Finding> out) {
-        for (List<ExtensionAsset> claimants : claims.values()) {
-            if (claimants.size() < 2) {
-                continue;
-            }
-            // `claimants` was appended while walking extensions in APPLY_ORDER, so the LAST
-            // entry is the one that actually wins the key at apply time.
-            ExtensionAsset winner = claimants.get(claimants.size() - 1);
-            String winnerId = winner.getId() == null ? "(unnamed)" : winner.getId();
-            for (int i = 0; i < claimants.size() - 1; i++) {
-                ExtensionAsset loser = claimants.get(i);
-                String loserId = loser.getId() == null ? "(unnamed)" : loser.getId();
-                out.add(Finding.warning(DOMAIN, "EXTENSION_KEY_COLLISION",
-                        "Extension '" + loserId + "' " + payloadName + " key collides with a later-applying"
-                                + " extension '" + winnerId + "' targeting the same key - the higher apply-order"
-                                + " entry wins, this one is skipped", loserId));
+        for (List<Claim> bucket : claims.values()) {
+            Set<String> reported = new HashSet<>();
+            for (ClaimGroup group : overlapGroups(bucket)) {
+                List<Claim> claimants = group.claims();
+                if (claimants.size() < 2) {
+                    continue;
+                }
+                // `claimants` keeps the APPLY_ORDER the extensions were walked in, so its LAST
+                // entry is the one that actually wins the key at apply time.
+                String winnerId = extLabel(claimants.get(claimants.size() - 1).ext());
+                for (int i = 0; i < claimants.size() - 1; i++) {
+                    String loserId = extLabel(claimants.get(i).ext());
+                    if (!reported.add(loserId + " -> " + winnerId)) {
+                        continue;
+                    }
+                    out.add(Finding.warning(DOMAIN, "EXTENSION_KEY_COLLISION",
+                            "Extension '" + loserId + "' " + payloadName + " key collides with a later-applying"
+                                    + " extension '" + winnerId + "' targeting the same key - the higher apply-order"
+                                    + " entry wins, this one is skipped", loserId));
+                }
             }
         }
     }
@@ -1137,14 +1351,13 @@ public final class StationValidator {
                 continue;
             }
             String id = asset.getId() != null ? asset.getId() : "?";
-            warnUnmatchedCustodyInput(asset.getCustody(), live, "Station '" + id + "'", id, out);
-            Map<String, ActionDef> actions = asset.getActions();
+            ActionDef[] actions = asset.getActions();
             if (actions != null) {
-                for (Map.Entry<String, ActionDef> e : actions.entrySet()) {
-                    ActionDef def = e.getValue();
-                    if (def != null) {
-                        warnUnmatchedCustodyInput(def.getCustody(), live,
-                                "Station '" + id + "' action '" + e.getKey() + "'", id, out);
+                for (int i = 0; i < actions.length; i++) {
+                    if (actions[i] != null) {
+                        warnUnmatchedCustodyInput(actions[i].getCustody(), live,
+                                "Station '" + id + "' action '"
+                                        + ActionResolver.effectiveActionId(actions[i], i) + "'", id, out);
                     }
                 }
             }
@@ -1204,10 +1417,11 @@ public final class StationValidator {
      * interaction can never place anything (a silent dead-content trap, not merely cosmetic).
      * {@code overlay} suppresses ONLY that check (delta re-check, F3 follow-up): an
      * {@code ExtensionAsset} Custody overlay is a DELTA, not a complete group - the canonical
-     * Display-only re-skin inherits Input/Recipe from the BASE, so warning "nothing can ever be
+     * Display-only re-skin inherits Input/Recipes from the BASE, so warning "nothing can ever be
      * placed" about it would actively mislead. The value-range checks below still run either way.
      */
-    private static void checkCustody(@Nullable Custody custody, @Nullable StationAsset.Recipe effectiveRecipe,
+    private static void checkCustody(@Nullable Custody custody,
+            @Nullable StationAsset.Recipe effectiveRecipe,
             boolean overlay, @Nonnull String label, @Nonnull String id, @Nonnull List<Finding> out) {
         if (custody == null) {
             return;
@@ -1296,13 +1510,13 @@ public final class StationValidator {
                         label + " Puppet.Look.Source '" + rawSource
                                 + "' is not one of PlayerClone/Model/NpcRole - falls back to PlayerClone at runtime", id));
             }
-            // Decision 47's Look nesting symmetry retro-nested the flat ModelId/FallbackModelId
-            // leaves into the Look.Model group (R1 schema handoff) - resolve through it here.
+            // Look.Model carries the fixed-model arm's own id; the any-source fallback sits one
+            // level up on Look itself, because every arm reads it.
             Puppet.Model model = look.getModel();
             if (Puppet.LOOK_SOURCE_MODEL.equalsIgnoreCase(look.effectiveSource())) {
                 String modelId = model != null ? model.getModelId() : null;
                 boolean modelIdBlank = modelId == null || modelId.isBlank();
-                String fallback = model != null ? model.getFallbackModelId() : null;
+                String fallback = look.getFallbackModelId();
                 boolean fallbackAuthored = fallback != null && !fallback.isBlank();
                 if (!fallbackAuthored && (modelIdBlank || !modelKnown.test(modelId))) {
                     out.add(Finding.warning(DOMAIN, "PUPPET_LOOK_MODEL_UNKNOWN",
@@ -1445,9 +1659,9 @@ public final class StationValidator {
         }
     }
 
-    private static void checkTool(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
-                                  @Nonnull List<Finding> out) {
-        StationAsset.Tool tool = a.getTool();
+    /** The reusable {@code Tool} group core, run against each action's one held-tool gate. */
+    private static void checkToolGroup(@Nullable StationAsset.Tool tool, @Nonnull String id,
+                                       @Nonnull String label, @Nonnull List<Finding> out) {
         if (tool == null) {
             return;
         }
@@ -1478,24 +1692,23 @@ public final class StationValidator {
                 }
             }
         }
-        checkPowerScale(tool, gatherTypeSet ? gather.getGatherType() : null, id, label, out);
         checkDurability(tool, id, label, out);
-        checkMinDurabilityPercent(tool, id, label, out);
+        checkMinStartPercent(tool, id, label, out);
     }
 
     /**
-     * {@code Tool.MinDurabilityPercent} (P11 knob, ruling 74): a value outside (0, 100] is almost
-     * always an authoring slip, not intent - the leaf documents itself as a PERCENT (0-100), so a
-     * fraction like {@code 0.5} silently becomes a near-impossible 0.5% floor rather than the
+     * {@code Tool.Durability.MinStartPercent} (P11 knob, ruling 74): a value outside (0, 100] is
+     * almost always an authoring slip, not intent - the leaf documents itself as a PERCENT (0-100),
+     * so a fraction like {@code 0.5} silently becomes a near-impossible 0.5% floor rather than the
      * intended 50%, and anything <= 0 is a no-op the reader already treats as "no gate" (author
      * {@code null} instead of a zero/negative sentinel).
      */
-    private static void checkMinDurabilityPercent(@Nonnull StationAsset.Tool tool, @Nonnull String id,
-                                                   @Nonnull String label, @Nonnull List<Finding> out) {
-        Double minDurability = tool.getMinDurabilityPercent();
-        if (minDurability != null && (minDurability <= 0 || minDurability > 100)) {
+    private static void checkMinStartPercent(@Nonnull StationAsset.Tool tool, @Nonnull String id,
+                                             @Nonnull String label, @Nonnull List<Finding> out) {
+        Double minStart = tool.getMinStartPercent();
+        if (minStart != null && (minStart <= 0 || minStart > 100)) {
             out.add(Finding.warning(DOMAIN, "TOOL_MIN_DURABILITY_OUT_OF_RANGE",
-                    label + " authors Tool.MinDurabilityPercent " + minDurability + " outside (0, 100] - the"
+                    label + " authors Tool.Durability.MinStartPercent " + minStart + " outside (0, 100] - the"
                             + " gate expects a PERCENT (0-100), not a 0-1 fraction; a value <= 0 is already a"
                             + " no-op (author null instead) and a value > 100 can never pass", id));
         }
@@ -1509,9 +1722,11 @@ public final class StationValidator {
         }
         boolean perSwingOn = durability.getPerSwing() != null && durability.getPerSwing() > 0;
         boolean perCycleOn = durability.getPerCycle() != null && durability.getPerCycle() > 0;
-        if (!perSwingOn && !perCycleOn) {
+        boolean gateOn = durability.getMinStartPercent() != null;
+        if (!perSwingOn && !perCycleOn && !gateOn) {
             out.add(Finding.warning(DOMAIN, "DEAD_DURABILITY_GROUP",
-                    label + " authors a Tool.Durability group with no positive PerSwing or PerCycle; the drain is a no-op", id));
+                    label + " authors a Tool.Durability group with no positive PerSwing or PerCycle and no"
+                            + " MinStartPercent gate; the whole group is a no-op", id));
             return;
         }
         if (perSwingOn) {
@@ -1521,52 +1736,27 @@ public final class StationValidator {
         }
     }
 
-    private static void checkPowerScale(@Nonnull StationAsset.Tool tool, @Nullable String gatherFallback,
-                                        @Nonnull String id, @Nonnull String label, @Nonnull List<Finding> out) {
-        StationAsset.Tool.PowerScale scale = tool.getPowerScale();
-        if (scale == null) {
-            return;
-        }
-        if (scale.getReferencePower() == null || scale.getReferencePower() <= 0) {
-            out.add(Finding.warning(DOMAIN, "DEAD_POWER_SCALE",
-                    label + " authors a Tool.PowerScale with a null or nonpositive ReferencePower; the multiplier stays 1.0 forever", id));
-        }
-        String scaleGather = scale.getGatherType();
-        boolean scaleGatherSet = scaleGather != null && !scaleGather.isBlank();
-        if (!scaleGatherSet && (gatherFallback == null || gatherFallback.isBlank())) {
-            out.add(Finding.warning(DOMAIN, "POWER_SCALE_NO_GATHER_TYPE",
-                    label + " authors a Tool.PowerScale but neither PowerScale.GatherType nor Tool.Gather.GatherType resolves; the scale never applies", id));
-        }
-        if (scale.getMinMult() != null && scale.getMaxMult() != null && scale.getMinMult() > scale.getMaxMult()) {
-            out.add(Finding.error(DOMAIN, "POWER_SCALE_BAD_CLAMP",
-                    label + " Tool.PowerScale has MinMult > MaxMult (the clamp is inverted)", id));
-        }
-        if (scale.getExponent() != null && scale.getExponent() <= 0) {
-            out.add(Finding.warning(DOMAIN, "POWER_SCALE_BAD_EXPONENT",
-                    label + " Tool.PowerScale authors a nonpositive Exponent", id));
-        }
-    }
-
-    /**
-     * The station-level conditional-lootable declaration (scope-2: {@link LootRef} - delegates to
-     * the shared {@link #checkLootRef} core also used by {@code ActionDef.Loot}, an
-     * {@code ExtensionAsset.Loot} payload, and {@link StationStep#getRoll()}).
-     */
-    private static void checkLoot(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
-                                  @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
-                                  @Nonnull Predicate<String> lootableKnown, @Nonnull List<Finding> out) {
-        checkLootRef(a.getLoot(), id, label, dropListKnown, factorKnown, lootableKnown, out);
-    }
 
     /**
      * The shared {@link LootRef} core (scope-2 design 1.3, DRY principle 1 - the ONE loot-reference
      * vocabulary): validates {@link LootRef#getLootables()} references, then every
      * {@link LootRef#getRolls()} entry via {@link #checkRoll}. Reused by the station-level
-     * {@code Loot} group, a per-action {@code ActionDef.Loot} override, a {@code StationStep.Roll}
-     * phase, and an {@code ExtensionAsset.Loot} payload.
+     * an action's own {@code Bonus} group, a {@code StationStep.Roll} phase, and an
+     * {@code ExtensionAsset.Bonus} payload.
      */
     private static void checkLootRef(@Nullable LootRef loot, @Nonnull String id, @Nonnull String label,
                                      @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
+                                     @Nonnull Predicate<String> lootableKnown, @Nonnull List<Finding> out) {
+        checkLootRef(loot, id, label, false, dropListKnown, factorKnown, lootableKnown, out);
+    }
+
+    /**
+     * As above, for a {@link LootRef} reached through an action that runs an authored {@code Steps}
+     * program ({@code noCycleOutput} - see {@link #checkGrants}).
+     */
+    private static void checkLootRef(@Nullable LootRef loot, @Nonnull String id, @Nonnull String label,
+                                     boolean noCycleOutput, @Nonnull Predicate<String> dropListKnown,
+                                     @Nonnull Predicate<String> factorKnown,
                                      @Nonnull Predicate<String> lootableKnown, @Nonnull List<Finding> out) {
         if (loot == null) {
             return;
@@ -1575,17 +1765,17 @@ public final class StationValidator {
         if (lootables != null) {
             for (String t : lootables) {
                 if (t == null || t.isBlank()) {
-                    out.add(Finding.warning(DOMAIN, "LOOT_BLANK_TABLE", label + " Loot.Lootables has a blank entry", id));
+                    out.add(Finding.warning(DOMAIN, "LOOT_BLANK_TABLE", label + " Lootables has a blank entry", id));
                 } else if (!lootableKnown.test(t.toLowerCase(Locale.ROOT))) {
                     out.add(Finding.warning(DOMAIN, "LOOT_UNKNOWN_TABLE",
-                            label + " Loot.Lootables references unknown lootable '" + t + "'", id));
+                            label + " Lootables references unknown lootable '" + t + "'", id));
                 }
             }
         }
         Roll[] rolls = loot.getRolls();
         if (rolls != null) {
             for (int i = 0; i < rolls.length; i++) {
-                checkRoll(rolls[i], label + " Loot.Rolls[" + i + "]", id, dropListKnown, factorKnown, out);
+                checkRoll(rolls[i], label + " Rolls[" + i + "]", id, noCycleOutput, dropListKnown, factorKnown, out);
             }
         }
     }
@@ -1593,19 +1783,28 @@ public final class StationValidator {
     /**
      * The shared {@link Roll} structural core (design 4.8's "validator coverage" + the M3
      * critique fix 5, scope-2 weighted-factor unification): {@code Conditions} factor ids run
-     * through {@code factorKnown} via {@link #checkConditionFactors}; {@code Chance.AddFactors}/
-     * {@code Ladder.Values} (now {@link FactorRef}s) run through {@code factorKnown} via
+     * through {@code factorKnown} via {@link #checkConditionFactors}; {@code Chance.Factors}/
+     * {@code Ladder.Factors} (now {@link FactorRef}s) run through {@code factorKnown} via
      * {@link #checkFactorRefs} - the SAME {@code UNKNOWN_FACTOR} code every factor-reference site
-     * in this file uses, one code, one meaning; every {@code Grants.DropList} (top-level or
-     * per-floor) runs through {@code dropListKnown}; a {@code Grants.BonusOutputCopies} authored
-     * under a non-{@code Cycle} {@link Roll#effectiveTrigger()} is flagged
-     * {@code LOOT_BONUS_COPIES_WRONG_TRIGGER}; and a roll naming the same
+     * in this file uses, one code, one meaning; every {@code Grants.DropLists} entry (top-level or
+     * per-floor) runs through {@code dropListKnown}; two floors of one ladder sharing a {@code Min}
+     * are flagged {@code LADDER_DUPLICATE_FLOOR_MIN}; and a roll naming the same
      * {@code (Factor, Param)} pair twice across its own reference sites is flagged INFO
      * {@code LOOT_DUPLICATE_FACTOR} via {@link #checkDuplicateFactors}.
      */
     static void checkRoll(@Nullable Roll roll, @Nonnull String label, @Nonnull String id,
                           @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
                           @Nonnull List<Finding> out) {
+        checkRoll(roll, label, id, false, dropListKnown, factorKnown, out);
+    }
+
+    /**
+     * As above, for a roll reached through an action that runs an authored {@code Steps} program
+     * ({@code noCycleOutput} - see {@link #checkGrants}).
+     */
+    static void checkRoll(@Nullable Roll roll, @Nonnull String label, @Nonnull String id,
+                          boolean noCycleOutput, @Nonnull Predicate<String> dropListKnown,
+                          @Nonnull Predicate<String> factorKnown, @Nonnull List<Finding> out) {
         if (roll == null) {
             return;
         }
@@ -1615,7 +1814,7 @@ public final class StationValidator {
 
         Roll.Chance chance = roll.getChance();
         if (chance != null) {
-            checkFactorRefs(chance.getAddFactors(), label + ".Chance.AddFactors", id, factorKnown, out);
+            checkFactorRefs(chance.getFactors(), label + ".Chance.Factors", id, factorKnown, out);
             if (chance.getBasePercent() != null && chance.getBasePercent() < 0) {
                 out.add(Finding.warning(DOMAIN, "LOOT_NEGATIVE_BASE_PERCENT",
                         label + ".Chance has a negative BasePercent", id));
@@ -1627,24 +1826,26 @@ public final class StationValidator {
         }
 
         Roll.Grants topGrants = roll.getGrants();
-        checkGrants(topGrants, label + ".Grants", id, trigger, dropListKnown, out);
+        checkGrants(topGrants, label + ".Grants", id, trigger, noCycleOutput, dropListKnown, out);
         boolean hasAnything = topGrants != null && !topGrants.isEmpty();
 
         Roll.Ladder ladder = roll.getLadder();
         if (ladder != null) {
             hasAnything = true;
-            FactorRef[] values = ladder.getValues();
-            if (values == null || values.length == 0) {
-                out.add(Finding.error(DOMAIN, "LOOT_LADDER_MISSING_VALUE",
-                        label + ".Ladder has no Values - it can never resolve a floor", id));
+            FactorRef[] ladderFactors = ladder.getFactors();
+            if (ladderFactors == null || ladderFactors.length == 0) {
+                out.add(Finding.warning(DOMAIN, "LOOT_LADDER_MISSING_VALUE",
+                        label + ".Ladder has no Factors - the ladder value is a constant 0, so only a"
+                                + " Min<=0 floor can ever be reached", id));
             } else {
-                checkFactorRefs(values, label + ".Ladder.Values", id, factorKnown, out);
+                checkFactorRefs(ladderFactors, label + ".Ladder.Factors", id, factorKnown, out);
             }
+            checkDuplicateFloorMins(ladder.getFloors(), label + ".Ladder", id, out);
             Roll.Ladder.Floor[] floors = ladder.getFloors();
             if (floors == null || floors.length == 0) {
                 out.add(Finding.warning(DOMAIN, "LOOT_LADDER_EMPTY", label + ".Ladder has no Floors", id));
             } else {
-                checkFloors(floors, label, id, trigger, dropListKnown, out);
+                checkFloors(floors, label, id, trigger, noCycleOutput, dropListKnown, out);
             }
         }
 
@@ -1657,7 +1858,7 @@ public final class StationValidator {
     /**
      * The generic redundant-reference lint (INFO-only, best-effort): one {@link Roll} naming the
      * SAME {@code (Factor, Param)} pair more than once across its own {@code Conditions} /
-     * {@code Chance.AddFactors} / {@code Ladder.Values}. The engine can state that in its own
+     * {@code Chance.Factors} / {@code Ladder.Factors}. The engine can state that in its own
      * terms - reading one number twice in one formula is nearly always an editing slip - without
      * knowing what any particular factor MEANS.
      *
@@ -1666,7 +1867,7 @@ public final class StationValidator {
      * {@code "hytale:stat"} factor id, so a ladder composing two different stat channels (the documented
      * equal-weight composition shape) would emit a spurious note at every boot. Only a genuinely
      * repeated pair fires, which in practice means a param-less zero-arg engine factor named twice
-     * (e.g. {@code rpgstations:cycle_count} in both a Condition and a Chance.AddFactors entry).
+     * (e.g. {@code rpgstations:cycle_count} in both a Condition and a Chance.Factors entry).
      *
      * <p>Composition rules that depend on what specific ids MEAN - "these two ids are two views of
      * the same underlying number, never compose both" - belong to whichever mod owns that
@@ -1685,10 +1886,10 @@ public final class StationValidator {
             }
         }
         if (roll.getChance() != null) {
-            noteFactorRefPairs(roll.getChance().getAddFactors(), seen, reported, label, id, out);
+            noteFactorRefPairs(roll.getChance().getFactors(), seen, reported, label, id, out);
         }
         if (roll.getLadder() != null) {
-            noteFactorRefPairs(roll.getLadder().getValues(), seen, reported, label, id, out);
+            noteFactorRefPairs(roll.getLadder().getFactors(), seen, reported, label, id, out);
         }
     }
 
@@ -1721,12 +1922,12 @@ public final class StationValidator {
         out.add(Finding.info(DOMAIN, "LOOT_DUPLICATE_FACTOR",
                 label + " references (Factor '" + factor.trim() + "'"
                         + (normalizedParam.isEmpty() ? ", no Param" : ", Param '" + param.trim() + "'")
-                        + ") more than once across its Conditions / Chance.AddFactors / Ladder.Values -"
+                        + ") more than once across its Conditions / Chance.Factors / Ladder.Factors -"
                         + " the same number is read twice in one roll", id));
     }
 
     private static void checkFloors(@Nonnull Roll.Ladder.Floor[] floors, @Nonnull String rollLabel,
-                                    @Nonnull String id, @Nonnull String trigger,
+                                    @Nonnull String id, @Nonnull String trigger, boolean noCycleOutput,
                                     @Nonnull Predicate<String> dropListKnown, @Nonnull List<Finding> out) {
         Set<Double> seenFloors = new HashSet<>();
         for (int i = 0; i < floors.length; i++) {
@@ -1748,10 +1949,8 @@ public final class StationValidator {
                 out.add(Finding.error(DOMAIN, "LOOT_LADDER_FLOOR_EMPTY_GRANTS",
                         fLabel + " has no Grants - this floor rolls nothing even if reached", id));
             } else {
-                checkGrants(f.getGrants(), fLabel + ".Grants", id, trigger, dropListKnown, out);
+                checkGrants(f.getGrants(), fLabel + ".Grants", id, trigger, noCycleOutput, dropListKnown, out);
             }
-            warnUnplayedPresentationLeaves(f.getPresentation(), fLabel + ".Presentation", id,
-                    "LOOT_FLOOR_UNPLAYED_LEAVES", out);
             checkNativeRefs(f.getPresentation(), fLabel + ".Presentation", id, out);
         }
     }
@@ -1776,9 +1975,9 @@ public final class StationValidator {
     /**
      * The shared {@link FactorRef} check (scope-2's weighted-factor vocabulary, design 1.3/4.2):
      * the {@code FactorRef}-array sibling of {@link #checkConditionFactors}, reused everywhere a
-     * numeric factor channel is SUMMED - {@code Roll.Chance.AddFactors}, {@code Roll.Ladder.Values},
-     * {@code StatRollEntry.Points.AddFactors}, {@code StationStep.Stamp.Stats.Caps.Budgets[]
-     * .Factors}, {@code StationStep.Repeat.AddFactors}. Same {@code UNKNOWN_FACTOR} code as every
+     * numeric factor channel is SUMMED - {@code Roll.Chance.Factors}, {@code Roll.Ladder.Factors},
+     * {@code StatRollEntry.Points.Factors}, {@code StationStep.Stamp.Stats.Caps.Budgets[]
+     * .Factors}, {@code StationStep.Repeat.Factors}. Same {@code UNKNOWN_FACTOR} code as every
      * other factor-reference site (one code, one meaning).
      */
     private static void checkFactorRefs(@Nullable FactorRef[] factors, @Nonnull String label, @Nonnull String id,
@@ -1797,22 +1996,32 @@ public final class StationValidator {
         }
     }
 
+    /**
+     * {@code noCycleOutput}: does the action this roll belongs to run an authored {@code Steps}
+     * program? Such a program has no single "cycle output" for a {@code Grants.OutputItems} to add
+     * copies OF, so the engine drops the grant - see
+     * {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT} below. {@code false} at every site with no action
+     * context (a lootable table, a standalone extension payload): those are checked where they are
+     * REFERENCED from an action instead, since the same table can be shared by both action shapes.
+     */
     private static void checkGrants(@Nullable Roll.Grants grants, @Nonnull String label, @Nonnull String id,
-                                    @Nonnull String trigger, @Nonnull Predicate<String> dropListKnown,
+                                    @Nonnull String trigger, boolean noCycleOutput,
+                                    @Nonnull Predicate<String> dropListKnown,
                                     @Nonnull List<Finding> out) {
         if (grants == null) {
             return;
         }
-        if (grants.getBonusOutputCopies() != null && grants.getBonusOutputCopies() > 0
-                && !Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
-            out.add(Finding.warning(DOMAIN, "LOOT_BONUS_COPIES_WRONG_TRIGGER",
-                    label + " authors BonusOutputCopies under a non-Cycle Trigger ('" + trigger
-                            + "') - there is no live cycle output to copy there", id));
-        }
-        String dropListId = grants.getDropList();
-        if (dropListId != null && !dropListId.isBlank() && !dropListKnown.test(dropListId)) {
-            out.add(Finding.warning(DOMAIN, "LOOT_UNKNOWN_DROPLIST",
-                    label + " references unknown ItemDropList '" + dropListId + "'", id));
+        String[] dropLists = grants.getDropLists();
+        if (dropLists != null) {
+            for (String dropListId : dropLists) {
+                if (dropListId == null || dropListId.isBlank()) {
+                    out.add(Finding.warning(DOMAIN, "LOOT_BLANK_DROPLIST",
+                            label + ".DropLists has a blank entry - it grants nothing", id));
+                } else if (!dropListKnown.test(dropListId)) {
+                    out.add(Finding.warning(DOMAIN, "LOOT_UNKNOWN_DROPLIST",
+                            label + " references unknown ItemDropList '" + dropListId + "'", id));
+                }
+            }
         }
         // Decision 51d (seam wave): a Grants.Effects[] entry is the SAME EffectRef id-ref-only
         // vocabulary Presentation.Effect uses - the shared checkEffectRef core covers both.
@@ -1822,8 +2031,26 @@ public final class StationValidator {
                 checkEffectRef(effects[i], label + ".Effects[" + i + "]", id, out);
             }
         }
-        // A one-shot contribution rides the cycle-completed event, which only a Cycle trigger has -
-        // the same wrong-trigger shape BonusOutputCopies already warns for.
+        // OutputItems adds to the CYCLE's own output, which only a Cycle trigger has - the same
+        // shape (and the same reason) as the Contributions check below.
+        if (grants.effectiveOutputItems() > 0 && !Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
+            out.add(Finding.warning(DOMAIN, "LOOT_OUTPUT_ITEMS_WRONG_TRIGGER",
+                    label + " authors Grants.OutputItems under a non-Cycle Trigger ('" + trigger
+                            + "') - there is no cycle output to add items to, so the grant is dropped", id));
+        }
+        // The sibling of the wrong-trigger rule above, for the other way a cycle can have no output
+        // to add to: the action runs an authored Steps program, whose phases produce whatever they
+        // individually author rather than one recipe-driven output. The roll still evaluates, it
+        // just has nothing to multiply - so without this the content is dead with no diagnostic.
+        if (grants.effectiveOutputItems() > 0 && noCycleOutput
+                && Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
+            out.add(Finding.warning(DOMAIN, "LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT",
+                    label + " authors Grants.OutputItems on an action that runs an authored Steps"
+                            + " program - such a program has no single cycle output to add copies of,"
+                            + " so the grant is dropped; author a Produce phase or a Grants.DropLists"
+                            + " entry instead", id));
+        }
+        // A one-shot contribution rides the cycle-completed event, which only a Cycle trigger has.
         Contribution[] posts = grants.getContributions();
         if (posts != null && posts.length > 0) {
             if (!Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
@@ -1897,28 +2124,28 @@ public final class StationValidator {
         return false;
     }
 
-    private static void checkRecipe(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
-                                    @Nonnull Predicate<String> factorKnown, @Nonnull List<Finding> out) {
-        StationAsset.Recipe recipe = a.getRecipe();
-        StationAsset.Conversion[] conversions = recipe != null ? recipe.getConversions() : null;
-        StationAsset.FromCrafting fromCrafting = recipe != null ? recipe.getFromCrafting() : null;
-        boolean hasConversions = conversions != null && conversions.length > 0;
-        if (!hasConversions && fromCrafting == null && !anyActionProvidesRunSource(a.getActions())) {
-            // Multi-action stations (design 9.1) author per-action Recipe/Steps/Ref instead of a
-            // station-level one - this is only a real dead-station bug when NEITHER the station
-            // level NOR any authored action can ever run a cycle.
-            out.add(Finding.error(DOMAIN, "EMPTY_CONVERSIONS",
-                    label + " has neither Recipe.Conversions nor Recipe.FromCrafting - the work loop can never run a cycle", id));
+    /** One action's own {@code Recipe} group (the whole of "what this action makes"). */
+    private static void checkRecipe(@Nullable StationAsset.Recipe recipe, @Nonnull String id,
+                                    @Nonnull String label, @Nonnull List<Finding> out) {
+        if (recipe == null) {
             return;
         }
+        String rLabel = label + " Recipe";
+        StationAsset.Conversion[] conversions = recipe.getConversions();
+        StationAsset.FromCrafting fromCrafting = recipe.getFromCrafting();
+        boolean hasConversions = conversions != null && conversions.length > 0;
+        if (!hasConversions && fromCrafting == null) {
+            out.add(Finding.warning(DOMAIN, "RECIPE_ENTRY_EMPTY",
+                    rLabel + " authors neither Conversions nor FromCrafting - it can never run a cycle", id));
+        }
         if (fromCrafting != null) {
-            checkFromCrafting(fromCrafting, id, label, out);
+            checkFromCrafting(fromCrafting, id, rLabel, out);
         }
         if (hasConversions) {
-            checkConversions(conversions, id, label, out);
+            checkConversions(conversions, id, rLabel, out);
         }
-        if (recipe != null && recipe.getYield() != null) {
-            checkYield(recipe.getYield(), id, label, factorKnown, out);
+        if (recipe.getYield() != null) {
+            checkYield(recipe.getYield(), id, rLabel, out);
         }
     }
 
@@ -1927,93 +2154,92 @@ public final class StationValidator {
      * posture: a nonsensical yield still loads and the engine's own reader defaults absorb it.
      */
     private static void checkYield(@Nonnull StationAsset.Yield y, @Nonnull String id,
-                                   @Nonnull String label, @Nonnull Predicate<String> factorKnown,
-                                   @Nonnull List<Finding> out) {
+                                   @Nonnull String label, @Nonnull List<Finding> out) {
         if (y.getBase() != null && y.getBase() <= 0) {
             out.add(Finding.warning(DOMAIN, "YIELD_NONPOSITIVE_BASE",
-                    label + " Recipe.Yield.Base is not positive - it is ignored and each conversion's"
+                    label + " Yield.Base is not positive - it is ignored and each conversion's"
                             + " own authored output quantity is used instead", id));
         }
         if (y.getScale() != null && (!Double.isFinite(y.getScale()) || y.getScale() <= 0.0)) {
             out.add(Finding.warning(DOMAIN, "YIELD_NONPOSITIVE_SCALE",
-                    label + " Recipe.Yield.Scale is not a positive finite number - it reader-defaults to 1.0", id));
+                    label + " Yield.Scale is not a positive finite number - it reader-defaults to 1.0", id));
         }
         if (y.getMin() != null && y.getMax() != null && y.getMin() > y.getMax()) {
             out.add(Finding.warning(DOMAIN, "YIELD_MIN_ABOVE_MAX",
-                    label + " Recipe.Yield.Min (" + y.getMin() + ") exceeds Max (" + y.getMax()
+                    label + " Yield.Min (" + y.getMin() + ") exceeds Max (" + y.getMax()
                             + ") - Max wins, so every cycle produces exactly Max", id));
-        }
-        StationAsset.Yield.Bonus bonus = y.getBonus();
-        if (bonus == null) {
-            return;
-        }
-        boolean hasFloors = bonus.getFloors() != null && bonus.getFloors().length > 0;
-        boolean hasValues = bonus.getValues() != null && bonus.getValues().length > 0;
-        if (hasFloors && !hasValues) {
-            out.add(Finding.warning(DOMAIN, "YIELD_BONUS_FLOORS_WITHOUT_VALUES",
-                    label + " Recipe.Yield.Bonus authors Floors but no Values - the ladder value is a"
-                            + " constant 0, so only a Min<=0 floor can ever be reached", id));
-        }
-        if (hasValues && !hasFloors) {
-            out.add(Finding.warning(DOMAIN, "YIELD_BONUS_VALUES_WITHOUT_FLOORS",
-                    label + " Recipe.Yield.Bonus authors Values but no Floors - nothing consumes the"
-                            + " summed value, so the bonus can never add anything", id));
-        }
-        if (bonus.getValues() != null) {
-            for (FactorRef ref : bonus.getValues()) {
-                if (ref == null || ref.getFactor() == null || ref.getFactor().isBlank()) {
-                    out.add(Finding.warning(DOMAIN, "YIELD_BONUS_BLANK_FACTOR",
-                            label + " Recipe.Yield.Bonus.Values has an entry with no Factor id - it contributes 0", id));
-                } else if (!factorKnown.test(ref.getFactor())) {
-                    out.add(Finding.warning(DOMAIN, "YIELD_BONUS_UNKNOWN_FACTOR",
-                            label + " Recipe.Yield.Bonus.Values references unregistered factor '"
-                                    + ref.getFactor() + "' - it resolves to 0 (fail-closed)", id));
-                }
-            }
-        }
-        if (bonus.getFloors() != null) {
-            for (StationAsset.Yield.Floor floor : bonus.getFloors()) {
-                if (floor != null && floor.effectiveAdd() == 0) {
-                    out.add(Finding.info(DOMAIN, "YIELD_BONUS_FLOOR_ADDS_NOTHING",
-                            label + " Recipe.Yield.Bonus has a floor at Min " + floor.effectiveMin()
-                                    + " whose Add is 0 - reaching it changes nothing", id));
-                }
-            }
         }
     }
 
     /**
-     * True when at least one authored {@code Actions} entry supplies its OWN runnable recipe/
-     * program source - a {@code Ref} to a standalone {@link ActionAsset} (which owns its own
-     * body), a per-action {@code Recipe} (Conversions or FromCrafting), or a {@code Steps} program
-     * (the anvil's {@code enhance} action runs entirely off a Stamp-step ritual, no Recipe at
-     * all). Mirrors {@link #checkActions}'s {@code ACTION_NO_BODY} per-action check, but answers
-     * the station-wide question {@link #checkRecipe} needs: "can THIS station ever run a cycle
-     * through ANY route".
+     * An action's {@code ContributionScale} ladder: the same shape checks a loot {@code Ladder} gets,
+     * since both resolve through the ONE shared {@code loot.FactorLadder} core. Warn-only - an
+     * unreachable or empty ladder simply resolves to the neutral 1.0.
      */
-    private static boolean anyActionProvidesRunSource(@Nullable Map<String, ActionDef> actions) {
-        if (actions == null || actions.isEmpty()) {
-            return false;
+    private static void checkContributionScale(@Nonnull ContributionScale scale, @Nonnull String id,
+                                               @Nonnull String label, @Nonnull Predicate<String> factorKnown,
+                                               @Nonnull List<Finding> out) {
+        boolean hasFactors = scale.getFactors() != null && scale.getFactors().length > 0;
+        ContributionScale.Floor[] floors = scale.getFloors();
+        boolean hasFloors = floors != null && floors.length > 0;
+        if (!hasFactors && !hasFloors) {
+            out.add(Finding.warning(DOMAIN, "CONTRIBUTION_SCALE_EMPTY",
+                    label + " authors neither Factors nor Floors - the whole group resolves to the"
+                            + " neutral 1.0 and can be removed", id));
+            return;
         }
-        for (ActionDef def : actions.values()) {
-            if (def == null) {
+        if (hasFloors && !hasFactors) {
+            out.add(Finding.warning(DOMAIN, "CONTRIBUTION_SCALE_FLOORS_WITHOUT_FACTORS",
+                    label + " authors Floors but no Factors - the ladder value is a constant 0, so"
+                            + " only a Min<=0 floor can ever be reached", id));
+        }
+        if (hasFactors && !hasFloors) {
+            out.add(Finding.warning(DOMAIN, "CONTRIBUTION_SCALE_FACTORS_WITHOUT_FLOORS",
+                    label + " authors Factors but no Floors - nothing consumes the summed value, so"
+                            + " the multiplier is always the neutral 1.0", id));
+        }
+        checkFactorRefs(scale.getFactors(), label + ".Factors", id, factorKnown, out);
+        if (hasFloors) {
+            double[] mins = new double[floors.length];
+            for (int i2 = 0; i2 < floors.length; i2++) {
+                mins[i2] = floors[i2] != null ? floors[i2].effectiveMin() : Double.NaN;
+            }
+            warnDuplicateMins(mins, label, id, out);
+        }
+    }
+
+    /**
+     * Two ladder floors sharing a {@code Min} is always an authoring slip: only ONE of them can ever
+     * be the reached floor (the LAST authored wins, per the shared {@code loot.FactorLadder} rule),
+     * so the other silently never grants. Warned for both ladder consumers from their own overload.
+     */
+    private static void checkDuplicateFloorMins(@Nullable Roll.Ladder.Floor[] floors, @Nonnull String label,
+                                                @Nonnull String id, @Nonnull List<Finding> out) {
+        if (floors == null) {
+            return;
+        }
+        double[] mins = new double[floors.length];
+        for (int i = 0; i < floors.length; i++) {
+            mins[i] = floors[i] != null ? floors[i].effectiveMin() : Double.NaN;
+        }
+        warnDuplicateMins(mins, label, id, out);
+    }
+
+    /** The shared duplicate-threshold report both ladder consumers feed. */
+    private static void warnDuplicateMins(@Nonnull double[] mins, @Nonnull String label, @Nonnull String id,
+                                          @Nonnull List<Finding> out) {
+        Set<Double> seen = new HashSet<>();
+        Set<Double> reported = new HashSet<>();
+        for (double min : mins) {
+            if (Double.isNaN(min)) {
                 continue;
             }
-            if (def.hasRef()) {
-                return true;
-            }
-            if (def.getSteps() != null && def.getSteps().length > 0) {
-                return true;
-            }
-            StationAsset.Recipe actionRecipe = def.getRecipe();
-            if (actionRecipe != null) {
-                StationAsset.Conversion[] actionConversions = actionRecipe.getConversions();
-                if ((actionConversions != null && actionConversions.length > 0) || actionRecipe.getFromCrafting() != null) {
-                    return true;
-                }
+            if (!seen.add(min) && reported.add(min)) {
+                out.add(Finding.warning(DOMAIN, "LADDER_DUPLICATE_FLOOR_MIN",
+                        label + " authors more than one floor at Min " + min + " - only the LAST authored one"
+                                + " can ever be reached, so the earlier duplicate never grants", id));
             }
         }
-        return false;
     }
 
     /**
@@ -2149,9 +2375,8 @@ public final class StationValidator {
         }
     }
 
-    private static void checkWork(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
+    private static void checkWork(@Nullable StationAsset.Work work, @Nonnull String id, @Nonnull String label,
                                   @Nonnull List<Finding> out) {
-        StationAsset.Work work = a.getWork();
         if (work == null) {
             return;
         }
@@ -2206,14 +2431,14 @@ public final class StationValidator {
     }
 
     /**
-     * RpgStations' OWN Requires check (design section 4.4.2): a {@code Condition}
-     * referencing an unregistered factor id warns ({@code UNKNOWN_FACTOR} - fail-open at
-     * validate time since providers may register later, matching {@link #validate()}'s live
-     * entry point). No permission-existence check is possible (permission nodes are free text).
+     * The shared {@code Requires} check, run against BOTH the station's entry gate and each
+     * action's own (the two are ANDed at engage, neither defaults the other): a {@code Condition}
+     * referencing an unregistered factor id warns ({@code UNKNOWN_FACTOR} - fail-open at validate
+     * time since providers may register later, matching {@link #validate()}'s live entry point). No
+     * permission-existence check is possible (permission nodes are free text).
      */
-    private static void checkRequires(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
-                                      @Nonnull Predicate<String> factorKnown, @Nonnull List<Finding> out) {
-        Requires reqs = a.getRequires();
+    private static void checkRequiresGroup(@Nullable Requires reqs, @Nonnull String id, @Nonnull String label,
+                                           @Nonnull Predicate<String> factorKnown, @Nonnull List<Finding> out) {
         if (reqs == null || reqs.getConditions() == null) {
             return;
         }
@@ -2223,15 +2448,17 @@ public final class StationValidator {
             }
             if (!factorKnown.test(c.getFactor())) {
                 out.add(Finding.warning(DOMAIN, "UNKNOWN_FACTOR",
-                        label + " Requires.Conditions references unknown factor '" + c.getFactor()
+                        label + ".Conditions references unknown factor '" + c.getFactor()
                                 + "' (the gate fails closed at runtime until a provider registers it)", id));
             }
         }
     }
 
-    private static void checkPresentationRefs(@Nonnull StationAsset a, @Nonnull String id,
+    private static void checkPresentationRefs(@Nullable StationAsset.Animation animation,
+                                              @Nullable StationAsset.Hold hold,
+                                              @Nullable Presentation cycle, @Nonnull String id,
                                               @Nonnull String label, @Nonnull List<Finding> out) {
-        String emoteId = a.getAnimation() != null ? a.getAnimation().getEmoteId() : null;
+        String emoteId = animation != null ? animation.getEmoteId() : null;
         if (emoteId != null && emoteId.isBlank()) {
             out.add(Finding.warning(DOMAIN, "BLANK_EMOTE_ID",
                     label + " authors an empty Animation.EmoteId", id));
@@ -2239,7 +2466,7 @@ public final class StationValidator {
             out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_EMOTE",
                     label + " Animation.EmoteId '" + emoteId + "' is not a known Emote id - check for a typo", id));
         }
-        String holdEffectId = a.getHold() != null ? a.getHold().getEffectId() : null;
+        String holdEffectId = hold != null ? hold.getEffectId() : null;
         if (holdEffectId != null && holdEffectId.isBlank()) {
             out.add(Finding.warning(DOMAIN, "BLANK_EFFECT_ID",
                     label + " authors an empty Hold.EffectId", id));
@@ -2247,15 +2474,13 @@ public final class StationValidator {
             out.add(Finding.warning(DOMAIN, "UNKNOWN_ENTITY_EFFECT",
                     label + " Hold.EffectId '" + holdEffectId + "' references unknown EntityEffect", id));
         }
-        // Seam wave (decision 51b/51d, decision 53): the station's own cycle-moment Presentation
-        // gains the SAME native-composition advisory coverage every other Presentation site gets -
-        // this was a pre-existing gap (only Completion/Swing/Impact/flair Moments were checked).
-        checkNativeRefs(a.getPresentation(), label + ".Presentation", id, out);
+        // The action's own cycle moment gains the SAME native-composition advisory coverage every
+        // other Presentation site gets.
+        checkNativeRefs(cycle, label + " Moments.Cycle", id, out);
     }
 
-    private static void checkAnimation(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
-                                       @Nonnull List<Finding> out) {
-        StationAsset.Animation animation = a.getAnimation();
+    private static void checkAnimation(@Nullable StationAsset.Animation animation, @Nonnull String id,
+                                       @Nonnull String label, @Nonnull List<Finding> out) {
         if (animation == null) {
             return;
         }
@@ -2264,11 +2489,11 @@ public final class StationValidator {
             if (animation.getActionClip() != null && !animation.getActionClip().isBlank()) {
                 out.add(Finding.warning(DOMAIN, "ACTION_CLIP_WITHOUT_SWING",
                         label + " authors Animation.ActionClip with no Animation.Swing group;"
-                                + " the seat-mode swing re-fire only happens per swing tick, so ActionClip never fires", id));
+                                + " the Action-slot re-fire only happens per swing tick, so ActionClip never fires", id));
             }
             return;
         }
-        String swingLabel = label + " Animation.Swing";
+        String swingLabel = label + " Worker.Animation.Swing";
         if (swing.getIntervalMs() == null || swing.getIntervalMs() <= 0) {
             out.add(Finding.error(DOMAIN, "NONPOSITIVE_SWING_INTERVAL",
                     swingLabel + " has a null or nonpositive IntervalMs - the swing timer stays off", id));
@@ -2277,11 +2502,15 @@ public final class StationValidator {
                     swingLabel + " has an IntervalMs under 250ms (sound spam; faster than any vanilla swing clip)", id));
         }
         if (animation.getEmoteId() == null || animation.getEmoteId().isBlank()) {
-            out.add(Finding.warning(DOMAIN, "SWING_WITHOUT_EMOTE",
-                    swingLabel + " is authored with no Animation.EmoteId (legal - pure ambience - but usually an authoring mistake)", id));
+            // ADVISORY, not a mistake: a swing with no EmoteId is the Action-slot route, which is
+            // the normal authoring choice (EmoteId is the opt-in full-body override). The note
+            // states which clip actually plays, since that depends on how the worker is held.
+            out.add(Finding.info(DOMAIN, "SWING_WITHOUT_EMOTE",
+                    swingLabel + " authors no Animation.EmoteId: a SEAT-mounted or PUPPET worker rides"
+                            + " the Action-slot clip against the held item's own animation set"
+                            + " (Animation.ActionClip, defaulting to 'Chop'), while an effect-mode"
+                            + " session plays no clip at all and the swing is a pure sound/particle cue", id));
         }
-        warnUnplayedPresentationLeaves(swing.getPresentation(), swingLabel + ".Presentation", id,
-                "SWING_UNPLAYED_LEAVES", out);
         checkNativeRefs(swing.getPresentation(), swingLabel + ".Presentation", id, out);
         checkImpact(swing, swingLabel, id, out);
     }
@@ -2304,37 +2533,32 @@ public final class StationValidator {
             out.add(Finding.warning(DOMAIN, "IMPACT_WITHOUT_PRESENTATION",
                     impactLabel + " is authored with no Presentation - the delay has nothing to play", id));
         }
-        warnUnplayedPresentationLeaves(impact.getPresentation(), impactLabel + ".Presentation", id,
-                "IMPACT_UNPLAYED_LEAVES", out);
         checkNativeRefs(impact.getPresentation(), impactLabel + ".Presentation", id, out);
     }
 
-    private static void checkCamera(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
-                                    @Nonnull List<Finding> out) {
-        StationAsset.Camera camera = a.getCamera();
+    private static void checkCamera(@Nullable StationAsset.Camera camera, @Nullable StationAsset.Hold hold,
+                                    @Nonnull String id, @Nonnull String label, @Nonnull List<Finding> out) {
         if (camera == null) {
             return;
         }
-        boolean faceBlock = camera.getFaceBlock() != null && camera.getFaceBlock();
-        boolean cameraOff = camera.getMode() != null && "None".equalsIgnoreCase(camera.getMode());
-        if (faceBlock && cameraOff) {
-            out.add(Finding.warning(DOMAIN, "FACE_BLOCK_WITHOUT_CAMERA",
-                    label + " authors Camera.FaceBlock true with Camera.Mode \"None\" - the leaf can never take effect", id));
+        boolean fixedLook = camera.hasRecipe();
+        if (fixedLook && !camera.effectiveEnabled()) {
+            out.add(Finding.warning(DOMAIN, "CAMERA_RECIPE_WITHOUT_CAMERA",
+                    label + " authors a Camera.Recipe with Camera.Enabled false - the fixed look can never take effect", id));
         }
         String recipe = camera.getRecipe();
-        if (recipe != null && !recipe.isBlank()
-                && StationCameraPreset.fromId(recipe) == null) {
+        if (fixedLook && StationCameraPreset.fromId(recipe) == null) {
             out.add(Finding.warning(DOMAIN, "UNKNOWN_CAMERA_RECIPE",
                     label + " authors Camera.Recipe '" + recipe
-                            + "' which is not a known StationCameraPreset id - falls back to 'look_rot' at runtime", id));
+                            + "' which is not a known camera preset id - falls back to '"
+                            + StationCameraPreset.LOOK_ROT.id() + "' at runtime", id));
         }
-        StationAsset.Hold hold = a.getHold();
         StationAsset.Hold.Mount mount = hold != null ? hold.getMount() : null;
-        if (mount != null && faceBlock) {
+        if (mount != null && fixedLook) {
             out.add(Finding.warning(DOMAIN, "MOUNT_FACE_BLOCK_CONFLICT",
-                    label + " authors both Hold.Mount (a native Block or Entity mount) and Camera.FaceBlock"
-                            + " true - the mount already locks facing while keeping the camera free; the"
-                            + " packet-level FaceBlock lock on top is redundant (or conflicting) with it", id));
+                    label + " authors both Hold.Mount (a native Block or Entity mount) and a Camera.Recipe"
+                            + " fixed look - the mount already locks facing while keeping the camera free; the"
+                            + " packet-level look lock on top is redundant (or conflicting) with it", id));
         }
     }
 
@@ -2344,9 +2568,8 @@ public final class StationValidator {
      * runtime), and the untested {@code Steerable true} combo - all warn-only, per the maintainer
      * ruling ("validator warns on odd combos, never blocks").
      */
-    private static void checkMount(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
+    private static void checkMount(@Nullable StationAsset.Hold hold, @Nonnull String id, @Nonnull String label,
                                    @Nonnull List<Finding> out) {
-        StationAsset.Hold hold = a.getHold();
         StationAsset.Hold.Mount mount = hold != null ? hold.getMount() : null;
         if (mount == null) {
             return;
@@ -2374,11 +2597,9 @@ public final class StationValidator {
         }
     }
 
-    private static void checkCompletion(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
-                                        @Nonnull List<Finding> out) {
-        warnUnplayedPresentationLeaves(a.getCompletion(), label + ".Completion", id,
-                "COMPLETION_UNPLAYED_LEAVES", out);
-        checkNativeRefs(a.getCompletion(), label + ".Completion", id, out);
+    private static void checkCompletion(@Nullable Presentation completion, @Nonnull String id,
+                                        @Nonnull String label, @Nonnull List<Finding> out) {
+        checkNativeRefs(completion, label + " Moments.Completion", id, out);
     }
 
     /**
@@ -2435,8 +2656,6 @@ public final class StationValidator {
                         label + " Moments['" + momentId + "'] is not a recognized moment id (cycle/swing/impact/"
                                 + "rare_find/completion, or a step:<actionId>:<stepId> id) - check for a typo", id));
             }
-            warnUnplayedPresentationLeaves(entry.getValue(), label + ".Moments['" + momentId + "']", id,
-                    "FLAIR_UNPLAYED_LEAVES", out);
             checkNativeRefs(entry.getValue(), label + ".Moments['" + momentId + "']", id, out);
         }
     }
@@ -2473,114 +2692,155 @@ public final class StationValidator {
     }
 
     /**
-     * Multi-action station coverage (design section 9.1, scope-2 additions Ref/Anchors) - per
-     * table-entry structure: "warn on odd combos, never block" (every finding here is
-     * WARNING/INFO, never ERROR, matching the design's binding note). A station with no
-     * {@code Actions} map is a no-op call (nothing to iterate) - the implicit single-{@code "work"}
-     * -action path is validated entirely by the existing station-level checks above it. Delegates
-     * every per-body structural check (hasBody/Custody/Puppet/Anchors/Steps) to
-     * {@link #checkActionBody}, the SAME core {@link #validateActionAssets} uses for a standalone
-     * {@link ActionAsset}.
+     * The station's ORDERED {@code Actions} list: the id contract ({@code ACTION_MISSING_ID}/
+     * {@code ACTION_DUPLICATE_ID}), the selection-order contract ({@code UNREACHABLE_ACTION}/
+     * {@code AMBIGUOUS_ACTION_INPUT} - authored order IS priority, so a later action shadowed by an
+     * earlier one can never run), the {@code Ref} reference, and every per-body check via
+     * {@link #checkActionBody} (the SAME core {@link #validateActionAssets} runs on a standalone
+     * {@link ActionAsset}).
+     *
+     * <p><b>The one ERROR here</b> is a station with no actions at all: every group that makes a
+     * station DO something lives inside an action, so an empty list is an inert station rather than
+     * an odd combination, and the never-block posture does not extend to content that cannot run.
      */
     private static void checkActions(@Nonnull StationAsset a, @Nonnull String id, @Nonnull String label,
             @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
             @Nonnull Predicate<String> lootableKnown, @Nonnull Predicate<String> rollPoolKnown,
             @Nonnull Predicate<String> modelKnown, @Nonnull Predicate<String> stationKnown,
             @Nonnull Predicate<String> actionAssetKnown, @Nonnull List<Finding> out) {
-        Map<String, ActionDef> actions = a.getActions();
-        if (actions == null || actions.isEmpty()) {
+        ActionDef[] actions = a.getActions();
+        if (actions == null || actions.length == 0) {
+            out.add(Finding.error(DOMAIN, "STATION_NO_ACTIONS",
+                    label + " authors no Actions - every job a station offers lives in an action, so"
+                            + " this station can never run a cycle", id));
             return;
         }
         boolean sawCatchAll = false;
+        Set<String> seenActionIds = new HashSet<>();
         Set<String> seenItemIds = new HashSet<>();
         Set<String> seenResourceTypeIds = new HashSet<>();
-        for (Map.Entry<String, ActionDef> entry : actions.entrySet()) {
-            String actionId = entry.getKey() == null || entry.getKey().isBlank() ? "(unnamed)" : entry.getKey();
-            ActionDef def = entry.getValue();
-            String actionLabel = label + " Actions['" + actionId + "']";
+        for (int index = 0; index < actions.length; index++) {
+            ActionDef def = actions[index];
+            String actionId = ActionResolver.effectiveActionId(def, index);
+            String actionLabel = label + " Actions[" + actionId + "]";
             if (def == null) {
                 out.add(Finding.warning(DOMAIN, "EMPTY_ACTION_ENTRY", actionLabel + " has no body", id));
                 continue;
+            }
+            if (def.getId() == null || def.getId().isBlank()) {
+                out.add(Finding.warning(DOMAIN, "ACTION_MISSING_ID",
+                        actionLabel + " authors no Id - the engine falls back to its Ref id or its"
+                                + " position, but only an explicit Id can be targeted by an Extension"
+                                + " or a step insertion", id));
+            }
+            if (!seenActionIds.add(actionId.toLowerCase(Locale.ROOT))) {
+                out.add(Finding.warning(DOMAIN, "ACTION_DUPLICATE_ID",
+                        actionLabel + " repeats an earlier action's Id - ids match case-insensitively,"
+                                + " so every lookup resolves the FIRST one and this entry is unreachable", id));
             }
             if (def.hasRef() && !actionAssetKnown.test(def.getRef().toLowerCase(Locale.ROOT))) {
                 out.add(Finding.warning(DOMAIN, "ACTION_REF_UNKNOWN",
                         actionLabel + " Ref '" + def.getRef() + "' does not resolve to a known ActionAsset - "
                                 + "engage will deny with ui.station.action_unavailable", id));
             }
-            ActionInput input = def.getInput();
-            boolean catchAll = input == null || input.isCatchAll();
+            ActionInput select = def.getSelect();
+            boolean catchAll = select == null || select.isCatchAll();
             if (catchAll) {
                 if (sawCatchAll) {
                     out.add(Finding.warning(DOMAIN, "UNREACHABLE_ACTION",
-                            actionLabel + " authors no Input matcher (or an all-blank one) AFTER an earlier"
-                                    + " catch-all action - selection resolves 'first match wins', so this"
-                                    + " action can never be reached", id));
+                            actionLabel + " authors no Select matcher (or an all-blank one) AFTER an"
+                                    + " earlier catch-all action - authored order IS selection priority,"
+                                    + " so this action can never be reached", id));
                 }
                 sawCatchAll = true;
             } else {
-                // AMBIGUOUS_ACTION_INPUT (design 9.1): an exact ItemId/ResourceTypeId collision
-                // with an EARLIER action - "first match wins" means this action's matching route
-                // is unreachable via that exact id (a Tags/Function overlap is not flagged - too
-                // fuzzy to call an authoring mistake outright, so this stays a targeted check).
-                String itemId = input.getItemId();
+                // AMBIGUOUS_ACTION_INPUT: an exact ItemId/ResourceTypeId collision with an EARLIER
+                // action - "first match wins" means this action's matching route is unreachable via
+                // that exact id (a Tags/Function overlap is not flagged - too fuzzy to call an
+                // authoring mistake outright, so this stays a targeted check).
+                String itemId = select.getItemId();
                 if (itemId != null && !itemId.isBlank() && !seenItemIds.add(itemId.toLowerCase(Locale.ROOT))) {
                     out.add(Finding.warning(DOMAIN, "AMBIGUOUS_ACTION_INPUT",
-                            actionLabel + " Input.ItemId '" + itemId + "' repeats an earlier action's exact"
+                            actionLabel + " Select.ItemId '" + itemId + "' repeats an earlier action's exact"
                                     + " ItemId - 'first match wins' makes this route unreachable via that id", id));
                 }
-                String resourceTypeId = input.getResourceTypeId();
+                String resourceTypeId = select.getResourceTypeId();
                 if (resourceTypeId != null && !resourceTypeId.isBlank()
                         && !seenResourceTypeIds.add(resourceTypeId.toLowerCase(Locale.ROOT))) {
                     out.add(Finding.warning(DOMAIN, "AMBIGUOUS_ACTION_INPUT",
-                            actionLabel + " Input.ResourceTypeId '" + resourceTypeId + "' repeats an earlier"
+                            actionLabel + " Select.ResourceTypeId '" + resourceTypeId + "' repeats an earlier"
                                     + " action's exact ResourceTypeId - 'first match wins' makes this route"
                                     + " unreachable via that id", id));
                 }
             }
-            String function = input != null ? input.getFunction() : null;
+            String function = select != null ? select.getFunction() : null;
             if (function != null && !function.isBlank() && !isKnownFunction(function)) {
                 out.add(Finding.warning(DOMAIN, "UNKNOWN_ACTION_FUNCTION",
-                        actionLabel + " Input.Function '" + function
+                        actionLabel + " Select.Function '" + function
                                 + "' is not one of Weapon/Armor/Tool", id));
             }
 
-            Puppet resolvedPuppet = def.getPuppet() != null ? def.getPuppet() : a.getPuppet();
-            StationAsset.Hold effectiveHold = def.getHold() != null ? def.getHold() : a.getHold();
-            StationAsset.Recipe effectiveRecipe = def.getRecipe() != null ? def.getRecipe() : a.getRecipe();
-            checkActionBody(def, resolvedPuppet, effectiveHold, effectiveRecipe, actionLabel, id,
-                    dropListKnown, factorKnown, lootableKnown, rollPoolKnown, modelKnown, stationKnown, out);
+            checkActionBody(def, actionLabel, id, dropListKnown, factorKnown, lootableKnown, rollPoolKnown,
+                    modelKnown, stationKnown, out);
         }
     }
 
     /**
-     * The per-action BODY structural core (scope-2), shared by an inline {@code Actions} map
-     * entry ({@link #checkActions}) AND a standalone {@link ActionAsset} ({@link
-     * #validateActionAssets}) - one check, two authoring sites. {@code resolvedPuppet}/
-     * {@code effectiveHold}/{@code effectiveRecipeForCustody} are the CALLER's already-resolved
-     * groups (a station-map entry falls back to the station's own group; a standalone action has
-     * no fallback - it IS the base), so this method never re-derives a fallback itself.
+     * The per-action BODY core, shared by an inline {@code Actions} entry ({@link #checkActions}) AND
+     * a standalone {@link ActionAsset} ({@link #validateActionAssets}) - one check, two authoring
+     * sites. An action is SELF-CONTAINED, so every group it is checked against is its own; there is
+     * no caller-resolved fallback to thread in any more.
      */
-    private static void checkActionBody(@Nonnull ActionDef def, @Nullable Puppet resolvedPuppet,
-            @Nullable StationAsset.Hold effectiveHold, @Nullable StationAsset.Recipe effectiveRecipeForCustody,
-            @Nonnull String actionLabel, @Nonnull String id,
+    private static void checkActionBody(@Nonnull ActionDef def, @Nonnull String actionLabel, @Nonnull String id,
             @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
             @Nonnull Predicate<String> lootableKnown, @Nonnull Predicate<String> rollPoolKnown,
             @Nonnull Predicate<String> modelKnown, @Nonnull Predicate<String> stationKnown,
             @Nonnull List<Finding> out) {
-        boolean hasBody = def.hasRef() || def.getRecipe() != null || (def.getSteps() != null && def.getSteps().length > 0);
+        boolean hasBody = def.hasRef() || def.getRecipe() != null
+                || (def.getSteps() != null && def.getSteps().length > 0);
         if (!hasBody) {
             out.add(Finding.warning(DOMAIN, "ACTION_NO_BODY",
-                    actionLabel + " authors neither Ref, Recipe (for the implicit convert-loop program), nor"
-                            + " Steps - this action can never run a cycle", id));
+                    actionLabel + " authors neither Ref, Recipe (for the implicit convert-loop program),"
+                            + " nor Steps - this action can never run a cycle", id));
         }
-        if (def.getLoot() != null) {
-            checkLootRef(def.getLoot(), id, actionLabel + ".Loot", dropListKnown, factorKnown, lootableKnown, out);
+        ActionDef.Worker worker = def.getWorker();
+        ActionDef.Moments moments = def.getMoments();
+        StationAsset.Hold hold = worker != null ? worker.getHold() : null;
+        StationAsset.Animation animation = worker != null ? worker.getAnimation() : null;
+
+        // An action running an authored Steps program has no single cycle output, so a
+        // Grants.OutputItems anywhere under it is dropped at runtime - see checkGrants. Read off the
+        // EFFECTIVE program (its own Steps, else the Ref'd ActionAsset base's, the runtime's own
+        // rule) rather than the entry's own array: an inline entry that Refs a stepped action and
+        // overrides only Bonus runs that program too, and used to escape this warning entirely.
+        StationStep[] effectiveSteps = ActionResolver.effectiveStepsOf(def);
+        boolean noCycleOutput = effectiveSteps != null && effectiveSteps.length > 0;
+
+        checkRecipe(def.getRecipe(), id, actionLabel, out);
+        checkWork(def.getWork(), id, actionLabel, out);
+        checkToolGroup(def.getTool(), id, actionLabel + " Tool", out);
+        checkRequiresGroup(def.getRequires(), id, actionLabel + " Requires", factorKnown, out);
+        if (def.getBonus() != null) {
+            checkLootRef(def.getBonus(), id, actionLabel + " Bonus", noCycleOutput, dropListKnown, factorKnown,
+                    lootableKnown, out);
+        }
+        if (def.getContributionScale() != null) {
+            checkContributionScale(def.getContributionScale(), id, actionLabel + " ContributionScale",
+                    factorKnown, out);
         }
         if (def.getCustody() != null) {
-            checkCustody(def.getCustody(), effectiveRecipeForCustody, false, actionLabel, id, out);
+            checkCustody(def.getCustody(), def.getRecipe(), false, actionLabel, id, out);
         }
-        if (def.getPuppet() != null) {
-            checkPuppet(def.getPuppet(), effectiveHold, actionLabel, id, modelKnown, out);
+        if (worker != null) {
+            checkAnimation(animation, id, actionLabel, out);
+            checkPresentationRefs(animation, hold, moments != null ? moments.getCycle() : null,
+                    id, actionLabel, out);
+            checkCamera(worker.getCamera(), hold, id, actionLabel, out);
+            checkMount(hold, id, actionLabel, out);
+            checkPuppet(worker.getPuppet(), hold, actionLabel, id, modelKnown, out);
+        }
+        if (moments != null) {
+            checkCompletion(moments.getCompletion(), id, actionLabel, out);
         }
         checkAnchorsMap(def.getAnchors(), actionLabel, id, stationKnown, out);
         Set<String> knownAnchorIds = new HashSet<>();
@@ -2593,7 +2853,8 @@ public final class StationValidator {
         }
         StationStep[] steps = def.getSteps();
         if (steps != null && steps.length > 0) {
-            boolean puppetActive = resolvedPuppet != null && resolvedPuppet.effectiveEnabled();
+            Puppet puppet = worker != null ? worker.getPuppet() : null;
+            boolean puppetActive = puppet != null && puppet.effectiveEnabled();
             checkSteps(steps, actionLabel, id, dropListKnown, factorKnown, lootableKnown, rollPoolKnown,
                     puppetActive, knownAnchorIds, out);
         }
@@ -2644,14 +2905,13 @@ public final class StationValidator {
      * unknown sibling step id, a per-step {@code Puppet} override), then EVERY phase group present
      * on the step: {@code Consume}/{@code Produce} emptiness, a {@code Roll} phase's inline
      * {@link Roll}s through the SAME shared {@link #checkRoll} core every other Roll site uses (via
-     * {@link #checkLootRef}), a {@code Repeat.AddFactors}/{@code Walk} check, and (design 9.5) a
+     * {@link #checkLootRef}), a {@code Repeat.Factors}/{@code Walk} check, and (design 9.5) a
      * {@code Stamp} phase's own coverage. Also flags {@code WALK_TARGET_UNKNOWN_ANCHOR}/
      * {@code STEP_AT_UNKNOWN_ANCHOR} (a {@code Walk.To}/{@code At} not matching {@code
      * knownAnchorIds} or the reserved {@code "self"}), and {@code WALK_REQUIRES_PUPPET} (any step
      * authoring {@code Walk} when the resolved Puppet is not active - flagged once per action).
-     * The multi-station seam (Walk/At/Produce.To:Custody) EXECUTES as of wave 3, so there is no
-     * longer a {@code WAVE3_PENDING}-style warn gating those phases - {@link
-     * StationStep#authorsWave3OnlyPhase()} is unused here now.
+     * The multi-station seam (Walk/At/Produce.To:Custody) EXECUTES, so there is no
+     * warn gating those phases; the anchor/walk checks above are the live coverage.
      */
     private static void checkSteps(@Nonnull StationStep[] steps,
             @Nonnull String actionLabel, @Nonnull String id, @Nonnull Predicate<String> dropListKnown,
@@ -2707,7 +2967,7 @@ public final class StationValidator {
 
             StationStep.Repeat repeat = step.getRepeat();
             if (repeat != null) {
-                checkFactorRefs(repeat.getAddFactors(), stepLabel + ".Repeat.AddFactors", id, factorKnown, out);
+                checkFactorRefs(repeat.getFactors(), stepLabel + ".Repeat.Factors", id, factorKnown, out);
             }
 
             StationStep.Walk walk = step.getWalk();
@@ -2777,7 +3037,8 @@ public final class StationValidator {
             }
             LootRef roll = step.getRoll();
             if (roll != null) {
-                checkLootRef(roll, id, stepLabel + ".Roll", dropListKnown, factorKnown, lootableKnown, out);
+                // Always true here: this walk only runs for an action that authors a Steps program.
+                checkLootRef(roll, id, stepLabel + ".Roll", true, dropListKnown, factorKnown, lootableKnown, out);
             }
             StationStep.Stamp stamp = step.getStamp();
             if (stamp != null) {
@@ -2802,7 +3063,7 @@ public final class StationValidator {
      * A Stamp phase's own coverage (design 9.5, scope-2 3.8's {@code Budgets[]} reshape): no
      * {@code Reagents} (a free ritual - warn, not an error, some future station may genuinely want
      * that), a {@code Stats.Pool} reference to an unknown {@code RollPool}, each inline entry's
-     * {@code Points.AddFactors} through the shared {@link #checkFactorRefs} core, and each
+     * {@code Points.Factors} through the shared {@link #checkFactorRefs} core, and each
      * {@code Caps.Budgets[]} entry: {@code STAMP_BUDGET_BAD_ROUTE} when neither/both of the
      * exactly-one-of {@code {Points}}/{@code {PointsPer,Factors}} routes are authored (see {@link
      * StationStep.Stamp.Stats.Caps.Budget#hasExactlyOneRoute()}'s own javadoc), {@code
@@ -2842,8 +3103,8 @@ public final class StationValidator {
             for (int i = 0; i < entries.length; i++) {
                 StatRollEntry e = entries[i];
                 if (e != null && e.getPoints() != null) {
-                    checkFactorRefs(e.getPoints().getAddFactors(),
-                            stepLabel + ".Stats.Entries[" + i + "].Points.AddFactors", id, factorKnown, out);
+                    checkFactorRefs(e.getPoints().getFactors(),
+                            stepLabel + ".Stats.Entries[" + i + "].Points.Factors", id, factorKnown, out);
                 }
             }
         }
@@ -2884,26 +3145,6 @@ public final class StationValidator {
         }
     }
 
-    /**
-     * Shared leaf check: station-scale playback ({@code StationService.emitMoment}) renders
-     * {@code Sound} + {@code Particles} + {@code Shake} + the two native-composition groups - see
-     * that method's javadoc - so an authored {@code Animation}/{@code AnimationItem}/
-     * {@code AnimationSlot}/{@code CameraEffect} leaf is dead weight.
-     */
-    private static void warnUnplayedPresentationLeaves(@Nullable Presentation p, @Nonnull String label,
-                                                        @Nonnull String id, @Nonnull String code,
-                                                        @Nonnull List<Finding> out) {
-        if (p == null) {
-            return;
-        }
-        boolean hasUnplayedLeaf = notBlank(p.getAnimation()) || notBlank(p.getAnimationItem())
-                || notBlank(p.getAnimationSlot()) || notBlank(p.getCameraEffect());
-        if (hasUnplayedLeaf) {
-            out.add(Finding.warning(DOMAIN, code,
-                    label + " authors an Animation/AnimationItem/AnimationSlot/CameraEffect leaf;"
-                            + " station-scale playback renders Sound + Particles + Shake only", id));
-        }
-    }
 
     private static boolean notBlank(@Nullable String s) {
         return s != null && !s.isBlank();

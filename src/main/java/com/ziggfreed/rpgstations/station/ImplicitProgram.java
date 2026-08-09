@@ -17,16 +17,16 @@ import com.ziggfreed.rpgstations.asset.StationStep;
  * {@code [Consume, Produce, Roll, Present]} array onto a single step - byte-equivalent behavior
  * (the phases execute in the SAME order the composite handler walks: {@code Consume} -&gt;
  * {@code Produce} -&gt; {@code Roll} -&gt; {@code Presentation}), a simpler anchor for the phase
- * model. The shipped sawmill (no {@code Actions} map authored at all) resolves to this SAME shape
- * via {@code ActionResolver}'s implicit {@code "work"} action, so {@code StationService#runRealCycle}
- * runs through ONE engine (the {@code station.step} kernel) whether a station authors a step program
- * or not - "one engine, no dual path".
+ * model. An action that authors no {@code Steps} resolves to this SAME shape from its own
+ * {@code Recipe}, so {@code StationService#runRealCycle} runs through ONE engine (the
+ * {@code station.step} kernel) whether an action authors a step program or not - "one engine, no
+ * dual path".
  *
  * <p>Zero engine/store touch - takes only already-resolved value objects
  * ({@link StationStep.Consume}/{@link StationStep.Produce} built from a live {@code ConversionCheck}
  * pick, an already-{@code LootEngine.resolveRolls}-resolved {@link Roll} array wrapped into a
- * {@link LootRef}, and the resolved action's cycle {@link Presentation}) so it is unit-testable
- * without a live server.
+ * {@link LootRef}, and the resolved action's {@code Moments.Cycle} {@link Presentation}) so it is
+ * unit-testable without a live server.
  */
 final class ImplicitProgram {
 
@@ -38,7 +38,7 @@ final class ImplicitProgram {
     /**
      * Build the single-step implicit program (a one-element list, so the dispatch choke point sees
      * the SAME {@code List<StationStep>} shape an authored program yields). {@code resolvedRolls}
-     * is the action's {@code Loot} group ALREADY resolved through {@code loot.LootEngine#resolveRolls}
+     * is the action's {@code Bonus} group ALREADY resolved through {@code loot.LootEngine#resolveRolls}
      * (Lootables + inline Rolls concatenated) - the {@code Roll} phase never re-resolves a
      * {@code LootRef.Lootables} reference, it only evaluates the inline array it is handed (mirroring
      * how an AUTHORED step's own inline {@code Rolls} works, so one Roll phase serves both origins).

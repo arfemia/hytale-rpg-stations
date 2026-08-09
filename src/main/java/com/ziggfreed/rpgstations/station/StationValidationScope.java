@@ -5,7 +5,6 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 import javax.annotation.Nonnull;
@@ -57,9 +56,9 @@ final class StationValidationScope implements ValidationScope {
 
     /**
      * Snapshots every folded catalog into one scope: each station's own {@code Loot} plus its
-     * inline actions' {@code Loot} and step {@code Roll} phases, each standalone
+     * inline actions' {@code Bonus} and step {@code Roll} phases, each standalone
      * {@link ActionAsset}'s body, each {@link LootableAsset}'s table, and each
-     * {@link ExtensionAsset}'s appended loot / rolls / inserted steps.
+     * {@link ExtensionAsset}'s appended bonus / rolls / inserted steps.
      */
     @Nonnull
     static ValidationScope build(@Nonnull Collection<StationAsset> stationAssets,
@@ -73,7 +72,6 @@ final class StationValidationScope implements ValidationScope {
             }
             String owner = a.getId();
             String base = "Station[" + owner + "]";
-            collectLootRef(a.getLoot(), owner, base + ".Loot", out);
             collectActions(a.getActions(), owner, base, out);
         }
         for (ActionAsset act : actionAssets) {
@@ -94,7 +92,7 @@ final class StationValidationScope implements ValidationScope {
             }
             String owner = ext.getId();
             String base = "Extension[" + owner + "]";
-            collectLootRef(ext.getLoot(), owner, base + ".Loot", out);
+            collectLootRef(ext.getBonus(), owner, base + ".Bonus", out);
             collectRolls(ext.getRolls(), owner, base + ".Rolls", out);
             collectActions(ext.getActions(), owner, base, out);
             ExtensionAsset.StepInsertion[] insertions = ext.getSteps();
@@ -110,14 +108,15 @@ final class StationValidationScope implements ValidationScope {
         return new StationValidationScope(out, RpgStationsApiImpl.getInstance().stations());
     }
 
-    private static void collectActions(@Nullable Map<String, ActionDef> actions, @Nonnull String owner,
+    private static void collectActions(@Nullable ActionDef[] actions, @Nonnull String owner,
             @Nonnull String base, @Nonnull List<RollView> out) {
         if (actions == null) {
             return;
         }
-        for (Map.Entry<String, ActionDef> e : actions.entrySet()) {
-            if (e.getKey() != null && e.getValue() != null) {
-                collectActionDef(e.getValue(), owner, base + ".Actions[" + e.getKey() + "]", out);
+        for (int i = 0; i < actions.length; i++) {
+            if (actions[i] != null) {
+                collectActionDef(actions[i], owner,
+                        base + ".Actions[" + ActionResolver.effectiveActionId(actions[i], i) + "]", out);
             }
         }
     }
@@ -127,7 +126,7 @@ final class StationValidationScope implements ValidationScope {
         if (def == null) {
             return;
         }
-        collectLootRef(def.getLoot(), owner, base + ".Loot", out);
+        collectLootRef(def.getBonus(), owner, base + ".Bonus", out);
         collectSteps(def.getSteps(), owner, base + ".Steps", out);
     }
 
@@ -185,7 +184,7 @@ final class StationValidationScope implements ValidationScope {
         @Nonnull private final List<FactorRefView> factors;
         @Nullable private final Double chanceBasePercent;
         @Nullable private final Double chanceCapPercent;
-        @Nonnull private final List<FactorRefView> ladderValues;
+        @Nonnull private final List<FactorRefView> ladderFactors;
         @Nonnull private final List<LadderFloorView> ladderFloors;
         @Nonnull private final List<StationContribution> contributions;
         @Nonnull private final Set<String> contributionChannels;
@@ -200,10 +199,10 @@ final class StationValidationScope implements ValidationScope {
             this.chanceCapPercent = chance != null ? chance.getCapPercent() : null;
 
             Roll.Ladder ladder = roll.getLadder();
-            this.ladderValues = viewFactorRefs(ladder != null ? ladder.getValues() : null);
+            this.ladderFactors = viewFactorRefs(ladder != null ? ladder.getFactors() : null);
 
-            // The FLATTENED union, in the documented order: Conditions, then Chance.AddFactors,
-            // then Ladder.Values - the walk order a double-count lint reads as authoring order.
+            // The FLATTENED union, in the documented order: Conditions, then Chance.Factors,
+            // then Ladder.Factors - the walk order a double-count lint reads as authoring order.
             List<FactorRefView> flat = new ArrayList<>();
             Condition[] conditions = roll.getConditions();
             if (conditions != null) {
@@ -214,8 +213,8 @@ final class StationValidationScope implements ValidationScope {
                     }
                 }
             }
-            flat.addAll(viewFactorRefs(chance != null ? chance.getAddFactors() : null));
-            flat.addAll(this.ladderValues);
+            flat.addAll(viewFactorRefs(chance != null ? chance.getFactors() : null));
+            flat.addAll(this.ladderFactors);
             this.factors = List.copyOf(flat);
 
             List<StationContribution> top = viewContributions(
@@ -313,8 +312,8 @@ final class StationValidationScope implements ValidationScope {
 
         @Override
         @Nonnull
-        public List<FactorRefView> ladderValues() {
-            return ladderValues;
+        public List<FactorRefView> ladderFactors() {
+            return ladderFactors;
         }
 
         @Override
