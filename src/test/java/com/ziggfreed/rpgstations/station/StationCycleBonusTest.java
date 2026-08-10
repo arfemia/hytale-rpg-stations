@@ -109,7 +109,7 @@ class StationCycleBonusTest {
         List<Roll> rolls = StationService.effectiveBonusRolls(station,
                 ActionResolver.resolve(station, "Enhance"));
         LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, snapshot(),
-                NULL_PLAYER, null, "fixtureritual", "Enhance", 1, NULL_STORE, 0, 0, 0);
+                NULL_PLAYER, null, "fixtureritual", "Enhance", 1, null, NULL_STORE, 0, 0, 0);
 
         assertEquals(1, result.getContributions().size(), "exactly the Cycle-trigger roll granted");
         assertEquals("ALPHA", result.getContributions().get(0).getParam());
@@ -125,7 +125,7 @@ class StationCycleBonusTest {
         s.stationId = "fixtureritual";
         s.cycleOutputItemId = null;
 
-        StationService.grantBonusOutputItems(s, NULL_STORE, NULL_PLAYER, 3.0);
+        StationService.grantBonusOutputItems(s, NULL_STORE, null, NULL_PLAYER, 3.0);
 
         assertTrue(s.producedItems.isEmpty(), "nothing is produced when there is no cycle output");
         assertTrue(s.producedYield.isEmpty(), "and no yield-breakdown row is invented for it");
@@ -142,7 +142,7 @@ class StationCycleBonusTest {
         List<Roll> rolls = StationService.effectiveBonusRolls(station,
                 ActionResolver.resolve(station, "Enhance"));
         LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, snapshot(),
-                NULL_PLAYER, null, "fixtureritual", "Enhance", 1, NULL_STORE, 0, 0, 0);
+                NULL_PLAYER, null, "fixtureritual", "Enhance", 1, null, NULL_STORE, 0, 0, 0);
 
         assertEquals(2.0, result.getOutputItems());
         assertFalse(result.getDropListItems().containsKey("Fixture_Plank"),

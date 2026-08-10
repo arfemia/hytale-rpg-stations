@@ -11,6 +11,7 @@ import java.util.function.DoubleSupplier;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
@@ -222,13 +223,14 @@ public final class LootEngine {
     public static GrantResult rollAndGrant(@Nonnull List<Roll> rolls, @Nonnull String trigger,
             @Nonnull FactorSnapshot snapshot, @Nonnull Player player,
             @Nullable PlayerRef playerRef, @Nonnull String stationId, @Nonnull String actionId, int cycleIndex,
+            @Nullable CommandBuffer<EntityStore> commandBuffer,
             @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
         CommandRewardExecutor.Placeholders placeholders = playerRef != null
                 ? CommandRewardExecutor.Placeholders.of(playerRef, stationId, actionId, cycleIndex)
                 : null;
         return rollAndGrant(rolls, trigger, snapshot::resolve,
                 () -> ThreadLocalRandom.current().nextDouble(100.0), placeholders,
-                id -> rollAndGrantDropList(id, player, store, blockX, blockY, blockZ));
+                id -> rollAndGrantDropList(id, player, commandBuffer, store, blockX, blockY, blockZ));
     }
 
     /**
@@ -393,6 +395,7 @@ public final class LootEngine {
      */
     @Nonnull
     private static Map<String, Integer> rollAndGrantDropList(@Nonnull String dropListId, @Nonnull Player player,
+            @Nullable CommandBuffer<EntityStore> commandBuffer,
             @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
         List<ItemStack> drops;
         try {
@@ -407,8 +410,14 @@ public final class LootEngine {
         Map<String, Integer> landed = new LinkedHashMap<>();
         for (ItemStack stack : drops) {
             try {
-                ItemGrantUtil.grant(player, stack, store, blockX, blockY, blockZ);
-                landed.merge(stack.getItemId(), stack.getQuantity(), Integer::sum);
+                // Read the quantity BEFORE granting, and record it only when the stack actually
+                // reached the player - inventory, or the ground when it was full. A stack that
+                // went nowhere no longer exists, so counting it here would tell the player they
+                // found something they never received and inflate the session summary with it.
+                int quantity = stack.getQuantity();
+                if (ItemGrantUtil.grantOrDrop(player, stack, commandBuffer, store, blockX, blockY, blockZ)) {
+                    landed.merge(stack.getItemId(), quantity, Integer::sum);
+                }
             } catch (Throwable t) {
                 Log.fine("STATION loot droplist item grant failed: " + t.getMessage());
             }

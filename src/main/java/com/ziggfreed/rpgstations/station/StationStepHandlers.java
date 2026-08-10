@@ -568,7 +568,7 @@ final class StationStepHandlers {
         try {
             for (Ingredient item : items) {
                 int quantity = item.effectiveQuantity();
-                ItemGrantUtil.grant(ctx.player, new ItemStack(item.getItemId(), quantity), ctx.store,
+                ItemGrantUtil.grant(ctx.player, new ItemStack(item.getItemId(), quantity), ctx.commandBuffer, ctx.store,
                         ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
                 ctx.session.producedItems.merge(item.getItemId(), quantity, Integer::sum);
                 if (ctx.session.playerRef != null) {
@@ -611,9 +611,9 @@ final class StationStepHandlers {
         }
         LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, ctx.snapshot,
                 ctx.player, ctx.session.playerRef, ctx.session.stationId,
-                ctx.action.getActionId(), ctx.cycleIndex, ctx.store,
+                ctx.action.getActionId(), ctx.cycleIndex, ctx.commandBuffer, ctx.store,
                 ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
-        StationService.applyGrantResult(ctx.session, ctx.store, ctx.player, result);
+        StationService.applyGrantResult(ctx.session, ctx.store, ctx.commandBuffer, ctx.player, result);
         return null;
     }
 
@@ -812,7 +812,7 @@ final class StationStepHandlers {
             for (ItemStack restore : toRestore) {
                 if (restore != null) {
                     try {
-                        ItemGrantUtil.grant(ctx.player, restore, ctx.store,
+                        ItemGrantUtil.grant(ctx.player, restore, ctx.commandBuffer, ctx.store,
                                 ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
                     } catch (Throwable restoreFailure) {
                         Log.warn("STAMP restore failed for '" + restore.getItemId() + "': " + restoreFailure.getMessage());

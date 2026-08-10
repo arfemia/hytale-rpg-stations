@@ -1287,7 +1287,7 @@ public final class StationService {
         // event, so a granted Roll.Grants.Contributions rides THIS cycle's event exactly as it does
         // on the implicit route (where the Roll phase ran inside the walk that just finished).
         if (bonusAtCompletion) {
-            rollCycleBonus(s, store, asset, action, player, snapshot, attemptCycleIndex);
+            rollCycleBonus(s, store, commandBuffer, asset, action, player, snapshot, attemptCycleIndex);
         }
         // The action's ContributionScale ladder, resolved against the SAME snapshot this dispatch
         // pass already built - one factor aggregation, every consumer.
@@ -1578,6 +1578,7 @@ public final class StationService {
      * floor's presentation - now applies.
      */
     private static void rollCycleBonus(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nullable CommandBuffer<EntityStore> commandBuffer,
             @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
             @Nonnull FactorSnapshot snapshot, int cycleIndex) {
         List<Roll> rolls = effectiveBonusRolls(asset, action);
@@ -1585,8 +1586,9 @@ public final class StationService {
             return;
         }
         LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, snapshot, player,
-                s.playerRef, s.stationId, action.getActionId(), cycleIndex, store, s.blockX, s.blockY, s.blockZ);
-        applyGrantResult(s, store, player, result);
+                s.playerRef, s.stationId, action.getActionId(), cycleIndex, commandBuffer, store,
+                s.blockX, s.blockY, s.blockZ);
+        applyGrantResult(s, store, commandBuffer, player, result);
     }
 
     /**
@@ -1595,7 +1597,8 @@ public final class StationService {
      * session's item ledger. Reads the SESSION's own action - the same {@code Bonus} group the
      * per-cycle pass reads, just filtered to the {@code Completion} trigger.
      */
-    private void rollCompletionLoot(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
+    private void rollCompletionLoot(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nullable CommandBuffer<EntityStore> commandBuffer) {
         StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
         if (asset == null || s.actionId == null) {
             return;
@@ -1611,8 +1614,9 @@ public final class StationService {
         }
         FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, action, s.cyclesDone));
         LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_COMPLETION, snapshot, player,
-                s.playerRef, s.stationId, s.actionId, s.cyclesDone, store, s.blockX, s.blockY, s.blockZ);
-        applyGrantResult(s, store, player, result);
+                s.playerRef, s.stationId, s.actionId, s.cyclesDone, commandBuffer, store,
+                s.blockX, s.blockY, s.blockZ);
+        applyGrantResult(s, store, commandBuffer, player, result);
     }
 
     /**
@@ -1624,11 +1628,12 @@ public final class StationService {
      * toasts (design 4.5.1), which no longer fire from here.
      */
     static void applyGrantResult(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nullable CommandBuffer<EntityStore> commandBuffer,
             @Nullable Player player, @Nonnull LootEngine.GrantResult result) {
         if (!result.anyGranted()) {
             return;
         }
-        grantBonusOutputItems(s, store, player, result.getOutputItems());
+        grantBonusOutputItems(s, store, commandBuffer, player, result.getOutputItems());
         for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
             s.luckItems.merge(e.getKey(), e.getValue(), Integer::sum);
         }
@@ -1698,7 +1703,7 @@ public final class StationService {
      * fail quietly instead of grabbing a stale one.
      */
     static void grantBonusOutputItems(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
-            @Nullable Player player, double tally) {
+            @Nullable CommandBuffer<EntityStore> commandBuffer, @Nullable Player player, double tally) {
         int count = OutputItemResolver.resolve(tally, () -> ThreadLocalRandom.current().nextDouble());
         if (count <= 0) {
             return;
@@ -1709,7 +1714,13 @@ public final class StationService {
             return;
         }
         try {
-            ItemGrantUtil.grant(player, new ItemStack(itemId, count), store, s.blockX, s.blockY, s.blockZ);
+            if (!ItemGrantUtil.grantOrDrop(player, new ItemStack(itemId, count), commandBuffer, store,
+                    s.blockX, s.blockY, s.blockZ)) {
+                // Nowhere to put it and the ground drop failed too: the items do not exist, so
+                // they must not be tallied into the session summary as produced.
+                Log.warn("STATION bonus output lost - no inventory room and drop failed for '" + itemId + "'");
+                return;
+            }
         } catch (Throwable t) {
             Log.fine("STATION Bonus OutputItems grant failed: " + t.getMessage());
             return;
@@ -2419,7 +2430,7 @@ public final class StationService {
                 // The Completion-trigger loot pass runs BEFORE the summary so anything it grants
                 // still lands in the item ledger the summary renders (design section 4.5.1).
                 if (entityAlive && s.cyclesDone >= 1) {
-                    rollCompletionLoot(s, store);
+                    rollCompletionLoot(s, store, commandBuffer);
                 }
                 if (s.cyclesDone > 0) {
                     // Summary enrichers (design section 7.2/7.3) run INSIDE this call, before the
@@ -4110,9 +4121,9 @@ public final class StationService {
             ItemStack stack = new ItemStack(e.getKey(), e.getValue());
             try {
                 if (player != null) {
-                    ItemGrantUtil.grant(player, stack, ownerStore, s.blockX, s.blockY, s.blockZ);
+                    ItemGrantUtil.grant(player, stack, null, ownerStore, s.blockX, s.blockY, s.blockZ);
                 } else {
-                    ItemDropUtil.dropAtBlock(ownerStore, s.blockX, s.blockY, s.blockZ, List.of(stack));
+                    ItemDropUtil.dropAtBlock(null, ownerStore, s.blockX, s.blockY, s.blockZ, List.of(stack));
                 }
             } catch (Throwable t) {
                 Log.warn("STATION iteration refund failed for '" + e.getKey() + "': " + t.getMessage());
@@ -4461,7 +4472,7 @@ public final class StationService {
         List<ItemStack> landedInInventory = new ArrayList<>(stacks.size());
         for (ItemStack stack : stacks) {
             try {
-                if (ItemGrantUtil.grant(player, stack, ownerStore, blockX, blockY, blockZ)
+                if (ItemGrantUtil.grant(player, stack, null, ownerStore, blockX, blockY, blockZ)
                         != InventoryGrant.Landed.FALLBACK) {
                     landedInInventory.add(stack);
                 }
@@ -4703,7 +4714,7 @@ public final class StationService {
      */
     private static void dropCustodyAtBlock(@Nullable Store<EntityStore> store, int x, int y, int z,
             @Nonnull List<ItemStack> stacks) {
-        ItemDropUtil.dropAtBlock(store, x, y, z, stacks);
+        ItemDropUtil.dropAtBlock(null, store, x, y, z, stacks);
     }
 
     /**

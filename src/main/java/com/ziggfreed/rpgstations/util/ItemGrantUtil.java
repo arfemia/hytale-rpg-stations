@@ -3,6 +3,7 @@ package com.ziggfreed.rpgstations.util;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
@@ -48,8 +49,28 @@ public final class ItemGrantUtil {
      */
     @Nonnull
     public static InventoryGrant.Landed grant(@Nonnull Player player, @Nonnull ItemStack stack,
-            @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
+            @Nullable CommandBuffer<EntityStore> commandBuffer, @Nullable Store<EntityStore> store,
+            int blockX, int blockY, int blockZ) {
         return InventoryGrant.grant(player, stack,
-                dropped -> ItemDropUtil.dropAtBlock(store, blockX, blockY, blockZ, dropped));
+                dropped -> ItemDropUtil.dropAtBlock(commandBuffer, store, blockX, blockY, blockZ, dropped));
+    }
+
+    /**
+     * As {@link #grant}, but answers the question a caller actually needs before telling the player
+     * they received something: did this stack reach the player AT ALL?
+     *
+     * <p>{@code false} means it went nowhere - no inventory room and the ground drop failed too -
+     * so the item no longer exists and must not be counted, notified, or added to a session
+     * summary. The plain {@link #grant} overload cannot express that: its {@code FALLBACK} result
+     * only says the drop was ATTEMPTED, which is how a failed drop came to be reported to players
+     * as a successful find.
+     */
+    public static boolean grantOrDrop(@Nonnull Player player, @Nonnull ItemStack stack,
+            @Nullable CommandBuffer<EntityStore> commandBuffer, @Nullable Store<EntityStore> store,
+            int blockX, int blockY, int blockZ) {
+        boolean[] droppedOk = {false};
+        InventoryGrant.Landed landed = InventoryGrant.grant(player, stack,
+                dropped -> droppedOk[0] = ItemDropUtil.dropAtBlock(commandBuffer, store, blockX, blockY, blockZ, dropped));
+        return landed != InventoryGrant.Landed.FALLBACK || droppedOk[0];
     }
 }
