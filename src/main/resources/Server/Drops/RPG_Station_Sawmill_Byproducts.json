@@ -1,0 +1,28 @@
+{
+  "$Comment": "The offcuts a milled log gives up: fibre, bark, sap and sticks. This is the sawmill's byproduct VOCABULARY in one place - every find tier references it by id through a Droplist container rather than listing these items itself, so retuning what milling yields is a single edit here and every tier moves together. A pack can also override this file by id to reshape offcuts across the whole bench at once.\n\nThe container is Multiple, which resolves EVERY child independently rather than picking one, so a single roll can shake loose fibre and bark together - what milling a log actually feels like. Inside a Multiple, a child's Weight is its own PERCENT CHANCE (not a relative pick weight the way it is inside a Choice), so the four numbers below are read directly: fibre lands 45 percent of the time, bark 30, sap 20, sticks 25. They do not sum to 100 and are not meant to; each is its own coin flip. A roll therefore averages about 1.2 stacks and can occasionally hand over all four or nothing at all.\n\nFibre is the common one and sticks the incidental, which is why sticks carry the widest quantity range. Nothing here is rare: the essence a find tier pays alongside these is the prize, and these are the everyday material a working bench produces.\n\nA tier that should yield MORE offcuts references this list several times in its own Multiple rather than authoring bigger numbers, so the mix stays identical and only the volume changes.\n\nEvery weight and quantity here is initial balance and retunes freely without any engine change.",
+  "Container": {
+    "Type": "Multiple",
+    "Containers": [
+      {
+        "Type": "Single",
+        "Weight": 45,
+        "Item": { "ItemId": "Ingredient_Fibre", "QuantityMin": 1, "QuantityMax": 3 }
+      },
+      {
+        "Type": "Single",
+        "Weight": 30,
+        "Item": { "ItemId": "Ingredient_Tree_Bark", "QuantityMin": 1, "QuantityMax": 2 }
+      },
+      {
+        "Type": "Single",
+        "Weight": 20,
+        "Item": { "ItemId": "Ingredient_Tree_Sap", "QuantityMin": 1, "QuantityMax": 2 }
+      },
+      {
+        "Type": "Single",
+        "Weight": 25,
+        "Item": { "ItemId": "Ingredient_Stick", "QuantityMin": 1, "QuantityMax": 4 }
+      }
+    ]
+  }
+}

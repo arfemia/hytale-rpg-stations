@@ -1,28 +1,44 @@
 {
-  "$Comment": "The sawmill's deep-session find table (cycle 50 onward of SawmillFinds' ladder): a winning roll nearly always pays - 95 percent for 2 to 4 life essence, a rare 2 percent jackpot of one CONCENTRATED life essence (the trophy the tier's celebration cues announce), and only 3 percent nothing. The scarcity lives in the Roll's own 15 percent per-cycle chance, not inside this table. Weights sum to 100. A find is deliberately a DIFFERENT item from the cycle's own planks - extra planks are the station's Grants.OutputItems concern, never a drop table's.",
+  "$Comment": "The third find tier, from cycle 50 onward, which covers most of a long session. Offcuts double to two pulls from the shared byproduct list, and essence becomes near-certain on a winning roll (95 percent for 2 to 4) with a 2 percent chance of a single CONCENTRATED essence instead. The deep tier nearly always pays because its scarcity is carried by the parent roll's own 15 percent chance rather than by this table being stingy.",
   "Container": {
-    "Type": "Choice",
-    "RollsMin": 1,
-    "RollsMax": 1,
+    "Type": "Multiple",
     "Containers": [
-      { "Type": "Empty", "Weight": 3 },
       {
-        "Type": "Single",
-        "Weight": 95,
-        "Item": {
-          "ItemId": "Ingredient_Life_Essence",
-          "QuantityMin": 2,
-          "QuantityMax": 4
-        }
+        "Type": "Droplist",
+        "DroplistId": "RPG_Station_Sawmill_Byproducts"
       },
       {
-        "Type": "Single",
-        "Weight": 2,
-        "Item": {
-          "ItemId": "Ingredient_Life_Essence_Concentrated",
-          "QuantityMin": 1,
-          "QuantityMax": 1
-        }
+        "Type": "Droplist",
+        "DroplistId": "RPG_Station_Sawmill_Byproducts"
+      },
+      {
+        "Type": "Choice",
+        "RollsMin": 1,
+        "RollsMax": 1,
+        "Containers": [
+          {
+            "Type": "Empty",
+            "Weight": 3
+          },
+          {
+            "Type": "Single",
+            "Weight": 95,
+            "Item": {
+              "ItemId": "Ingredient_Life_Essence",
+              "QuantityMin": 2,
+              "QuantityMax": 4
+            }
+          },
+          {
+            "Type": "Single",
+            "Weight": 2,
+            "Item": {
+              "ItemId": "Ingredient_Life_Essence_Concentrated",
+              "QuantityMin": 1,
+              "QuantityMax": 1
+            }
+          }
+        ]
       }
     ]
   }

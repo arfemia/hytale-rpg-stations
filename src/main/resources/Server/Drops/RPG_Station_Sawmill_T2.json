@@ -1,13 +1,32 @@
 {
-  "$Comment": "The sawmill's long-session find table (cycle 25 onward of SawmillFinds' ladder): a 20 percent chance of 1 to 3 life essence, else nothing. A find is deliberately a DIFFERENT item from the cycle's own planks - extra planks are the station's Grants.OutputItems concern, never a drop table's.",
+  "$Comment": "The second find tier, from cycle 25. Offcuts as before, plus the first life essence: a one-in-five chance of 1 to 3. Essence entering the table at all IS this tier's identity, so the offcut yield deliberately stays at a single byproduct pull and the step up is the new item rather than more of the old.",
   "Container": {
-    "Type": "Choice",
-    "RollsMin": 1,
-    "RollsMax": 1,
+    "Type": "Multiple",
     "Containers": [
-      { "Type": "Empty", "Weight": 80 },
-      { "Type": "Single", "Weight": 20,
-        "Item": { "ItemId": "Ingredient_Life_Essence", "QuantityMin": 1, "QuantityMax": 3 } }
+      {
+        "Type": "Droplist",
+        "DroplistId": "RPG_Station_Sawmill_Byproducts"
+      },
+      {
+        "Type": "Choice",
+        "RollsMin": 1,
+        "RollsMax": 1,
+        "Containers": [
+          {
+            "Type": "Empty",
+            "Weight": 80
+          },
+          {
+            "Type": "Single",
+            "Weight": 20,
+            "Item": {
+              "ItemId": "Ingredient_Life_Essence",
+              "QuantityMin": 1,
+              "QuantityMax": 3
+            }
+          }
+        ]
+      }
     ]
   }
 }

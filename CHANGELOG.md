@@ -662,9 +662,17 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
 - Ships `SawmillFinds`, the session-loyalty find table. It gates on staying at the bench: cycle 10 or
   later AND a tool of quality 2 or better, then 15 percent of qualifying cycles, into a three-floor
   ladder over the session's own cycle count - the first tier from cycle 10, the second from 25, the
-  third from 50, each granting its own jar-shipped drop table of life essence with its own internal
-  empty weight. The upper two floors carry their own celebration cue, which the smart-cue rule keeps
-  silent on a cycle whose table resolved to nothing.
+  third from 50, each granting its own jar-shipped drop table. The upper two floors carry their own
+  celebration cue, which the smart-cue rule keeps silent on a cycle whose table resolved to nothing.
+- Ships the find tables as COMPOSED drop lists, using the native drop-list vocabulary rather than a
+  flat list per tier. `RPG_Station_Sawmill_Byproducts` holds the offcut vocabulary in one file -
+  plant fibre, tree bark, tree sap and sticks, as a `Multiple` container so a single pull can shake
+  loose several at once - and each tier is itself a `Multiple` combining N `Droplist` references to
+  that shared list with its own life-essence `Choice`. Retuning what milling yields is therefore one
+  edit that moves every tier together, a richer tier simply references the shared list more times
+  (one pull at T1 and T2, two at T3 and T4), and a pack can override that single id to reshape
+  offcuts across the whole bench. The first tier pays offcuts ALONE: life essence enters at the
+  second, so reaching it is a change in kind rather than more of the same.
 - Ships `SawmillTrophy`, the trophy chase, alone in its own file precisely because it is the roll an
   add-on is most likely to reshape: a progression mod wants it scaled by its own notion of luck,
   which this engine cannot express, so the version here is deliberately the plainest one possible -

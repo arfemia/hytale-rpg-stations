@@ -1,13 +1,12 @@
 {
-  "$Comment": "The sawmill's early-session find table (cycles 10 to 24 of SawmillFinds' ladder): a 10 percent chance of 1 to 2 life essence shaken loose from the milled logs, else nothing. A find is deliberately a DIFFERENT item from the cycle's own planks - extra planks are the station's Grants.OutputItems concern, never a drop table's.",
+  "$Comment": "The first find tier, reached from cycle 10 of a session. It pays OFFCUTS only - one pull from the shared RPG_Station_Sawmill_Byproducts list and nothing else - so the earliest finds are the everyday material a working bench produces rather than anything precious. Life essence starts at the second tier, which is what makes reaching it feel like a step up rather than more of the same. The Multiple container resolves every child, so adding a second reference to the byproduct list here would simply double the offcuts without touching their mix.",
   "Container": {
-    "Type": "Choice",
-    "RollsMin": 1,
-    "RollsMax": 1,
+    "Type": "Multiple",
     "Containers": [
-      { "Type": "Empty", "Weight": 90 },
-      { "Type": "Single", "Weight": 10,
-        "Item": { "ItemId": "Ingredient_Life_Essence", "QuantityMin": 1, "QuantityMax": 2 } }
+      {
+        "Type": "Droplist",
+        "DroplistId": "RPG_Station_Sawmill_Byproducts"
+      }
     ]
   }
 }
