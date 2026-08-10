@@ -337,6 +337,61 @@ outcome; the sibling toast-stacking defects land in the consumer mod's own repo)
   overlays layering correctly onto a base station, and sawmill presentation parity after the step
   reshape (three maintainer smoke-fix rounds, decisions 57 through 67 in the design log).
 
+### Presentation + moment vocabulary pass
+
+One moment vocabulary, one scheduler, and cues authored where a reader looks for them. The schema
+is pre-release, so each change below is a hard break with no alias.
+
+- Adds per-sound timing. A `Presentation.Sounds` entry is now EITHER a bare `SoundEvent` id (the
+  shorthand every existing file already uses, byte-unchanged) OR `{EventId, DelayMs}`, decided per
+  entry, so a moment can stagger a thud and a chime without splitting into two moments. A
+  shorthand entry re-encodes as a bare string, so nothing inflates on a round trip. The per-sound
+  `DelayMs` ADDS to the moment's own: the moment delay offsets the moment, the entry delay offsets
+  that sound inside it, and both land on the same one-tick-resolution playback queue. `Volume` and
+  `Pitch` stay deliberately unauthorable - the engine's positional one-shot call takes neither, so
+  either leaf would decode and then do nothing; vary them by referencing a different `SoundEvent`.
+- **An action's `Moments` is an OPEN map keyed by moment id**, replacing the fixed
+  `{Cycle, Completion}` pair - the same open vocabulary and the same shape a `FlairAsset` already
+  keys its own `Moments` by, so a cue reads the same whether an action authored it or a flair
+  overlaid it. `Cycle` and `Completion` keep working verbatim (matching is case-insensitive), and
+  `swing`/`impact`/`step:<actionId>:<stepId>` are authorable beside them. Native
+  `Parent` merges the map per KEY and per leaf under it, so a child re-skinning one moment inherits
+  every other. **Specificity wins**: an entry is the base for its moment id wherever the engine has
+  nothing more specific, and a step's own `Presentation` (or a loot floor's cue) outranks it for
+  that emission. An unrecognized key is the same warn-only typo finding a flair map gets.
+  `rare_find` is the one well-known id an action does NOT author, since that moment only ever fires
+  with the earning `Roll`/`Ladder.Floor` cue already in hand: author it there, and the new warn-only
+  `RARE_FIND_MOMENT_NEVER_PLAYS` finding catches a map entry that could never play. An action's
+  `Moments` entry drives a STEP's cue only for a `step:<actionId>:<stepId>` id, so an unnamed step
+  never replays the action-wide `cycle` cue per beat. The implicit convert loop's per-cycle cue plays
+  under `cycle` itself, so a flair re-skins the classic work loop by the id the docs name for it.
+- **A swing's cues moved out of `Worker.Animation` and into `Moments`.** `Animation.Swing` is now
+  pure cadence (`IntervalMs`); the swing cue is the `swing` moment and the strike landing behind it
+  is the `impact` moment, late purely because it authors the generic `Presentation.DelayMs`. That
+  removes the engine's one piece of dedicated single-cue scheduling machinery: every offset in the
+  mod now rides one queue and one due-time core. `impact` stays a distinct flair-targetable moment
+  id, so a flair can still re-skin or re-time the strike independently of the swing.
+- **`Puppet.Yaw` is `Puppet.Rotation`**, the shared `{Yaw, Pitch, Roll}` degrees group already used
+  by `Custody.Display` and particle bursts. `Rotation.Yaw` folds with the placed block's facing
+  exactly as the scalar leaf did (identity at yaw 0); `Pitch` and `Roll` are the puppet's own tilt
+  and are not composed with the block, the same rule a particle burst's `RotationOffset` follows.
+  An `ExtensionAsset`'s `Puppet` overlay merges the group per axis, so a pack authoring only
+  `Rotation.Pitch` keeps the base's `Yaw` and `Roll`.
+- **Every moment and flair map merges per KEY under native `Parent`.** `StationAsset.Flairs` (keyed
+  by flair id), a station's inline `Flairs[].Moments`, and `FlairAsset.Moments` (both keyed by
+  moment id) decode through the same `InheritMapCodec` an action's own `Moments` uses, so a child
+  station restyling one flair inherits every other flair the base authored, and a child flair
+  re-skinning one moment inherits the rest. Inline and standalone flair content stays ONE shape,
+  merge behaviour included. Those maps also accept an inline `$Comment` (or any `$`-key) directly
+  among their entries, the same editorial keys a structured group has always taken. The map leaves
+  that still read EVERY key as a map key are `Anchors`, `Stamp.Stats.Caps.PerStat`, and every `Tags`
+  leaf; put a note there on one of the map's values or on the enclosing object instead.
+- Adds the warn-only `PUPPET_NPC_ROLE_ROLL_DROPPED` validator finding: an action pairing
+  `Puppet.Look.Source: "NpcRole"` with a non-zero `Puppet.Rotation.Roll`. An NPC keeps its pose from
+  a leash that carries heading and pitch only, so the bank is dropped and the puppet stands level
+  about that axis. `Yaw` and `Pitch` both still apply; author `Look.Source "PlayerClone"` or
+  `"Model"` when the roll matters.
+
 ### Pre-release schema + authoring pass (2026-08-05)
 
 Multi-item recipes, tunable particle bursts, ref-or-inline authoring, shared spatial leaves, a
@@ -360,17 +415,17 @@ schema is pre-release, so the renames below are hard breaks with no aliases.
   duration cap is authorable per burst but stays a leak guard against unbounded-spawner systems.
 - Adds `Presentation.DelayMs`, a per-moment playback offset on the shared presentation type, so
   every site that authors a `Presentation` can land its cues on the beat they belong to rather than
-  the instant the engine reached them: an action's `Moments.Cycle`/`Moments.Completion`, a step's
-  own `Presentation`, a `Roll`'s or a `Ladder.Floor`'s, and a `FlairAsset` moment. It offsets the
+  the instant the engine reached them: any of an action's own `Moments` entries, a step's own
+  `Presentation`, a `Roll`'s or a `Ladder.Floor`'s, and a `FlairAsset` moment. It offsets the
   whole group as one cue, is applied after the flair fold (so a flair can re-time a moment as well
-  as re-skin it), and resolves on the same due-time core the swing-impact cue already scheduled on.
+  as re-skin it), and resolves on the ONE due-time core every offset in the engine shares.
   Null, zero, or a negative value plays at once. A delayed cue survives the end of the run that
   earned it (a completed ritual's final cues still play), while an interrupted session falls silent.
-  The jar's Sawmill authors `DelayMs: 100` on its cycle moment.
-- Adds three warn-only validator checks. `CYCLE_DELAY_OVERLAPS_NEXT_CYCLE` and
-  `STEP_DELAY_OVERLAPS_ITS_DURATION` catch a `Presentation.DelayMs` held longer than the window it
-  plays inside (a repeating action's own `Work.CycleMs`, or a step's authored `Duration.Ms`), the
-  timing siblings of the existing swing-impact check. `LOOT_DROPLIST_NEVER_RESOLVES` rolls every
+  The jar's Sawmill authors `DelayMs: 100` on its cycle moment and `140` on its impact moment.
+- Adds three warn-only validator checks. `CYCLE_DELAY_OVERLAPS_NEXT_CYCLE`,
+  `STEP_DELAY_OVERLAPS_ITS_DURATION` and `IMPACT_OVERLAPS_NEXT_SWING` catch a
+  `Presentation.DelayMs` held longer than the window it plays inside (a repeating action's own
+  `Work.CycleMs`, a step's authored `Duration.Ms`, or one `Animation.Swing.IntervalMs`). `LOOT_DROPLIST_NEVER_RESOLVES` rolls every
   referenced `ItemDropList` a few times during the full validate pass and reports a table that pays
   out nothing every time - the shape a container tree of pure `Droplist` references takes at runtime,
   which an existence check alone can never see.
@@ -564,8 +619,8 @@ as shipped, not a change to something previously released.
   "what else a cycle hands over" group now lives beside its `Recipe`, never on the station);
   an action's `Presentation` group is its `Moments.Cycle` (so it pairs with its `Moments.Completion`
   sibling and both name their moment); `Presentation.Sound` is `Sounds[]` (played in authored order - a thud
-  plus a chime is two entries; deliberately not promoted to `[{EventId, Volume, Pitch}]`, which the
-  sound primitive cannot honour); `Roll.Grants.DropList` is `DropLists[]` (each entry rolled
+  plus a chime is two entries; an entry is a bare id or `{EventId, DelayMs}`, and `Volume`/`Pitch`
+  stay unauthorable because the sound primitive takes neither); `Roll.Grants.DropList` is `DropLists[]` (each entry rolled
   independently, so a guaranteed common table plus a rare one is two entries); `Tool
   .MinDurabilityPercent` is `Tool.Durability.MinStartPercent` (inside the group covering the same
   concern, with the engage-only semantics in the name); `Puppet.Look.Model.FallbackModelId` is

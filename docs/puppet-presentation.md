@@ -19,19 +19,23 @@ whole-group overridable per action, exactly like every other action group.
 ```json
 "Worker": {
   "Puppet": {
-    "Enabled": true,
-    "Hide":   { "Route": "Scale" },
-    "Look":   { "Source": "PlayerClone" },
-    "Offset": { "X": 0.0, "Y": -0.4, "Z": 0.6 },
-    "Yaw":    0.0,
-    "Prop":   { "Source": "MirrorHeld", "Slot": "Hotbar" }
+    "Enabled":  true,
+    "Hide":     { "Route": "Scale" },
+    "Look":     { "Source": "PlayerClone" },
+    "Offset":   { "X": 0.0, "Y": -0.4, "Z": 0.6 },
+    "Rotation": { "Yaw": 0.0 },
+    "Prop":     { "Source": "MirrorHeld", "Slot": "Hotbar" }
   }
 }
 ```
 
-`Offset`/`Yaw` place the puppet relative to the station's block-top anchor, FACING-RELATIVE - the same
-convention `Custody.Display` follows: `X`/`Z` are in the placed block's own horizontal frame (`+Z` its
-front), `Y` is vertical and never rotated, and the block's own facing yaw folds additively into `Yaw`.
+`Offset`/`Rotation` place the puppet relative to the station's block-top anchor - the same convention
+`Custody.Display` follows: `X`/`Z` are in the placed block's own horizontal frame (`+Z` its front),
+`Y` is vertical and never rotated, and the block's own facing yaw folds additively into
+`Rotation.Yaw`, so `Yaw: 0` means "faces the same way the block does". `Rotation.Pitch` and
+`Rotation.Roll` are the puppet's OWN tilt about its own axes and are NOT composed with the block
+facing (the same rule `Presentation.Particles[].RotationOffset` follows); both default to 0, so a
+puppet that only wants a facing authors `Rotation.Yaw` alone.
 At a default-orientation placement (block yaw 0) the local frame equals the world frame, so a station
 that only authors a vertical `Offset.Y` behaves exactly as a naive world-space offset would and needs
 no re-tuning. Presence of the group with `Enabled` not explicitly `false` activates the whole route -

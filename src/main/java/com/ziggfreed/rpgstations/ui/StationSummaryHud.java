@@ -26,6 +26,7 @@ import com.ziggfreed.common.ui.rows.SummaryRowRenderer;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.util.Log;
+import com.ziggfreed.rpgstations.i18n.RpgMsg;
 
 /**
  * The standalone-rich end-of-session summary panel (design section 4.1's summary-panel split,
@@ -266,7 +267,7 @@ public final class StationSummaryHud extends KeyedCustomHud {
         cmd.set(ITEM_MORE_SEL + ".Visible", overflow > 0);
         if (overflow > 0) {
             cmd.set(ITEM_MORE_SEL + ".TextSpans",
-                    com.ziggfreed.rpgstations.i18n.RpgMsg.tr("ui.station.summary.items_more", overflow));
+                    RpgMsg.tr("ui.station.summary.items_more", overflow));
         }
     }
 

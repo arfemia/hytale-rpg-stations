@@ -36,7 +36,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Identity` | [Identity](#field-stationasset-identity) | `null` | Display name/description localization keys plus the icon item id, shown at the station's engage prompt and any station-listing UI. |
 | `Block` | [Block](#field-stationasset-block) | `null` | Properties of the PLACED BLOCK: currently just Exclusive, whether one worker at a time owns it. |
 | `Requires` | [Requires](#type-requires) | `null` | The STATION-entry gate (permission plus factor Conditions), evaluated once at engage and ANDed with the engaged action's own Requires. It never supplies a default for an action. |
-| `Flairs` | map of [Flair](#field-stationasset-flairs-item) | `null` | Named cosmetic flair overrides, keyed by flair id; each entry overlays its non-null Moments onto the base presentation when that flair is unlocked for the player. |
+| `Flairs` | map of [Flair](#field-stationasset-flairs-item) | `null` | Named cosmetic flair overrides, keyed by flair id; each entry overlays its non-null Moments onto the base presentation when that flair is unlocked for the player. Under native Parent the map merges PER FLAIR ID, so a child restyling one flair inherits every other flair the base authored. |
 | `Actions` | array of [ActionDef](#type-actiondef) | `null` | This station's actions, in AUTHORED ORDER - the order IS selection priority, so the first entry whose Select matches the held or placed material runs. Each entry is self-contained; nothing is inherited from the station. |
 
 <a id="field-stationasset-identity"></a>
@@ -60,7 +60,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Moments` | map of [Presentation](#type-presentation) | `null` | An open moment id (cycle/swing/impact/rare_find/completion, or step:<actionId>:<stepId>) to a Presentation overlay; each authored leaf overlays the base moment's own leaves, per moment id. |
+| `Moments` | map of [Presentation](#type-presentation) | `null` | An open moment id (cycle/swing/impact/rare_find/completion, or step:<actionId>:<stepId>) to a Presentation overlay; each authored leaf overlays the base moment's own leaves, per moment id. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored. |
 
 <a id="type-actionasset"></a>
 ## ActionAsset
@@ -81,7 +81,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Bonus` | [LootRef](#type-lootref) | `null` | What ELSE a cycle hands over: referenced Lootables plus inline Rolls. Yield decides how much of the thing you made, Bonus decides what else you got. |
 | `ContributionScale` | [ContributionScale](#field-actionasset-contributionscale) | `null` | A factor ladder multiplying every Work.PerCycleContributions amount before it is forwarded; the engine pre-scales, so a listener grants the amount verbatim. |
 | `Worker` | [Worker](#field-actionasset-worker) | `null` | How the person looks doing this: Hold, Camera, Animation, Puppet. |
-| `Moments` | [Moments](#field-actionasset-moments) | `null` | What it sounds and looks like: the per-Cycle moment and the session Completion moment. |
+| `Moments` | map of [Presentation](#type-presentation) | `null` | What it sounds and looks like, keyed by moment id (cycle/swing/impact/completion, or step:<actionId>:<stepId>); matching is case-insensitive. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why rare_find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). |
 
 <a id="field-actionasset-select"></a>
 ### ActionAsset.Select
@@ -147,16 +147,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Hold` | [Hold](#field-actionasset-worker-hold) | `null` | The movement lock while working: the default self-effect hold, or the Mount knob family (seated/standing mount). |
 | `Camera` | [Camera](#field-actionasset-worker-camera) | `null` | The third-person camera pull while working, plus the optional fixed-look Recipe preset. |
-| `Animation` | [Animation](#field-actionasset-worker-animation) | `null` | The work emote id plus the optional per-swing cadence/impact cue layer. |
+| `Animation` | [Animation](#field-actionasset-worker-animation) | `null` | The work emote id, the action clip, and the per-swing cadence (Swing.IntervalMs) - pure timing; what a swing SOUNDS and LOOKS like is the swing/impact entry of Moments. |
 | `Puppet` | [Puppet](#type-puppet) | `null` | The puppet presentation route: mount the player, hide their body, spawn a skinned visual performing the work. Null = the classic in-body worker. |
-
-<a id="field-actionasset-moments"></a>
-### ActionAsset.Moments
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `Cycle` | [Presentation](#type-presentation) | `null` | The CYCLE-complete moment: sound/particle cues fired at the block each finished cycle. |
-| `Completion` | [Presentation](#type-presentation) | `null` | The SESSION-COMPLETION moment, played on a non-silent stop with at least one completed cycle. Null = silent completion. |
 
 <a id="field-actionasset-tool-gather"></a>
 #### ActionAsset.Tool.Gather
@@ -256,7 +248,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `EmoteId` | `string` | `null` | The registered EmoteAsset id looped while working; null = no work animation played. |
-| `Swing` | [Swing](#field-actionasset-worker-animation-swing) | `null` | The optional per-swing cadence layer (re-fires a one-shot cue on an interval); null = no swing layer. |
+| `Swing` | [Swing](#field-actionasset-worker-animation-swing) | `null` | The optional per-swing CADENCE layer (how often the work animation re-fires); null = no swing layer. What a swing sounds and looks like is the Moments 'swing' entry, not this group. |
 | `ActionClip` | `string` | `null` | The Action-slot clip id for a SEAT-MODE swing (plays against the held item's own ItemPlayerAnimations set). Null/blank falls to the 'Chop' default. |
 
 <a id="field-actionasset-recipe-fromcrafting-nativetime"></a>
@@ -280,9 +272,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `IntervalMs` | `long` | `null` | Milliseconds between swing cues while working; a non-looping EmoteId needs this authored or the work animation never re-fires. |
-| `Presentation` | [Presentation](#type-presentation) | `null` | The presentation cue fired together with each swing re-fire; null = the swing plays with no extra sound/particles. |
-| `Impact` | [Impact](#field-actionasset-worker-animation-swing-impact) | `null` | An optional delayed impact cue scheduled off this swing; null = no impact cue. |
+| `IntervalMs` | `long` | `null` | Milliseconds between swings while working; a non-looping EmoteId needs this authored or the work animation never re-fires. Each swing also fires the Moments 'swing' and 'impact' entries. |
 
 <a id="field-actionasset-worker-hold-mount-entity"></a>
 ###### ActionAsset.Worker.Hold.Mount.Entity
@@ -293,14 +283,6 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `DismountOnMove` | `boolean` | `null` | Whether a heartbeat walk-off check dismounts the player (no native auto-dismount for this route). Reader-defaults to true; false = hard-lock until crouch/re-press. |
 | `Steerable` | `boolean` | `null` | Whether the anchor may be WASD-steered by the mounted player. Reader-defaults to false (a per-heartbeat snap-back defeats native steering); true is validator-flagged as untested. |
 | `VisibleAnchorItemId` | `string` | `null` | Diagnostic/authoring aid: an item id the invisible anchor renders as a dropped-item-style prop, so its position is visible in-game. Null = no visual (the shipped default). |
-
-<a id="field-actionasset-worker-animation-swing-impact"></a>
-###### ActionAsset.Worker.Animation.Swing.Impact
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `DelayMs` | `long` | `null` | Milliseconds after the swing before the impact cue fires. Null/non-positive = fire together with the swing. |
-| `Presentation` | [Presentation](#type-presentation) | `null` | The presentation cue fired at the scheduled impact moment. |
 
 <a id="field-actionasset-worker-hold-mount-entity-offset"></a>
 ###### ActionAsset.Worker.Hold.Mount.Entity.Offset
@@ -330,7 +312,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Bonus` | [LootRef](#type-lootref) | `null` | What ELSE a cycle hands over: referenced Lootables plus inline Rolls. Yield decides how much of the thing you made, Bonus decides what else you got. |
 | `ContributionScale` | [ContributionScale](#field-actiondef-contributionscale) | `null` | A factor ladder multiplying every Work.PerCycleContributions amount before it is forwarded; the engine pre-scales, so a listener grants the amount verbatim. |
 | `Worker` | [Worker](#field-actiondef-worker) | `null` | How the person looks doing this: Hold, Camera, Animation, Puppet. |
-| `Moments` | [Moments](#field-actiondef-moments) | `null` | What it sounds and looks like: the per-Cycle moment and the session Completion moment. |
+| `Moments` | map of [Presentation](#type-presentation) | `null` | What it sounds and looks like, keyed by moment id (cycle/swing/impact/completion, or step:<actionId>:<stepId>); matching is case-insensitive. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why rare_find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). |
 
 <a id="field-actiondef-select"></a>
 ### ActionDef.Select
@@ -396,16 +378,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Hold` | [Hold](#field-actiondef-worker-hold) | `null` | The movement lock while working: the default self-effect hold, or the Mount knob family (seated/standing mount). |
 | `Camera` | [Camera](#field-actiondef-worker-camera) | `null` | The third-person camera pull while working, plus the optional fixed-look Recipe preset. |
-| `Animation` | [Animation](#field-actiondef-worker-animation) | `null` | The work emote id plus the optional per-swing cadence/impact cue layer. |
+| `Animation` | [Animation](#field-actiondef-worker-animation) | `null` | The work emote id, the action clip, and the per-swing cadence (Swing.IntervalMs) - pure timing; what a swing SOUNDS and LOOKS like is the swing/impact entry of Moments. |
 | `Puppet` | [Puppet](#type-puppet) | `null` | The puppet presentation route: mount the player, hide their body, spawn a skinned visual performing the work. Null = the classic in-body worker. |
-
-<a id="field-actiondef-moments"></a>
-### ActionDef.Moments
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `Cycle` | [Presentation](#type-presentation) | `null` | The CYCLE-complete moment: sound/particle cues fired at the block each finished cycle. |
-| `Completion` | [Presentation](#type-presentation) | `null` | The SESSION-COMPLETION moment, played on a non-silent stop with at least one completed cycle. Null = silent completion. |
 
 <a id="field-actiondef-tool-gather"></a>
 #### ActionDef.Tool.Gather
@@ -505,7 +479,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `EmoteId` | `string` | `null` | The registered EmoteAsset id looped while working; null = no work animation played. |
-| `Swing` | [Swing](#field-actiondef-worker-animation-swing) | `null` | The optional per-swing cadence layer (re-fires a one-shot cue on an interval); null = no swing layer. |
+| `Swing` | [Swing](#field-actiondef-worker-animation-swing) | `null` | The optional per-swing CADENCE layer (how often the work animation re-fires); null = no swing layer. What a swing sounds and looks like is the Moments 'swing' entry, not this group. |
 | `ActionClip` | `string` | `null` | The Action-slot clip id for a SEAT-MODE swing (plays against the held item's own ItemPlayerAnimations set). Null/blank falls to the 'Chop' default. |
 
 <a id="field-actiondef-recipe-fromcrafting-nativetime"></a>
@@ -529,9 +503,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `IntervalMs` | `long` | `null` | Milliseconds between swing cues while working; a non-looping EmoteId needs this authored or the work animation never re-fires. |
-| `Presentation` | [Presentation](#type-presentation) | `null` | The presentation cue fired together with each swing re-fire; null = the swing plays with no extra sound/particles. |
-| `Impact` | [Impact](#field-actiondef-worker-animation-swing-impact) | `null` | An optional delayed impact cue scheduled off this swing; null = no impact cue. |
+| `IntervalMs` | `long` | `null` | Milliseconds between swings while working; a non-looping EmoteId needs this authored or the work animation never re-fires. Each swing also fires the Moments 'swing' and 'impact' entries. |
 
 <a id="field-actiondef-worker-hold-mount-entity"></a>
 ###### ActionDef.Worker.Hold.Mount.Entity
@@ -542,14 +514,6 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `DismountOnMove` | `boolean` | `null` | Whether a heartbeat walk-off check dismounts the player (no native auto-dismount for this route). Reader-defaults to true; false = hard-lock until crouch/re-press. |
 | `Steerable` | `boolean` | `null` | Whether the anchor may be WASD-steered by the mounted player. Reader-defaults to false (a per-heartbeat snap-back defeats native steering); true is validator-flagged as untested. |
 | `VisibleAnchorItemId` | `string` | `null` | Diagnostic/authoring aid: an item id the invisible anchor renders as a dropped-item-style prop, so its position is visible in-game. Null = no visual (the shipped default). |
-
-<a id="field-actiondef-worker-animation-swing-impact"></a>
-###### ActionDef.Worker.Animation.Swing.Impact
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `DelayMs` | `long` | `null` | Milliseconds after the swing before the impact cue fires. Null/non-positive = fire together with the swing. |
-| `Presentation` | [Presentation](#type-presentation) | `null` | The presentation cue fired at the scheduled impact moment. |
 
 <a id="field-actiondef-worker-hold-mount-entity-offset"></a>
 ###### ActionDef.Worker.Hold.Mount.Entity.Offset
@@ -903,7 +867,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Hide` | [Hide](#field-puppet-hide) | `null` | How the real player's own body is hidden while the puppet performs. |
 | `Look` | [Look](#field-puppet-look) | `null` | The puppet's appearance: whose model it wears and where that model comes from. |
 | `Offset` | [Vec3](#field-puppet-offset) | `null` | The puppet's stance shift off the station's block-top anchor, facing-relative: X/Z are in the block's own horizontal frame (+Z = its front), Y is vertical. |
-| `Yaw` | `double` | `null` | The puppet's facing in degrees, facing-relative to the placed block's own yaw (the block facing folds in additively). Reader-defaults to 0 (faces the same way the block does). |
+| `Rotation` | [Rotation](#field-puppet-rotation) | `null` | The puppet's own orientation in degrees (Yaw/Pitch/Roll), each leaf defaulting to 0. Yaw is facing-relative (the placed block's facing folds in additively, so 0 faces the same way the block does); Pitch and Roll are the puppet's own tilt and are NOT composed with the block. Roll needs Look.Source "PlayerClone" or "Model": an NPC keeps its pose from a leash that carries heading and pitch only, so a banked pose is dropped under Look.Source "NpcRole" (the validator warns). |
 | `Prop` | [Prop](#field-puppet-prop) | `null` | The item the puppet holds while performing. |
 
 <a id="field-puppet-hide"></a>
@@ -932,6 +896,15 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `X` | `double` | `null` | The X component; unauthored means 0 (each axis is independently optional). |
 | `Y` | `double` | `null` | The Y component; unauthored means 0 (each axis is independently optional). |
 | `Z` | `double` | `null` | The Z component; unauthored means 0 (each axis is independently optional). |
+
+<a id="field-puppet-rotation"></a>
+### Puppet.Rotation
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Yaw` | `double` | `null` | Yaw in degrees (turns about the vertical axis). Default 0. |
+| `Pitch` | `double` | `null` | Pitch in degrees (tips forward/back - the 'lay it flat' axis). Default 0. |
+| `Roll` | `double` | `null` | Roll in degrees (tips sideways about the subject's own long axis). Default 0. |
 
 <a id="field-puppet-prop"></a>
 ### Puppet.Prop
@@ -980,12 +953,20 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Sounds` | array of `string` | `null` | Native one-shot SoundEvent ids played at the moment's target position, in authored order (a thud plus a chime is two entries). Never author a LOOPING event here - nothing can stop it once fired. |
+| `Sounds` | array of `string`, or [SoundCue](#field-presentation-sounds-item) | `null` | The one-shot sounds played at the moment's target position, in authored order (a thud plus a chime is two entries). Each entry is either a bare SoundEvent id or {EventId, DelayMs} to hold that one sound behind the rest of the moment. Never author a LOOPING event here - nothing can stop it once fired. |
 | `Particles` | array of [ModelParticle](#field-presentation-particles-item) | `null` | The particle bursts played at this moment, in authored order (native InteractionEffects.Particles is an array too). Each entry is one ModelParticle-shaped burst; layering two is the author's call. |
 | `Shake` | [Shake](#field-presentation-shake) | `null` | A one-shot camera shake: a CameraEffect asset id plus a contextual intensity. |
 | `Interaction` | [Interaction](#field-presentation-interaction) | `null` | A native RootInteraction chain fired at this moment (id-ref-only); null = none. |
 | `Effect` | [EffectRef](#field-presentation-effect) | `null` | A native EntityEffect applied at this moment (id-ref-only, with an optional DurationMs); null = none. |
 | `DelayMs` | `long` | `null` | Milliseconds to hold every cue in this group before it plays; null/non-positive (the default) plays it at once. Use it to land a sound on the beat it belongs to rather than the instant the engine reached it. Playback resolution is one server tick (about 33ms at the default 30 ticks per second), so the cue fires on the first tick at or after the delay, never earlier. |
+
+<a id="field-presentation-sounds-item"></a>
+### Presentation.Sounds[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `EventId` | `string` | `null` | The native one-shot SoundEvent asset id to play (required; a blank entry is skipped). Never a looping event - nothing can stop one once fired. |
+| `DelayMs` | `long` | `null` | Milliseconds to hold THIS sound on top of the moment's own DelayMs (the two add up); null/non-positive plays it with the rest of the moment. Playback resolution is one server tick, about 33ms at the default 30 ticks per second. |
 
 <a id="field-presentation-particles-item"></a>
 ### Presentation.Particles[]
@@ -1084,7 +1065,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Tags` | map of array of `string` | `null` | Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.<br><br>For example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.<br><br>Tags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**. |
 | `Name` | `string` | `null` | Ignored - the flair id comes from the asset filename, not this key. Kept as a schema field for editor display only. |
 | `Stations` | array of `string` | `null` | Station ids this flair applies to; null/empty = every station. |
-| `Moments` | map of [Presentation](#type-presentation) | `null` | Moment id (cycle/swing/impact/rare_find/completion or step:<action>:<step>) -> the presentation overlay. |
+| `Moments` | map of [Presentation](#type-presentation) | `null` | Moment id (cycle/swing/impact/rare_find/completion or step:<action>:<step>) -> the presentation overlay. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored. |
 
 <a id="type-extensionasset"></a>
 ## ExtensionAsset

@@ -11,12 +11,12 @@ import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
-import com.hypixel.hytale.codec.codecs.map.MapCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditorSectionStart;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import com.ziggfreed.common.codec.InheritMapCodec;
 import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.common.codec.TagMatch;
 
@@ -96,9 +96,9 @@ public final class StationAsset
             .documentation("The STATION-entry gate (permission plus factor Conditions), evaluated once at engage and ANDed with the engaged action's own Requires. It never supplies a default for an action.")
             .metadata(new UIEditorSectionStart("Requires")).add()
             .appendInherited(new KeyedCodec<>("Flairs",
-                            new MapCodec<>(Flair.CODEC, LinkedHashMap::new), false),
+                            new InheritMapCodec<>(Flair.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.flairs = v, a -> a.flairs, (a, parent) -> a.flairs = parent.flairs)
-            .documentation("Named cosmetic flair overrides, keyed by flair id; each entry overlays its non-null Moments onto the base presentation when that flair is unlocked for the player.")
+            .documentation("Named cosmetic flair overrides, keyed by flair id; each entry overlays its non-null Moments onto the base presentation when that flair is unlocked for the player. Under native Parent the map merges PER FLAIR ID, so a child restyling one flair inherits every other flair the base authored.")
             .metadata(new UIEditorSectionStart("Flairs")).add()
             .appendInherited(new KeyedCodec<>("Actions",
                             new ArrayCodec<>(ActionDef.CODEC, ActionDef[]::new), false),
@@ -1445,7 +1445,7 @@ public final class StationAsset
                 .documentation("The registered EmoteAsset id looped while working; null = no work animation played.").add()
                 .appendInherited(new KeyedCodec<>("Swing", Swing.CODEC, false),
                         (o, v) -> o.swing = v, o -> o.swing, (o, p) -> o.swing = p.swing)
-                .documentation("The optional per-swing cadence layer (re-fires a one-shot cue on an interval); null = no swing layer.").add()
+                .documentation("The optional per-swing CADENCE layer (how often the work animation re-fires); null = no swing layer. What a swing sounds and looks like is the Moments 'swing' entry, not this group.").add()
                 .appendInherited(new KeyedCodec<>("ActionClip", Codec.STRING, false),
                         (o, v) -> o.actionClip = v, o -> o.actionClip, (o, p) -> o.actionClip = p.actionClip)
                 .documentation("The Action-slot clip id for a SEAT-MODE swing (plays against the held item's own ItemPlayerAnimations set). Null/blank falls to the 'Chop' default.").add()
@@ -1493,91 +1493,35 @@ public final class StationAsset
         }
 
         /**
-         * Per-swing cadence + flair: a server-timed cue played at the block every
-         * {@link #intervalMs} while WORKING. OMIT this group and the pre-round-2 behavior is
-         * unchanged (no swing layer).
+         * Per-swing CADENCE: how often the work animation re-fires while WORKING. Omit the group
+         * and there is no swing layer at all.
+         *
+         * <p>This group is pure timing. What a swing SOUNDS and LOOKS like is authored beside every
+         * other cue, as the action's {@code Moments} entry keyed {@code "swing"} - and the strike
+         * landing a beat later is the {@code "impact"} entry, whose own
+         * {@code Presentation.DelayMs} is what makes it late. Keeping the cadence here and the cues
+         * there is what lets a flair re-skin or re-time either moment on its own.
          */
         public static final class Swing {
             @Nullable protected Long intervalMs;
-            @Nullable protected Presentation presentation;
-            @Nullable protected Impact impact;
 
             public static final BuilderCodec<Swing> CODEC = BuilderCodec.builder(Swing.class, Swing::new)
                     .appendInherited(new KeyedCodec<>("IntervalMs", Codec.LONG, false),
                             (o, v) -> o.intervalMs = v, o -> o.intervalMs, (o, p) -> o.intervalMs = p.intervalMs)
-                    .documentation("Milliseconds between swing cues while working; a non-looping EmoteId needs this authored or the work animation never re-fires.")
+                    .documentation("Milliseconds between swings while working; a non-looping EmoteId needs this authored or the work animation never re-fires. Each swing also fires the Moments 'swing' and 'impact' entries.")
                     .addValidator(CodecWarnValidators.positive("Animation.Swing.IntervalMs should be positive.")).add()
-                    .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
-                            (o, v) -> o.presentation = v, o -> o.presentation, (o, p) -> o.presentation = p.presentation)
-                    .documentation("The presentation cue fired together with each swing re-fire; null = the swing plays with no extra sound/particles.").add()
-                    .appendInherited(new KeyedCodec<>("Impact", Impact.CODEC, false),
-                            (o, v) -> o.impact = v, o -> o.impact, (o, p) -> o.impact = p.impact)
-                    .documentation("An optional delayed impact cue scheduled off this swing; null = no impact cue.").add()
                     .build();
 
             @Nonnull
-            public static Swing of(@Nullable Long intervalMs, @Nullable Presentation presentation) {
-                return of(intervalMs, presentation, null);
-            }
-
-            @Nonnull
-            public static Swing of(@Nullable Long intervalMs, @Nullable Presentation presentation,
-                    @Nullable Impact impact) {
+            public static Swing of(@Nullable Long intervalMs) {
                 Swing s = new Swing();
                 s.intervalMs = intervalMs;
-                s.presentation = presentation;
-                s.impact = impact;
                 return s;
             }
 
             @Nullable
             public Long getIntervalMs() {
                 return intervalMs;
-            }
-
-            @Nullable
-            public Presentation getPresentation() {
-                return presentation;
-            }
-
-            @Nullable
-            public Impact getImpact() {
-                return impact;
-            }
-
-            /** The delayed impact cue. {@link #delayMs} null/nonpositive = fire with the swing. */
-            public static final class Impact {
-                @Nullable protected Long delayMs;
-                @Nullable protected Presentation presentation;
-
-                public static final BuilderCodec<Impact> CODEC = BuilderCodec.builder(Impact.class, Impact::new)
-                        .appendInherited(new KeyedCodec<>("DelayMs", Codec.LONG, false),
-                                (o, v) -> o.delayMs = v, o -> o.delayMs, (o, p) -> o.delayMs = p.delayMs)
-                        .documentation("Milliseconds after the swing before the impact cue fires. Null/non-positive = fire together with the swing.")
-                        .addValidator(CodecWarnValidators.nonNegative("Animation.Swing.Impact.DelayMs should not be negative.")).add()
-                        .appendInherited(new KeyedCodec<>("Presentation", Presentation.CODEC, false),
-                                (o, v) -> o.presentation = v, o -> o.presentation,
-                                (o, p) -> o.presentation = p.presentation)
-                        .documentation("The presentation cue fired at the scheduled impact moment.").add()
-                        .build();
-
-                @Nonnull
-                public static Impact of(@Nullable Long delayMs, @Nullable Presentation presentation) {
-                    Impact i = new Impact();
-                    i.delayMs = delayMs;
-                    i.presentation = presentation;
-                    return i;
-                }
-
-                @Nullable
-                public Long getDelayMs() {
-                    return delayMs;
-                }
-
-                @Nullable
-                public Presentation getPresentation() {
-                    return presentation;
-                }
             }
         }
     }
@@ -1601,9 +1545,9 @@ public final class StationAsset
 
         public static final BuilderCodec<Flair> CODEC = BuilderCodec.builder(Flair.class, Flair::new)
                 .appendInherited(new KeyedCodec<>("Moments",
-                                new MapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
+                                new InheritMapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
                         (o, v) -> o.moments = v, o -> o.moments, (o, p) -> o.moments = p.moments)
-                .documentation("An open moment id (cycle/swing/impact/rare_find/completion, or step:<actionId>:<stepId>) to a Presentation overlay; each authored leaf overlays the base moment's own leaves, per moment id.").add()
+                .documentation("An open moment id (cycle/swing/impact/rare_find/completion, or step:<actionId>:<stepId>) to a Presentation overlay; each authored leaf overlays the base moment's own leaves, per moment id. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored.").add()
                 .build();
 
         @Nonnull

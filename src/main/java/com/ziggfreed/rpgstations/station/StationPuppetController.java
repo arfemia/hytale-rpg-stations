@@ -6,6 +6,7 @@ import javax.annotation.Nullable;
 import org.joml.Vector3d;
 
 import com.hypixel.hytale.component.CommandBuffer;
+import com.hypixel.hytale.component.ComponentAccessor;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.protocol.AnimationSlot;
@@ -125,6 +126,35 @@ final class StationPuppetController {
         }
     }
 
+    /**
+     * Apply the authored {@code Puppet.Rotation} {@code Pitch}/{@code Roll} tilt to the spawned
+     * performer, ONCE, on the first frame that has a live ref to tilt. Called from the same
+     * per-frame hook as {@link #refreshPuppetRef}; a no-op for every session that authors no tilt
+     * ({@link StationSession#puppetTiltPending} is only ever set when one is authored), which is
+     * what keeps an untilted puppet byte-identical to one spawned before the knob existed.
+     *
+     * <p>It runs a frame LATE rather than at spawn because the spawn context carries a yaw alone -
+     * the full three-angle set reaches a performer through its re-anchor call, which needs a ref
+     * that exists. That timing is also what covers the {@code NpcRole} backend's deferred spawn: its
+     * ref is honestly null at engage, so the flag simply stays pending until the tick its entity
+     * lands. A backend that has not opted into the full rotation keeps its yaw and ignores the rest,
+     * per the performer contract's own default.
+     */
+    static void applyPendingTilt(@Nonnull StationSession s, @Nonnull ComponentAccessor<EntityStore> accessor) {
+        if (!s.puppetTiltPending || s.performer == null || s.performer.ref() == null || s.puppetStance == null) {
+            return;
+        }
+        double[] stance = s.puppetStance;
+        try {
+            s.performer.presentAt(accessor, new Vector3d(stance[0], stance[1], stance[2]),
+                    (float) stance[3], (float) stance[4], (float) stance[5]);
+            s.puppetTiltPending = false;
+        } catch (Throwable t) {
+            s.puppetTiltPending = false;
+            Log.fine("STATION puppet tilt could not be applied: " + t.getMessage());
+        }
+    }
+
     // ==================== engage: spawn + hide ====================
 
     /**
@@ -164,6 +194,11 @@ final class StationPuppetController {
             double[] pos = PlayerPuppetService.offsetPosition(anchorX, anchorY, anchorZ,
                     worldOffset[0], worldOffset[1], worldOffset[2]);
             float yawRadians = resolveYawRadians(puppet.effectiveYawDegrees(), blockYawRadians);
+            // Pitch/Roll are the puppet's OWN tilt and are NOT composed with the block facing (the
+            // rule Presentation.ModelParticle.RotationOffset documents), so they convert straight
+            // from degrees with nothing folded in.
+            float pitchRadians = (float) Math.toRadians(puppet.effectivePitchDegrees());
+            float rollRadians = (float) Math.toRadians(puppet.effectiveRollDegrees());
 
             Puppet.Prop prop = puppet.getProp();
             String propItemId = resolveEffectivePropItemId(heldItemIdOf(player), prop);
@@ -206,6 +241,10 @@ final class StationPuppetController {
 
             s.performer = performer;
             s.puppetRef = puppetRef;
+            s.puppetStance = new double[] {pos[0], pos[1], pos[2], yawRadians, pitchRadians, rollRadians};
+            // Only an AUTHORED tilt schedules the re-anchor pass; a yaw-only puppet (every shipped
+            // one) never touches it and keeps the spawn's own placement untouched.
+            s.puppetTiltPending = pitchRadians != 0f || rollRadians != 0f;
             s.puppetDefaultProp = prop;
             s.puppetHeldItemId = propItemId;
             s.puppetActive = true;

@@ -226,7 +226,7 @@ ritual already in progress); a restart-orphan recovery path
 an action authoring no `Requires` is gated by the station's alone, and a station authoring none
 leaves the action's own gate as the only one.
 
-**Per-action completion.** The session-end `Moments.Completion` presentation, and a
+**Per-action completion.** The session-end `completion` moment, and a
 `Roll{Trigger:"Completion"}` in the action's own `Bonus`, are both read off the RESOLVED action -
 there is no station-level completion-loot fallback any more, matching the "no station-level
 group" rule everywhere else.
@@ -497,15 +497,50 @@ presentation-playback funnel every station moment goes through (`StationFlairs.M
 `StationFlairs.stepMomentId(actionId, stepId)`) - it is ALSO the flair-resolution choke point
 (`StationFlairs.effective` against `FlairCatalog.effectiveFlairsFor`'s merged map).
 
+**SPECIFICITY WINS, and this is the ONE place it is decided.** The `presentation` argument is
+whatever base the CALLER already holds for this emission (a step's own `Presentation`, a reached
+`Ladder.Floor`'s cue). When it is null, `emitMoment` falls back to the running action's own
+`Moments` entry for that moment id - `StationSession.moments`, the action's map canonicalized to
+lowercase and snapshotted ONCE at engage (`ActionResolver.ResolvedAction#getMoments`), so a
+mid-session catalog re-fold can never swap a moment out from under a running run. That one rule is
+why `runSwing` passes `null` for both of its moments and why `playCompletionMoment` no longer
+re-resolves the action at stop: a call site that has nothing more specific to say says nothing, and
+the map answers. The one place the gate also had to widen is the per-step emission
+(`StationStepHandlers.emitEntryCues` -> `StationStepDecisions.shouldEmitPresentationOnEntry`, which
+now takes an `actionAuthorsThisMoment` flag): a step with no `Presentation` of its own still has a
+moment to play when the action authored one under its `step:<actionId>:<stepId>` id. That second
+route is gated to per-STEP ids only (`StationStepDecisions.actionAuthorsStepMoment`): an id-less step
+resolves to the action-wide `cycle` moment, which the cycle machinery itself owns, so honoring a
+`Moments.cycle` entry there would replay the cycle cue once per unnamed beat.
+
+**Which moment id a step's entry cue plays under** is `StationStepDecisions.momentIdForStep`
+(`StationStepHandlers.presentMomentId` wraps it with the live action): `step:<actionId>:<stepId>` for
+an AUTHORED step id, else `cycle`. The implicit convert loop an action with no `Steps` runs is
+`cycle` too - its one step is engine-synthesized (`ImplicitProgram.ID_WORK`, which no author ever
+wrote), and its iteration IS the cycle, so a flair re-skins the classic work loop by the same `cycle`
+id the docs name for it rather than by a `step:` id derived from an engine-internal name.
+`rare_find` is the one well-known moment an action's own `Moments` can never supply: it is emitted
+only WITH the earning `Roll`/`Ladder.Floor` cue in hand, so the base always outranks the map
+(`RARE_FIND_MOMENT_NEVER_PLAYS` warns on such an entry; a flair keyed `rare_find` still overlays it).
+
 **`Presentation.DelayMs` is applied INSIDE `emitMoment`, after the flair fold** (`../asset/CLAUDE.md`'s
 Presentation bullet), so the winning presentation is the one whose timing is honored and a flair can
 re-time a moment as well as re-skin it. An undelayed cue plays inline through `playMoment` (the
 extracted body, byte-identical to the pre-delay path); a delayed one is parked in
 `pendingMomentsByWorld` (a `WorldKeyedQueues<PendingMoment>`) carrying the ALREADY-RESOLVED
 presentation, so a mid-wait catalog re-fold can never change what was scheduled. Four rules bind:
-- **ONE scheduler.** `scheduleCueAt(now, delay)`/`cueDue(now, dueAt)` are the generalized pure pair
-  (renamed from `scheduleImpactAt`/`impactDue`) that the single pending swing-impact slot AND every
-  queued moment share. Do not add a second due-time rule.
+- **ONE scheduler.** `scheduleCueAt(now, delay)`/`cueDue(now, dueAt)` are the pure pair EVERY offset
+  cue in this engine resolves through: a moment's own `DelayMs`, a single `Sounds` entry's, and the
+  `impact` moment that is late purely because it authors one. There is no dedicated single-slot
+  machinery beside the queue any more - the session carries no pending-impact field, the frame drain
+  has no impact branch, and `stop()` has no impact reset. Do not add a second due-time rule.
+- **A `Sounds` entry with its own `DelayMs` is split into its own cue, before anything is queued.**
+  `emitMoment` runs two pure cores over the flair-resolved presentation: `offsetSoundCues(p)` yields
+  one sound-only `Presentation` per offset entry, each already carrying `group delay + its own` as
+  its whole `DelayMs`, and `withoutOffsetSounds(p)` is the remainder (returned as the SAME object
+  when no entry carries an offset, so shipped content allocates nothing). Each is then an ordinary
+  delayed-or-inline cue - per-sound timing needs no downstream special case, and `playMoment` never
+  re-reads a per-sound delay. A remainder with nothing left to play is skipped rather than queued.
 - **The queue is per WORLD, never per session, and `drainPendingMoments` runs at the TOP of
   `tickFrameOnce`, ahead of the session loop's empty-queue early return.** `MOMENT_COMPLETION` is
   emitted from inside `stop()`, so its cue routinely outlives its own session and, when that was the
@@ -524,8 +559,8 @@ presentation, so a mid-wait catalog re-fold can never change what was scheduled.
   also the KEY registry for the cross-world sweep, since `WorldKeyedQueues` exposes values only.
 - **An INTERRUPTED stop drops this session's parked cues; a COMPLETION keeps them.**
   `dropsPendingCuesAtStop(reason)` is the pure gate, and `stop()` runs the sweep
-  (`dropPendingMoments`) only when it says so, right beside the existing `pendingImpactAtMs = 0L`
-  reset. Walking off, taking a hit, dying, or breaking a tool should not keep playing the sounds of
+  (`dropPendingMoments`) only when it says so. Walking off, taking a hit, dying, or breaking a tool
+  should not keep playing the sounds of
   work that is no longer happening - but `RITUAL_COMPLETE` and `INPUTS_EXHAUSTED` are real
   completions, and a non-looping ritual emits its final cycle's cues microseconds BEFORE stopping
   itself, so a sweep keyed on session identity alone silences exactly the moment the ritual exists to
@@ -534,12 +569,15 @@ presentation, so a mid-wait catalog re-fold can never change what was scheduled.
   cue itself is outside the question either way: `stop()` emits it further down, after the sweep,
   into the world-scoped queue.
 
-**Which delay to reach for.** `Worker.Animation.Swing.Impact.DelayMs` SPLITS the swing into a second
-moment: the held cue gets its own `MOMENT_IMPACT` id, which a flair can re-skin or re-time on its
-own, independently of `MOMENT_SWING`. `Presentation.DelayMs` offsets a cue WITHIN the moment id it
-already has, leaving the moment vocabulary alone. So: author `Impact` when the late cue is a
-separate beat a flair should be able to target (the strike landing after the swing); author
-`Presentation.DelayMs` when the whole moment simply reads early and wants nudging onto its beat.
+**Which delay to reach for** - three offsets, one scheduler, and the choice is about IDENTITY, not
+timing:
+- **A separate `Moments` entry** (`impact` beside `swing`) when the late cue is its own BEAT that a
+  flair should be able to re-skin or re-time on its own. It is late because its own
+  `Presentation.DelayMs` says so; the moment id is what buys the flair target.
+- **`Presentation.DelayMs`** when a whole moment simply reads early and wants nudging onto its beat,
+  keeping the moment vocabulary alone.
+- **A `Sounds` entry's own `DelayMs`** when ONE sound inside a moment needs to trail the rest and
+  nothing else about that moment moves. It ADDS to the moment's own delay.
 
 Two more consequences worth knowing:
 - A flair overlays `DelayMs` like any other leaf, so a flair that OMITS it inherits the base moment's
@@ -577,17 +615,22 @@ exists. Route a new moment call site through `emitMoment` - never spawn particle
 moment yourself, or you lose the flair overlay AND the leak guard (this bug was found in-game; do
 not reintroduce it).
 
-## Per-swing cadence (unchanged)
+## Per-swing cadence
 
-`StationAsset.Animation.Swing` (its OWN `Presentation`): an independent server-side timer fires a
-swing SFX/VFX cue TOGETHER with a one-shot re-fire of the work animation. The work emote must NOT
-loop client-side by convention: a looping emote (`IsLooping:true`) with no `Swing` group behaves
-as before (client loops it, zero re-fires); a non-looping emote needs an authored
-`Swing.IntervalMs`. `runSwing` picks the animation ROUTE via `useActionSlotForSwing(seatMode)` -
-see the seat/swing routing bullet below. `scheduleCueAt`/`cueDue` (the engine's ONE due-time pair,
-shared with every `Presentation.DelayMs` cue) schedule an optional delayed impact cue
-(`Swing.Impact.{DelayMs, Presentation}`) into the session's single pending slot, played on its own
-`MOMENT_IMPACT` moment id.
+`StationAsset.Animation.Swing` is pure CADENCE (`IntervalMs` and nothing else): an independent
+server-side timer re-fires the work animation as a one-shot. The work emote must NOT loop
+client-side by convention: a looping emote (`IsLooping:true`) with no `Swing` group behaves as
+before (client loops it, zero re-fires); a non-looping emote needs an authored `Swing.IntervalMs`.
+`runSwing` picks the animation ROUTE via `useActionSlotForSwing(seatMode)` - see the seat/swing
+routing bullet below.
+
+**What a swing SOUNDS like is two `Moments` entries, not a leaf on this group.** Each tick emits
+`MOMENT_SWING` and `MOMENT_IMPACT`, both with a `null` base, so both resolve against the action's own
+`Moments` map through `emitMoment`. Both emit UNCONDITIONALLY: an action authoring neither entry
+plays nothing (the flair fold early-returns on a null base), while a FLAIR authoring one without a
+base entry still gets to play - which an "only emit when the action authored it" gate would have
+silently forbidden. The impact cue is late purely because its own `Presentation.DelayMs` holds it,
+riding the same per-world queue as every other delayed cue.
 
 ## THE camera packet shapes - written in blood, do not improvise a fourth combination
 
@@ -972,11 +1015,12 @@ at first ready (`StationService.reconcilePerformersAtBoot`); `toggle` fires a de
 sweep (`reconcileStalePerformersAtEngage`, via `world.execute` so the native sweep runs outside the
 processing lock). **Legacy mechanics carry over below.** **Spawn + hide, at engage**
 (`spawnAndHide`, called from `toggle` AFTER the mount-attach block): resolves `Puppet.Offset` (the
-shared `Vec3`) / `Yaw` off the block-top anchor + the initial `Puppet.Prop`, spawns via `PlayerPuppetService
-.spawn`; a null spawn is non-fatal (session continues in-body). **`Offset`/`Yaw` are
-FACING-RELATIVE to the placed block's own yaw (round-3 smoke, 2026-07-29)** - authored `+Z` = the
+shared `Vec3`) / `Puppet.Rotation` off the block-top anchor + the initial `Puppet.Prop`, spawns via
+`PlayerPuppetService.spawn`; a null spawn is non-fatal (session continues in-body).
+**`Offset`/`Rotation.Yaw` are
+FACING-RELATIVE to the placed block's own yaw** - authored `+Z` = the
 block's FRONT, `+X` = its right, `Offset.Y` vertical, block yaw folded additively into the authored
-`Yaw` - the round-8 `Custody.Display` precedent applied to the puppet, because world-space `Offset`
+`Yaw` - the `Custody.Display` precedent applied to the puppet, because world-space `Offset`
 meant which SIDE of the sawmill the worker stood on depended on how that block happened to be
 placed. The block-yaw read and its trig are the ONE shared helper
 [`StationBlockFacing`](StationBlockFacing.java) (`yawRadians` over `World#getBlockRotationIndex`,
@@ -989,6 +1033,15 @@ on a default-facing placement. Only the engage-time spawn resolves position/yaw;
 actually hides (`hideByScale`/`revealByScale`); `"Effect"`/`"None"` apply no hide. **Reveal +
 despawn** happens in the ONE idempotent `stop()` funnel (`revealAndDespawn`, right after
 `returnCustody`), resolving its own store so a disconnect/shutdown stop still reveals + despawns.
+**Rotation**: `Puppet.Rotation.Yaw` folds with the block facing exactly as the old scalar `Yaw` leaf
+did (`resolveYawRadians`, identity at yaw 0); `Rotation.Pitch`/`.Roll` are the puppet's OWN tilt and
+are NOT block-composed. The spawn context carries a yaw alone, so a non-zero tilt is applied ONE
+FRAME LATER through the performer's own `presentAt(accessor, pos, yaw, pitch, roll)` overload
+(`StationSession.puppetStance`/`puppetTiltPending`, drained by
+`StationPuppetController.applyPendingTilt` from the same per-frame hook as `refreshPuppetRef`). That
+timing is not a workaround to remove: it is also what covers the `NpcRole` backend's deferred spawn,
+whose ref is honestly null at engage. A puppet authoring no tilt never sets the flag, so it keeps the
+spawn placement untouched.
 **Animation routing**: a puppet-active session supersedes `useActionSlotForSwing` entirely and
 picks its OWN swing slot through the pure `StationPuppetController.useActionSlotForPuppetSwing`,
 fed by the already-existing `resolveEffectiveClip`. An `Emote`-slot clip is the OPT-IN full-body

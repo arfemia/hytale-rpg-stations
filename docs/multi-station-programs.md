@@ -93,7 +93,7 @@ it, walk the cooked fish back, deposit it.
           "Enabled": true,
           "Hide": { "Route": "Scale" },
           "Look": { "Source": "PlayerClone" },
-          "Offset": { "X": 0.0, "Y": -0.4, "Z": 0.6 }, "Yaw": 0.0,
+          "Offset": { "X": 0.0, "Y": -0.4, "Z": 0.6 }, "Rotation": { "Yaw": 0.0 },
           "Prop": { "Source": "MirrorHeld", "Slot": "Hotbar" }
         }
       }

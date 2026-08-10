@@ -111,6 +111,16 @@ resolution section for the engine half.
   than appending - to ADD rolls/entries to a shared table, ship an `ExtensionAsset` targeting it (or
   author the extras in the sibling inline `Rolls`/`Entries` leaf). `ActionAsset` has no such caveat:
   every leaf is `appendInherited`, so a `Parent` body is a genuine per-group delta.
+- **STRING-OR-OBJECT ([`StringOrObjectCodec`](StringOrObjectCodec.java))** - the ONE dual-shape leaf
+  mechanism: a value authorable EITHER as a bare string SHORTHAND or as the full nested object,
+  dispatched per value on the raw JSON/BSON type. It follows the engine's own two dual-shape codecs
+  exactly (`ContainedAssetCodec` and `Message`'s `ParamValue`): `bsonValue.isString()` /
+  `reader.peekFor('"')` / `Schema.anyOf(string, <the object schema>)`. ONE consumer today,
+  `Presentation.Sounds[]`. It implements `WrappedCodec` over the OBJECT body codec, so the
+  documentation-coverage walk and the schema-reference writer both descend into that body's own
+  leaves instead of stopping at an opaque terminal. Encoding round-trips the SHORTHAND whenever the
+  value carries nothing the shorthand cannot express. **Generic, and a lift candidate** for
+  `ziggfreed-common`'s `codec/` package the moment a second mod wants one.
 - **[`EffectRef`](EffectRef.java)** - the ONE native-EntityEffect
   reference leaf (`{Id, DurationMs?}`, id-ref-only, never inlines the effect body).
   Reused at every altitude an effect payload lands: `Presentation.Effect` (a single per-moment
@@ -154,7 +164,11 @@ resolution section for the engine half.
     engage and ANDed with the engaged action's own `Requires`. It is deliberately NOT a default:
     an action authoring none is gated by this one alone.
   - `Flairs` - a named cosmetic flair overrides map (per-flair-id, `{Moments}`), consulted by
-    every action; see [`FlairAsset`](FlairAsset.java) for the standalone route.
+    every action; see [`FlairAsset`](FlairAsset.java) for the standalone route. Decoded through
+    `ziggfreed-common`'s `InheritMapCodec`, so native `Parent` merges it PER FLAIR ID: a child
+    restyling one flair inherits every other flair the base authored, and each entry's own
+    `Moments` merges per moment id in turn (the same codec, so inline and standalone flair content
+    behave identically).
   - `Actions[]` - the station's actions, in AUTHORED ORDER, which IS selection priority: the
     first entry whose `Select` matches the held/placed context wins (see the `ActionDef` bullet's
     selection rule). Every station authors at least one; an empty/absent array leaves the station
@@ -258,14 +272,49 @@ resolution section for the engine half.
     `../station/CLAUDE.md`'s Mount bullet), `Camera` (three independent knobs, no mode: `Enabled`
     - reader-default true on an authored group -, `Locked`, and `Recipe`; authoring `Recipe` at
     all IS the fixed-look opt-in, since a second boolean gating it could only ever make an
-    authored preset silently inert), `Animation` (`EmoteId` + `Swing`/`Impact`/`ActionClip`),
+    authored preset silently inert), `Animation` (`EmoteId` + `ActionClip` + `Swing{IntervalMs}`, pure CADENCE - a swing's
+  CUES are `Moments` entries),
     `Puppet` (below). They travel together because an author tuning one almost always tunes the
     next, and nesting them keeps an action at eight readable concerns instead of fourteen flat
     siblings. Each leaf is the SAME type it always was, and each is independently nullable.
-  - **`Moments`** - GROUPING, not a new concept: the same [`Presentation`](Presentation.java) type
-    at two TIMES - `Cycle` (fired every finished cycle) and `Completion` (played on a non-silent
-    stop with at least one completed cycle; null = silent completion). Naming the moments rather
-    than the type is what makes the pair readable side by side.
+  - **`Moments`** - an OPEN `Map<String, Presentation>` keyed by MOMENT ID, the same vocabulary and
+    the same shape a [`FlairAsset`](FlairAsset.java) keys its own `Moments` by (one moment
+    vocabulary, whether a cue is authored by the action or overlaid by a flair). Well-known ids:
+    `cycle` (every finished cycle), `swing` and `impact` (each `Animation.Swing` tick - the swing,
+    and the strike landing behind it, which is late purely because its own `Presentation.DelayMs`
+    says so), `rare_find`, `completion`, plus a per-step `step:<actionId>:<stepId>`. Keys are
+    canonicalized to lowercase and matched case-insensitively (`StationFlairs.canonicalMomentKeys`
+    is the ONE canonicalizer, shared with both flair maps), so an authored `"Cycle"` resolves.
+    Decoded through `ziggfreed-common`'s `InheritMapCodec`, so native `Parent` merges the map PER
+    KEY and per leaf under it - a child re-skinning one moment inherits every other one plus the
+    leaves it did not mention. **SPECIFICITY WINS, resolved in exactly one place**
+    (`station.StationService#emitMoment`): an entry here is the BASE for its moment id wherever the
+    engine holds nothing more specific, and where it does - a `StationStep`'s own `Presentation`
+    for that step's moment, a `Ladder.Floor`'s cue for `rare_find` - the site-supplied presentation
+    plays and the map entry is not consulted for that emission. An unrecognized key is the same
+    warn-only typo finding a flair map gets (`UNKNOWN_MOMENT_ID`), never a block.
+    **`rare_find` is NOT action-authorable** (`RARE_FIND_MOMENT_NEVER_PLAYS` warns): that moment is
+    only ever emitted with the earning `Roll`/`Ladder.Floor` cue in hand, so a map entry could never
+    win. A FLAIR keyed `rare_find` is meaningful (it overlays the earning cue), which is why the
+    check lives on the action branch and not in the shared map walk.
+    **Whether a `$Comment` (or any other `$`-key) may sit directly inside a map-shaped group
+    depends on which map codec backs it.** A `BuilderCodec` always ignores the editorial `$` keys.
+    A map codec has to opt in, because every key there is a map KEY whose value goes straight to the
+    value codec: `ziggfreed-common`'s `InheritMapCodec` skips a `$`-key on both decode paths
+    (consuming its value, whatever shape it is), and the engine's own `MapCodec` does not, so under
+    `MapCodec` a `$Comment` hands a String to the value codec and the whole asset fails to decode at
+    server start.
+    - **`$` keys are LEGAL** (backed by `InheritMapCodec`) inside every MOMENT/FLAIR map: an
+      action's `Moments` (`ActionDef` and `ActionAsset` alike), `StationAsset.Flairs`, a station's
+      inline `Flairs[].Moments`, and `FlairAsset.Moments`. Inline and standalone flair content is
+      ONE shape, so the two `Moments` maps behave identically.
+    - **`$` keys are ILLEGAL** (backed by the engine `MapCodec`) inside `Anchors` (`ActionDef`,
+      `ActionAsset`, `ExtensionAsset`), `StationStep.Stamp.Stats.Caps.PerStat`, and every `Tags`
+      leaf (`Tool.Tags`, `ActionInput.Tags`, and so `Custody.Input.Tags`), which share
+      `TagMatch.CODEC`.
+    In an illegal spot, put the note inside one of the map's VALUES (a `Presentation` is a
+    `BuilderCodec`, so `Moments.Swing.$Comment` is fine) or on the enclosing object.
+    `ShippedAssetDecodeTest` decodes every shipped file through its real codec to catch exactly this.
 - **[`ActionAsset`](ActionAsset.java)** - a standalone, reusable,
   fourth-party-extendable action: `Server/RpgStations/Actions/<Name>.json` (Pattern A, id =
   lowercased filename). Its body is the EXACT SAME field set as the inline `ActionDef` (one
@@ -368,10 +417,17 @@ resolution section for the engine half.
   Folded into `loot.RollPoolCatalog`.
 - **[`Presentation`](Presentation.java)** - this mod's OWN codec, deliberately direct: a moment
   plays its cues here with no feedback-service indirection layer, and every leaf on it is
-  genuinely PLAYED. Leaves: **`Sounds`** (a `String[]`, played in authored order, so a thud plus a
-  chime is two entries rather than two whole `Roll`s or a synthetic `SoundEvent` asset;
-  deliberately NOT promoted to `[{EventId, Volume, Pitch}]` because the underlying 3D-sound
-  primitive takes no gain or pitch argument, so those leaves would be inert), **`Particles`** (an
+  genuinely PLAYED. Leaves: **`Sounds`** (a `SoundCue[]` played in authored order, so a thud plus a
+  chime is two entries rather than two whole `Roll`s or a synthetic `SoundEvent` asset. Each entry
+  is DUAL-SHAPE - either a bare id string, or `{EventId, DelayMs?}` - decoded by the one
+  [`StringOrObjectCodec`](StringOrObjectCodec.java) and normalized to one `SoundCue` record either
+  way; a shorthand entry re-ENCODES as a bare string, which is what keeps an encode-based test and a
+  hand-authored file on the same bytes. `DelayMs` there holds THAT sound and ADDS to the group's own
+  (the moment delay offsets the moment, the entry delay offsets that sound inside it); the engine
+  splits an offset entry off into its own sound-only queued cue, so both land on the ONE scheduler.
+  Still deliberately NO `Volume`/`Pitch`: the 3D-sound primitive takes neither argument, so those
+  leaves would decode and then do nothing - vary them by referencing a different `SoundEvent`
+  asset), **`Particles`** (an
   ARRAY of `ModelParticle`-shaped bursts matching native `InteractionEffects.Particles` - each
   entry is `{SystemId, Scale?, DurationSeconds?, RotationOffset{Yaw,Pitch,Roll}?,
   PositionOffset{X,Y,Z}?}`, every knob nullable with reader-defaults that reproduce the old
@@ -387,30 +443,34 @@ resolution section for the engine half.
   id). Both id-ref-only. Plus **`DelayMs`** (nullable `Long`), the one leaf that is not itself a
   cue: it offsets the WHOLE group in time so every cue in it stays together and lands late as one
   moment. Because it lives on the shared type, EVERY `Presentation` site can re-time itself with no
-  extra schema - an action's `Moments.Cycle`/`Moments.Completion`, a step's own `Presentation`, a
+  extra schema - any of an action's own `Moments` entries, a step's own `Presentation`, a
   `Roll`'s or a `Ladder.Floor`'s, a `FlairAsset` moment. Null/zero/negative all read as "play at
   once" (`effectiveDelayMs()`), so a nonsense value degrades to the undelayed cue rather than to a
   cue that never fires. A flair overlays it like any other leaf, so a flair OMITTING it inherits the
   base moment's timing and needs an explicit `0` to cancel one. Engine side:
   `station.StationService#emitMoment` applies it AFTER the flair fold (so the winning
   `Presentation`'s timing is the one honored, and a flair can re-time as well as re-skin) onto the
-  one shared due-time core the swing-impact cue already used - see `../station/CLAUDE.md`'s
-  `emitMoment` section for the queue, its drain, the stop policy, and when to reach for
-  `Animation.Swing.Impact.DelayMs` (a separate flair-targetable moment id) instead of this leaf
-  (an offset within the moment id a cue already has).
+  ONE due-time core every offset in this engine rides - see `../station/CLAUDE.md`'s `emitMoment`
+  section for the queue, its drain, the stop policy, and the three-way "which delay to reach for"
+  rule (a separate `Moments` entry when the late cue is its own flair-targetable beat, this leaf
+  when a whole moment reads early, a `Sounds` entry's own `DelayMs` when one sound inside a moment
+  needs staggering behind the rest).
 - **[`Puppet`](Puppet.java)** - "mount the player, hide their player model, and spawn/display a
   visual of their character model performing the steps" - one of the four `ActionDef.Worker`
   groups (ORTHOGONAL to whichever `Hold.Mount` holds the real player, never nested under `Hold`),
   whole-GROUP overridable per action:
   `{Enabled?, Hide{Route,Effect?}, Look{Source,FallbackModelId?,Model?,Role?}, Offset: Vec3,
-  Yaw, Prop{Source,ItemId?,Slot?}}`. `Hide.Route` is a THREE-arm union: `"Scale"` is the
+  Rotation: {Yaw,Pitch,Roll}, Prop{Source,ItemId?,Slot?}}`. `Hide.Route` is a THREE-arm union: `"Scale"` is the
   in-game-crowned default (hides the puppeteer's own body via `ziggfreed-common`'s
   `entity.PlayerPuppetService`); `"Effect"` is schema-reserved future work; `"None"` is the
   deliberate degraded fallback. `Look.Source` defaults `"PlayerClone"`, with `"Model"` an open
-  performer seam. `Offset`/`Yaw` place the puppet relative to the station's block-top anchor and are
-  **FACING-RELATIVE to the placed block's own yaw**: authored `+Z` is
+  performer seam. `Offset`/`Rotation` place the puppet relative to the station's block-top anchor: authored `+Z` is
   the block's FRONT, `+X` its right, `Offset.Y` stays vertical, and the block yaw folds additively
-  into the authored `Yaw` (so `Yaw: 0` means "faces the same way the block does"). This shares ONE
+  into `Rotation.Yaw` (so `Yaw: 0` means "faces the same way the block does"). **`Rotation.Pitch`/
+  `.Roll` are the puppet's OWN tilt and are NOT block-composed**, the same rule
+  `Presentation.ModelParticle.RotationOffset` documents; the engine applies them through the
+  performer's own re-anchor call one frame after spawn (which is also what covers the `NpcRole`
+  backend's deferred spawn), so a puppet authoring no tilt keeps the untouched spawn placement. This shares ONE
   reader with `Custody.Display`, `station.StationBlockFacing` (`yawRadians` reads
   `World#getBlockRotationIndex`, try-guarded to yaw 0; `rotateOffset` is the one
   horizontal-rotation core), with the per-consumer composition in
@@ -428,7 +488,7 @@ resolution section for the engine half.
   `Hide`/`Prop`). See `../station/CLAUDE.md`'s puppet-engine bullet
   (`StationPuppetController`). The jar's own `Stations/Sawmill.json` authors the shipped
   standalone default (`Enabled true`, `Hide.Route "Scale"`, `Look.Source "PlayerClone"`,
-  `Offset {0.0, -0.4, 1.0}`, `Yaw 0.0`, `Prop {MirrorHeld, Hotbar}`, the maintainer's in-game-tuned
+  `Offset {0.0, -0.4, 1.15}`, `Rotation {Yaw: 0.0}`, `Prop {MirrorHeld, Hotbar}`, the in-game-tuned
   values); the pack-shipped Anvil authors its own. A pack re-skins any of them through an
   `ExtensionAsset`'s `Puppet` per-leaf overlay (rule 5 below), never a full-file station override.
 - **[`Roll`](Roll.java)** - the conditional-lootable roll: `Trigger` (`Cycle`/`Completion`),
@@ -508,7 +568,9 @@ resolution section for the engine half.
   Moments}`. `Stations` null/empty = applies to every station; `Moments` is an OPEN
   `Map<String, Presentation>` keyed by an arbitrary moment id (well-known ids `cycle`/`swing`/
   `impact`/`rare_find`/`completion` plus a per-step `step:<actionId>:<stepId>` id) - nothing
-  hardcodes the vocabulary in Java. Folded into `station.FlairCatalog`
+  hardcodes the vocabulary in Java. Decoded through `ziggfreed-common`'s `InheritMapCodec`, so
+  native `Parent` merges it PER MOMENT ID (and per leaf under it), exactly like an action's own
+  `Moments`: a child re-skinning one moment inherits the rest. Folded into `station.FlairCatalog`
   (`effectiveFlairsFor`, UNIONS every applicable `FlairAsset` onto a station's own inline `Flairs`
   map). Deliberately NOT extension-composable via `ExtensionAsset` (the non-extensible list below)
   - extend `FlairAsset.Moments` by shipping another `FlairAsset`, the union already composes.
@@ -572,7 +634,8 @@ resolution section for the engine half.
        `appendInherited`/nullable-nested-leaves convention applied ACROSS assets instead of down a
        `Parent` chain). A `Custody` overlay carrying only `Display` never touches the base's
        `States`/`MaxQuantity`/`Input`; a `Display` carrying only `Scale` never clears its `Offset`;
-       a `Puppet` carrying only `Offset.Z` keeps `Offset.X`/`.Y` plus `Hide`/`Look`/`Prop`/`Yaw`;
+       a `Puppet` carrying only `Offset.Z` keeps `Offset.X`/`.Y` plus `Hide`/`Look`/`Prop` and every
+       `Rotation` axis, and one carrying only `Rotation.Pitch` keeps the base's `Rotation.Yaw`/`.Roll`;
        a `ContributionScale` overlay authoring only `Floors` keeps the base action's own `Factors`.
        (Leaf-granularity note: a MAP-valued leaf - `Custody.Input.Tags` - replaces wholesale as
        ONE leaf, never per tag family.)

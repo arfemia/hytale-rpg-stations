@@ -28,6 +28,7 @@ import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.RootInteraction;
 import com.hypixel.hytale.server.core.modules.item.ItemModule;
 import com.hypixel.hytale.server.npc.NPCPlugin;
+import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.rpgstations.api.FindingSink;
 import com.ziggfreed.rpgstations.api.ValidationHook;
 import com.ziggfreed.rpgstations.api.ValidationScope;
@@ -62,6 +63,7 @@ import com.ziggfreed.rpgstations.util.Log;
 import com.ziggfreed.rpgstations.validation.Finding;
 import com.ziggfreed.rpgstations.validation.Report;
 import com.ziggfreed.rpgstations.validation.Severity;
+import com.ziggfreed.common.entity.PlayerModelService;
 
 /**
  * Read-only content diagnostic for station assets (design section 4.1), over the local
@@ -340,7 +342,7 @@ public final class StationValidator {
      */
     private static boolean modelKnownLive(@Nonnull String modelId) {
         try {
-            return com.ziggfreed.common.entity.PlayerModelService.modelExists(modelId);
+            return PlayerModelService.modelExists(modelId);
         } catch (Throwable t) {
             return true; // a lookup failure is not evidence the id is wrong - don't flag it
         }
@@ -493,12 +495,21 @@ public final class StationValidator {
         if (p == null) {
             return;
         }
-        String[] sounds = p.getSounds();
+        Presentation.SoundCue[] sounds = p.getSounds();
         if (sounds != null) {
-            for (String sound : sounds) {
-                if (notBlank(sound) && !soundKnownLive(sound)) {
+            for (Presentation.SoundCue cue : sounds) {
+                if (cue == null) {
+                    continue;
+                }
+                if (!cue.hasEventId()) {
+                    out.add(Finding.warning(DOMAIN, "PRESENTATION_SOUND_MISSING_EVENT_ID",
+                            label + " Sounds has an entry with no EventId - it is skipped at play time", id));
+                    continue;
+                }
+                if (!soundKnownLive(cue.getEventId())) {
                     out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_SOUND",
-                            label + " Sounds entry '" + sound + "' is not a known SoundEvent id - check for a typo", id));
+                            label + " Sounds entry '" + cue.getEventId()
+                                    + "' is not a known SoundEvent id - check for a typo", id));
                 }
             }
         }
@@ -1658,6 +1669,17 @@ public final class StationValidator {
                                     + " mirroring on the NpcRole performer is UNPROVEN pending the maintainer's"
                                     + " in-game spike (best-effort/role-authored-only until confirmed)", id));
                 }
+                // An NPC keeps its pose from its own leash, which carries a heading and a pitch and
+                // nothing else - so a banked pose is the one tilt axis this performer cannot hold.
+                Rotation rotation = puppet.getRotation();
+                if (rotation != null && rotation.getRoll() != null && puppet.effectiveRollDegrees() != 0.0) {
+                    out.add(Finding.warning(DOMAIN, "PUPPET_NPC_ROLE_ROLL_DROPPED",
+                            label + " Puppet.Look.Source is \"NpcRole\" with Puppet.Rotation.Roll "
+                                    + puppet.effectiveRollDegrees() + " - the NpcRole performer has no roll axis"
+                                    + " (its leash mirrors yaw and pitch only), so the bank is dropped and the"
+                                    + " puppet stands level about that axis. Yaw and Pitch still apply; author"
+                                    + " Look.Source \"PlayerClone\" or \"Model\" if the roll matters", id));
+                }
             }
         }
 
@@ -2624,8 +2646,7 @@ public final class StationValidator {
     }
 
     private static void checkPresentationRefs(@Nullable StationAsset.Animation animation,
-                                              @Nullable StationAsset.Hold hold,
-                                              @Nullable Presentation cycle, @Nonnull String id,
+                                              @Nullable StationAsset.Hold hold, @Nonnull String id,
                                               @Nonnull String label, @Nonnull List<Finding> out) {
         String emoteId = animation != null ? animation.getEmoteId() : null;
         if (emoteId != null && emoteId.isBlank()) {
@@ -2643,9 +2664,6 @@ public final class StationValidator {
             out.add(Finding.warning(DOMAIN, "UNKNOWN_ENTITY_EFFECT",
                     label + " Hold.EffectId '" + holdEffectId + "' references unknown EntityEffect", id));
         }
-        // The action's own cycle moment gains the SAME native-composition advisory coverage every
-        // other Presentation site gets.
-        checkNativeRefs(cycle, label + " Moments.Cycle", id, out);
     }
 
     private static void checkAnimation(@Nullable StationAsset.Animation animation, @Nonnull String id,
@@ -2680,29 +2698,68 @@ public final class StationValidator {
                             + " (Animation.ActionClip, defaulting to 'Chop'), while an effect-mode"
                             + " session plays no clip at all and the swing is a pure sound/particle cue", id));
         }
-        checkNativeRefs(swing.getPresentation(), swingLabel + ".Presentation", id, out);
-        checkImpact(swing, swingLabel, id, out);
     }
 
-    private static void checkImpact(@Nonnull StationAsset.Animation.Swing swing, @Nonnull String swingLabel,
-                                    @Nonnull String id, @Nonnull List<Finding> out) {
-        StationAsset.Animation.Swing.Impact impact = swing.getImpact();
-        if (impact == null) {
+    /**
+     * The timing sibling of {@code CYCLE_DELAY_OVERLAPS_NEXT_CYCLE}/
+     * {@code STEP_DELAY_OVERLAPS_ITS_DURATION}, over the {@code impact} moment: a strike cue held
+     * for at least a whole swing interval lands on (or after) the swing that replays the same
+     * moment, so it reads as belonging to the wrong swing.
+     */
+    private static void checkImpactMomentDelay(@Nullable StationAsset.Animation animation,
+                                               @Nullable Map<String, Presentation> moments,
+                                               @Nonnull String label, @Nonnull String id,
+                                               @Nonnull List<Finding> out) {
+        StationAsset.Animation.Swing swing = animation != null ? animation.getSwing() : null;
+        Long intervalMs = swing != null ? swing.getIntervalMs() : null;
+        Presentation impact = moment(moments, StationFlairs.MOMENT_IMPACT);
+        if (impact == null || intervalMs == null || intervalMs <= 0) {
             return;
         }
-        String impactLabel = swingLabel + ".Impact";
-        Long delayMs = impact.getDelayMs();
-        Long intervalMs = swing.getIntervalMs();
-        if (delayMs != null && delayMs > 0 && intervalMs != null && intervalMs > 0 && delayMs >= intervalMs) {
+        long delayMs = impact.effectiveDelayMs();
+        if (delayMs > 0 && delayMs >= intervalMs) {
             out.add(Finding.warning(DOMAIN, "IMPACT_OVERLAPS_NEXT_SWING",
-                    impactLabel + " DelayMs " + delayMs + " is >= Swing.IntervalMs " + intervalMs
-                            + " (the delayed impact lands at or after the next swing re-plays the whole moment)", id));
+                    label + " Moments impact DelayMs " + delayMs + " is >= Animation.Swing.IntervalMs "
+                            + intervalMs + " (the held strike cue lands at or after the next swing replays the"
+                            + " same moment); keep the delay comfortably under one swing", id));
         }
-        if (impact.getPresentation() == null) {
-            out.add(Finding.warning(DOMAIN, "IMPACT_WITHOUT_PRESENTATION",
-                    impactLabel + " is authored with no Presentation - the delay has nothing to play", id));
+    }
+
+    /**
+     * The {@code rare_find} moment is the one well-known id an ACTION cannot author: it is only ever
+     * emitted WITH the earning {@code Roll}/{@code Ladder.Floor} cue already in hand, and the
+     * site-supplied presentation always outranks the map entry, so an entry keyed by it decodes,
+     * reads as a known moment, and then never plays. Warn-only, and deliberately not part of the
+     * shared map walk - a FLAIR keyed {@code rare_find} is meaningful (it overlays the earning cue).
+     */
+    private static void checkRareFindNotActionAuthored(@Nullable Map<String, Presentation> moments,
+                                                       @Nonnull String label, @Nonnull String id,
+                                                       @Nonnull List<Finding> out) {
+        if (moment(moments, StationFlairs.MOMENT_RARE_FIND) == null) {
+            return;
         }
-        checkNativeRefs(impact.getPresentation(), impactLabel + ".Presentation", id, out);
+        out.add(Finding.warning(DOMAIN, "RARE_FIND_MOMENT_NEVER_PLAYS",
+                label + " Moments authors rare_find, which an action can never supply - that cue comes"
+                        + " from the Roll or Ladder.Floor that earned it. Move the presentation onto the"
+                        + " roll/floor (a flair can still overlay it under the rare_find id)", id));
+    }
+
+    /**
+     * One entry of an action's own {@code Moments} map, matched case-insensitively - the same
+     * lookup rule the engine applies at play time, so a validator finding and a runtime emission
+     * never disagree about which key resolved.
+     */
+    @Nullable
+    private static Presentation moment(@Nullable Map<String, Presentation> moments, @Nonnull String momentId) {
+        if (moments == null) {
+            return null;
+        }
+        for (Map.Entry<String, Presentation> e : moments.entrySet()) {
+            if (e.getKey() != null && e.getKey().equalsIgnoreCase(momentId)) {
+                return e.getValue();
+            }
+        }
+        return null;
     }
 
     private static void checkCamera(@Nullable StationAsset.Camera camera, @Nullable StationAsset.Hold hold,
@@ -2766,11 +2823,6 @@ public final class StationValidator {
         }
     }
 
-    private static void checkCompletion(@Nullable Presentation completion, @Nonnull String id,
-                                        @Nonnull String label, @Nonnull List<Finding> out) {
-        checkNativeRefs(completion, label + " Moments.Completion", id, out);
-    }
-
     /**
      * Station-inline {@code Flairs} coverage (design section 9.6, leg F reshape - the old fixed
      * {@code Swing}/{@code Cycle}/{@code RareFind}/{@code Completion} leaf check is replaced by
@@ -2813,19 +2865,33 @@ public final class StationValidator {
                     label + " authors no Moments - it can never overlay anything", id));
             return;
         }
+        checkMomentsMap(moments, label + " Moments", id, out);
+    }
+
+    /**
+     * The ONE {@code momentId -> Presentation} map walk, shared by BOTH map-shaped moment surfaces
+     * in this schema - an action's own {@code Moments} and a flair's - because they key by the exact
+     * same open vocabulary and a finding phrased for one reads correctly for the other. A blank key
+     * warns; an unrecognized one (typo'd against the 5 well-known ids or the {@code step:} prefix -
+     * {@link StationFlairs#isKnownMomentId}) warns ONLY, never blocks: a future engine moment must
+     * not fail an older pack's validation. Each authored Presentation then gets the standard
+     * native-reference advisories.
+     */
+    private static void checkMomentsMap(@Nonnull Map<String, Presentation> moments, @Nonnull String label,
+                                        @Nonnull String id, @Nonnull List<Finding> out) {
         for (Map.Entry<String, Presentation> entry : moments.entrySet()) {
             String momentId = entry.getKey();
             if (momentId == null || momentId.isBlank()) {
-                out.add(Finding.warning(DOMAIN, "BLANK_FLAIR_MOMENT_ID",
-                        label + " Moments has a blank moment id", id));
+                out.add(Finding.warning(DOMAIN, "BLANK_MOMENT_ID",
+                        label + " has a blank moment id", id));
                 continue;
             }
             if (!StationFlairs.isKnownMomentId(momentId)) {
-                out.add(Finding.warning(DOMAIN, "UNKNOWN_FLAIR_MOMENT_ID",
-                        label + " Moments['" + momentId + "'] is not a recognized moment id (cycle/swing/impact/"
+                out.add(Finding.warning(DOMAIN, "UNKNOWN_MOMENT_ID",
+                        label + "['" + momentId + "'] is not a recognized moment id (cycle/swing/impact/"
                                 + "rare_find/completion, or a step:<actionId>:<stepId> id) - check for a typo", id));
             }
-            checkNativeRefs(entry.getValue(), label + ".Moments['" + momentId + "']", id, out);
+            checkNativeRefs(entry.getValue(), label + "['" + momentId + "']", id, out);
         }
     }
 
@@ -2973,7 +3039,7 @@ public final class StationValidator {
                             + " nor Steps - this action can never run a cycle", id));
         }
         ActionDef.Worker worker = def.getWorker();
-        ActionDef.Moments moments = def.getMoments();
+        Map<String, Presentation> moments = def.getMoments();
         StationAsset.Hold hold = worker != null ? worker.getHold() : null;
         StationAsset.Animation animation = worker != null ? worker.getAnimation() : null;
 
@@ -3002,17 +3068,21 @@ public final class StationValidator {
         }
         if (worker != null) {
             checkAnimation(animation, id, actionLabel, out);
-            checkPresentationRefs(animation, hold, moments != null ? moments.getCycle() : null,
-                    id, actionLabel, out);
+            checkPresentationRefs(animation, hold, id, actionLabel, out);
             checkCamera(worker.getCamera(), hold, id, actionLabel, out);
             checkMount(hold, id, actionLabel, out);
             checkPuppet(worker.getPuppet(), hold, actionLabel, id, modelKnown, out);
         }
         if (moments != null) {
-            checkCompletion(moments.getCompletion(), id, actionLabel, out);
-            // Timing, not references: a Cycle cue held for a whole cycle lands in the wrong one.
-            // Completion is deliberately exempt - there is no next cycle for its cue to overlap.
-            checkCycleMomentDelay(def.getWork(), moments.getCycle(), noCycleOutput, actionLabel, id, out);
+            // The same open-vocabulary walk a flair's Moments map gets - typo detection plus the
+            // per-Presentation native-reference advisories, on every moment id at once.
+            checkMomentsMap(moments, actionLabel + " Moments", id, out);
+            // Timing, not references: a cue held for the whole window it plays inside lands in the
+            // next one. Completion is deliberately exempt - there is no next cycle for it to overlap.
+            checkCycleMomentDelay(def.getWork(), moment(moments, StationFlairs.MOMENT_CYCLE), noCycleOutput,
+                    actionLabel, id, out);
+            checkImpactMomentDelay(animation, moments, actionLabel, id, out);
+            checkRareFindNotActionAuthored(moments, actionLabel, id, out);
         }
         checkAnchorsMap(def.getAnchors(), actionLabel, id, stationKnown, out);
         Set<String> knownAnchorIds = new HashSet<>();

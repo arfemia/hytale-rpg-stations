@@ -23,16 +23,17 @@ import com.ziggfreed.common.codec.Rotation;
  * <p>{@code DelayMs} is the one leaf that is not itself a cue: it offsets the WHOLE group in time,
  * so every cue in it stays together and lands late as one moment. Because it lives here rather
  * than on any single consumer, every site that authors a {@code Presentation} - an action's
- * {@code Moments.Cycle}/{@code Moments.Completion}, a step's own {@code Presentation}, a
- * {@code Roll}'s or a {@code Ladder.Floor}'s, a {@code FlairAsset} moment - can offset its cues
- * with no extra schema.
+ * {@code Moments} entry, a step's own {@code Presentation}, a {@code Roll}'s or a
+ * {@code Ladder.Floor}'s, a {@code FlairAsset} moment - can offset its cues with no extra schema.
+ * A single {@code Sounds} entry can then step out of that group timing with its own
+ * {@link SoundCue#getDelayMs()}, which ADDS to the group's.
  */
 public final class Presentation {
 
     /** The playback offset applied when {@link #delayMs} is not authored: none, play immediately. */
     public static final long NO_DELAY_MS = 0L;
 
-    @Nullable protected String[] sounds;
+    @Nullable protected SoundCue[] sounds;
     @Nullable protected ModelParticle[] particles;
     @Nullable protected Shake shake;
     @Nullable protected Interaction interaction;
@@ -40,9 +41,10 @@ public final class Presentation {
     @Nullable protected Long delayMs;
 
     public static final BuilderCodec<Presentation> CODEC = BuilderCodec.builder(Presentation.class, Presentation::new)
-            .appendInherited(new KeyedCodec<>("Sounds", new ArrayCodec<>(Codec.STRING, String[]::new), false),
+            .appendInherited(new KeyedCodec<>("Sounds",
+                            new ArrayCodec<>(SoundCue.CODEC, SoundCue[]::new), false),
                     (o, v) -> o.sounds = v, o -> o.sounds, (o, p) -> o.sounds = p.sounds)
-            .documentation("Native one-shot SoundEvent ids played at the moment's target position, in authored order (a thud plus a chime is two entries). Never author a LOOPING event here - nothing can stop it once fired.").add()
+            .documentation("The one-shot sounds played at the moment's target position, in authored order (a thud plus a chime is two entries). Each entry is either a bare SoundEvent id or {EventId, DelayMs} to hold that one sound behind the rest of the moment. Never author a LOOPING event here - nothing can stop it once fired.").add()
             .appendInherited(new KeyedCodec<>("Particles",
                             new ArrayCodec<>(ModelParticle.CODEC, ModelParticle[]::new), false),
                     (o, v) -> o.particles = v, o -> o.particles, (o, p) -> o.particles = p.particles)
@@ -65,11 +67,11 @@ public final class Presentation {
     public Presentation() {
     }
 
-    /** Java-side factory carrying a single {@code Sounds} entry. */
+    /** Java-side factory carrying a single undelayed {@code Sounds} entry (the shorthand shape). */
     @Nonnull
     public static Presentation ofSound(@Nullable String sound) {
         Presentation p = new Presentation();
-        p.sounds = sound == null || sound.isBlank() ? null : new String[] {sound};
+        p.sounds = sound == null || sound.isBlank() ? null : new SoundCue[] {SoundCue.of(sound)};
         return p;
     }
 
@@ -87,14 +89,14 @@ public final class Presentation {
 
     /** Fully-populated Java-side factory; does NOT touch the codec or JSON keys. */
     @Nonnull
-    public static Presentation of(@Nullable String[] sounds, @Nullable ModelParticle[] particles,
+    public static Presentation of(@Nullable SoundCue[] sounds, @Nullable ModelParticle[] particles,
             @Nullable Shake shake, @Nullable Interaction interaction, @Nullable EffectRef effect) {
         return of(sounds, particles, shake, interaction, effect, null);
     }
 
     /** Fully-populated Java-side factory carrying the playback {@code DelayMs} leaf too. */
     @Nonnull
-    public static Presentation of(@Nullable String[] sounds, @Nullable ModelParticle[] particles,
+    public static Presentation of(@Nullable SoundCue[] sounds, @Nullable ModelParticle[] particles,
             @Nullable Shake shake, @Nullable Interaction interaction, @Nullable EffectRef effect,
             @Nullable Long delayMs) {
         Presentation p = new Presentation();
@@ -107,10 +109,25 @@ public final class Presentation {
         return p;
     }
 
-    /** The one-shot sound ids played at this moment, in authored order; null/empty = silent. */
+    /**
+     * The one-shot sounds played at this moment, in authored order; null/empty = silent. Every
+     * entry is a normalized {@link SoundCue} whichever shape it was authored in - a bare id string
+     * decodes to a cue with no offset of its own.
+     */
     @Nullable
-    public String[] getSounds() {
+    public SoundCue[] getSounds() {
         return sounds;
+    }
+
+    /**
+     * Whether this moment has anything at all to play. A group whose every cue has been split off
+     * elsewhere (each {@code Sounds} entry carrying its own offset, with no other leaf authored)
+     * answers {@code false}, so a caller can skip scheduling a cue that would play silence.
+     */
+    public boolean hasPlayableCue() {
+        return (sounds != null && sounds.length > 0)
+                || (particles != null && particles.length > 0)
+                || shake != null || interaction != null || effect != null;
     }
 
     /** The particle bursts played at this moment, in authored order; null/empty = none. */
@@ -154,6 +171,105 @@ public final class Presentation {
      */
     public long effectiveDelayMs() {
         return delayMs != null && delayMs > 0 ? delayMs : NO_DELAY_MS;
+    }
+
+    /**
+     * ONE sound played at a moment. Authorable two ways, decoded to this one record either way:
+     *
+     * <pre>{@code
+     * "Sounds": ["SFX_Tool_T1_Swing", { "EventId": "SFX_Wood_Hit", "DelayMs": 140 }]
+     * }</pre>
+     *
+     * <p>A bare STRING is the shorthand for "play this sound with the rest of the moment"; the
+     * object form adds {@link #delayMs}, which holds THAT sound alone. The two forms mix freely
+     * inside one array, and a shorthand entry re-encodes as a bare string, so a file authored
+     * entirely in shorthand stays byte-identical through a decode/encode round trip.
+     *
+     * <p><b>{@link #delayMs} ADDS to the moment's own {@code Presentation.DelayMs}.</b> The
+     * moment's delay offsets the whole moment; this one offsets this sound inside it. So a moment
+     * held 100ms whose second sound authors 140ms plays that sound 240ms after the engine reached
+     * the moment. Both are scheduled on the ONE playback queue, at a resolution of one server tick.
+     *
+     * <p><b>No {@code Volume} or {@code Pitch} leaf, deliberately.</b> The engine's one-shot
+     * positional sound call takes neither a gain nor a pitch argument, so either leaf would decode,
+     * validate, and then do nothing at all. Vary the loudness or tone by referencing a different
+     * {@code SoundEvent} asset, which is where those values are authored.
+     */
+    public static final class SoundCue {
+
+        /** The offset applied when {@link #delayMs} is not authored: none, play with the moment. */
+        public static final long NO_DELAY_MS = 0L;
+
+        @Nullable protected String eventId;
+        @Nullable protected Long delayMs;
+
+        /** The OBJECT form's schema; {@link #CODEC} is what a {@code Sounds} entry actually decodes through. */
+        public static final BuilderCodec<SoundCue> BODY_CODEC =
+                BuilderCodec.builder(SoundCue.class, SoundCue::new)
+                        .appendInherited(new KeyedCodec<>("EventId", Codec.STRING, false),
+                                (o, v) -> o.eventId = v, o -> o.eventId, (o, p) -> o.eventId = p.eventId)
+                        .documentation("The native one-shot SoundEvent asset id to play (required; a blank entry is skipped). Never a looping event - nothing can stop one once fired.").add()
+                        .appendInherited(new KeyedCodec<>("DelayMs", Codec.LONG, false),
+                                (o, v) -> o.delayMs = v, o -> o.delayMs, (o, p) -> o.delayMs = p.delayMs)
+                        .documentation("Milliseconds to hold THIS sound on top of the moment's own DelayMs (the two add up); null/non-positive plays it with the rest of the moment. Playback resolution is one server tick, about 33ms at the default 30 ticks per second.")
+                        .addValidator(CodecWarnValidators.nonNegative("Presentation.Sounds[].DelayMs should not be negative.")).add()
+                        .build();
+
+        /** The dual bare-id / {@code {EventId, DelayMs}} entry codec (see {@link StringOrObjectCodec}). */
+        public static final StringOrObjectCodec<SoundCue> CODEC =
+                new StringOrObjectCodec<>(BODY_CODEC, SoundCue::of, SoundCue::shorthandOrNull);
+
+        public SoundCue() {
+        }
+
+        /** The shorthand shape: one sound, no offset of its own. */
+        @Nonnull
+        public static SoundCue of(@Nullable String eventId) {
+            return of(eventId, null);
+        }
+
+        /** Java-side factory; sets the same fields the codec fills. */
+        @Nonnull
+        public static SoundCue of(@Nullable String eventId, @Nullable Long delayMs) {
+            SoundCue c = new SoundCue();
+            c.eventId = eventId;
+            c.delayMs = delayMs;
+            return c;
+        }
+
+        @Nullable
+        public String getEventId() {
+            return eventId;
+        }
+
+        /** True when {@link #eventId} is authored (a blank entry is skipped at play time). */
+        public boolean hasEventId() {
+            return eventId != null && !eventId.isBlank();
+        }
+
+        @Nullable
+        public Long getDelayMs() {
+            return delayMs;
+        }
+
+        /**
+         * {@link #delayMs}, reader-defaulted to {@link #NO_DELAY_MS}: null, zero, and any negative
+         * value all mean "play with the rest of the moment", so a nonsense value degrades to an
+         * undelayed sound rather than to one that never fires.
+         */
+        public long effectiveDelayMs() {
+            return delayMs != null && delayMs > 0 ? delayMs : NO_DELAY_MS;
+        }
+
+        /**
+         * This cue's bare-string form, or {@code null} when it carries an offset the shorthand
+         * cannot express. Drives {@link StringOrObjectCodec}'s encode so a shorthand-authored entry
+         * round-trips as a bare string instead of inflating into an object.
+         */
+        @Nullable
+        private static String shorthandOrNull(@Nonnull SoundCue cue) {
+            return cue.delayMs == null ? cue.eventId : null;
+        }
     }
 
     /**

@@ -8,6 +8,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -806,13 +807,10 @@ public final class StationService {
         StationAsset.Animation.Swing swing = animation != null ? animation.getSwing() : null;
         s.swingIntervalMs = swing != null && swing.getIntervalMs() != null && swing.getIntervalMs() > 0
                 ? swing.getIntervalMs() : 0L;
-        s.swingPresentation = swing != null ? swing.getPresentation() : null;
-
-        StationAsset.Animation.Swing.Impact impact = swing != null ? swing.getImpact() : null;
-        s.impactDelayMs = impact != null && impact.getDelayMs() != null && impact.getDelayMs() > 0
-                ? impact.getDelayMs() : 0L;
-        s.impactPresentation = impact != null ? impact.getPresentation() : null;
-        s.pendingImpactAtMs = 0L;
+        // The action's whole moment vocabulary, snapshotted once: every cue this session plays that
+        // the engine has no more specific presentation for resolves against THIS map, so a mid-session
+        // catalog re-fold can never swap a moment out from under a running run.
+        s.moments = action.getMoments();
 
         s.idleEnabled = idleEnabled;
         s.idleCycleMs = StationToolScaling.resolvedIdleCycleMs(
@@ -909,6 +907,9 @@ public final class StationService {
                 // StationPuppetController#refreshPuppetRef). Runs upstream of the heartbeat AND the
                 // step-frame drive below, so both see a fresh ref.
                 StationPuppetController.refreshPuppetRef(s);
+                // ... and, for a puppet authoring a Pitch/Roll tilt, apply it on the first frame
+                // that has a ref to tilt (a no-op for every untilted session).
+                StationPuppetController.applyPendingTilt(s, commandBuffer);
                 if (now >= s.nextHeartbeatAtMs) {
                     s.nextHeartbeatAtMs = now + HEARTBEAT_MS;
                     if (!heartbeat(s, world, store, commandBuffer)) {
@@ -936,10 +937,6 @@ public final class StationService {
                 if (s.swingIntervalMs > 0 && now >= s.nextSwingAtMs) {
                     s.nextSwingAtMs = now + s.swingIntervalMs;
                     runSwing(s, store, commandBuffer);
-                }
-                if (cueDue(now, s.pendingImpactAtMs)) {
-                    s.pendingImpactAtMs = 0L;
-                    runImpact(s, store);
                 }
             } catch (Throwable t) {
                 Log.warn("STATION tick failed: " + t.getMessage(), t);
@@ -2113,26 +2110,114 @@ public final class StationService {
      * map resolved against is the UNION of the station's own inline {@code Flairs} with every
      * applicable standalone {@code asset.FlairAsset} ({@link #effectiveFlairs}).
      *
+     * <p><b>SPECIFICITY WINS, resolved here.</b> {@code base} is whatever presentation the CALLER
+     * already holds for this emission - a step's own, a reached loot floor's. When it holds none,
+     * the running action's own {@code Moments} entry for {@code momentId} is used instead
+     * ({@link StationSession#moments}, snapshotted at engage). That one rule is why an action can
+     * author {@code swing}/{@code impact}/{@code cycle}/{@code completion} beside every other cue
+     * and still never override a step that speaks for itself.
+     *
      * <p><b>{@code Presentation.DelayMs} is applied HERE, after the flair fold</b>, so the winning
      * presentation is the one whose timing is honored (a flair that re-times a moment re-times the
      * cue it actually replaced). A delayed cue is parked in this world's {@link #pendingMomentsByWorld}
      * queue with the RESOLVED presentation and played by {@link #drainPendingMoments}; an undelayed
-     * one plays inline, byte-identically to the pre-delay path. The one shared due-time core
-     * ({@link #scheduleCueAt}/{@link #cueDue}) is the same pair the swing-impact cue schedules on -
-     * there is exactly one scheduler in this engine.
+     * one plays inline. A {@code Sounds} entry carrying its OWN offset is split off first into a
+     * sound-only cue queued at the moment's delay PLUS its own, so per-sound timing needs no second
+     * mechanism: everything lands on the one due-time core
+     * ({@link #scheduleCueAt}/{@link #cueDue}), and there is exactly one scheduler in this engine.
      */
     static void emitMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
                                    @Nonnull String momentId, @Nullable Presentation base,
                                    @Nonnull Vector3d targetPos) {
-        Presentation p = StationFlairs.effective(base, effectiveFlairs(s), momentId, s.playerUuid, s.stationId);
+        Presentation resolvedBase = base != null ? base : actionMoment(s, momentId);
+        Presentation p = StationFlairs.effective(resolvedBase, effectiveFlairs(s), momentId, s.playerUuid, s.stationId);
         if (p == null) {
             return;
         }
-        long delayMs = p.effectiveDelayMs();
-        if (delayMs > 0 && getInstance().queueDelayedMoment(store, s, momentId, p, targetPos, delayMs)) {
+        for (Presentation offsetCue : offsetSoundCues(p)) {
+            long cueDelay = offsetCue.effectiveDelayMs();
+            if (!getInstance().queueDelayedMoment(store, s, momentId, offsetCue, targetPos, cueDelay)) {
+                playMoment(store, s, offsetCue, targetPos);
+            }
+        }
+        Presentation main = withoutOffsetSounds(p);
+        if (!main.hasPlayableCue()) {
             return;
         }
-        playMoment(store, s, p, targetPos);
+        long delayMs = main.effectiveDelayMs();
+        if (delayMs > 0 && getInstance().queueDelayedMoment(store, s, momentId, main, targetPos, delayMs)) {
+            return;
+        }
+        playMoment(store, s, main, targetPos);
+    }
+
+    /**
+     * The running action's own authored {@code Moments} entry for {@code momentId}, or null. The
+     * session's snapshot is already canonicalized to lowercase keys, so the lookup lowercases to
+     * match and a key authored {@code "Cycle"} resolves.
+     */
+    @Nullable
+    private static Presentation actionMoment(@Nonnull StationSession s, @Nonnull String momentId) {
+        return s.moments == null ? null : s.moments.get(momentId.toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * PURE: {@code p} with every {@code Sounds} entry that carries its OWN offset removed, because
+     * those play as their own cues (see {@link #offsetSoundCues}). Returns {@code p} ITSELF when no
+     * entry carries one, which is the shipped-content path and keeps it allocation-free.
+     */
+    @Nonnull
+    static Presentation withoutOffsetSounds(@Nonnull Presentation p) {
+        Presentation.SoundCue[] sounds = p.getSounds();
+        if (!hasOffsetSound(sounds)) {
+            return p;
+        }
+        List<Presentation.SoundCue> kept = new ArrayList<>(sounds.length);
+        for (Presentation.SoundCue cue : sounds) {
+            if (cue != null && cue.effectiveDelayMs() <= 0) {
+                kept.add(cue);
+            }
+        }
+        return Presentation.of(kept.isEmpty() ? null : kept.toArray(new Presentation.SoundCue[0]),
+                p.getParticles(), p.getShake(), p.getInteraction(), p.getEffect(), p.getDelayMs());
+    }
+
+    /**
+     * PURE: one sound-only cue per {@code Sounds} entry carrying its own offset, each already
+     * holding its TOTAL delay ({@code Presentation.DelayMs + the entry's own}) as its own
+     * {@code DelayMs}. The moment's delay offsets the moment; the entry's offsets that sound inside
+     * it, so the two ADD - and the result is an ordinary delayed cue that needs no special handling
+     * anywhere downstream. Empty (and allocation-free) when no entry carries an offset.
+     */
+    @Nonnull
+    static List<Presentation> offsetSoundCues(@Nonnull Presentation p) {
+        Presentation.SoundCue[] sounds = p.getSounds();
+        if (!hasOffsetSound(sounds)) {
+            return List.of();
+        }
+        long groupDelayMs = p.effectiveDelayMs();
+        List<Presentation> out = new ArrayList<>(sounds.length);
+        for (Presentation.SoundCue cue : sounds) {
+            if (cue == null || cue.effectiveDelayMs() <= 0) {
+                continue;
+            }
+            out.add(Presentation.of(new Presentation.SoundCue[] {Presentation.SoundCue.of(cue.getEventId())},
+                    null, null, null, null, groupDelayMs + cue.effectiveDelayMs()));
+        }
+        return out;
+    }
+
+    /** PURE: whether any authored {@code Sounds} entry carries an offset of its own. */
+    private static boolean hasOffsetSound(@Nullable Presentation.SoundCue[] sounds) {
+        if (sounds == null) {
+            return false;
+        }
+        for (Presentation.SoundCue cue : sounds) {
+            if (cue != null && cue.effectiveDelayMs() > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -2269,11 +2354,13 @@ public final class StationService {
      */
     private static void playMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
                                    @Nonnull Presentation p, @Nonnull Vector3d targetPos) {
-        String[] sounds = p.getSounds();
+        // Every Sounds entry reaching here plays NOW: an entry with its own offset was split off
+        // into its own queued cue back in emitMoment, so this loop never re-reads a per-sound delay.
+        Presentation.SoundCue[] sounds = p.getSounds();
         if (sounds != null) {
-            for (String sound : sounds) {
-                if (sound != null && !sound.isBlank()) {
-                    Sound3D.play(sound, targetPos, store, "STATION");
+            for (Presentation.SoundCue cue : sounds) {
+                if (cue != null && cue.hasEventId()) {
+                    Sound3D.play(cue.getEventId(), targetPos, store, "STATION");
                 }
             }
         }
@@ -2394,9 +2481,17 @@ public final class StationService {
     }
 
     /**
-     * The per-swing cadence cue: re-fires the work animation as a ONE-SHOT TOGETHER with the
-     * session's snapshotted {@link StationSession#swingPresentation} at the block. The clip
-     * re-fire routes by {@link StationSession#seatMode}.
+     * The per-swing beat: re-fires the work animation as a ONE-SHOT and emits the TWO moments a
+     * swing owns at the block - {@link StationFlairs#MOMENT_SWING} (the swing itself) and
+     * {@link StationFlairs#MOMENT_IMPACT} (the strike landing behind it). The clip re-fire routes by
+     * {@link StationSession#seatMode}.
+     *
+     * <p>Both moments emit UNCONDITIONALLY and resolve their own base through
+     * {@link #emitMoment}: an action that authors neither entry costs one null map lookup per swing
+     * and plays nothing, while a flair that authors one WITHOUT a base entry still gets to play -
+     * which a "only emit when the action authored it" gate would have silently forbidden. What makes
+     * the impact cue late is its own {@code Presentation.DelayMs}, riding the same one queue every
+     * other delayed cue rides.
      */
     private void runSwing(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
                           @Nonnull CommandBuffer<EntityStore> commandBuffer) {
@@ -2419,11 +2514,8 @@ public final class StationService {
             StationHoldController.playEmote(s, store);
         }
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
-        emitMoment(store, s, StationFlairs.MOMENT_SWING, s.swingPresentation, blockPos);
-
-        if (s.impactDelayMs > 0 && s.impactPresentation != null) {
-            s.pendingImpactAtMs = scheduleCueAt(System.currentTimeMillis(), s.impactDelayMs);
-        }
+        emitMoment(store, s, StationFlairs.MOMENT_SWING, null, blockPos);
+        emitMoment(store, s, StationFlairs.MOMENT_IMPACT, null, blockPos);
 
         if (s.durabilityPerSwing > 0 && !s.idleMode && swingPlayer != null) {
             drainHeldToolDurability(store, s.ref, swingPlayer, s.durabilityPerSwing);
@@ -2436,20 +2528,11 @@ public final class StationService {
     }
 
     /**
-     * The delayed swing-impact cue itself, on its OWN {@link StationFlairs#MOMENT_IMPACT} moment
-     * id (design 9.6 - split off {@link StationFlairs#MOMENT_SWING} this leg; a flair author can
-     * now target the impact cue independently of the swing cue that scheduled it).
-     */
-    private static void runImpact(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
-        Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
-        emitMoment(store, s, StationFlairs.MOMENT_IMPACT, s.impactPresentation, blockPos);
-    }
-
-    /**
      * The ONE pure due-time scheduler in this engine: the millisecond at which a cue delayed by
-     * {@code delayMs} comes due. Shared by the single pending swing-impact slot
-     * ({@code Animation.Swing.Impact.DelayMs}) and by every queued {@code Presentation.DelayMs}
-     * cue - there is deliberately no second scheduling rule to keep in step with this one.
+     * {@code delayMs} comes due. EVERY offset cue resolves through it - a moment's own
+     * {@code Presentation.DelayMs}, a single {@code Sounds} entry's, and the {@code impact} moment
+     * that is late purely because it authors one - so there is deliberately no second scheduling
+     * rule to keep in step with this one.
      */
     static long scheduleCueAt(long nowMs, long delayMs) {
         return nowMs + delayMs;
@@ -2528,17 +2611,14 @@ public final class StationService {
      * block (completion celebrates the player).
      */
     private static void playCompletionMoment(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
-        StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
-        if (asset == null || s.actionId == null) {
-            return;
-        }
         TransformComponent transform = store.getComponent(s.ref, TransformComponent.getComponentType());
         if (transform == null) {
             return;
         }
         Vector3d playerPos = transform.getPosition();
-        emitMoment(store, s, StationFlairs.MOMENT_COMPLETION,
-                ActionResolver.resolve(asset, s.actionId).getCompletion(), playerPos);
+        // No base is passed: emitMoment resolves the session's own snapshotted "completion" entry,
+        // the same route every other action-authored moment takes.
+        emitMoment(store, s, StationFlairs.MOMENT_COMPLETION, null, playerPos);
     }
 
     /**
@@ -2573,12 +2653,11 @@ public final class StationService {
         // every stop path so it can never bleed into a future session (the session object is
         // discarded anyway; this is the explicit "cleared at stop" guarantee).
         s.chosenOutputCategory = null;
-        s.pendingImpactAtMs = 0L;
-        // An INTERRUPTED session's still-parked cues go with it, on the same reasoning the pending
-        // impact slot above is cleared: work has stopped, so its leftover sounds should not arrive
-        // afterwards. A COMPLETION keeps them - the cues of a run that finished are the sound of
-        // work that happened. The COMPLETION cue itself is emitted below, after this point, into the
-        // world-scoped queue, so a delayed completion moment survives the stop either way.
+        // An INTERRUPTED session's still-parked cues go with it: work has stopped, so its leftover
+        // sounds should not arrive afterwards. A COMPLETION keeps them - the cues of a run that
+        // finished are the sound of work that happened. The COMPLETION cue itself is emitted below,
+        // after this point, into the world-scoped queue, so a delayed completion moment survives the
+        // stop either way.
         if (dropsPendingCuesAtStop(reason)) {
             dropPendingMoments(s);
         }

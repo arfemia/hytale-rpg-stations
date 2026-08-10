@@ -12,6 +12,7 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.ziggfreed.common.codec.InheritMapCodec;
 
 /**
  * ONE SELF-CONTAINED ACTION: a complete job a station offers, readable top to bottom with nothing
@@ -55,7 +56,7 @@ public final class ActionDef {
     @Nullable protected LootRef bonus;
     @Nullable protected ContributionScale contributionScale;
     @Nullable protected Worker worker;
-    @Nullable protected Moments moments;
+    @Nullable protected Map<String, Presentation> moments;
 
     public static final BuilderCodec<ActionDef> CODEC = BuilderCodec.builder(ActionDef.class, ActionDef::new)
             .appendInherited(new KeyedCodec<>("Id", Codec.STRING, false),
@@ -107,9 +108,10 @@ public final class ActionDef {
             .appendInherited(new KeyedCodec<>("Worker", Worker.CODEC, false),
                     (o, v) -> o.worker = v, o -> o.worker, (o, p) -> o.worker = p.worker)
             .documentation("How the person looks doing this: Hold, Camera, Animation, Puppet.").add()
-            .appendInherited(new KeyedCodec<>("Moments", Moments.CODEC, false),
+            .appendInherited(new KeyedCodec<>("Moments",
+                            new InheritMapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
                     (o, v) -> o.moments = v, o -> o.moments, (o, p) -> o.moments = p.moments)
-            .documentation("What it sounds and looks like: the per-Cycle moment and the session Completion moment.").add()
+            .documentation("What it sounds and looks like, keyed by moment id (cycle/swing/impact/completion, or step:<actionId>:<stepId>); matching is case-insensitive. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why rare_find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it).").add()
             .build();
 
     public ActionDef() {
@@ -216,7 +218,7 @@ public final class ActionDef {
     }
 
     @Nonnull
-    public ActionDef withMoments(@Nullable Moments moments) {
+    public ActionDef withMoments(@Nullable Map<String, Presentation> moments) {
         this.moments = moments;
         return this;
     }
@@ -312,9 +314,25 @@ public final class ActionDef {
         return worker;
     }
 
-    /** What it sounds and looks like ({@code Cycle}/{@code Completion}). */
+    /**
+     * What it sounds and looks like: an OPEN {@code momentId -> Presentation} map, the same shape
+     * and the same vocabulary a {@code FlairAsset} keys its own {@code Moments} by. Authored keys
+     * are matched case-insensitively (the engine canonicalizes to lowercase when it resolves the
+     * action), so {@code "Cycle"} and {@code "cycle"} are the same moment.
+     *
+     * <p><b>Specificity wins.</b> An entry here is the BASE presentation for its moment id wherever
+     * the engine has nothing more specific. Where it does - a {@code StationStep}'s own
+     * {@code Presentation} for that step's {@code step:<actionId>:<stepId>} moment, a
+     * {@code Ladder.Floor}'s cue for {@code rare_find} - the site-supplied one is played and the map
+     * entry is not consulted for that emission.
+     *
+     * <p><b>{@code rare_find} is therefore not authorable here</b> (the validator warns): that moment
+     * only ever fires WITH the earning {@code Roll}/{@code Ladder.Floor} cue already in hand, so an
+     * entry keyed by it could never win. Author the cue on the roll or floor that earns it; a flair
+     * still overlays it under the {@code rare_find} id like any other moment.
+     */
     @Nullable
-    public Moments getMoments() {
+    public Map<String, Presentation> getMoments() {
         return moments;
     }
 
@@ -339,7 +357,7 @@ public final class ActionDef {
                 .documentation("The third-person camera pull while working, plus the optional fixed-look Recipe preset.").add()
                 .appendInherited(new KeyedCodec<>("Animation", StationAsset.Animation.CODEC, false),
                         (o, v) -> o.animation = v, o -> o.animation, (o, p) -> o.animation = p.animation)
-                .documentation("The work emote id plus the optional per-swing cadence/impact cue layer.").add()
+                .documentation("The work emote id, the action clip, and the per-swing cadence (Swing.IntervalMs) - pure timing; what a swing SOUNDS and LOOKS like is the swing/impact entry of Moments.").add()
                 .appendInherited(new KeyedCodec<>("Puppet", Puppet.CODEC, false),
                         (o, v) -> o.puppet = v, o -> o.puppet, (o, p) -> o.puppet = p.puppet)
                 .documentation("The puppet presentation route: mount the player, hide their body, spawn a skinned visual performing the work. Null = the classic in-body worker.").add()
@@ -374,43 +392,6 @@ public final class ActionDef {
         @Nullable
         public Puppet getPuppet() {
             return puppet;
-        }
-    }
-
-    /**
-     * GROUPING, not a new concept: the same {@link Presentation} type at two TIMES - once per
-     * completed cycle, and once when the whole session finishes. Naming the moments rather than the
-     * type is what makes the pair readable side by side.
-     */
-    public static final class Moments {
-        @Nullable protected Presentation cycle;
-        @Nullable protected Presentation completion;
-
-        public static final BuilderCodec<Moments> CODEC = BuilderCodec.builder(Moments.class, Moments::new)
-                .appendInherited(new KeyedCodec<>("Cycle", Presentation.CODEC, false),
-                        (o, v) -> o.cycle = v, o -> o.cycle, (o, p) -> o.cycle = p.cycle)
-                .documentation("The CYCLE-complete moment: sound/particle cues fired at the block each finished cycle.").add()
-                .appendInherited(new KeyedCodec<>("Completion", Presentation.CODEC, false),
-                        (o, v) -> o.completion = v, o -> o.completion, (o, p) -> o.completion = p.completion)
-                .documentation("The SESSION-COMPLETION moment, played on a non-silent stop with at least one completed cycle. Null = silent completion.").add()
-                .build();
-
-        @Nonnull
-        public static Moments of(@Nullable Presentation cycle, @Nullable Presentation completion) {
-            Moments m = new Moments();
-            m.cycle = cycle;
-            m.completion = completion;
-            return m;
-        }
-
-        @Nullable
-        public Presentation getCycle() {
-            return cycle;
-        }
-
-        @Nullable
-        public Presentation getCompletion() {
-            return completion;
         }
     }
 

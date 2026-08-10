@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -95,19 +96,72 @@ public class StationStepDecisionsTest {
     @Test
     void presentationEntry_freshEntry_playsWhenStepAuthorsAPresentation() {
         StationStep step = StationStep.of("beat").withPresentation(Presentation.ofSound("SFX"));
-        assertTrue(StationStepDecisions.shouldEmitPresentationOnEntry(step, null));
+        assertTrue(StationStepDecisions.shouldEmitPresentationOnEntry(step, null, false));
     }
 
     @Test
-    void presentationEntry_noPresentation_neverPlays() {
-        assertFalse(StationStepDecisions.shouldEmitPresentationOnEntry(StationStep.of("beat"), null));
+    void presentationEntry_noPresentationAnywhere_neverPlays() {
+        assertFalse(StationStepDecisions.shouldEmitPresentationOnEntry(StationStep.of("beat"), null, false));
+    }
+
+    @Test
+    void presentationEntry_theActionsOwnMomentsEntryIsEnoughOnItsOwn() {
+        assertTrue(StationStepDecisions.shouldEmitPresentationOnEntry(StationStep.of("beat"), null, true),
+                "a step with no Presentation still has a moment to play when the action authored one for it");
     }
 
     @Test
     void presentationEntry_resumeReCheckOfTheSuspendedStep_doesNotReplay() {
         StationStep step = StationStep.of("beat").withPresentation(Presentation.ofSound("SFX"));
-        assertFalse(StationStepDecisions.shouldEmitPresentationOnEntry(step, step),
+        assertFalse(StationStepDecisions.shouldEmitPresentationOnEntry(step, step, false),
                 "the resume re-check of an already-started step must not replay its Presentation");
+        assertFalse(StationStepDecisions.shouldEmitPresentationOnEntry(step, step, true),
+                "and an action-authored moment for it does not reopen that door either");
+    }
+
+    // ==================== Which moment id a step's entry cue plays under ====================
+
+    @Test
+    void momentId_authoredStepId_isThePerStepId() {
+        assertEquals("step:mill:chop", StationStepDecisions.momentIdForStep("Mill", "Chop", false),
+                "both halves lowercase, so a PascalCase-authored pair composes to one stable id");
+    }
+
+    @Test
+    void momentId_stepWithNoId_fallsBackToTheActionWideCycleMoment() {
+        assertEquals(StationFlairs.MOMENT_CYCLE, StationStepDecisions.momentIdForStep("mill", null, false));
+        assertEquals(StationFlairs.MOMENT_CYCLE, StationStepDecisions.momentIdForStep("mill", "  ", false));
+    }
+
+    @Test
+    void momentId_implicitProgram_isTheCycleMoment_neverAStepIdNoAuthorWrote() {
+        assertEquals(StationFlairs.MOMENT_CYCLE,
+                StationStepDecisions.momentIdForStep("mill", ImplicitProgram.ID_WORK, true),
+                "the implicit convert loop's one synthesized step IS the cycle, so a flair targets it as 'cycle'");
+    }
+
+    // ==================== The action-authored route into a step's entry cue ====================
+
+    @Test
+    void actionMoments_driveAStepCueOnlyForAPerStepMomentId() {
+        Map<String, Presentation> moments = Map.of("step:mill:chop", Presentation.ofSound("SFX"));
+        assertTrue(StationStepDecisions.actionAuthorsStepMoment(moments, "step:mill:chop"));
+        assertTrue(StationStepDecisions.actionAuthorsStepMoment(moments, "STEP:MILL:CHOP"),
+                "the lookup lowercases to match the session's canonicalized snapshot");
+        assertFalse(StationStepDecisions.actionAuthorsStepMoment(moments, "step:mill:sand"));
+    }
+
+    @Test
+    void actionMoments_cycleEntry_neverDrivesAnUnnamedStepsEntryCue() {
+        Map<String, Presentation> moments = Map.of(StationFlairs.MOMENT_CYCLE, Presentation.ofSound("SFX"));
+        assertFalse(StationStepDecisions.actionAuthorsStepMoment(moments, StationFlairs.MOMENT_CYCLE),
+                "an unnamed step resolves to the action-wide cycle moment, which the cycle machinery owns -"
+                        + " honoring it here would replay the cycle cue once per beat");
+    }
+
+    @Test
+    void actionMoments_absentMap_isNeverARoute() {
+        assertFalse(StationStepDecisions.actionAuthorsStepMoment(null, "step:mill:chop"));
     }
 
     // ==================== Step-synced puppet clip ====================

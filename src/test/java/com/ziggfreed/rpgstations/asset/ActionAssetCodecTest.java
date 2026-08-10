@@ -75,8 +75,8 @@ public class ActionAssetCodecTest {
         ActionDef body = a.getBody();
         assertEquals("Fixture_Hold", body.getWorker().getHold().getEffectId());
         assertTrue(body.getWorker().getPuppet().effectiveEnabled());
-        assertEquals("Fixture_Cycle", body.getMoments().getCycle().getSounds()[0]);
-        assertNull(body.getMoments().getCompletion());
+        assertEquals("Fixture_Cycle", body.getMoments().get("Cycle").getSounds()[0].getEventId());
+        assertNull(body.getMoments().get("Completion"));
         assertEquals("FixtureFinds", body.getBonus().getLootables()[0]);
         assertEquals(1.5, body.getContributionScale().getFloors()[0].effectiveScale());
     }

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
+import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
@@ -688,7 +689,7 @@ public class StationValidatorTest {
         StationAsset a = station("badswing", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withWorker(ActionDef.Worker.of(null, null,
                         StationAsset.Animation.of("Fixture_Emote",
-                                StationAsset.Animation.Swing.of(0L, null)), null)));
+                                StationAsset.Animation.Swing.of(0L)), null)));
         assertTrue(codes(validate(a)).contains("NONPOSITIVE_SWING_INTERVAL"));
     }
 
@@ -709,6 +710,47 @@ public class StationValidatorTest {
                 .withWorker(ActionDef.Worker.of(StationAsset.Hold.of(true, "Fixture_Hold", true),
                         null, null, puppet)));
         assertTrue(codes(validate(a)).contains("UNKNOWN_PUPPET_HIDE_ROUTE"));
+    }
+
+    private static StationAsset stationWithPuppet(String id, Puppet.Look look, Rotation rotation) {
+        Puppet puppet = Puppet.of(true, Puppet.Hide.of(Puppet.HIDE_ROUTE_SCALE, null), look, null, rotation, null);
+        return station(id, ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withWorker(ActionDef.Worker.of(StationAsset.Hold.of(true, "Fixture_Hold", true),
+                        null, null, puppet)));
+    }
+
+    private static Puppet.Look npcRoleLook() {
+        return Puppet.Look.of(Puppet.LOOK_SOURCE_NPC_ROLE, null,
+                Puppet.Role.of("Fixture_Role", null, null, null));
+    }
+
+    @Test
+    void npcRolePuppetWithAnAuthoredRoll_flagged() {
+        StationAsset a = stationWithPuppet("rolledrole", npcRoleLook(), Rotation.of(null, null, 15.0));
+        assertTrue(codes(validate(a)).contains("PUPPET_NPC_ROLE_ROLL_DROPPED"),
+                "the NpcRole performer's leash carries heading and pitch only, so the bank never renders");
+    }
+
+    @Test
+    void npcRolePuppetWithYawAndPitchOnly_notFlagged() {
+        StationAsset a = stationWithPuppet("uprightrole", npcRoleLook(), Rotation.of(90.0, 12.0, null));
+        assertFalse(codes(validate(a)).contains("PUPPET_NPC_ROLE_ROLL_DROPPED"),
+                "yaw and pitch both survive the NpcRole performer");
+    }
+
+    @Test
+    void npcRolePuppetWithAZeroRoll_notFlagged() {
+        StationAsset a = stationWithPuppet("levelrole", npcRoleLook(), Rotation.of(null, null, 0.0));
+        assertFalse(codes(validate(a)).contains("PUPPET_NPC_ROLE_ROLL_DROPPED"),
+                "a level pose renders identically under every performer, so there is nothing to warn about");
+    }
+
+    @Test
+    void playerClonePuppetWithAnAuthoredRoll_notFlagged() {
+        StationAsset a = stationWithPuppet("rolledclone",
+                Puppet.Look.of(Puppet.LOOK_SOURCE_PLAYER_CLONE, null, null), Rotation.of(null, null, 15.0));
+        assertFalse(codes(validate(a)).contains("PUPPET_NPC_ROLE_ROLL_DROPPED"),
+                "the bare-Holder performer carries the full roll axis");
     }
 
     // ==================== Anchors + steps ====================
@@ -1009,6 +1051,63 @@ public class StationValidatorTest {
                 "the inline action's own step program is resolvable, so a dangling anchor is catchable");
     }
 
+    // ==================== An action's own Moments map ====================
+
+    @Test
+    void unknownMomentIdOnAnActionsMoments_flagged_theSameTypoWarnAFlairMapGets() {
+        StationAsset a = station("typomoment", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withMoments(Map.of("cyclee", Presentation.ofSound("Fixture_Sound"))));
+        assertTrue(codes(validate(a)).contains("UNKNOWN_MOMENT_ID"));
+    }
+
+    @Test
+    void wellKnownAndStepMomentIds_pass_whateverTheirCasing() {
+        StationAsset a = station("goodmoments", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withMoments(Map.of(
+                        "Cycle", Presentation.ofSound("Fixture_A"),
+                        "swing", Presentation.ofSound("Fixture_B"),
+                        "IMPACT", Presentation.ofSound("Fixture_C"),
+                        "step:mill:beat", Presentation.ofSound("Fixture_D"))));
+        assertFalse(codes(validate(a)).contains("UNKNOWN_MOMENT_ID"));
+    }
+
+    @Test
+    void impactMomentHeldPastAWholeSwing_flagged() {
+        StationAsset a = station("lateimpact", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withWorker(ActionDef.Worker.of(null, null,
+                        StationAsset.Animation.of("Fixture_Emote", StationAsset.Animation.Swing.of(900L)), null))
+                .withMoments(Map.of("impact",
+                        Presentation.of(null, null, null, null, null, 900L))));
+        assertTrue(codes(validate(a)).contains("IMPACT_OVERLAPS_NEXT_SWING"));
+    }
+
+    @Test
+    void impactMomentComfortablyInsideItsSwing_notFlagged() {
+        StationAsset a = station("goodimpact", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withWorker(ActionDef.Worker.of(null, null,
+                        StationAsset.Animation.of("Fixture_Emote", StationAsset.Animation.Swing.of(900L)), null))
+                .withMoments(Map.of("impact",
+                        Presentation.of(null, null, null, null, null, 140L))));
+        assertFalse(codes(validate(a)).contains("IMPACT_OVERLAPS_NEXT_SWING"));
+    }
+
+    @Test
+    void soundsEntryWithNoEventId_flagged() {
+        StationAsset a = station("blanksound", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withMoments(Map.of("cycle", Presentation.of(
+                        new Presentation.SoundCue[] {Presentation.SoundCue.of(null, 40L)},
+                        null, null, null, null))));
+        assertTrue(codes(validate(a)).contains("PRESENTATION_SOUND_MISSING_EVENT_ID"));
+    }
+
+    @Test
+    void rareFindOnAnActionsMoments_flagged_thatCueComesFromTheRollThatEarnsIt() {
+        StationAsset a = station("rarefindmoment", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withMoments(Map.of("Rare_Find", Presentation.ofSound("Fixture_Sound"))));
+        assertTrue(codes(validate(a)).contains("RARE_FIND_MOMENT_NEVER_PLAYS"),
+                "an action can never supply rare_find, so an entry keyed by it decodes and then never plays");
+    }
+
     // ==================== Flairs (station scope) ====================
 
     @Test
@@ -1023,6 +1122,6 @@ public class StationValidatorTest {
         StationAsset a = station("typoflair", ActionDef.of("Mill").withRecipe(trunkRecipe()))
                 .withFlairs(Map.of("gilded", StationAsset.Flair.of(
                         Map.of("cyclee", Presentation.ofSound("Fixture_Sound")))));
-        assertTrue(codes(validate(a)).contains("UNKNOWN_FLAIR_MOMENT_ID"));
+        assertTrue(codes(validate(a)).contains("UNKNOWN_MOMENT_ID"));
     }
 }

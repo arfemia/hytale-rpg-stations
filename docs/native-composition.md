@@ -112,17 +112,25 @@ There is no RPG Stations-specific emote or item format.
 
 ## Sounds and Particles - native audio/VFX assets
 
-Every `Presentation`'s `Sounds` (an array of one-shot `SoundEvent` ids, played in authored order - never
-a looping event, since nothing can stop one once fired) and `Particles` (an array of `{SystemId, ...}`
+Every `Presentation`'s `Sounds` (an array of one-shot sounds, played in authored order - never a
+looping event, since nothing can stop one once fired) and `Particles` (an array of `{SystemId, ...}`
 bursts) are native asset ids too - the shipped content reuses already-existing vanilla ids wherever one
 fits (the fish exemplar's knife scrape reuses the vanilla dagger swing-impact sound; the Anvil reuses
 the vanilla metal-hit sound and gem-sparks particle) rather than authoring new audio/VFX assets for a
 mechanic that already has a natural-sounding native match.
 
+A `Sounds` entry is normally just the id string. Authoring it as `{"EventId": "...", "DelayMs": 140}`
+instead holds that ONE sound behind the rest of the moment - useful for staggering a thud and a chime
+inside a single cue. Volume and pitch are deliberately not authorable: the engine's positional
+one-shot call takes neither, so either leaf would decode and then do nothing. Vary them by
+referencing a different `SoundEvent` asset, which is where they live.
+
 A `Presentation` also carries `DelayMs`, which is not a cue but a timing knob over the whole group:
 it holds every sound, particle, shake, interaction and effect in that moment together for the given
-number of milliseconds before they play. Reach for it when a cue reads as slightly early - the jar's
-Sawmill holds its cycle break sound by `100` so the plank lands just after the cut looks finished.
+number of milliseconds before they play. A per-sound `DelayMs` ADDS to it. Reach for it when a cue
+reads as slightly early - the jar's Sawmill holds its cycle break sound by `100` so the plank lands
+just after the cut looks finished, and holds its whole `impact` moment by `140` so the wood-hit
+lands part-way through the swing.
 Omit it (or author zero) to play at once. Playback resolves on the server tick, so the cue fires on
 the first tick at or after the delay, never before it.
 

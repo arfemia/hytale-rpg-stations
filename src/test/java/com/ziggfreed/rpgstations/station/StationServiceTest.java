@@ -18,6 +18,7 @@ import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.Ingredient;
+import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
@@ -29,7 +30,7 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
  */
 public class StationServiceTest {
 
-    // ==================== Delayed-cue due-time (the ONE scheduler: swing impact + Presentation.DelayMs) ====================
+    // ==================== Delayed-cue due-time (the ONE scheduler every offset cue rides) ====================
 
     @Test
     void scheduleCueAt_addsTheDelayToNow() {
@@ -70,6 +71,81 @@ public class StationServiceTest {
     @Test
     void cueDue_falseWhenNothingIsPending() {
         assertFalse(StationService.cueDue(999_999L, 0L));
+    }
+
+    // ==================== Per-sound offsets: the split into sound-only cues ====================
+
+    /** One {@code Sounds} entry, with or without an offset of its own. */
+    private static Presentation.SoundCue cue(String eventId, Long delayMs) {
+        return Presentation.SoundCue.of(eventId, delayMs);
+    }
+
+    private static Presentation moment(Long groupDelayMs, Presentation.SoundCue... sounds) {
+        return Presentation.of(sounds, null, null, null, null, groupDelayMs);
+    }
+
+    @Test
+    void noEntryCarriesAnOffset_isTheIdentityPath_soShippedContentAllocatesNothing() {
+        Presentation p = moment(100L, cue("Fixture_A", null), cue("Fixture_B", null));
+
+        assertSame(p, StationService.withoutOffsetSounds(p),
+                "the common path must hand back the SAME object, not a rebuilt copy");
+        assertTrue(StationService.offsetSoundCues(p).isEmpty());
+    }
+
+    @Test
+    void anOffsetEntry_isSplitOut_andTheRestOfTheMomentKeepsItsOwnTiming() {
+        Presentation p = moment(100L, cue("Fixture_Swing", null), cue("Fixture_Hit", 140L));
+
+        Presentation main = StationService.withoutOffsetSounds(p);
+        assertEquals(1, main.getSounds().length);
+        assertEquals("Fixture_Swing", main.getSounds()[0].getEventId());
+        assertEquals(100L, main.effectiveDelayMs(), "the moment's own delay is untouched by the split");
+
+        List<Presentation> offset = StationService.offsetSoundCues(p);
+        assertEquals(1, offset.size());
+        assertEquals("Fixture_Hit", offset.get(0).getSounds()[0].getEventId());
+    }
+
+    @Test
+    void aPerSoundOffsetADDSToTheMomentsOwnDelay() {
+        // The moment delay offsets the MOMENT; the entry's offsets that sound INSIDE it.
+        Presentation p = moment(100L, cue("Fixture_Hit", 140L));
+
+        assertEquals(240L, StationService.offsetSoundCues(p).get(0).effectiveDelayMs());
+    }
+
+    @Test
+    void anUndelayedMoment_leavesThePerSoundOffsetAsTheWholeDelay() {
+        Presentation p = moment(null, cue("Fixture_Hit", 140L));
+
+        assertEquals(140L, StationService.offsetSoundCues(p).get(0).effectiveDelayMs());
+    }
+
+    @Test
+    void aSplitOutCue_carriesNothingButItsOwnSound_soNoOtherLeafPlaysTwice() {
+        Presentation p = Presentation.of(new Presentation.SoundCue[] {cue("Fixture_Hit", 140L)},
+                new Presentation.ModelParticle[] {Presentation.ModelParticle.of("Fixture_Chips")},
+                Presentation.Shake.of("Fixture_Shake", 0.5), null, null, null);
+
+        Presentation offset = StationService.offsetSoundCues(p).get(0);
+        assertEquals(1, offset.getSounds().length);
+        assertNull(offset.getParticles());
+        assertNull(offset.getShake());
+
+        Presentation main = StationService.withoutOffsetSounds(p);
+        assertNull(main.getSounds(), "every sound was offset, so the main cue keeps none");
+        assertEquals("Fixture_Chips", main.getParticles()[0].getSystemId());
+        assertTrue(main.hasPlayableCue(), "it still has particles and a shake to play");
+    }
+
+    @Test
+    void aMomentWhoseEveryCueWasSplitOut_hasNothingLeftToPlay() {
+        Presentation p = moment(50L, cue("Fixture_A", 10L), cue("Fixture_B", 20L));
+
+        assertEquals(2, StationService.offsetSoundCues(p).size());
+        assertFalse(StationService.withoutOffsetSounds(p).hasPlayableCue(),
+                "an empty remainder must not burn a queue slot playing silence");
     }
 
     // ==================== Which stops sweep this session's parked cues ====================

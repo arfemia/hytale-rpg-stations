@@ -8,7 +8,7 @@ A station's `Actions` is an ORDERED array of `ActionDef` entries - the authored 
 priority, so the first entry whose `Select` matches the held or placed material runs. Each entry is
 **self-contained**: `Id`, `Ref`, `Label`, `Select`, `Requires`, `Tool`, `Recipe`, `Work`, `Custody`,
 `Anchors`, `Steps`, `Bonus`, `ContributionScale`, `Worker` (`Hold`/`Camera`/`Animation`/`Puppet`), and
-`Moments` (`Cycle`/`Completion`). Nothing here is inherited from the station or from a sibling action -
+`Moments` (an open `momentId -> Presentation` map). Nothing here is inherited from the station or from a sibling action -
 a station-level `Requires` gate is the only exception, and even that ANDs with the action's own rather
 than supplying it.
 

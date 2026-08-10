@@ -66,7 +66,7 @@ class LootEngineCuePresentationTest {
                 DropListGranters.paying("Fixture_Find", 2));
 
         assertEquals(1, result.getFloorPresentations().size(), "the grant landed, so the cue is earned");
-        assertEquals("Fixture_Fanfare", result.getFloorPresentations().get(0).getSounds()[0]);
+        assertEquals("Fixture_Fanfare", result.getFloorPresentations().get(0).getSounds()[0].getEventId());
         assertEquals(2, result.getDropListItems().get("Fixture_Find"));
     }
 
@@ -100,7 +100,7 @@ class LootEngineCuePresentationTest {
 
         assertEquals(1, result.getCommandsRun(), "the command ran, which is a produced grant");
         assertEquals(1, result.getFloorPresentations().size(), "so the roll-level cue is earned");
-        assertEquals("Fixture_Fanfare", result.getFloorPresentations().get(0).getSounds()[0]);
+        assertEquals("Fixture_Fanfare", result.getFloorPresentations().get(0).getSounds()[0].getEventId());
     }
 
     /** The roll-level cue obeys the same rule its floor sibling does when its own table pays nothing. */
@@ -134,12 +134,12 @@ class LootEngineCuePresentationTest {
         LootEngine.GrantResult earnedOnlyByTheCommand = pass(roll, DropListGranters.empty());
         assertEquals(1, earnedOnlyByTheCommand.getFloorPresentations().size(),
                 "the command produced, the floor's table did not");
-        assertEquals("Fixture_Roll_Cue", earnedOnlyByTheCommand.getFloorPresentations().get(0).getSounds()[0]);
+        assertEquals("Fixture_Roll_Cue", earnedOnlyByTheCommand.getFloorPresentations().get(0).getSounds()[0].getEventId());
 
         LootEngine.GrantResult bothEarned = pass(roll, DropListGranters.paying("Fixture_Find", 1));
         assertEquals(List.of("Fixture_Roll_Cue", "Fixture_Floor_Cue"),
-                List.of(bothEarned.getFloorPresentations().get(0).getSounds()[0],
-                        bothEarned.getFloorPresentations().get(1).getSounds()[0]),
+                List.of(bothEarned.getFloorPresentations().get(0).getSounds()[0].getEventId(),
+                        bothEarned.getFloorPresentations().get(1).getSounds()[0].getEventId()),
                 "the roll-level cue is collected before the floor's, matching the grant order");
     }
 }

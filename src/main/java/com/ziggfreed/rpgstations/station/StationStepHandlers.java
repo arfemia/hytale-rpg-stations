@@ -337,22 +337,32 @@ final class StationStepHandlers {
         if (StationStepDecisions.shouldSyncPropOnEntry(step, null)) {
             StationPuppetController.syncStepProp(ctx.session, ctx.commandBuffer, ctx.player, step);
         }
-        if (StationStepDecisions.shouldEmitPresentationOnEntry(step, null)) {
+        String momentId = presentMomentId(ctx, step);
+        boolean actionAuthorsThisMoment =
+                StationStepDecisions.actionAuthorsStepMoment(ctx.session.moments, momentId);
+        if (StationStepDecisions.shouldEmitPresentationOnEntry(step, null, actionAuthorsThisMoment)) {
             Vector3d blockPos = new Vector3d(ctx.session.blockX + 0.5, ctx.session.blockY + 0.5,
                     ctx.session.blockZ + 0.5);
-            StationService.emitMoment(ctx.store, ctx.session, presentMomentId(ctx, step), step.getPresentation(),
-                    blockPos);
+            // A null base defers to the action's own Moments entry for this step (specificity wins
+            // when the step authors its own).
+            StationService.emitMoment(ctx.store, ctx.session, momentId, step.getPresentation(), blockPos);
         }
     }
 
-    /** The per-step moment id: {@code step:<actionId>:<stepId>} when the step authors an Id, else {@link StationFlairs#MOMENT_CYCLE}. */
+    /**
+     * The per-step moment id ({@link StationStepDecisions#momentIdForStep}): {@code
+     * step:<actionId>:<stepId>} when the step authors an Id, else {@link StationFlairs#MOMENT_CYCLE}.
+     *
+     * <p>An action that authors NO {@code Steps} runs the engine's implicit convert loop, whose one
+     * synthesized step is the cycle itself - so its cue plays under the plain {@code cycle} moment,
+     * the id the docs name and a flair targets, rather than under a {@code step:} id derived from an
+     * engine-internal name no author ever wrote.
+     */
     @Nonnull
     static String presentMomentId(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
-        String stepId = step.getId();
-        if (stepId != null && !stepId.isBlank()) {
-            return StationFlairs.stepMomentId(ctx.action.getActionId(), stepId);
-        }
-        return StationFlairs.MOMENT_CYCLE;
+        StationStep[] authored = ctx.action.getSteps();
+        boolean implicitProgram = authored == null || authored.length == 0;
+        return StationStepDecisions.momentIdForStep(ctx.action.getActionId(), step.getId(), implicitProgram);
     }
 
     // ==================== Consume phase ====================

@@ -166,17 +166,17 @@ final class StationSession {
     int durabilityPerSwing;
     int durabilityPerCycle;
 
-    // Per-swing cadence + flair (Animation.Swing). 0 swingIntervalMs = no swing layer.
+    // Per-swing cadence (Animation.Swing). 0 swingIntervalMs = no swing layer. What a swing SOUNDS
+    // like is the "swing"/"impact" entries of `moments` below, not a field of its own.
     long swingIntervalMs;
-    Presentation swingPresentation;
     long nextSwingAtMs;
 
-    // Delayed swing-impact cue (Animation.Swing.Impact). impactDelayMs/impactPresentation are
-    // the resolved config snapshot; pendingImpactAtMs is the RUNTIME due-at-millis for the one
-    // pending impact this session may owe (0 = none pending).
-    long impactDelayMs;
-    Presentation impactPresentation;
-    long pendingImpactAtMs;
+    /**
+     * The running action's own {@code Moments} map, canonicalized to lowercase keys and snapshotted
+     * ONCE at engage - the BASE presentation for every moment id the session emits where the engine
+     * has nothing more specific to play. Null when the action authors no moments.
+     */
+    @Nullable Map<String, Presentation> moments;
 
     // Opt-in idle practice mode (Work.Idle). The first three are the resolved config snapshot;
     // idleMode is a RUNTIME flag flipped by runCycle as materials come and go mid-session.
@@ -293,6 +293,22 @@ final class StationSession {
      * {@link #puppetActive} is false, or the puppet is currently empty-handed.
      */
     @Nullable String puppetHeldItemId;
+    /**
+     * The puppet's world-space stance, resolved once at engage: {@code [x, y, z]} plus the three
+     * angles in RADIANS ({@code yaw} with the placed block's facing already folded in,
+     * {@code pitch}/{@code roll} the puppet's own untouched tilt). Kept because the tilt is applied
+     * through the performer's re-anchor call rather than at spawn, which needs the same position
+     * back. Null when {@link #puppetActive} is false.
+     */
+    @Nullable double[] puppetStance;
+    /**
+     * True while the authored {@code Puppet.Rotation} {@code Pitch}/{@code Roll} tilt still has to
+     * be applied to the spawned performer. Set at engage ONLY when a non-zero tilt is authored, and
+     * cleared by the first frame that finds a live performer ref - which is what covers the NpcRole
+     * backend's one-tick deferred spawn, whose ref is honestly null at engage. A puppet with no
+     * authored tilt never sets this, so the untilted path is byte-identical to having no tilt knob.
+     */
+    boolean puppetTiltPending;
 
     /**
      * The resolved anchor block keys (scope-2 wave 3, design 2.2/2.4 - decision 28c): {@code

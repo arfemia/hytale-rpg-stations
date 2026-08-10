@@ -40,6 +40,7 @@ import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StatRollEntry;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
+import com.ziggfreed.rpgstations.asset.StringOrObjectCodec;
 
 /**
  * Walks every authorable RpgStations asset type's declared static {@code CODEC} field via
@@ -80,6 +81,10 @@ import com.ziggfreed.rpgstations.asset.StationStep;
  *   <li>an array/map/set field (detected via {@link WrappedCodec} + the concrete codec class's
  *       simple name, e.g. {@code ArrayCodec}/{@code MapCodec}/{@code SetCodec}) renders
  *       {@code type:"array"|"map"|"set"} + an {@code "of"} classification of the element/value codec;
+ *   <li>a dual {@link StringOrObjectCodec} leaf (authorable as a bare string shorthand OR as the
+ *       full object) renders {@code type:"stringOrObject"} + an {@code "of"} classification of its
+ *       object form, so the reference row names both shapes and still links into the object's own
+ *       field table;
  *   <li>an {@link EnumCodec} renders {@code type:"enum"} + a {@code "values"} list;
  *   <li>anything else (the primitive codecs - {@code StringCodec}/{@code IntegerCodec}/
  *       {@code DoubleCodec}/{@code BooleanCodec}/{@code LongCodec}/...) renders a friendly lowered
@@ -239,6 +244,15 @@ public final class SchemaDocWriter {
             return out;
         }
 
+        if (codec instanceof StringOrObjectCodec<?> dual) {
+            // A dual leaf: EITHER a bare string shorthand OR the full object. Rendered as its object
+            // form with the shorthand named, so the reference documents both shapes in one row and
+            // still links into the object's own field table.
+            out.put("type", "stringOrObject");
+            out.put("of", classify(dual.getChildCodec(), stack));
+            return out;
+        }
+
         if (codec instanceof WrappedCodec<?> wrapped) {
             String simple = codec.getClass().getSimpleName();
             String bucket = simple.contains("Array") ? "array"
@@ -392,6 +406,10 @@ public final class SchemaDocWriter {
                 }
                 queue.add(new PendingSection(anchor, human, (List<Object>) typeInfo.get("fields"), level));
                 return "[" + nestedType + "](#field-" + anchor + ")";
+            }
+            case "stringOrObject" -> {
+                Map<String, Object> of = (Map<String, Object>) typeInfo.get("of");
+                return "`string`, or " + describeType(of, anchor, human, level, queue);
             }
             case "array", "map", "set" -> {
                 Map<String, Object> of = (Map<String, Object>) typeInfo.get("of");

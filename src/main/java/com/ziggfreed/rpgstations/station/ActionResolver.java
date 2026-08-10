@@ -2,6 +2,7 @@ package com.ziggfreed.rpgstations.station;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 
@@ -227,7 +228,7 @@ public final class ActionResolver {
         ActionDef def = findAction(asset, actionId);
         ActionDef base = def != null && def.hasRef() ? refLookup.apply(def.getRef()) : null;
         ActionDef.Worker worker = pick(def, base, ActionDef::getWorker);
-        ActionDef.Moments moments = pick(def, base, ActionDef::getMoments);
+        Map<String, Presentation> moments = pick(def, base, ActionDef::getMoments);
         return new ResolvedAction(
                 actionId,
                 pick(def, base, ActionDef::getSelect),
@@ -244,8 +245,7 @@ public final class ActionResolver {
                 worker != null ? worker.getCamera() : null,
                 worker != null ? worker.getAnimation() : null,
                 worker != null ? worker.getPuppet() : null,
-                moments != null ? moments.getCycle() : null,
-                moments != null ? moments.getCompletion() : null);
+                moments != null ? StationFlairs.canonicalMomentKeys(moments) : null);
     }
 
     /**
@@ -427,8 +427,7 @@ public final class ActionResolver {
         @Nullable private final StationAsset.Camera camera;
         @Nullable private final StationAsset.Animation animation;
         @Nullable private final Puppet puppet;
-        @Nullable private final Presentation presentation;
-        @Nullable private final Presentation completion;
+        @Nullable private final Map<String, Presentation> moments;
 
         ResolvedAction(@Nonnull String actionId, @Nullable ActionInput select, @Nullable Requires requires,
                 @Nullable StationAsset.Tool tool, @Nullable StationAsset.Recipe recipe,
@@ -437,7 +436,7 @@ public final class ActionResolver {
                 @Nullable LootRef bonus, @Nullable ContributionScale contributionScale,
                 @Nullable StationAsset.Hold hold, @Nullable StationAsset.Camera camera,
                 @Nullable StationAsset.Animation animation, @Nullable Puppet puppet,
-                @Nullable Presentation presentation, @Nullable Presentation completion) {
+                @Nullable Map<String, Presentation> moments) {
             this.actionId = actionId;
             this.select = select;
             this.requires = requires;
@@ -453,8 +452,7 @@ public final class ActionResolver {
             this.camera = camera;
             this.animation = animation;
             this.puppet = puppet;
-            this.presentation = presentation;
-            this.completion = completion;
+            this.moments = moments;
         }
 
         /** A copy with the four extension-overlaid groups swapped in; everything else is carried over. */
@@ -462,7 +460,7 @@ public final class ActionResolver {
         ResolvedAction with(@Nullable Custody newCustody, @Nullable Puppet newPuppet,
                 @Nullable ContributionScale newScale, @Nullable Map<String, ActionDef.Anchor> newAnchors) {
             return new ResolvedAction(actionId, select, requires, tool, recipe, work, newCustody, newAnchors,
-                    steps, bonus, newScale, hold, camera, animation, newPuppet, presentation, completion);
+                    steps, bonus, newScale, hold, camera, animation, newPuppet, moments);
         }
 
         /** The id this action answers to (its authored {@code Id}, or the documented fallback). */
@@ -567,16 +565,37 @@ public final class ActionResolver {
             return puppet;
         }
 
-        /** {@code Moments.Cycle} - the per-cycle moment. */
+        /**
+         * This action's whole {@code Moments} map, already canonicalized to lowercase keys; null =
+         * the action authors no moments at all. Handed to the session at engage so every emission
+         * resolves against ONE snapshot.
+         */
         @Nullable
-        public Presentation getPresentation() {
-            return presentation;
+        public Map<String, Presentation> getMoments() {
+            return moments;
         }
 
-        /** {@code Moments.Completion} - the session-end moment. */
+        /**
+         * The action's authored {@code Moments} entry for {@code momentId} (matched
+         * case-insensitively), or null when it authors none. This is the BASE for that moment; a
+         * presentation the engine already holds for the same emission - a step's own, a loot
+         * floor's - outranks it and is played instead.
+         */
+        @Nullable
+        public Presentation getMoment(@Nonnull String momentId) {
+            return moments == null ? null : moments.get(momentId.toLowerCase(Locale.ROOT));
+        }
+
+        /** Shorthand for the {@code cycle} moment: the per-completed-cycle cue. */
+        @Nullable
+        public Presentation getPresentation() {
+            return getMoment(StationFlairs.MOMENT_CYCLE);
+        }
+
+        /** Shorthand for the {@code completion} moment: the session-end cue. */
         @Nullable
         public Presentation getCompletion() {
-            return completion;
+            return getMoment(StationFlairs.MOMENT_COMPLETION);
         }
     }
 }

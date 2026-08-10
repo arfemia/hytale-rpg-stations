@@ -78,7 +78,7 @@
         ]
       },
       "Worker": {
-        "$Comment": "How the person looks doing this - all in-game-tuned standalone defaults. Hold seats the worker on the block mount and interrupts on damage; Animation drives the swing cadence (the work clip is the held hatchet's own default Action-slot clip, re-fired every IntervalMs so a viewer arriving mid-session sees it within one interval; Impact fires 140ms after each swing with the vanilla wood-hit sound and chips, the same cue a hatchet makes part-way through breaking a log); Puppet spawns the visible working double (Offset.Z 1.0 and Yaw 0.0 place it at the bench, the real player hidden by scale, the held item mirrored into its hand).",
+        "$Comment": "How the person looks doing this - all in-game-tuned standalone defaults. Hold seats the worker on the block mount and interrupts on damage; Animation is pure cadence, re-firing the work clip (the held hatchet's own default Action-slot clip) every IntervalMs so a viewer arriving mid-session sees it within one interval, while what a swing SOUNDS like lives in Moments below; Puppet spawns the visible working double (Offset.Z 1.15 and Rotation.Yaw 0.0 place it at the bench facing the way the block does, the real player hidden by scale, the held item mirrored into its hand). Rotation.Pitch and .Roll are available for a puppet that should lean or bank; both default to 0 here, and unlike Yaw neither is composed with the block's facing.",
         "Hold": {
           "MovementLock": true,
           "EffectId": "RPG_Station_Hold",
@@ -87,17 +87,7 @@
         },
         "Animation": {
           "Swing": {
-            "IntervalMs": 933,
-            "Presentation": {
-              "Sounds": ["SFX_Tool_T1_Swing"]
-            },
-            "Impact": {
-              "DelayMs": 140,
-              "Presentation": {
-                "Sounds": ["SFX_Wood_Hit"],
-                "Particles": [ { "SystemId": "Block_Hit_Wood" } ]
-              }
-            }
+            "IntervalMs": 933
           }
         },
         "Puppet": {
@@ -105,17 +95,29 @@
           "Hide": { "Route": "Scale" },
           "Look": { "Source": "PlayerClone" },
           "Offset": { "X": 0.0, "Y": -0.4, "Z": 1.15 },
-          "Yaw": 0.0,
+          "Rotation": { "Yaw": 0.0 },
           "Prop": { "Source": "MirrorHeld", "Slot": "Hotbar" }
         }
       },
       "Moments": {
-        "$Comment": "What it sounds and looks like at the two fixed times: Cycle plays once per completed conversion, Completion once when the session ends. Both are Presentation groups a flair can re-skin per moment id. Cycle holds its break sound by DelayMs 100 so the plank lands a tenth of a second after the cut reads as finished rather than on the same instant the cycle ticks over; raise it to sit further behind the swing, or drop the leaf here to fire at once. Keep it well under Work.CycleMs, or the held cue lands in the next cycle instead. DelayMs is available on every Presentation in the schema, so any moment can be nudged onto its beat the same way. A flair re-skinning this moment inherits this timing unless it authors its own DelayMs, and needs an explicit 0 to play at once.",
+        "$Comment": "Every other key here is a MOMENT ID the engine emits: cycle, swing, impact, completion, or a per-step step:<actionId>:<stepId>. A $-prefixed key like this one is read as editorial and never as a moment id, so a map-wide note is safe to leave right here.",
+        "Swing": {
+          "$Comment": "Fires with each Animation.Swing tick, and a flair can re-skin or re-time it by this same key (keys are matched case-insensitively). A single Sounds entry can also step out on its own by authoring {\"EventId\": ..., \"DelayMs\": ...} instead of a bare id, which adds to whatever delay the moment already holds - reach for that to stagger two sounds inside one moment, and for a separate moment id when a flair should be able to target the late cue by itself.",
+          "Sounds": ["SFX_Tool_T1_Swing"]
+        },
+        "Impact": {
+          "$Comment": "The strike landing behind each swing: a second moment holding DelayMs 140, the same generic offset every Presentation carries, so the wood-hit sound and chips arrive part-way through the stroke the way a hatchet breaking a log does. Keep the delay well under Animation.Swing.IntervalMs or the held cue lands in the next swing instead; the validator warns when it does not.",
+          "DelayMs": 140,
+          "Sounds": ["SFX_Wood_Hit"],
+          "Particles": [ { "SystemId": "Block_Hit_Wood" } ]
+        },
         "Cycle": {
+          "$Comment": "Plays once per completed conversion, holding its break sound by 100ms so the plank lands a tenth of a second after the cut reads as finished rather than on the same instant the cycle ticks over. Keep the delay under Work.CycleMs or the cue lands in the next cycle; the validator warns when it does not.",
           "Sounds": ["SFX_Wood_Break"],
           "DelayMs": 100
         },
         "Completion": {
+          "$Comment": "Plays once when the session ends. The other id an action can author here is step:<actionId>:<stepId>, one per beat of a Steps program. rare_find is deliberately NOT authored here: that cue comes from whichever Roll or Ladder.Floor earned it, and a flair overlays THAT presentation, so an entry keyed rare_find in this map would never play.",
           "Sounds": ["SFX_Chest_Wooden_Open_Player"],
           "Particles": [ { "SystemId": "Block_Gem_Sparks" } ]
         }

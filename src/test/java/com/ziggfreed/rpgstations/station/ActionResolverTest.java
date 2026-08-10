@@ -104,7 +104,8 @@ public class ActionResolverTest {
                 com.ziggfreed.rpgstations.asset.Presentation.ofSound("Fixture_Done");
         StationAsset a = station(def("Mill")
                 .withWorker(ActionDef.Worker.of(hold, camera, animation, puppet))
-                .withMoments(ActionDef.Moments.of(cycle, completion)));
+                .withMoments(java.util.Map.of(StationFlairs.MOMENT_CYCLE, cycle,
+                        StationFlairs.MOMENT_COMPLETION, completion)));
 
         ActionResolver.ResolvedAction resolved = ActionResolver.resolve(a, "Mill", NO_REFS);
         assertSame(hold, resolved.getHold());

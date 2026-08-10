@@ -46,7 +46,7 @@ public class ExtensionOverlayTest {
             + "   \"Hide\": { \"Route\": \"Scale\" },"
             + "   \"Look\": { \"Source\": \"PlayerClone\", \"FallbackModelId\": \"Fixture_Fallback\" },"
             + "   \"Offset\": { \"X\": 1.5, \"Y\": 2.5, \"Z\": 3.5 },"
-            + "   \"Yaw\": 45.0,"
+            + "   \"Rotation\": { \"Yaw\": 45.0, \"Roll\": -12.0 },"
             + "   \"Prop\": { \"Source\": \"MirrorHeld\", \"Slot\": \"Hotbar\" }"
             + " } },"
             + " \"Custody\": {"
@@ -114,14 +114,14 @@ public class ExtensionOverlayTest {
         AssetExtraInfo.Data pData = new AssetExtraInfo.Data(ExtensionAsset.class, "fixture_base", null);
         ExtensionAsset parent = ExtensionAsset.CODEC.decodeAndInheritJsonAsset(
                 RawJsonReader.fromJsonString("{ \"Target\": { \"Action\": \"Mill\" },"
-                        + " \"Puppet\": { \"Yaw\": 12.5 }, \"Custody\": { \"MaxQuantity\": 3 } }"),
+                        + " \"Puppet\": { \"Rotation\": { \"Yaw\": 12.5 } }, \"Custody\": { \"MaxQuantity\": 3 } }"),
                 null, new AssetExtraInfo<>(pData));
 
         AssetExtraInfo.Data cData = new AssetExtraInfo.Data(ExtensionAsset.class, "fixture_child", "fixture_base");
         ExtensionAsset child = ExtensionAsset.CODEC.decodeAndInheritJsonAsset(
                 RawJsonReader.fromJsonString("{}"), parent, new AssetExtraInfo<>(cData));
 
-        assertEquals(12.5, d(child.getPuppet().getYaw()), "Puppet inherits on omit");
+        assertEquals(12.5, child.getPuppet().effectiveYawDegrees(), "Puppet inherits on omit");
         assertEquals(Integer.valueOf(3), child.getCustody().getMaxQuantity(), "Custody inherits on omit");
     }
 
@@ -196,13 +196,30 @@ public class ExtensionOverlayTest {
         assertEquals(8.5, d(merged.getOffset().getZ()));
         assertEquals(1.5, d(merged.getOffset().getX()), "an unauthored Offset axis survives");
         assertEquals(2.5, d(merged.getOffset().getY()));
-        assertEquals(45.0, d(merged.getYaw()), "Yaw survives an Offset-only overlay");
+        assertEquals(45.0, merged.effectiveYawDegrees(), "Yaw survives an Offset-only overlay");
         assertTrue(merged.effectiveEnabled());
         assertEquals(Puppet.HIDE_ROUTE_SCALE, merged.getHide().effectiveRoute());
         assertEquals(Puppet.LOOK_SOURCE_PLAYER_CLONE, merged.getLook().effectiveSource());
         assertEquals("Fixture_Fallback", merged.getLook().getFallbackModelId());
         assertEquals(Puppet.PROP_SOURCE_MIRROR_HELD, merged.getProp().effectiveSource());
         assertEquals(Puppet.PROP_SLOT_HOTBAR, merged.getProp().effectiveSlot());
+    }
+
+    @Test
+    void puppetOverlay_partialRotation_keepsTheUnauthoredAxes() throws Exception {
+        // The nested Rotation group follows the same per-leaf rule as Offset: an overlay tilting the
+        // puppet must not silently straighten out the facing the base authored.
+        Puppet base = basePuppet();
+        ExtensionAsset skin = ext("fixture_skin", "{ \"Target\": { \"Action\": \"Mill\" },"
+                + " \"Puppet\": { \"Rotation\": { \"Pitch\": 30.0 } } }");
+
+        Puppet merged = ExtensionCatalog.overlayPuppet(base, skin.getPuppet());
+
+        assertEquals(30.0, merged.effectivePitchDegrees(), "the overlay's own axis wins");
+        assertEquals(45.0, merged.effectiveYawDegrees(), "the base's Yaw survives a Pitch-only overlay");
+        assertEquals(-12.0, merged.effectiveRollDegrees(), "and so does its Roll");
+        assertEquals(1.5, d(merged.getOffset().getX()), "every other leaf is untouched");
+        assertEquals(Puppet.PROP_SOURCE_MIRROR_HELD, merged.getProp().effectiveSource());
     }
 
     @Test
@@ -222,7 +239,7 @@ public class ExtensionOverlayTest {
         assertEquals("Fixture_Prop", merged.getProp().getItemId());
         assertEquals(Puppet.PROP_SLOT_HOTBAR, merged.getProp().effectiveSlot(), "the base's Slot survives");
         assertEquals(1.5, d(merged.getOffset().getX()), "placement leaves are untouched by a look re-skin");
-        assertEquals(45.0, d(merged.getYaw()));
+        assertEquals(45.0, merged.effectiveYawDegrees());
     }
 
     // ==================== ContributionScale: the same rule again ====================
@@ -262,9 +279,9 @@ public class ExtensionOverlayTest {
     @Test
     void overlay_onANullBase_yieldsTheOverlayItself() throws Exception {
         ExtensionAsset skin = ext("fixture_skin", "{ \"Target\": { \"Action\": \"Mill\" },"
-                + " \"Puppet\": { \"Yaw\": 99.0 }, \"Custody\": { \"MaxQuantity\": 4 } }");
+                + " \"Puppet\": { \"Rotation\": { \"Yaw\": 99.0 } }, \"Custody\": { \"MaxQuantity\": 4 } }");
 
-        assertEquals(99.0, d(ExtensionCatalog.overlayPuppet(null, skin.getPuppet()).getYaw()));
+        assertEquals(99.0, ExtensionCatalog.overlayPuppet(null, skin.getPuppet()).effectiveYawDegrees());
         assertEquals(Integer.valueOf(4), ExtensionCatalog.overlayCustody(null, skin.getCustody()).getMaxQuantity());
     }
 
@@ -289,13 +306,13 @@ public class ExtensionOverlayTest {
     void overlay_twoExtensionsTouchingDifferentLeaves_bothLand() throws Exception {
         Puppet base = basePuppet();
         ExtensionAsset a = ext("a_ext", "{ \"Target\": { \"Action\": \"Mill\" },"
-                + " \"Puppet\": { \"Yaw\": 77.0 } }");
+                + " \"Puppet\": { \"Rotation\": { \"Yaw\": 77.0 } } }");
         ExtensionAsset b = ext("b_ext", "{ \"Target\": { \"Action\": \"Mill\" },"
                 + " \"Puppet\": { \"Offset\": { \"Y\": -6.5 } } }");
 
         Puppet merged = ExtensionCatalog.mergePuppet(base, ExtensionAsset.sortedForApply(List.of(b, a)));
 
-        assertEquals(77.0, d(merged.getYaw()));
+        assertEquals(77.0, merged.effectiveYawDegrees());
         assertEquals(-6.5, d(merged.getOffset().getY()));
         assertEquals(1.5, d(merged.getOffset().getX()), "the base still supplies every untouched leaf");
     }
@@ -336,7 +353,7 @@ public class ExtensionOverlayTest {
         ExtensionAsset e = ext("fixture_mixed", "{ \"Target\": { \"Action\": \"Mill\" },"
                 + " \"Bonus\": { \"Lootables\": [\"fixturetable\"] },"
                 + " \"ContributionScale\": { \"Floors\": [ { \"Min\": 2, \"Scale\": 2.0 } ] },"
-                + " \"Puppet\": { \"Yaw\": 1.0 },"
+                + " \"Puppet\": { \"Rotation\": { \"Yaw\": 1.0 } },"
                 + " \"Custody\": { \"Display\": { \"Scale\": 1.5 } } }");
 
         assertEquals(List.of(ExtensionAsset.PAYLOAD_BONUS, ExtensionAsset.PAYLOAD_CONTRIBUTION_SCALE,

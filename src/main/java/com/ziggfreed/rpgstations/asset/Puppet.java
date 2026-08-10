@@ -7,6 +7,7 @@ import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.common.codec.Vec3;
 
 /**
@@ -48,8 +49,8 @@ import com.ziggfreed.common.codec.Vec3;
  *   "Enabled": true,
  *   "Hide":   { "Route": "Scale" },
  *   "Look":   { "Source": "PlayerClone" },
- *   "Offset": { "X": 0.0, "Y": 0.0, "Z": 0.0 },
- *   "Yaw":    0.0,
+ *   "Offset":   { "X": 0.0, "Y": 0.0, "Z": 0.0 },
+ *   "Rotation": { "Yaw": 0.0 },
  *   "Prop":   { "Source": "MirrorHeld", "Slot": "Hotbar" }
  * }
  * }</pre>
@@ -84,7 +85,7 @@ public final class Puppet {
     @Nullable protected Hide hide;
     @Nullable protected Look look;
     @Nullable protected Vec3 offset;
-    @Nullable protected Double yaw;
+    @Nullable protected Rotation rotation;
     @Nullable protected Prop prop;
 
     public static final BuilderCodec<Puppet> CODEC = BuilderCodec.builder(Puppet.class, Puppet::new)
@@ -100,9 +101,9 @@ public final class Puppet {
             .appendInherited(new KeyedCodec<>("Offset", Vec3.CODEC, false),
                     (o, v) -> o.offset = v, o -> o.offset, (o, p) -> o.offset = p.offset)
             .documentation("The puppet's stance shift off the station's block-top anchor, facing-relative: X/Z are in the block's own horizontal frame (+Z = its front), Y is vertical.").add()
-            .appendInherited(new KeyedCodec<>("Yaw", Codec.DOUBLE, false),
-                    (o, v) -> o.yaw = v, o -> o.yaw, (o, p) -> o.yaw = p.yaw)
-            .documentation("The puppet's facing in degrees, facing-relative to the placed block's own yaw (the block facing folds in additively). Reader-defaults to 0 (faces the same way the block does).").add()
+            .appendInherited(new KeyedCodec<>("Rotation", Rotation.CODEC, false),
+                    (o, v) -> o.rotation = v, o -> o.rotation, (o, p) -> o.rotation = p.rotation)
+            .documentation("The puppet's own orientation in degrees (Yaw/Pitch/Roll), each leaf defaulting to 0. Yaw is facing-relative (the placed block's facing folds in additively, so 0 faces the same way the block does); Pitch and Roll are the puppet's own tilt and are NOT composed with the block. Roll needs Look.Source \"PlayerClone\" or \"Model\": an NPC keeps its pose from a leash that carries heading and pitch only, so a banked pose is dropped under Look.Source \"NpcRole\" (the validator warns).").add()
             .appendInherited(new KeyedCodec<>("Prop", Prop.CODEC, false),
                     (o, v) -> o.prop = v, o -> o.prop, (o, p) -> o.prop = p.prop)
             .documentation("The item the puppet holds while performing.").add()
@@ -114,13 +115,13 @@ public final class Puppet {
     /** Java-side factory; sets the same fields the codec fills. */
     @Nonnull
     public static Puppet of(@Nullable Boolean enabled, @Nullable Hide hide, @Nullable Look look,
-            @Nullable Vec3 offset, @Nullable Double yaw, @Nullable Prop prop) {
+            @Nullable Vec3 offset, @Nullable Rotation rotation, @Nullable Prop prop) {
         Puppet p = new Puppet();
         p.enabled = enabled;
         p.hide = hide;
         p.look = look;
         p.offset = offset;
-        p.yaw = yaw;
+        p.rotation = rotation;
         p.prop = prop;
         return p;
     }
@@ -165,19 +166,38 @@ public final class Puppet {
         return offset;
     }
 
+    /**
+     * The puppet's own orientation as the shared {@link Rotation} group (degrees, each leaf
+     * independently nullable and defaulting to 0); null = upright and facing the way the block does.
+     *
+     * <p><b>{@code Yaw} is FACING-RELATIVE, {@code Pitch}/{@code Roll} are not.</b> The placed
+     * block's own facing is ADDED to {@code Yaw} ({@code station.StationPuppetController
+     * #resolveYawRadians}), so {@code Yaw: 0} means "faces the same way the block does" at every
+     * placement orientation; {@code Pitch}/{@code Roll} are the puppet's OWN tilt about its own
+     * axes and are passed through untouched, exactly the rule
+     * {@code Presentation.ModelParticle.RotationOffset} documents.
+     */
     @Nullable
-    public Double getYaw() {
-        return yaw;
+    public Rotation getRotation() {
+        return rotation;
     }
 
     /**
-     * {@link #yaw} (degrees, FACING-RELATIVE to the placed station block's own yaw - the engine adds
-     * the block facing on top, see {@code station.StationPuppetController#resolveYawRadians}),
-     * reader-defaulted to {@code 0.0} when null. {@code 0} therefore means "faces the same way the
-     * block does" at every placement orientation.
+     * {@link Rotation#getYaw()} of {@link #getRotation()}, reader-defaulted to {@code 0.0}: the
+     * puppet's facing in degrees BEFORE the placed block's own facing is added on top.
      */
     public double effectiveYawDegrees() {
-        return yaw != null ? yaw : 0.0;
+        return rotation != null && rotation.getYaw() != null ? rotation.getYaw() : 0.0;
+    }
+
+    /** {@link Rotation#getPitch()} of {@link #getRotation()}, reader-defaulted to {@code 0.0} (upright). */
+    public double effectivePitchDegrees() {
+        return rotation != null && rotation.getPitch() != null ? rotation.getPitch() : 0.0;
+    }
+
+    /** {@link Rotation#getRoll()} of {@link #getRotation()}, reader-defaulted to {@code 0.0} (no bank). */
+    public double effectiveRollDegrees() {
+        return rotation != null && rotation.getRoll() != null ? rotation.getRoll() : 0.0;
     }
 
     @Nullable

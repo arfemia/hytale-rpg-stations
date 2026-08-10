@@ -17,9 +17,21 @@ can emit a new moment without a schema break. Five well-known ids cover the buil
 |---|---|
 | `cycle` | Each completed work cycle. |
 | `swing` | Each per-swing animation beat. |
-| `impact` | A delayed impact cue after a swing. |
-| `rare_find` | A loot Ladder floor is reached. |
+| `impact` | Each swing too, one moment later - it is the strike landing, and what makes it late is its own `Presentation.DelayMs`. |
+| `rare_find` | A `Roll` or a reached `Ladder.Floor` pays out with a cue of its own. |
 | `completion` | The session ends (non-silent, at least one completed cycle). |
+
+**An action authors its own cues under the same ids**, in its `Moments` map (see
+[Actions and Steps](actions-and-steps.md)) - one open `momentId -> Presentation` map holding
+everything that station action sounds and looks like. A flair then overlays whatever is there, per
+leaf, for the moment ids it names. Where the engine already holds a more specific presentation for an
+emission - a step's own `Presentation`, a loot floor's cue - that one plays and the map entry is not
+consulted for it.
+
+`rare_find` is the one moment an action does NOT author: it fires only with the earning `Roll` or
+`Ladder.Floor` cue already in hand, so author the presentation there (the validator warns on an
+action `Moments` entry keyed `rare_find`, which could never play). A flair still overlays it by that
+id like any other moment.
 
 A step program adds a SIXTH kind of moment id automatically for every step:
 `step:<actionId>:<stepId>`, letting a flair target one specific beat of a specific ritual (for example

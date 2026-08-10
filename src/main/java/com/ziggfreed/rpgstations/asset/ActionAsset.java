@@ -16,6 +16,7 @@ import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
+import com.ziggfreed.common.codec.InheritMapCodec;
 
 /**
  * A standalone, reusable, fourth-party-extendable ACTION (scope-2 design 1.5, decision 28a):
@@ -95,9 +96,10 @@ public final class ActionAsset implements JsonAssetWithMap<String, DefaultAssetM
             .appendInherited(new KeyedCodec<>("Worker", ActionDef.Worker.CODEC, false),
                     (a, v) -> a.body.worker = v, a -> a.body.worker, (a, p) -> a.body.worker = p.body.worker)
             .documentation("How the person looks doing this: Hold, Camera, Animation, Puppet.").add()
-            .appendInherited(new KeyedCodec<>("Moments", ActionDef.Moments.CODEC, false),
+            .appendInherited(new KeyedCodec<>("Moments",
+                            new InheritMapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.body.moments = v, a -> a.body.moments, (a, p) -> a.body.moments = p.body.moments)
-            .documentation("What it sounds and looks like: the per-Cycle moment and the session Completion moment.").add()
+            .documentation("What it sounds and looks like, keyed by moment id (cycle/swing/impact/completion, or step:<actionId>:<stepId>); matching is case-insensitive. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why rare_find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it).").add()
             .build();
 
     /**

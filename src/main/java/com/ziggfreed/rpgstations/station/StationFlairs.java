@@ -1,5 +1,6 @@
 package com.ziggfreed.rpgstations.station;
 
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -11,6 +12,7 @@ import javax.annotation.Nullable;
 
 import com.ziggfreed.rpgstations.api.impl.FlairUnlockRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Presentation;
+import com.ziggfreed.rpgstations.asset.EffectRef;
 
 /**
  * The achievement/reward flair override seam. A station may author NAMED cosmetic flair
@@ -34,13 +36,11 @@ import com.ziggfreed.rpgstations.asset.Presentation;
  * {@link #MOMENT_RARE_FIND}/{@link #MOMENT_COMPLETION} are the engine's own well-known ids
  * (constants, not an enum - nothing hardcodes the vocabulary as a closed set); {@link
  * #stepMomentId} builds the per-step {@code step:<actionId>:<stepId>} id a multi-action
- * station's {@code Present} step resolves against. {@code impact} is a NEW id this leg, split
- * off from {@code swing} (previously the delayed swing-impact cue reused the {@code SWING} slot
- * verbatim) - a deliberate widening of the vocabulary, not a behavior regression: no shipped
- * content authors a {@code swing}-keyed flair expecting it to also cover the impact cue
- * (unreleased, unshipped feature), and a flair author can now target either cue independently.
- * The overlay-MERGE semantics themselves (per-leaf, sorted-flair-id-order stacking) are
- * UNCHANGED - only the slot identity moved from a closed enum to an open string.
+ * station's {@code Present} step resolves against. {@code swing} and {@code impact} are the two
+ * cues one swing tick fires: the swing itself, and the strike landing behind it (whose lateness is
+ * its own {@code Presentation.DelayMs}, nothing dedicated). They are separate ids precisely so a
+ * flair can re-skin or re-time either one alone. The overlay-MERGE semantics themselves (per-leaf,
+ * sorted-flair-id-order stacking) are the same for every id.
  *
  * <p>{@code DelayMs} overlays as an ordinary leaf, so a flair can re-time a moment as well as
  * re-skin it (and inherits the base moment's own timing when it authors none). A flair that wants
@@ -98,6 +98,38 @@ public final class StationFlairs {
     }
 
     /**
+     * {@code moments} re-keyed to lowercase, dropping blank keys and null values: the ONE
+     * canonicalizer every moment map in this engine shares - a station's inline {@code Flairs}
+     * entry, a standalone {@code FlairAsset}, and an action's own {@code Moments}.
+     *
+     * <p>Moment ids are matched by EXACT map key at play time, so canonicalizing here (with
+     * {@link #effective} and the action resolver lowercasing the lookup side to match) is what makes
+     * a key authored {@code "Cycle"} actually fire instead of validating as a known id and then
+     * silently never matching. A later duplicate under a different casing wins, the same later-wins
+     * rule the rest of this schema follows.
+     */
+    @Nonnull
+    public static Map<String, Presentation> canonicalMomentKeys(@Nonnull Map<String, Presentation> moments) {
+        Map<String, Presentation> out = new LinkedHashMap<>(moments.size());
+        for (Map.Entry<String, Presentation> e : moments.entrySet()) {
+            if (e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
+                continue;
+            }
+            out.put(e.getKey().toLowerCase(Locale.ROOT), e.getValue());
+        }
+        return out;
+    }
+
+    /**
+     * Whether {@code momentId} is a PER-STEP id ({@code step:<actionId>:<stepId>}) rather than one of
+     * the well-known engine moments - the one class of moment id an action's own {@code Moments} map
+     * may drive a step's iteration-entry cue with.
+     */
+    public static boolean isStepMomentId(@Nullable String momentId) {
+        return momentId != null && momentId.toLowerCase(Locale.ROOT).startsWith(STEP_MOMENT_PREFIX);
+    }
+
+    /**
      * Whether {@code momentId} is a RECOGNIZED id: one of the 5 well-known engine constants
      * (case-insensitive) or a {@code step:}-prefixed per-step id. An unrecognized id is never an
      * error (design 9.6 - "future engine moments must not break old packs") - callers use this
@@ -134,11 +166,11 @@ public final class StationFlairs {
         }
 
         String lookupId = momentId.toLowerCase(Locale.ROOT);
-        String[] sounds = base != null ? base.getSounds() : null;
+        Presentation.SoundCue[] sounds = base != null ? base.getSounds() : null;
         Presentation.ModelParticle[] particles = base != null ? base.getParticles() : null;
         Presentation.Shake shake = base != null ? base.getShake() : null;
         Presentation.Interaction interaction = base != null ? base.getInteraction() : null;
-        com.ziggfreed.rpgstations.asset.EffectRef effect = base != null ? base.getEffect() : null;
+        EffectRef effect = base != null ? base.getEffect() : null;
         Long delayMs = base != null ? base.getDelayMs() : null;
         boolean overlaidAny = false;
 

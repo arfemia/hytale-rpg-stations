@@ -14,7 +14,7 @@ import com.hypixel.hytale.assetstore.map.JsonAssetWithMap;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
-import com.hypixel.hytale.codec.codecs.map.MapCodec;
+import com.ziggfreed.common.codec.InheritMapCodec;
 
 /**
  * A standalone, ANY-mod-authorable cosmetic flair layer (design section 9.6, phase 2 leg F): the
@@ -68,9 +68,9 @@ public final class FlairAsset implements JsonAssetWithMap<String, DefaultAssetMa
                     (a, v) -> a.stations = v, a -> a.stations, (a, p) -> a.stations = p.stations)
             .documentation("Station ids this flair applies to; null/empty = every station.").add()
             .appendInherited(new KeyedCodec<>("Moments",
-                            new MapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
+                            new InheritMapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.moments = v, a -> a.moments, (a, p) -> a.moments = p.moments)
-            .documentation("Moment id (cycle/swing/impact/rare_find/completion or step:<action>:<step>) -> the presentation overlay.").add()
+            .documentation("Moment id (cycle/swing/impact/rare_find/completion or step:<action>:<step>) -> the presentation overlay. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored.").add()
             .build();
 
     public FlairAsset() {

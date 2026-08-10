@@ -49,9 +49,9 @@ public class PresentationDelayCodecTest {
                         + " \"Completion\": { \"Sounds\": [\"Fixture_Done\"], \"DelayMs\": 250 } }",
                 "[ { \"Id\": \"x\" } ]");
 
-        assertEquals(120L, a.getMoments().getCycle().getDelayMs());
-        assertEquals(120L, a.getMoments().getCycle().effectiveDelayMs());
-        assertEquals(250L, a.getMoments().getCompletion().getDelayMs());
+        assertEquals(120L, a.getMoments().get("Cycle").getDelayMs());
+        assertEquals(120L, a.getMoments().get("Cycle").effectiveDelayMs());
+        assertEquals(250L, a.getMoments().get("Completion").getDelayMs());
     }
 
     @Test
@@ -91,9 +91,9 @@ public class PresentationDelayCodecTest {
         ActionDef a = inlineAction("{ \"Cycle\": { \"Sounds\": [\"Fixture_Break\"] } }",
                 "[ { \"Id\": \"x\" } ]");
 
-        assertNotNull(a.getMoments().getCycle());
-        assertNull(a.getMoments().getCycle().getDelayMs());
-        assertEquals(Presentation.NO_DELAY_MS, a.getMoments().getCycle().effectiveDelayMs());
+        assertNotNull(a.getMoments().get("Cycle"));
+        assertNull(a.getMoments().get("Cycle").getDelayMs());
+        assertEquals(Presentation.NO_DELAY_MS, a.getMoments().get("Cycle").effectiveDelayMs());
     }
 
     @Test
@@ -101,16 +101,17 @@ public class PresentationDelayCodecTest {
         ActionDef zero = inlineAction("{ \"Cycle\": { \"DelayMs\": 0 } }", "[ { \"Id\": \"x\" } ]");
         ActionDef negative = inlineAction("{ \"Cycle\": { \"DelayMs\": -50 } }", "[ { \"Id\": \"x\" } ]");
 
-        assertEquals(Presentation.NO_DELAY_MS, zero.getMoments().getCycle().effectiveDelayMs());
-        assertEquals(Presentation.NO_DELAY_MS, negative.getMoments().getCycle().effectiveDelayMs());
-        assertEquals(-50L, negative.getMoments().getCycle().getDelayMs(),
+        assertEquals(Presentation.NO_DELAY_MS, zero.getMoments().get("Cycle").effectiveDelayMs());
+        assertEquals(Presentation.NO_DELAY_MS, negative.getMoments().get("Cycle").effectiveDelayMs());
+        assertEquals(-50L, negative.getMoments().get("Cycle").getDelayMs(),
                 "the authored value still round-trips; only the reader default clamps it");
     }
 
     @Test
     void javaFactory_carriesTheDelay_andTheFiveArgFormLeavesItUnset() {
-        Presentation delayed = Presentation.of(new String[]{"Fixture_A"}, null, null, null, null, 90L);
-        Presentation plain = Presentation.of(new String[]{"Fixture_A"}, null, null, null, null);
+        Presentation.SoundCue[] one = {Presentation.SoundCue.of("Fixture_A")};
+        Presentation delayed = Presentation.of(one, null, null, null, null, 90L);
+        Presentation plain = Presentation.of(one, null, null, null, null);
 
         assertEquals(90L, delayed.effectiveDelayMs());
         assertNull(plain.getDelayMs());
@@ -123,17 +124,17 @@ public class PresentationDelayCodecTest {
     void parentInheritance_delayInheritsOnOmit_andTheChildsOwnValueWins() throws Exception {
         ActionAsset parent = decodeAction("base_action", null,
                 "{ \"Moments\": { \"Cycle\": { \"Sounds\": [\"Fixture_Parent\"], \"DelayMs\": 200 } } }", null);
-        assertEquals(200L, parent.getBody().getMoments().getCycle().getDelayMs());
+        assertEquals(200L, parent.getBody().getMoments().get("Cycle").getDelayMs());
 
         ActionAsset inherits = decodeAction("child_inherits", "base_action",
                 "{ \"Moments\": { \"Cycle\": { \"Sounds\": [\"Fixture_Child\"] } } }", parent);
-        assertEquals(200L, inherits.getBody().getMoments().getCycle().getDelayMs(),
+        assertEquals(200L, inherits.getBody().getMoments().get("Cycle").getDelayMs(),
                 "a child re-skinning the sounds keeps the parent's timing");
 
         ActionAsset overrides = decodeAction("child_overrides", "base_action",
                 "{ \"Moments\": { \"Cycle\": { \"DelayMs\": 10 } } }", parent);
-        assertEquals(10L, overrides.getBody().getMoments().getCycle().getDelayMs());
-        assertEquals("Fixture_Parent", overrides.getBody().getMoments().getCycle().getSounds()[0],
+        assertEquals(10L, overrides.getBody().getMoments().get("Cycle").getDelayMs());
+        assertEquals("Fixture_Parent", overrides.getBody().getMoments().get("Cycle").getSounds()[0].getEventId(),
                 "the sibling Sounds leaf still inherits alongside an overridden DelayMs");
     }
 }

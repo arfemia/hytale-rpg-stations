@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Map;
+
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
@@ -120,8 +122,8 @@ public class StationAssetCodecTest {
         assertEquals("LookRot", alpha.getWorker().getCamera().getRecipe());
         assertEquals("Fixture_Emote", alpha.getWorker().getAnimation().getEmoteId());
         assertTrue(alpha.getWorker().getPuppet().effectiveEnabled());
-        assertEquals("Fixture_Cycle", alpha.getMoments().getCycle().getSounds()[0]);
-        assertEquals("Fixture_Done", alpha.getMoments().getCompletion().getSounds()[0]);
+        assertEquals("Fixture_Cycle", alpha.getMoments().get("Cycle").getSounds()[0].getEventId());
+        assertEquals("Fixture_Done", alpha.getMoments().get("Completion").getSounds()[0].getEventId());
 
         ActionDef beta = actions[1];
         assertEquals("Beta", beta.getId());
@@ -212,7 +214,7 @@ public class StationAssetCodecTest {
                 + " \"cycle\": { \"Sounds\": [\"Fixture_Gilded\"] } } } } }");
         assertEquals(1, a.getFlairs().size());
         assertEquals("Fixture_Gilded",
-                a.getFlairs().get("gilded").getMoments().get("cycle").getSounds()[0]);
+                a.getFlairs().get("gilded").getMoments().get("cycle").getSounds()[0].getEventId());
     }
 
     // ==================== Yield: purely deterministic, four leaves ====================
@@ -331,9 +333,19 @@ public class StationAssetCodecTest {
     }
 
     @Test
-    void moments_pairTheCycleAndCompletionPresentations() {
-        assertEquals(java.util.Set.of("Cycle", "Completion"),
-                ActionDef.Moments.CODEC.getEntries().keySet());
+    void moments_isAnOpenMapKeyedByMomentId_matchedCaseInsensitively() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Moments\": {"
+                + " \"Cycle\": { \"Sounds\": [\"Fixture_Cycle\"] },"
+                + " \"swing\": { \"Sounds\": [\"Fixture_Swing\"] },"
+                + " \"impact\": { \"DelayMs\": 140, \"Sounds\": [\"Fixture_Impact\"] },"
+                + " \"step:a:strike\": { \"Sounds\": [\"Fixture_Step\"] } } } ] }");
+        Map<String, Presentation> moments = a.getActions()[0].getMoments();
+
+        assertEquals(java.util.Set.of("Cycle", "swing", "impact", "step:a:strike"), moments.keySet(),
+                "the map keeps whatever casing was authored; the engine canonicalizes on resolve");
+        assertEquals("Fixture_Cycle", moments.get("Cycle").getSounds()[0].getEventId());
+        assertEquals(140L, moments.get("impact").effectiveDelayMs());
+        assertEquals("Fixture_Step", moments.get("step:a:strike").getSounds()[0].getEventId());
     }
 
     @Test
@@ -343,19 +355,15 @@ public class StationAssetCodecTest {
                 + "   \"Mount\": { \"Surface\": \"Entity\", \"Entity\": {"
                 + "     \"Offset\": { \"Z\": 0.6 }, \"VisibleAnchorItemId\": \"Fixture_Anchor\" } } },"
                 + " \"Animation\": { \"EmoteId\": \"Fixture_Emote\", \"ActionClip\": \"Chop\","
-                + "   \"Swing\": { \"IntervalMs\": 900, \"Presentation\": { \"Sounds\": [\"Fixture_Swing\"] },"
-                + "     \"Impact\": { \"DelayMs\": 120,"
-                + "       \"Presentation\": { \"Particles\": [ { \"SystemId\": \"Fixture_Chips\" } ] } } } } } } ] }");
+                + "   \"Swing\": { \"IntervalMs\": 900 } } } } ] }");
         ActionDef.Worker w = a.getActions()[0].getWorker();
         assertTrue(w.getHold().getMount().isEntitySurface());
         assertEquals(0.6, w.getHold().getMount().getEntity().getOffset().getZ());
         assertEquals("Fixture_Anchor", w.getHold().getMount().getEntity().getVisibleAnchorItemId());
         assertEquals("Chop", w.getAnimation().getActionClip());
         assertEquals(900L, w.getAnimation().getSwing().getIntervalMs());
-        assertEquals("Fixture_Swing", w.getAnimation().getSwing().getPresentation().getSounds()[0]);
-        assertEquals(120L, w.getAnimation().getSwing().getImpact().getDelayMs());
-        assertEquals("Fixture_Chips",
-                w.getAnimation().getSwing().getImpact().getPresentation().getParticles()[0].getSystemId());
+        assertEquals(java.util.Set.of("IntervalMs"), StationAsset.Animation.Swing.CODEC.getEntries().keySet(),
+                "Swing is pure cadence: the swing and impact CUES are Moments entries, not leaves here");
     }
 
     @Test
@@ -365,7 +373,8 @@ public class StationAssetCodecTest {
                 + " \"Look\": { \"Source\": \"NpcRole\", \"FallbackModelId\": \"Fixture_Model\","
                 + "   \"Role\": { \"RoleId\": \"Fixture_Role\", \"SkinSource\": \"PlayerClone\","
                 + "     \"Persist\": true, \"SpeedMps\": 3.5 } },"
-                + " \"Offset\": { \"X\": 0.0, \"Y\": -0.4, \"Z\": 1.0 }, \"Yaw\": 90.0,"
+                + " \"Offset\": { \"X\": 0.0, \"Y\": -0.4, \"Z\": 1.0 },"
+                + " \"Rotation\": { \"Yaw\": 90.0, \"Pitch\": 15.0, \"Roll\": -5.0 },"
                 + " \"Prop\": { \"Source\": \"MirrorHeld\", \"Slot\": \"Hotbar\" } } } } ] }");
         Puppet p = a.getActions()[0].getWorker().getPuppet();
         assertTrue(p.effectiveEnabled());
@@ -375,7 +384,9 @@ public class StationAssetCodecTest {
         assertEquals("Fixture_Role", p.getLook().getRole().getRoleId());
         assertEquals(3.5, p.getLook().getRole().getSpeedMps());
         assertEquals(-0.4, p.getOffset().getY());
-        assertEquals(90.0, p.getYaw());
+        assertEquals(90.0, p.effectiveYawDegrees());
+        assertEquals(15.0, p.effectivePitchDegrees());
+        assertEquals(-5.0, p.effectiveRollDegrees());
         assertEquals("MirrorHeld", p.getProp().getSource());
     }
 
@@ -423,7 +434,7 @@ public class StationAssetCodecTest {
         Roll roll = a.getActions()[0].getBonus().getRolls()[0];
 
         assertNotNull(roll.getPresentation());
-        assertEquals("Fixture_Fanfare", roll.getPresentation().getSounds()[0]);
+        assertEquals("Fixture_Fanfare", roll.getPresentation().getSounds()[0].getEventId());
         assertEquals("Fixture_Sparks", roll.getPresentation().getParticles()[0].getSystemId());
         assertNull(roll.getLadder(), "no ladder is needed to carry a roll-level cue");
     }

@@ -391,8 +391,10 @@ public final class ExtensionCatalog {
     /**
      * ONE per-leaf {@code Puppet} overlay (PURE): every leaf of {@code overlay} that is authored
      * wins; every leaf it omits keeps {@code base}'s value, recursively through
-     * {@code Hide}/{@code Look}/{@code Look.Model}/{@code Look.Role}/{@code Offset}/{@code Prop}. A
-     * null {@code overlay} is the identity; a null {@code base} yields {@code overlay} as-is.
+     * {@code Hide}/{@code Look}/{@code Look.Model}/{@code Look.Role}/{@code Offset}/
+     * {@code Rotation}/{@code Prop} - so an overlay authoring only {@code Rotation.Pitch} keeps the
+     * base's {@code Rotation.Yaw} and {@code .Roll}. A null {@code overlay} is the identity; a null
+     * {@code base} yields {@code overlay} as-is.
      */
     @Nullable
     static Puppet overlayPuppet(@Nullable Puppet base, @Nullable Puppet overlay) {
@@ -407,7 +409,7 @@ public final class ExtensionCatalog {
                 overlayHide(base.getHide(), overlay.getHide()),
                 overlayLook(base.getLook(), overlay.getLook()),
                 overlayVec3(base.getOffset(), overlay.getOffset()),
-                firstNonNull(overlay.getYaw(), base.getYaw()),
+                overlayRotation(base.getRotation(), overlay.getRotation()),
                 overlayProp(base.getProp(), overlay.getProp()));
     }
 
