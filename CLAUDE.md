@@ -231,6 +231,29 @@ src/main/java/com/ziggfreed/rpgstations/
                                the drop-at-block fallback)
 ```
 
+## Two engine traps that each cost a boot (read before touching drops or spawning entities)
+
+Both were found the hard way, and neither is visible from the authored JSON or the call site.
+
+1. **Spawning an entity from inside a station cycle throws.** `store.addEntity` fails with
+   `IllegalStateException: Store is currently processing!` when called from a system, and the cycle
+   drain and the interaction handler are both systems. The throw lands in a `catch` and the entity
+   silently never exists - which is how every overflow ground-drop was destroyed while the log said
+   only `STATION drop-at-block failed`. **Spawn through a `CommandBuffer<EntityStore>`**, threaded
+   from the call site (`runRealCycle` and `StationStepContext` both already carry one).
+   `util.ItemDropUtil` and `station.StationCustodyDisplay` are the two shipped examples.
+2. **An `ItemDropList` whose container tree holds only `Droplist` references fails validation** with
+   `Container must have something to drop!`, and a failed drop list takes the WHOLE mod's load down.
+   `ItemDropList`'s validator calls `container.getAllDrops(...)` and fails on an empty result, while
+   `DroplistItemDropContainer.getAllDrops` returns the list unchanged when its target is not
+   resolvable yet - which during validation it usually is not. **Pair every `Droplist` with at least
+   one concrete `Single` somewhere in the tree**, exactly as all 32 vanilla tables that use one do.
+
+**A grant that reports what it did not deliver is the same class of bug.** `ItemGrantUtil.grant`
+returning `FALLBACK` only means a drop was ATTEMPTED; use `grantOrDrop` when the answer decides
+whether to count, notify, or summarise the item, or a failed drop gets reported to the player as a
+reward they never received.
+
 ## Conventions (this mod's own; hyMMO's root CLAUDE.md does NOT auto-apply)
 
 - **COMPLETELY PROGRESSION-AGNOSTIC (maintainer edict, 2026-08-05, supreme over everything below).**

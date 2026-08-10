@@ -447,7 +447,12 @@ seam every other grant uses. **That tally is FRACTIONAL and resolves ONCE PER CY
 (`loot.OutputItemResolver` with `ThreadLocalRandom`: the whole part always, plus one more at the
 leftover fraction's probability), so a `1.5` ladder floor pays one item always plus a second half
 the time, and two rolls paying `0.5` each average a whole item instead of rounding twice; the
-produced row's breakdown records the RESOLVED count, since that is what the player received. An
+produced row's breakdown records the RESOLVED count, since that is what the player received. **It
+also NOTIFIES that count** (`notifyItemGain`, not lucky-flagged): the Produce phase only ever
+announces the recipe's own deterministic `Yield`, so a bonus that is not separately notified makes
+every toast under-report - a cycle paying one base plank plus four from the tool ladder announced a
+single plank, which reads in game as the bonus not working at all. **Any NEW grant path owes its own
+notification for the same reason.** An
 authored `Steps` program has no single "cycle output" for
 `OutputItems` to add to (`s.cycleOutputItemId` stays null, and `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT`
 warns on an action authoring `OutputItems` there - on its own `Bonus` or on a step's `Roll` phase

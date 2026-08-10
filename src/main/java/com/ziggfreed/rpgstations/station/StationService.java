@@ -1730,6 +1730,14 @@ public final class StationService {
         if (breakdown != null) {
             breakdown.addBonus(count);
         }
+        // Tell the player about the bonus too. The Produce phase notifies only the recipe's own
+        // deterministic Yield, so without this a cycle that granted one base plank plus four from
+        // the tool ladder reported a single plank - the toast under-counted every bonus this
+        // station pays, which reads as the reward not working rather than the toast being wrong.
+        // Not flagged lucky: this is ordinary output of the cycle, just more of it.
+        if (s.playerRef != null) {
+            notifyItemGain(s.playerRef, itemId, count, false);
+        }
     }
 
     /**
