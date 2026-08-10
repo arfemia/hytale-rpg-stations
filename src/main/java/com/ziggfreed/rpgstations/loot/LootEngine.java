@@ -25,6 +25,7 @@ import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.station.ExtensionCatalog;
+import com.ziggfreed.rpgstations.util.ItemDropUtil;
 import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -408,6 +409,13 @@ public final class LootEngine {
             return Map.of();
         }
         Map<String, Integer> landed = new LinkedHashMap<>();
+        // Overflow is collected and dropped ONCE at the end rather than per stack. A single roll
+        // can hand back several stacks of the same item (a table pulling a shared list more than
+        // once does exactly that), and dropping each leftover on its own scattered a find across
+        // several ground entities - so the pile a player walked up to showed only part of what the
+        // notification told them they got. One drop call per roll means the pile equals the
+        // remainder.
+        List<ItemStack> overflow = new ArrayList<>();
         for (ItemStack stack : drops) {
             try {
                 // Read the quantity BEFORE granting, and record it only when the stack actually
@@ -415,11 +423,19 @@ public final class LootEngine {
                 // went nowhere no longer exists, so counting it here would tell the player they
                 // found something they never received and inflate the session summary with it.
                 int quantity = stack.getQuantity();
-                if (ItemGrantUtil.grantOrDrop(player, stack, commandBuffer, store, blockX, blockY, blockZ)) {
+                if (ItemGrantUtil.grantToInventory(player, stack)) {
                     landed.merge(stack.getItemId(), quantity, Integer::sum);
+                } else {
+                    overflow.add(stack);
                 }
             } catch (Throwable t) {
                 Log.fine("STATION loot droplist item grant failed: " + t.getMessage());
+            }
+        }
+        if (!overflow.isEmpty()
+                && ItemDropUtil.dropAtBlock(commandBuffer, store, blockX, blockY, blockZ, overflow)) {
+            for (ItemStack dropped : overflow) {
+                landed.merge(dropped.getItemId(), dropped.getQuantity(), Integer::sum);
             }
         }
         return landed;

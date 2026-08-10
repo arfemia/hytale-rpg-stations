@@ -1966,6 +1966,7 @@ public final class StationService {
         for (Map.Entry<String, Integer> e : s.luckItems.entrySet()) {
             Message line = Msg.cat(
                     RpgMsg.tr("ui.station.summary.item_produced", itemNameMsg(e.getKey()), e.getValue()),
+                    Msg.raw(" "),
                     RpgMsg.tr("ui.station.summary.lucky"));
             rows.add(new StationSummaryHud.LedgerRow(e.getKey(), e.getValue(), line, SummaryRow.Kind.LUCKY));
         }
@@ -5146,7 +5147,7 @@ public final class StationService {
         try {
             Message line = RpgMsg.tr("ui.station.gain.produced", itemNameMsg(itemId), quantity);
             if (lucky) {
-                line = Msg.cat(line, RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
+                line = Msg.cat(line, Msg.raw(" "), RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
             }
             // D-4: the value is now the bare item name ({0}); the quantity rides the item-slot count
             // badge, matching a native pickup exactly (the unused quantity arg above is harmless).
