@@ -1,8 +1,8 @@
 {
-  "$Comment": "The sawmill's session-loyalty find table, referenced from the station's Bonus.Lootables. A Roll grants what ELSE a cycle handed over: how MUCH of the thing you made is the action's own Recipe.Yield plus its OutputItems rolls, and a find can only ever ADD something different, never multiply that. This table grants drop lists rather than output items because a find IS a different thing - life essence shaken loose from the milled logs, not more planks.",
+  "$Comment": "The sawmill's session-loyalty find table, referenced from the station's Bonus.Lootables. A Roll grants what ELSE a cycle handed over: how MUCH of the thing you made is the action's own Recipe.Yield plus its OutputItems rolls, and a find can only ever ADD something different, never multiply that. This table grants drop lists rather than output items because a find IS a different thing - life essence shaken loose from the milled logs, not more planks.\n\nONE roll lives here, and that is deliberate. A same-id Lootable in a later layer replaces a whole FILE, so which rolls share a file decides what a layering mod has to inherit in order to re-tune one of them. The Sawmill's three tables split along exactly that line: this is the loyalty ladder any worker can reach, SawmillTrophy is the Sawmiller's Hatchet chase, and SawmillMasterworkFinds is the fourth tier that chase pays out. Each can be replaced without touching the other two.",
   "Rolls": [
     {
-      "$Comment": "Read left to right: Trigger Cycle evaluates once per completed milling cycle. Conditions gates the whole Roll on rpgstations:cycle_count 10 or higher, so the first nine cycles of a session never even roll - finds reward staying at the bench, not tapping it - AND on tool quality 2 or better, so a starter Wood or Crude hatchet mills its planks but never shakes a find loose; Iron-grade steel is where the finds begin. Chance then passes 15 percent of those cycles. Ladder sums its Factors (a FactorRef[] summed before the floor lookup; a single-factor ladder authors a one-element array) and takes the HIGHEST floor the sum reaches, never several: cycles 10 to 24 grant the T1 table, cycles 25 to 49 the T2 table plus the coin sound and spark burst on that floor's own Presentation, and cycle 50 onward the T3 table plus the legendary chest sound and gold-crown burst. The referenced tables are this jar's own Server/Drops assets, each with its own internal empty weight (T1: 10 percent for 1 to 2 life essence; T2: 20 percent for 1 to 3; T3: 95 percent for 2 to 4 plus a 2 percent jackpot of one concentrated essence - the deep tier nearly always pays on a winning roll, its scarcity carried by this Roll's own 15 percent chance), so the combined odds per cycle are about 1.5 percent for a T1 find, 3 percent for a T2 find, and about 14.5 percent for a T3 find. A ten-minute session runs about 124 cycles, so the top tier covers well over half of a full session. Grants.DropLists is a plural array - a floor could roll a guaranteed common table plus a rare one as two independent entries, each rolled once through the native ItemModule.getRandomItemDrops. Floors resolve through the one shared ladder core every ladder in this schema uses: highest reached Min wins, a Min of 0 is reachable, and two floors sharing a Min is a validator warning because only the last authored one could ever grant. A floor's own celebration only plays when its referenced table actually paid, so the T2 coin chime and the T3 legendary fanfare stay silent on a cycle whose table resolved to its own empty entry rather than firing over an empty hand.",
+      "$Comment": "Read left to right: Trigger Cycle evaluates once per completed milling cycle. Conditions gates the whole Roll on rpgstations:cycle_count 10 or higher, so the first nine cycles of a session never even roll - finds reward staying at the bench, not tapping it - AND on tool quality 2 or better, so a starter Wood or Crude hatchet mills its planks but never shakes a find loose; Iron-grade steel is where the finds begin. Chance then passes 15 percent of those cycles. Ladder sums its Factors (a FactorRef[] summed before the floor lookup; a single-factor ladder authors a one-element array) and takes the HIGHEST floor the sum reaches, never several: cycles 10 to 24 grant the T1 table, cycles 25 to 49 the T2 table, and cycle 50 onward the T3 table, the upper two each carrying the same coin sound and spark burst on their own floor Presentation (the loyalty ladder's cue is a steady one; the grander legendary fanfare is reserved for the trophy). The referenced tables are this jar's own Server/Drops assets, each with its own internal empty weight (T1: 10 percent for 1 to 2 life essence; T2: 20 percent for 1 to 3; T3: 95 percent for 2 to 4 plus a 2 percent jackpot of one concentrated essence - the deep tier nearly always pays on a winning roll, its scarcity carried by this Roll's own 15 percent chance), so the combined odds per cycle are about 1.5 percent for a T1 find, 3 percent for a T2 find, and about 14.5 percent for a T3 find. A ten-minute session runs about 124 cycles, so the top tier covers well over half of a full session. Grants.DropLists is a plural array - a floor could roll a guaranteed common table plus a rare one as two independent entries, each rolled once through the native ItemModule.getRandomItemDrops. Floors resolve through the one shared ladder core every ladder in this schema uses: highest reached Min wins, a Min of 0 is reachable, and two floors sharing a Min is a validator warning because only the last authored one could ever grant. A floor's own celebration only plays when its referenced table actually paid, so the T2 coin chime and the T3 legendary fanfare stay silent on a cycle whose table resolved to its own empty entry rather than firing over an empty hand.",
       "Trigger": "Cycle",
       "Conditions": [
         { "Factor": "rpgstations:cycle_count", "Min": 10 },
@@ -25,44 +25,12 @@
             "Min": 50,
             "Grants": { "DropLists": ["RPG_Station_Sawmill_T3"] },
             "Presentation": {
-              "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player"],
-              "Particles": [{ "SystemId": "Effect_Crown_Gold" }]
+              "Sounds": ["SFX_Coins_Land"],
+              "Particles": [{ "SystemId": "Block_Gem_Sparks" }]
             }
           }
         ]
       }
-    },
-    {
-      "$Comment": "The trophy roll: the Sawmiller's Hatchet, a Legendary masterwork copy of the Mithril hatchet, for the worker who brings Mithril-grade steel and stays a few cycles. Conditions AND together: cycle 5 onward plus ALL THREE tool axes at the vanilla Mithril hatchet's own values - quality 4 (Epic or better), item level 50, and Woods gather power 0.5 (the Param-less tool_power reads the station's own gather type). Onyxium misses on item level by design: this is the top rung's trophy, not the top floor's. The whole probability is visible on one leaf, with no Ladder and no tiers involved: Chance BasePercent 0.04 IS 1 in 2500, so an eligible worker averages one trophy per 2500 cycles, on the order of one per twenty-five full sessions, a genuine chase item. The win grants INLINE from this roll's own top-level Grants, a command handing the hatchet over rather than a drop table, and the roll's own top-level Presentation plays at the station block on the rare-find moment the instant that chance lands. A celebration only ever plays over something actually granted, and a command grant always counts as produced, so this fanfare accompanies every win and can never fire on its own. The reward composes: a Sawmiller's Hatchet in hand scores 55.55 on the yield ladder, unlocking its 50 floor (a fifth plank per cycle), the matching contribution tier, and the fourth find tier below.",
-      "Trigger": "Cycle",
-      "Conditions": [
-        { "Factor": "rpgstations:cycle_count", "Min": 5 },
-        { "Factor": "hytale:tool_quality", "Min": 4 },
-        { "Factor": "hytale:tool_item_level", "Min": 50 },
-        { "Factor": "hytale:tool_power", "Min": 0.5 }
-      ],
-      "Chance": { "BasePercent": 0.04 },
-      "Grants": {
-        "Commands": ["give {player} RPG_Tool_Hatchet_Sawmiller"]
-      },
-      "Presentation": {
-        "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player"],
-        "Particles": [
-          { "SystemId": "Effect_Crown_Gold" },
-          { "SystemId": "Block_Gem_Sparks" }
-        ]
-      }
-    },
-    {
-      "$Comment": "The fourth find tier, for the trophy itself: Conditions demand ALL THREE tool axes at the Sawmiller's Hatchet's own values - quality 5 (Legendary), item level 50, and Woods gather power 0.55 - which no forgeable vanilla tool reaches (Mithril tops out at quality 4 and power 0.5), so only the sawmill's own 1 in 2500 trophy or a better modded tool unlocks it. No cycle gate: the trophy already proved the loyalty its chase demanded. The same 15 percent per-cycle cadence as the loyalty ladder, into a table that always pays on a win (T4 carries no empty entry).",
-      "Trigger": "Cycle",
-      "Conditions": [
-        { "Factor": "hytale:tool_quality", "Min": 5 },
-        { "Factor": "hytale:tool_item_level", "Min": 50 },
-        { "Factor": "hytale:tool_power", "Min": 0.55 }
-      ],
-      "Chance": { "BasePercent": 15 },
-      "Grants": { "DropLists": ["RPG_Station_Sawmill_T4"] }
     }
   ]
 }

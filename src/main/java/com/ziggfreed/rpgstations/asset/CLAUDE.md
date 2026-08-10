@@ -479,13 +479,17 @@ resolution section for the engine half.
 - **[`LootableAsset`](LootableAsset.java)** - `Server/RpgStations/Lootables/<Name>.json` (id =
   lowercased filename), body `{Rolls: [Roll, ...]}`, referenced by a `LootRef.Lootables` entry
   (an action, step, or extension may combine any number of shared tables with its own inline
-  `Rolls`). The standalone `SawmillFinds` lootable ships in this
-  jar's resources, alive with RpgStations alone (BUILT-IN factors only - `rpgstations:cycle_count`
-  for its session-loyalty ladder, plus the `hytale:tool_quality`/`tool_item_level`/`tool_power`
-  native reads its trophy and T4 gates need; nothing another mod has to register). Its three rolls
-  are the shipped exemplars of the whole Roll vocabulary - a conditioned chance + ladder, a
-  roll-level `Presentation` on a plain chance roll, and a Conditions-only tier - see
-  `../station/CLAUDE.md`'s Sawmill content bullet for the numbers.
+  `Rolls`). Three standalone lootables ship in this jar's resources, all alive with RpgStations
+  alone (BUILT-IN factors only - `rpgstations:cycle_count` for the session-loyalty ladder, plus the
+  `hytale:tool_quality`/`tool_item_level`/`tool_power` native reads the trophy gates need; nothing
+  another mod has to register): `SawmillFinds` (the loyalty ladder), `SawmillTrophy` (the hatchet
+  chase) and `SawmillMasterworkFinds` (the T4 tier that chase pays out). Their one roll each covers
+  the whole Roll vocabulary - a conditioned chance + ladder, a roll-level `Presentation` on a plain
+  chance roll, and a Conditions-only tier - see `../station/CLAUDE.md`'s Sawmill content bullet for
+  the numbers. **A fold REPLACES by id at whole-FILE granularity, so which rolls share a file is an
+  extension-point decision, not a filing one:** those three are one roll each precisely because a
+  layering mod re-tuning any of them should never have to inherit the other two. Split by default
+  when authoring a station - merging ids later is free, unpicking a shipped one is not.
 - **[`FlairAsset`](FlairAsset.java)** - a standalone, ANY-mod-authorable cosmetic flair layer,
   `Server/RpgStations/Flairs/<Name>.json` (Pattern A, id = lowercased filename): `{Stations?[],
   Moments}`. `Stations` null/empty = applies to every station; `Moments` is an OPEN

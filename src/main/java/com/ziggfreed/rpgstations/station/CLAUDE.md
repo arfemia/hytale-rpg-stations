@@ -40,9 +40,10 @@ the WHOLE set executes:
 - **Stations**: [`asset.StationAsset`](../asset/CLAUDE.md) (`Server/RpgStations/Stations/*.json`)
   folds into [`StationCatalog`](StationCatalog.java). Ids are lowercase (canonicalized at
   decode). This jar ships its OWN default Sawmill (`Server/RpgStations/Stations/Sawmill.json`,
-  standalone-playable with the built-in `rpgstations:` factors + `SawmillFinds` lootable); the
-  sibling stations pack adds its own luck-tier lootable plus a luck-scaled `Grants.OutputItems` roll as
-  an ADDITIVE `Extensions/*.json` (below) rather than a full-file override. **The jar Sawmill
+  standalone-playable with the built-in `rpgstations:` factors + the `SawmillFinds`/`SawmillTrophy`
+  lootables); the sibling stations pack adds its own find, output and masterwork lootables as an
+  ADDITIVE `Extensions/*.json` (below) rather than a full-file station override, and separately
+  REPLACES `SawmillTrophy` by id to make the chase luck-scaled. **The jar Sawmill
   declares NO `Work.PerCycleContributions` at all** - jar-layer content is progression-free by
   design, so a pack OWNS the sawmill's contributions outright and there is no base entry for an
   extension to collide with. The station's tool ladder lives where its EFFECT is visible: TWO INLINE
@@ -53,8 +54,8 @@ the WHOLE set executes:
   contributions - rather than in a separate baked curve
   - see `../../../../../../CONTENT_PACKS.md`'s Station authoring section for the authoring guide
   (brief reference only; do not duplicate it here). Those two are the action's OWN rolls;
-  `Bonus.Lootables` pulls in three more from `SawmillFinds` (below), so the live per-cycle pass
-  evaluates five.
+  `Bonus.Lootables` pulls in one roll from each of `SawmillFinds`, `SawmillTrophy` and
+  `SawmillMasterworkFinds` (all below), so the live per-cycle pass evaluates five.
   **The yield ladder's five floors** are `11`/`22`/`33`/`40`/`50` paying `1`/`1.5`/`2`/`3`/`4`
   OutputItems on top of `Yield.Base` 1, and `ContributionScale` crosses at the SAME five Mins with
   `2.0`/`2.5`/`3.0`/`4.0`/`5.0` - the two curves track rung for rung on purpose, trophy rung
@@ -64,20 +65,32 @@ the WHOLE set executes:
   the jar's own drop-only `RPG_Tool_Hatchet_Sawmiller` (scoring 55.55) or a better modded tool gets
   the fifth plank, which is what makes the trophy the bench's one endgame upgrade. Any doc claiming
   "up to four" predates the trophy.
-  **`SawmillFinds` (`Lootables/SawmillFinds.json`) is THREE rolls**, all `Cycle`-trigger: (1) the
-  session-loyalty ladder - Conditions `rpgstations:cycle_count >= 10` AND `hytale:tool_quality >= 2`,
-  `Chance` 15 percent, a `cycle_count` `Ladder` whose 10/25/50 floors grant the jar's own
+  **The Sawmill's three shipped lootables are split by REPLACEABILITY, not by theme - ONE ROLL
+  EACH.** A `Lootable` folds by id and a later layer replaces the whole FILE (`LootableCatalog.fold`
+  is a `putAll`), so **which rolls share a file decides what a layering mod must inherit in order to
+  re-tune one of them.** Any roll another mod is expected to reshape therefore gets its own file.
+  **Keep that split when adding a station: one file per independently replaceable concern**, and
+  when in doubt split, since merging later is free and unpicking a shipped id is not. The shipped
+  consumer is the MMO stations pack, whose own `SawmillTrophy` replaces the flat chase below with a
+  luck-scaled 1-in-3000 one and costs one small file to do it.
+  **`SawmillFinds` (`Lootables/SawmillFinds.json`) is the session-loyalty ladder**: Conditions
+  `rpgstations:cycle_count >= 10` AND `hytale:tool_quality >= 2`, `Chance` 15 percent, a
+  `cycle_count` `Ladder` whose 10/25/50 floors grant the jar's own
   `Drops/RPG_Station_Sawmill_T{1,2,3}` tables (the upper two floors carry their own celebration
-  `Presentation`, kept honest by the smart-cue rule since each table authors its own empty weight);
-  (2) the TROPHY roll - all three tool axes at the vanilla Mithril hatchet's own values
-  (`tool_quality >= 4`, `tool_item_level >= 50`, `tool_power >= 0.5`) plus `cycle_count >= 5`, a
-  visible `Chance.BasePercent` of `0.04` (1 in 2500), granting inline through its own top-level
-  `Grants.Commands` (`give {player} RPG_Tool_Hatchet_Sawmiller`) with its own top-level
-  `Presentation` - the shipped exemplar of the roll-level cue, and a command grant always counts as
-  produced so the fanfare can never fire dry; (3) the T4 find tier - gated on the TROPHY's own axes
-  (`tool_quality >= 5`, `tool_item_level >= 50`, `tool_power >= 0.55`, unreachable by any forgeable
-  vanilla tool), no cycle gate, the same 15 percent cadence into `RPG_Station_Sawmill_T4`, the one
-  find table with no empty entry. `RPG_Tool_Hatchet_Sawmiller` itself is a drop-only Legendary
+  `Presentation`, kept honest by the smart-cue rule since each table authors its own empty weight).
+  **`SawmillMasterworkFinds` (`Lootables/SawmillMasterworkFinds.json`) is the T4 find tier** - gated
+  on the TROPHY's own axes (`tool_quality >= 5`, `tool_item_level >= 50`, `tool_power >= 0.55`, each
+  exactly one notch above `SawmillTrophy`'s own gate and unreachable by any forgeable vanilla tool),
+  no cycle gate since the trophy already proved that loyalty, the same 15 percent cadence into
+  `RPG_Station_Sawmill_T4`, the one find table with no empty entry.
+  **`SawmillTrophy` (`Lootables/SawmillTrophy.json`) is ONE roll**, the chase itself: all three tool
+  axes at the vanilla Mithril hatchet's own values (`tool_quality >= 4`, `tool_item_level >= 50`,
+  `tool_power >= 0.5`) plus `cycle_count >= 5`, a visible `Chance.BasePercent` of `0.04` (1 in 2500)
+  with NO factors - deliberately the plainest possible curve, since a luck-scaled one reads channels
+  this mod knows nothing about - granting inline through its own top-level `Grants.Commands`
+  (`give {player} RPG_Tool_Hatchet_Sawmiller`) with its own top-level `Presentation`. It is the
+  shipped exemplar of the roll-level cue, and a command grant always counts as produced so the
+  fanfare can never fire dry. `RPG_Tool_Hatchet_Sawmiller` itself is a drop-only Legendary
   masterwork Mithril copy (500 durability, Woods power `0.55`, explicit `Tags.Family: Hatchet`),
   authored with NO `Parent` and NO `Recipe` deliberately - a Parent off the vanilla Mithril hatchet
   would inherit its forge recipe and make the chase pointless.

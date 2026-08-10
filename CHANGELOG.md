@@ -653,14 +653,21 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
   doubles a worker's planks also doubles whatever amounts a listening mod attaches to the action. The
   jar attaches none itself (its own content is deliberately free of any progression vocabulary), so
   the ladder ships ready and inert until something declares a channel.
-- Ships `SawmillFinds`, the station's session-loyalty find table, referenced from the action's
-  `Bonus.Lootables`. Its first roll gates on staying at the bench: cycle 10 or later AND a tool of
-  quality 2 or better, then 15 percent of qualifying cycles, into a three-floor ladder over the
-  session's own cycle count - the first tier from cycle 10, the second from 25, the third from 50,
-  each granting its own jar-shipped drop table of life essence with its own internal empty weight.
-  The upper two floors carry their own celebration cue, which the smart-cue rule keeps silent on a
-  cycle whose table resolved to nothing.
-- Ships the trophy chase. A second roll in that table wants all three tool axes at the vanilla Mithril
+- Ships the Sawmill's bonus rewards as THREE separate lootables, one roll each, referenced together
+  from the action's `Bonus.Lootables`. The split is an extension-point decision rather than a filing
+  one: a lootable folds by id and a later layer replaces a whole FILE, so which rolls share a file
+  decides what an add-on must inherit in order to re-tune one of them. One roll per file means each
+  can be replaced alone.
+- Ships `SawmillFinds`, the session-loyalty find table. It gates on staying at the bench: cycle 10 or
+  later AND a tool of quality 2 or better, then 15 percent of qualifying cycles, into a three-floor
+  ladder over the session's own cycle count - the first tier from cycle 10, the second from 25, the
+  third from 50, each granting its own jar-shipped drop table of life essence with its own internal
+  empty weight. The upper two floors carry their own celebration cue, which the smart-cue rule keeps
+  silent on a cycle whose table resolved to nothing.
+- Ships `SawmillTrophy`, the trophy chase, alone in its own file precisely because it is the roll an
+  add-on is most likely to reshape: a progression mod wants it scaled by its own notion of luck,
+  which this engine cannot express, so the version here is deliberately the plainest one possible -
+  a single flat chance with no factors at all. It wants all three tool axes at the vanilla Mithril
   hatchet's own values (quality 4, item level 50, Woods gather power 0.5) from cycle 5 onward, and
   then a visible `Chance` of `0.04` percent - 1 in 2500 eligible cycles, on the order of one per
   twenty-five full sessions. The whole probability is one readable leaf, with no ladder and no tiers
@@ -670,8 +677,11 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
   hatchet reaches is `0.5`). It is authored standalone with no `Parent` and deliberately no `Recipe`,
   because inheriting the Mithril hatchet would inherit its forge recipe and make the chase pointless.
   The roll's own top-level `Presentation` fires the celebration on the win.
-- Ships a fourth find tier for the trophy's owner. It gates on the Sawmiller's Hatchet's own three
-  axes (quality 5, item level 50, Woods power `0.55`), which no forgeable vanilla tool reaches, and
+- Ships `SawmillMasterworkFinds`, a fourth find tier for the trophy's owner, in its own file for the
+  same reason: it is what the chase pays out, so an add-on layering its own reward onto the trophy
+  reshapes it without touching the chase or the loyalty ladder. It gates on the Sawmiller's Hatchet's
+  own three axes (quality 5, item level 50, Woods power `0.55`), each exactly one notch above the
+  chase's own gate and none reachable by a forgeable vanilla tool, and
   needs no cycle gate at all - the chase already proved the loyalty. Same 15 percent per-cycle
   cadence, into the one find table with no empty entry: the tool that took 1 in 2500 to earn never
   comes up dry on a find. The reward composes rather than branching: a Sawmiller's Hatchet in hand
