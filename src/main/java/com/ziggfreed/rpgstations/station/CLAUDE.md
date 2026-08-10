@@ -46,16 +46,22 @@ the WHOLE set executes:
   REPLACES `SawmillTrophy` by id to make the chase luck-scaled. **The jar Sawmill
   declares NO `Work.PerCycleContributions` at all** - jar-layer content is progression-free by
   design, so a pack OWNS the sawmill's contributions outright and there is no base entry for an
-  extension to collide with. The station's tool ladder lives where its EFFECT is visible: TWO INLINE
-  `Bonus.Rolls` (a `Ladder` over three weighted tool factors granting `Grants.OutputItems` per
+  extension to collide with. The station's tool ladder lives where its EFFECT is visible: ONE INLINE
+  `Bonus.Roll` (a `Ladder` over three weighted tool factors granting `Grants.OutputItems` per
   floor - the mid rung's `1.5` is the FRACTIONAL half-step, one plank always plus a second half the
-  time - and a small flat windfall `Chance`) plus a
+  time) plus a
   parallel `ContributionScale` ladder describing the identical tool curve for whichever mod adds
   contributions - rather than in a separate baked curve
   - see `../../../../../../CONTENT_PACKS.md`'s Station authoring section for the authoring guide
-  (brief reference only; do not duplicate it here). Those two are the action's OWN rolls;
+  (brief reference only; do not duplicate it here). That one is the action's OWN roll;
   `Bonus.Lootables` pulls in one roll from each of `SawmillFinds`, `SawmillTrophy` and
-  `SawmillMasterworkFinds` (all below), so the live per-cycle pass evaluates five.
+  `SawmillMasterworkFinds` (all below), so the live per-cycle pass evaluates four.
+  **A second inline roll, a small flat windfall `Chance` scaled by tool power, was authored here and
+  REMOVED as needless complexity** - it proc'd on the same axis the ladder already priced, so it
+  added variance without adding a decision and made the pair read worse than the ladder alone. The
+  shape itself stays good authoring and survives as a worked example in `docs/loot-and-factors.md`.
+  **Do not re-add it here**, and when authoring a new station reach for a bare `Chance` roll only
+  for an outcome its ladder genuinely cannot express.
   **The yield ladder's five floors** are `11`/`22`/`33`/`40`/`50` paying `1`/`1.5`/`2`/`3`/`4`
   OutputItems on top of `Yield.Base` 1, and `ContributionScale` crosses at the SAME five Mins with
   `2.0`/`2.5`/`3.0`/`4.0`/`5.0` - the two curves track rung for rung on purpose, trophy rung

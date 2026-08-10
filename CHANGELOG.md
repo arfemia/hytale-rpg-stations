@@ -645,9 +645,10 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
   two planks always and a third half the time, so the rung sits genuinely between its neighbours
   instead of collapsing onto one; Thorium, Cobalt and Adamantite reach 33 for three; Onyxium and
   Mithril reach 40 for four; and the 50 floor's five planks is beyond every forgeable tool, reachable
-  only with the station's own drop-only trophy hatchet or a better modded one. A second roll adds a
-  small flat windfall for everyone (a 2 percent base chance plus the held tool's own gather power,
-  capped at 25 percent so an extreme modded power value cannot turn it into a guarantee).
+  only with the station's own drop-only trophy hatchet or a better modded one. That ladder is the
+  action's only inline roll: everything the bench pays for a better hatchet is one readable curve,
+  with no second proc layered on the same axis. A bare `Chance` roll remains good authoring for an
+  outcome a ladder cannot express, and `docs/loot-and-factors.md` carries a worked example.
 - Ships a `ContributionScale` ladder tracking that curve rung for rung - the same three factors and
   the same `11`/`22`/`33`/`40`/`50` crossings, scaling `2.0`/`2.5`/`3.0`/`4.0`/`5.0` - so a tool that
   doubles a worker's planks also doubles whatever amounts a listening mod attaches to the action. The

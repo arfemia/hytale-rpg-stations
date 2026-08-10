@@ -39,7 +39,7 @@
         }
       },
       "Bonus": {
-        "$Comment": "Everything conditional or probabilistic about output lives here, as visible Rolls. Grants.OutputItems adds EXTRA units of the cycle's own product (the actual species being milled) - additive on top of Recipe.Yield, so the two numbers stay directly comparable and no file can silently multiply another's. The amount is FRACTIONAL: the whole part is granted every cycle and the fraction left over is the chance of one more, so 1.5 pays one plank always plus a second half the time. Everything the cycle grants is summed before that single resolution, so two rolls paying 0.5 each average one whole plank. Lootables pulls in three tables, each its own independently replaceable concern: SawmillFinds is the session-loyalty ladder any worker can reach, SawmillTrophy is the Sawmiller's Hatchet chase, and SawmillMasterworkFinds is the fourth find tier that chase pays out. Finds arrive as drop-list items and the trophy as a command grant, both different things from the planks these rolls add. A same-id Lootable in a later layer replaces a whole FILE, so which rolls share a file decides what a layering mod must inherit to re-tune one of them: these three are split so each can be replaced alone.",
+        "$Comment": "Everything conditional or probabilistic about output lives here, as visible Rolls. ONE roll is authored inline: the tool ladder below, which is the whole of what this bench pays for a better hatchet. A second, chance-based windfall roll was authored here once and removed as needless complexity - a small flat proc on top of a ladder that already rewards the same axis adds variance without adding a decision, and the ladder alone reads at a glance. That shape is still perfectly good authoring and lives on as a worked example in docs/loot-and-factors.md; author it when a station genuinely wants an occasional surprise the ladder cannot express. Grants.OutputItems adds EXTRA units of the cycle's own product (the actual species being milled) - additive on top of Recipe.Yield, so the two numbers stay directly comparable and no file can silently multiply another's. The amount is FRACTIONAL: the whole part is granted every cycle and the fraction left over is the chance of one more, so 1.5 pays one plank always plus a second half the time. Everything the cycle grants is summed before that single resolution, so two rolls paying 0.5 each average one whole plank. Lootables pulls in three tables, each its own independently replaceable concern: SawmillFinds is the session-loyalty ladder any worker can reach, SawmillTrophy is the Sawmiller's Hatchet chase, and SawmillMasterworkFinds is the fourth find tier that chase pays out. Finds arrive as drop-list items and the trophy as a command grant, both different things from the planks these rolls add. A same-id Lootable in a later layer replaces a whole FILE, so which rolls share a file decides what a layering mod must inherit to re-tune one of them: these three are split so each can be replaced alone.",
         "Lootables": ["SawmillFinds", "SawmillTrophy", "SawmillMasterworkFinds"],
         "Rolls": [
           {
@@ -59,16 +59,6 @@
                 { "Min": 50.0, "Grants": { "OutputItems": 4 } }
               ]
             }
-          },
-          {
-            "$Comment": "The occasional windfall for everyone: chance = BasePercent 2 plus the held tool's gather power (a vanilla hatchet's Woods power is 0.2 to 0.5, so the real odds run 2.2 to 2.5 percent per cycle). CapPercent 25 is a safety ceiling that no vanilla tool approaches - it exists so a modded tool with an extreme power value cannot turn the windfall into a guarantee.",
-            "Trigger": "Cycle",
-            "Chance": {
-              "BasePercent": 2,
-              "Factors": [ { "Factor": "hytale:tool_power" } ],
-              "CapPercent": 25
-            },
-            "Grants": { "OutputItems": 1 }
           }
         ]
       },

@@ -59,6 +59,36 @@ those two numbers in separate groups is deliberate, so neither can silently mult
   when the roll HITS. A Ladder floor carries the same leaf for its own tier, so a tiered find
   celebrates per tier and a plain chance roll celebrates on the win with no Ladder involved.
 
+### Worked example: the occasional windfall
+
+The smallest useful roll is a bare `Chance` with a flat `Grants` and no `Ladder` at all - an
+occasional surprise on top of whatever the cycle already pays:
+
+```json
+{
+  "Trigger": "Cycle",
+  "Chance": {
+    "BasePercent": 2,
+    "Factors": [ { "Factor": "hytale:tool_power" } ],
+    "CapPercent": 25
+  },
+  "Grants": { "OutputItems": 1 }
+}
+```
+
+Chance resolves to `BasePercent` plus each factor's resolved value times its `Weight` (omitted, so
+`1.0`), clamped to `CapPercent`. Against the vanilla hatchets, whose Woods gather power runs `0.2` to
+`0.5`, that is a real 2.2 to 2.5 percent per cycle. `CapPercent` is doing real work even though no
+vanilla tool comes near it: a modded tool with an extreme power value would otherwise push a
+flavourful proc towards a guarantee, and a cap is cheaper than trusting every future tool.
+
+The Sawmill shipped exactly this roll for a while and then dropped it, which is worth knowing before
+you copy it. Its `Bonus` already carried a tool ladder rewarding the same axis, so the windfall added
+variance without adding a decision: no authored number changed what a player would do, and the pair
+read less clearly than the ladder alone. **Reach for this shape when a station wants an outcome its
+ladder genuinely cannot express** - a rare event rather than a smooth curve - and not as a second
+opinion about something the ladder already prices.
+
 ## The smart-cue rule: a celebration never plays over nothing
 
 A `Presentation` is always paired with the `Grants` group authored beside it - the roll's own
