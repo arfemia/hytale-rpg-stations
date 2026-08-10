@@ -87,8 +87,12 @@ the WHOLE set executes:
   **`SawmillMasterworkFinds` (`Lootables/SawmillMasterworkFinds.json`) is the T4 find tier** - gated
   on the TROPHY's own axes (`tool_quality >= 5`, `tool_item_level >= 50`, `tool_power >= 0.55`, each
   exactly one notch above `SawmillTrophy`'s own gate and unreachable by any forgeable vanilla tool),
-  no cycle gate since the trophy already proved that loyalty, the same 15 percent cadence into
-  `RPG_Station_Sawmill_T4`, the one find table with no empty entry.
+  no cycle GATE since the trophy already proved that loyalty - the cycle count drives the CHANCE
+  instead (15 percent rising 0.5 a cycle, `CapPercent` 75, so the cap lands at cycle 120 and a
+  ten-minute session only just reaches it). Deliberate contrast with `SawmillFinds`, where the TOOL
+  drives frequency and the session drives depth: here the tool has already done its work by
+  unlocking the roll, so the session is the only variable left. Pays `RPG_Station_Sawmill_T4`, the
+  one find table with no empty entry.
   **`SawmillTrophy` (`Lootables/SawmillTrophy.json`) is ONE roll**, the chase itself: all three tool
   axes at the vanilla Mithril hatchet's own values (`tool_quality >= 4`, `tool_item_level >= 50`,
   `tool_power >= 0.5`) plus `cycle_count >= 5`, a visible `Chance.BasePercent` of `0.04` (1 in 2500)

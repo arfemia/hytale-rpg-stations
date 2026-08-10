@@ -710,9 +710,11 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
   reshapes it without touching the chase or the loyalty ladder. It gates on the Sawmiller's Hatchet's
   own three axes (quality 5, item level 50, Woods power `0.55`), each exactly one notch above the
   chase's own gate and none reachable by a forgeable vanilla tool, and
-  needs no cycle gate at all - the chase already proved the loyalty. Same 15 percent per-cycle
-  cadence, into the one find table with no empty entry: the tool that took 1 in 2500 to earn never
-  comes up dry on a find. The reward composes rather than branching: a Sawmiller's Hatchet in hand
+  needs no cycle GATE at all - the chase already proved the loyalty. The cycle count drives its
+  CHANCE instead, 15 percent rising half a point per cycle to a 75 percent ceiling reached at cycle
+  120, so the trophy buys entry to the tier outright and a long session turns that entry into a
+  near-certainty. It pays into the one find table with no empty entry, so the tool that took 1 in
+  2500 to earn never comes up dry on a find. The reward composes rather than branching: a Sawmiller's Hatchet in hand
   scores 55.55 on the yield ladder, so it unlocks the 50 floor's fifth plank, the matching
   contribution rung, and this tier at once.
 - Ships the Sawmill block as a craftable item on a bare install: a **tier 2 Workbench** recipe taking
