@@ -664,15 +664,16 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
   ladder over the session's own cycle count - the first tier from cycle 10, the second from 25, the
   third from 50, each granting its own jar-shipped drop table. The upper two floors carry their own
   celebration cue, which the smart-cue rule keeps silent on a cycle whose table resolved to nothing.
-- Ships the loyalty find table reading the HELD TOOL as well as the session. Its chance to find
-  anything scales with the hatchet (8 percent base plus quality and gather power, capped at 25, so
-  iron sits near 13 percent and the trophy near 20), its tier ladder sums the tool score alongside
-  the session's cycle count so a better hatchet reaches the deeper tables sooner, and a second roll
-  pays offcuts on the tool alone - one, two or three pulls of the shared byproduct list at the same
-  11/33/50 crossings the plank ladder already turns on. Every tool score in the file holds the same
-  quality-10 / item-level-0.1 / power-1.0 ratio the plank ladder and `ContributionScale` use, so one
-  curve ranks every hatchet identically across the whole bench; the ladder that is summed with cycle
-  count scales that ratio to a quarter so the loyalty term stays dominant.
+- Ships the find table reading the HELD TOOL as well as the session, in two halves that each read
+  one input. The tool decides HOW OFTEN: `BasePercent` 0 with the canonical tool ratio at 1.62x
+  (`16.2` / `0.162` / `1.62`) and `CapPercent` 90, so the probability IS the hatchet - iron finds on
+  about 36 percent of cycles, the thorium-to-adamantite band 54 to 56, onyxium 66, mithril 74, and
+  the Sawmiller's Hatchet lands exactly on the cap. A zero base is safe because the quality-2
+  Condition already decides who may find at all. The session then decides HOW DEEP, its cycle count
+  plus 5 per quality step against floors at 5 / 25 / 50: iron opens the second tier at cycle 15 and
+  the third at 40, mithril at 5 and 30, and the trophy starts a session already on the second tier.
+  Quality is the only tool axis in that ladder, which keeps every step a whole rarity tier apart and
+  readable straight off a floor number.
 - Fixes the Stamp ritual losing a player's reagents when their inventory was full. Its failure path
   restored consumed reagents straight to backpack storage with no fallback, so a full inventory
   destroyed them - and a ritual can be failing precisely because its own output filled the last
