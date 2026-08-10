@@ -30,12 +30,12 @@
         "MaxMoveMeters": 1.5
       },
       "Custody": {
-        "$Comment": "Placed-input custody: hold logs and press F to load up to 100 into the bench, then work from the pile instead of your backpack. States maps the claim lifecycle onto the block's own interaction states; Display renders the placed logs as a prop at the block top, Offset.Y -0.1 embedding them slightly into the bench (in-game-tuned).",
+        "$Comment": "Placed-input custody: hold logs and press F to load up to 100 into the bench, then work from the pile instead of your backpack. States maps the claim lifecycle onto the block's own interaction states; Display renders the placed logs as a prop at the block top, Offset.Y -0.1 embedding them slightly into the bench and Scale 0.46 sizing them against it (both in-game-tuned).",
         "MaxQuantity": 100,
         "States": { "Empty": "Default", "Loaded": "Loaded" },
         "Display": {
           "Offset": { "Y": -0.1 },
-          "Scale": 0.4
+          "Scale": 0.46
         }
       },
       "Bonus": {
@@ -78,7 +78,7 @@
         ]
       },
       "Worker": {
-        "$Comment": "How the person looks doing this - all in-game-tuned standalone defaults. Hold seats the worker on the block mount and interrupts on damage; Animation drives the swing cadence (the work clip is the held hatchet's own default Action-slot clip, re-fired every IntervalMs so a viewer arriving mid-session sees it within one interval); Puppet spawns the visible working double (Offset.Z 1.0 and Yaw 0.0 place it at the bench, the real player hidden by scale, the held item mirrored into its hand).",
+        "$Comment": "How the person looks doing this - all in-game-tuned standalone defaults. Hold seats the worker on the block mount and interrupts on damage; Animation drives the swing cadence (the work clip is the held hatchet's own default Action-slot clip, re-fired every IntervalMs so a viewer arriving mid-session sees it within one interval; Impact fires 140ms after each swing with the vanilla wood-hit sound and chips, the same cue a hatchet makes part-way through breaking a log); Puppet spawns the visible working double (Offset.Z 1.0 and Yaw 0.0 place it at the bench, the real player hidden by scale, the held item mirrored into its hand).",
         "Hold": {
           "MovementLock": true,
           "EffectId": "RPG_Station_Hold",
@@ -94,6 +94,7 @@
             "Impact": {
               "DelayMs": 140,
               "Presentation": {
+                "Sounds": ["SFX_Wood_Hit"],
                 "Particles": [ { "SystemId": "Block_Hit_Wood" } ]
               }
             }
@@ -103,7 +104,7 @@
           "Enabled": true,
           "Hide": { "Route": "Scale" },
           "Look": { "Source": "PlayerClone" },
-          "Offset": { "X": 0.0, "Y": -0.4, "Z": 1.0 },
+          "Offset": { "X": 0.0, "Y": -0.4, "Z": 1.15 },
           "Yaw": 0.0,
           "Prop": { "Source": "MirrorHeld", "Slot": "Hotbar" }
         }
