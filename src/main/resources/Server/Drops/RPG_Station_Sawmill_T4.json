@@ -5,10 +5,24 @@
     "RollsMin": 1,
     "RollsMax": 1,
     "Containers": [
-      { "Type": "Single", "Weight": 90,
-        "Item": { "ItemId": "Ingredient_Life_Essence", "QuantityMin": 3, "QuantityMax": 5 } },
-      { "Type": "Single", "Weight": 10,
-        "Item": { "ItemId": "Ingredient_Life_Essence_Concentrated", "QuantityMin": 1, "QuantityMax": 2 } }
+      {
+        "Type": "Single",
+        "Weight": 90,
+        "Item": {
+          "ItemId": "Ingredient_Life_Essence",
+          "QuantityMin": 3,
+          "QuantityMax": 5
+        }
+      },
+      {
+        "Type": "Single",
+        "Weight": 10,
+        "Item": {
+          "ItemId": "Ingredient_Life_Essence",
+          "QuantityMin": 15,
+          "QuantityMax": 25
+        }
+      }
     ]
   }
 }

@@ -242,6 +242,17 @@ src/main/java/com/ziggfreed/rpgstations/
 - PascalCase upper-first codec keys; nested sub-object groups, never flat prefixed keys; every
   leaf `appendInherited` for native `Parent` reuse. Content ships as `Server/RpgStations/*.json`
   (Pattern A - the codec IS the schema).
+- **A shipped asset `$Comment` is a TIP or an EXPLANATION for the server owner / pack author
+  reading the file, never a record of how it came to look this way.** These ship inside the jar.
+  Write what the asset DOES, what each number means in game, how to tune it, what to watch out for.
+  NEVER write authoring history or the decision behind it: no "X was removed/retired/renamed", no
+  "this used to live in Y", no "supersedes Z", no "we chose A over B", no reason-we-split-this-file
+  narration. **If a sentence would make no sense to someone opening the file for the first time with
+  no memory of any prior version, cut it.** Rationale for a rejected alternative belongs in the
+  commit message or `CHANGELOG.md`. Forward-looking guidance the reader can act on is welcome
+  ("override this file by id to re-tune it", "author a fraction for a half-step tier") - phrase it
+  as advice, not as a decision already taken. hyMMO's `CommentHygieneTest` scans this mod's shipped
+  resources and fails ITS build on the catchable phrasings.
 - All display text via localization keys through common `i18n.Msg`, wrapped prefix-free by
   `i18n.RpgMsg` (`rpgstations.<key>` against `rpgstations.lang`); no em-dashes anywhere (code,
   comments, lang, docs). No `EnglishDefaults.java` generator in 1.0.0 - the small `.lang` key

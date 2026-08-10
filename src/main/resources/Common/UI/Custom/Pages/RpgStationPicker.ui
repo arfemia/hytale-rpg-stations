@@ -1,6 +1,6 @@
 // The multi-output PICKER page - the sneak+F selection surface for a station whose placed
-// input matches recipes across multiple native categories at once (it supersedes an earlier
-// native-bench-window route). A vertical RECIPE LIST: one full-width card per available
+// input matches recipes across multiple native categories at once. A vertical RECIPE LIST:
+// one full-width card per available
 // output category, appended from RpgStationPickerPage.build via RpgStationPickerTab.ui.
 // Never auto-opened; opened only on sneak+F when a station's input matches recipes across
 // multiple native categories.
