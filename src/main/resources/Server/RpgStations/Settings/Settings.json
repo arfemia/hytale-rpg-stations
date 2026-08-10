@@ -1,5 +1,5 @@
 {
   "Enabled": true,
-  "$Comment": "SummaryHud.Position is a shared-library HudPosition preset id, authored PascalCase like every other id in this schema (e.g. 'TopCenter'). Matching is case- and underscore-insensitive, so the legacy SCREAMING_SNAKE spelling ('TOP_CENTER') still resolves. The Limits group is deliberately NOT authored here: every leaf under it means unlimited when absent, and the right ceiling depends on a server's own player count and hardware, so shipping numbers would impose a guess on everyone. A busy server adds e.g. 'Limits': { 'MaxSessionsPerWorld': 60, 'MaxPuppetsPerWorld': 40, 'MaxCustodyClaimsPerWorld': 400 }; each knob is independent and any one may be set on its own.",
-  "SummaryHud": { "Enabled": true, "Position": "TopCenter", "OffsetY": 72, "TtlMs": 6000 }
+  "$Comment": "SummaryHud.Position is a shared-library HudPosition preset id, authored PascalCase like every other id in this schema (e.g. 'TopCenter'). Matching is case- and underscore-insensitive, so 'TOP_CENTER' resolves to the same preset. The Limits group is deliberately NOT authored here: every leaf under it means unlimited when absent, and the right ceiling depends on a server's own player count and hardware, so shipping numbers would impose a guess on everyone. A busy server adds e.g. 'Limits': { 'MaxSessionsPerWorld': 60, 'MaxPuppetsPerWorld': 40, 'MaxCustodyClaimsPerWorld': 400 }; each knob is independent and any one may be set on its own.",
+  "SummaryHud": { "Enabled": true, "Position": "TopCenter", "OffsetY": 72, "TtlMs": 10000 }
 }

@@ -5,9 +5,9 @@
 // Never auto-opened; opened only on sneak+F when a station's input matches recipes across
 // multiple native categories.
 //
-// COMPACT PANEL: the panel previously rendered full-screen-tall because its sized/
-// backgrounded content (#RpgStationPickerRoot, Width-only, no Height) WAS this document's
-// directly-appended root - a page's document root force-stretches to fill the viewport
+// COMPACT PANEL: a page's document root force-stretches to fill the viewport, so sized/
+// backgrounded content (#RpgStationPickerRoot, Width-only, no Height) must NOT be this
+// document's directly-appended root or the panel renders full-screen-tall
 // regardless of its own Anchor (the same trap RpgStationSummary.ui's header comment
 // documents for a HUD document's root). The fix mirrors the vanilla small-dialog pattern seen
 // in PrefabEditorExitConfirm.ui / NameRespawnPointPage.ui: wrap the real panel in the native
