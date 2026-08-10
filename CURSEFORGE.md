@@ -55,11 +55,11 @@ One station block can offer several distinct jobs, picked diegetically by what y
 dropdown, no menu. Hold a raw material and the block converts it; hold a finished item and the same
 block can open an entirely different job instead. The shipped Sawmill uses the lighter form of this:
 sneak and press `F` to pick which cut you want from the log you're holding (planks, decorative, or
-ornate) rather than accepting the default.
+ornate) if you do not want the default.
 
 ### Step programs and multi-station walks
 
-A station's work can be authored as a step-by-step program instead of a simple convert loop - a
+A station's work can be authored as a step-by-step program, not only a simple convert loop - a
 sequence of beats (a hold, a swing, a sound) composed with consume/produce/loot/command phases in
 one fixed order. A program can even reach out to a SECOND, separately-placed station nearby: your
 character (or performer) walks over, works at the remote station, and walks back, all from one `F`
@@ -83,12 +83,12 @@ Every station can roll bonus rewards on top of its normal output: extra copies o
 chance-gated drop table, a floor ladder that scales with any stat your server tracks (tool power,
 session length, whatever another installed mod writes) - composed from a small, weighted vocabulary
 shared across every loot site in the mod. Extra copies of the result can be fractional, so a
-mid-ladder tier can be worth "two and often a third" rather than being rounded onto a neighbouring
+mid-ladder tier can be worth "two and often a third" without rounding onto a neighbouring
 rung. Every find can carry its own sound-and-particle celebration, and a celebration never fires over
 an empty hand: a cue authored beside a reward only plays once that reward actually handed something
-over, so a drop table that rolled nothing stays silent instead of announcing a jackpot.
+over, so a drop table that rolled nothing stays silent, never announcing a jackpot it did not pay.
 
-Drop tables compose too, using Hytale's own drop-list vocabulary rather than a bespoke one. The
+Drop tables compose too, using Hytale's own drop-list vocabulary. The
 sawmill's four find tiers each combine a shared offcut list - referenced by id, so retuning what
 milling yields is one edit that moves every tier at once - with their own life-essence roll, and a
 richer tier simply pulls that shared list more times. Each of the mod's loot tables holds a single
@@ -167,7 +167,7 @@ session-summary HUD tuning, layered like any other asset - there is no separate 
 **Getting the Sawmill in-game.** On a bare install players craft the bench themselves at a **tier 2
 Workbench**: one crude hatchet (the tool becomes part of the bench), any one log, and any four
 planks. The tier gate puts it behind the first workbench upgrade, so the sawmill arrives as an earned
-base improvement rather than a day-one freebie. Admins can `/give` the block directly
+base improvement, not a day-one freebie. Admins can `/give` the block directly
 (`RPG_Station_Sawmill`). A content pack that ships its own block under the same id replaces the
 jar's, so a pack that authors no recipe on its copy removes that craftability and owns acquisition
 its own way - a shop, a quest, whatever that pack's economy wants.

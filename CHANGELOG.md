@@ -664,6 +664,25 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
   ladder over the session's own cycle count - the first tier from cycle 10, the second from 25, the
   third from 50, each granting its own jar-shipped drop table. The upper two floors carry their own
   celebration cue, which the smart-cue rule keeps silent on a cycle whose table resolved to nothing.
+- Ships the loyalty find table reading the HELD TOOL as well as the session. Its chance to find
+  anything scales with the hatchet (8 percent base plus quality and gather power, capped at 25, so
+  iron sits near 13 percent and the trophy near 20), its tier ladder sums the tool score alongside
+  the session's cycle count so a better hatchet reaches the deeper tables sooner, and a second roll
+  pays offcuts on the tool alone - one, two or three pulls of the shared byproduct list at the same
+  11/33/50 crossings the plank ladder already turns on. Every tool score in the file holds the same
+  quality-10 / item-level-0.1 / power-1.0 ratio the plank ladder and `ContributionScale` use, so one
+  curve ranks every hatchet identically across the whole bench; the ladder that is summed with cycle
+  count scales that ratio to a quarter so the loyalty term stays dominant.
+- Fixes the Stamp ritual losing a player's reagents when their inventory was full. Its failure path
+  restored consumed reagents straight to backpack storage with no fallback, so a full inventory
+  destroyed them - and a ritual can be failing precisely because its own output filled the last
+  slot. Restores now route through the same hotbar-then-storage-then-drop-at-block grant every other
+  payout in the mod uses.
+- Fixes the station validator warning that this jar's own shipped `RPG_Station_Hold` effect was
+  unknown. Station validation can run before the native asset registry finishes loading, and the
+  `EntityEffect` existence check failed CLOSED against a store that was merely empty rather than
+  missing the id. It now fails open on an empty store, matching the stance its sibling index checks
+  already document.
 - Ships the find tables as COMPOSED drop lists, using the native drop-list vocabulary rather than a
   flat list per tier. `RPG_Station_Sawmill_Byproducts` holds the offcut vocabulary in one file -
   plant fibre, tree bark, tree sap and sticks, as a `Multiple` container so a single pull can shake

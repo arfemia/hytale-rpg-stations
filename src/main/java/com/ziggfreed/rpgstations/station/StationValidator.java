@@ -365,8 +365,19 @@ public final class StationValidator {
         }
     }
 
+    /**
+     * Fails OPEN on an EMPTY store as well as on a lookup error, matching {@code benchIdKnownLive}'s
+     * own "an index that has not been seeded yet is not evidence the id is wrong" stance. Station
+     * validation can run before the native asset registry has finished loading, and an
+     * unpopulated {@code EntityEffect} store would otherwise flag every effect reference in the
+     * mod - including this jar's own shipped {@code RPG_Station_Hold}, which resolves perfectly
+     * well by the time a session actually applies it.
+     */
     private static boolean entityEffectKnownLive(@Nonnull String effectId) {
         try {
+            if (EntityEffect.getAssetMap().getAssetCount() == 0) {
+                return true;
+            }
             return EntityEffect.getAssetMap().getAsset(effectId) != null;
         } catch (Throwable t) {
             return true;

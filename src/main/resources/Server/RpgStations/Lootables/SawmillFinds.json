@@ -1,16 +1,28 @@
 {
-  "$Comment": "The sawmill's session-loyalty find table, referenced from the station's Bonus.Lootables. A Roll grants what ELSE a cycle handed over: how MUCH of the thing you made is the action's own Recipe.Yield plus its OutputItems rolls, and a find can only ever ADD something different, never multiply that. This table grants drop lists rather than output items because a find IS a different thing - life essence shaken loose from the milled logs, not more planks.\n\nONE roll lives here, and that is the pattern to copy. A Lootable folds by id and a later layer replaces the whole FILE, so a table holding a single roll is one a pack can re-tune by shipping its own copy, inheriting nothing else along with it. The Sawmill spreads its bonuses across three such tables: this loyalty ladder any worker can reach, SawmillTrophy for the Sawmiller's Hatchet chase, and SawmillMasterworkFinds for the fourth tier that chase pays out. Each is replaceable on its own.",
+  "$Comment": "The sawmill's session-loyalty find table, referenced from the station's Bonus.Lootables. A Roll grants what ELSE a cycle handed over: how MUCH of the thing you made is the action's own Recipe.Yield plus its OutputItems rolls, and a find can only ever ADD something different, never multiply that. Finds arrive as drop-list items, a different thing from the planks those rolls add.\n\nTwo rolls live here, and both read the HELD TOOL as well as the session. That is the through-line worth knowing before retuning either: a better hatchet finds more often, reaches the deeper tiers sooner, and shakes loose more offcuts, so an upgrade is felt at this table the same cycle it is felt in planks.\n\nTHE TOOL SCORE. Wherever a tool is scored below, the weights hold the SAME RATIO the Mill action's own plank ladder and ContributionScale use - quality 10, item level 0.1, gather power 1.0 - so one tool curve ranks every hatchet identically everywhere on the bench, and retuning what 'a better tool' means is one decision rather than three. Quality dominates, item level breaks ties inside a quality tier, and power rewards the genuinely better cutter; no two of those can rank the vanilla ladder alone. On that scale the vanilla hatchets read: Wood 10.6, Crude 10.55, Copper 11.3, Iron 22.3, Thorium 33.5, Cobalt 34.0, Adamantite 34.5, Onyxium 40.9, Mithril 45.5, and the drop-only Sawmiller's Hatchet 55.55.\n\nThe first roll's Ladder scales that ratio to a QUARTER (2.5 / 0.025 / 0.25) for one reason: it is summed with rpgstations:cycle_count, which runs 10 to about 124 over a session, and the unscaled score would put an iron hatchet past the second floor before the third cycle, erasing the loyalty the ladder exists to reward. The ranking is unchanged, only the magnitude is made commensurable. The second roll scores the tool alone, so it uses the full-scale weights and the same 11/33/50 crossings the plank ladder already turns on.\n\nSeparately, note that an ItemDropList cannot read factors at all - a drop table is a fixed weighted bag. Every 'better tool gives better loot' effect therefore has to be expressed at the Roll level, as this file does: which table is granted, how often, and how many times. Reach for a Ladder floor when the answer is a different table, and for Chance factors when it is a different frequency.\n\nEach of this jar's Sawmill lootables holds its own concern so a pack can replace exactly one: this file is the loyalty ladder any worker can reach, SawmillTrophy is the Sawmiller's Hatchet chase, and SawmillMasterworkFinds is the fourth tier that chase pays out.",
   "Rolls": [
     {
-      "$Comment": "Read left to right: Trigger Cycle evaluates once per completed milling cycle. Conditions gates the whole Roll on rpgstations:cycle_count 10 or higher, so the first nine cycles of a session never even roll - finds reward staying at the bench, not tapping it - AND on tool quality 2 or better, so a starter Wood or Crude hatchet mills its planks but never shakes a find loose; Iron-grade steel is where the finds begin. Chance then passes 15 percent of those cycles. Ladder sums its Factors (a FactorRef[] summed before the floor lookup; a single-factor ladder authors a one-element array) and takes the HIGHEST floor the sum reaches, never several: cycles 10 to 24 grant the T1 table, cycles 25 to 49 the T2 table, and cycle 50 onward the T3 table, the upper two each carrying the same coin sound and spark burst on their own floor Presentation (the loyalty ladder's cue is a steady one; the grander legendary fanfare is reserved for the trophy). The referenced tables are this jar's own Server/Drops assets, and each pays two things: OFFCUTS, pulled from the shared RPG_Station_Sawmill_Byproducts list (fibre, bark, sap, sticks - one pull at T1 and T2, two at T3), plus life essence from its own weighted Choice. T1 pays offcuts alone, so essence entering the table at all is what makes T2 a step up rather than more of the same; T2 adds a 20 percent chance of 1 to 3 essence, and T3 doubles the offcuts and makes essence near-certain (95 percent for 2 to 4, with a 2 percent jackpot of one concentrated). The deep tier nearly always pays on a winning roll because its scarcity is carried by this Roll's own 15 percent chance rather than by the table being stingy. A ten-minute session runs about 124 cycles, so at 15 percent a worker sees roughly 18 finds in a full session, and past cycle 50 the top tier covers well over half of them. Grants.DropLists is a plural array - a floor could roll a guaranteed common table plus a rare one as two independent entries, each rolled once through the native ItemModule.getRandomItemDrops. Floors resolve through the one shared ladder core every ladder in this schema uses: highest reached Min wins, a Min of 0 is reachable, and two floors sharing a Min is a validator warning because only the last authored one could ever grant. A floor's own celebration only plays when its referenced table actually paid, so the T2 coin chime and the T3 legendary fanfare stay silent on a cycle whose table resolved to its own empty entry rather than firing over an empty hand.",
+      "$Comment": "The loyalty-and-tool ladder. Conditions gate the whole roll on rpgstations:cycle_count 10 or higher, so the first nine cycles of a session never even roll - finds reward staying at the bench, not tapping it - AND on tool quality 2 or better, so a starter Wood, Crude or Copper hatchet mills its planks but never shakes a find loose; iron-grade steel is where finds begin.\n\nChance decides HOW OFTEN. 8 percent base plus 2 points per quality step and 4 per point of gather power, capped at 25. Across the eligible hatchets that reads as roughly 13 percent on iron, 16 on the thorium-to-adamantite band, 18 on mithril and 20 on the trophy - so every upgrade is felt on the very next cycle rather than only at a tier boundary. The cap is a ceiling no vanilla tool approaches; it exists so an extreme modded tool cannot make finds a certainty.\n\nLadder decides HOW DEEP, summing the session's cycle count with the quarter-scale tool score (see this file's own comment for why it is scaled). Floors are highest-wins and never cumulative: exactly one fires. Cycle 10 opens the T1 table, 25 the T2 table, and 50 the T3 table, each with a better hatchet arriving at those floors sooner - an iron worker crosses into T2 around cycle 19 and a mithril one around cycle 14, while the trophy is already deeper still. A floor's own celebration only plays when its table actually paid, so the cue stays silent on a cycle whose table resolved to nothing.\n\nThe tables themselves pay offcuts from the shared byproduct list plus their own life essence: T1 offcuts alone, T2 adding essence, T3 doubling the offcuts and making essence near-certain with a small concentrated jackpot. A ten-minute session runs about 124 cycles, so past cycle 50 the top tier covers well over half of them.",
       "Trigger": "Cycle",
       "Conditions": [
         { "Factor": "rpgstations:cycle_count", "Min": 10 },
         { "Factor": "hytale:tool_quality", "Min": 2 }
       ],
-      "Chance": { "BasePercent": 15 },
+      "Chance": {
+        "BasePercent": 8,
+        "Factors": [
+          { "Factor": "hytale:tool_quality", "Weight": 2.0 },
+          { "Factor": "hytale:tool_power", "Weight": 4.0 }
+        ],
+        "CapPercent": 25
+      },
       "Ladder": {
-        "Factors": [{ "Factor": "rpgstations:cycle_count" }],
+        "Factors": [
+          { "Factor": "rpgstations:cycle_count", "Weight": 1.0 },
+          { "Factor": "hytale:tool_quality", "Weight": 2.5 },
+          { "Factor": "hytale:tool_item_level", "Weight": 0.025 },
+          { "Factor": "hytale:tool_power", "Weight": 0.25 }
+        ],
         "Floors": [
           { "Min": 10, "Grants": { "DropLists": ["RPG_Station_Sawmill_T1"] } },
           {
@@ -27,6 +39,43 @@
             "Presentation": {
               "Sounds": ["SFX_Coins_Land"],
               "Particles": [{ "SystemId": "Block_Gem_Sparks" }]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "$Comment": "The clean-cut roll: a sharper hatchet wastes less of the log, so the tool alone decides how much usable material comes off it. No cycle gate and no quality gate - this one pays from the first cycle of a session and on any hatchet that reaches the first floor, which is what gives an early worker something the loyalty ladder above makes them wait for.\n\nThe tool is scored ALONE here, so the weights are the plank ladder's own full-scale ratio (quality 10, item level 0.1, power 1.0) and the floors sit on the very crossings that ladder already turns on: 11, 33 and 50. A hatchet that just earned its second plank per cycle also just started shaking loose an extra offcut, which is the point of reusing the crossings rather than inventing new ones. Wood and Crude reach nothing; copper upward pulls the shared byproduct list once; the thorium-to-adamantite band twice; and only the drop-only Sawmiller's Hatchet reaches 50 for three pulls.\n\nChance 20 keeps it a garnish rather than a flood: about a quarter of cycles pay, so a full session yields roughly 25 of these on top of the finds above. That number is the one to move first if offcuts feel too plentiful or too thin - lower it to make the bench stingier without touching what any tier pays.\n\nGrants.DropLists is a plural array and each entry rolls independently, so listing the same list twice pulls it twice; the mix stays identical and only the volume changes.",
+      "Trigger": "Cycle",
+      "Chance": { "BasePercent": 20 },
+      "Ladder": {
+        "Factors": [
+          { "Factor": "hytale:tool_quality", "Weight": 10.0 },
+          { "Factor": "hytale:tool_item_level", "Weight": 0.1 },
+          { "Factor": "hytale:tool_power", "Weight": 1.0 }
+        ],
+        "Floors": [
+          {
+            "Min": 11.0,
+            "Grants": { "DropLists": ["RPG_Station_Sawmill_Byproducts"] }
+          },
+          {
+            "Min": 33.0,
+            "Grants": {
+              "DropLists": [
+                "RPG_Station_Sawmill_Byproducts",
+                "RPG_Station_Sawmill_Byproducts"
+              ]
+            }
+          },
+          {
+            "Min": 50.0,
+            "Grants": {
+              "DropLists": [
+                "RPG_Station_Sawmill_Byproducts",
+                "RPG_Station_Sawmill_Byproducts",
+                "RPG_Station_Sawmill_Byproducts"
+              ]
             }
           }
         ]
