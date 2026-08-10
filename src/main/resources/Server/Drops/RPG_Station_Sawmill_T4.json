@@ -18,11 +18,11 @@
         "Containers": [
           {
             "Type": "Single",
-            "Weight": 90,
+            "Weight": 88,
             "Item": {
               "ItemId": "Ingredient_Life_Essence",
               "QuantityMin": 3,
-              "QuantityMax": 5
+              "QuantityMax": 9
             }
           },
           {
@@ -32,6 +32,15 @@
               "ItemId": "Ingredient_Life_Essence",
               "QuantityMin": 15,
               "QuantityMax": 25
+            }
+          },
+          {
+            "Type": "Single",
+            "Weight": 2,
+            "Item": {
+              "ItemId": "Ingredient_Life_Essence_Concentrated",
+              "QuantityMin": 1,
+              "QuantityMax": 1
             }
           }
         ]

@@ -736,7 +736,7 @@ final class StationStepHandlers {
                     }
                 }
             } catch (Throwable t) {
-                restoreReagents(ctx.player, consumedForRestore);
+                restoreReagents(ctx, consumedForRestore);
                 Log.warn("STAMP step '" + step.getId() + "' reagent consumption failed, restored: " + t.getMessage(), t);
                 return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
                         "Stamp step '" + step.getId() + "' reagent consumption failed: " + t.getMessage());
@@ -746,7 +746,7 @@ final class StationStepHandlers {
             try {
                 mutation = applyStampMutation(weaponStack, stamp.getDurability(), plan, stamper);
             } catch (Throwable t) {
-                restoreReagents(ctx.player, consumedForRestore);
+                restoreReagents(ctx, consumedForRestore);
                 Log.warn("STAMP step '" + step.getId() + "' mutation failed, restored reagents: " + t.getMessage(), t);
                 return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
                         "Stamp step '" + step.getId() + "' mutation failed: " + t.getMessage());
@@ -799,12 +799,21 @@ final class StationStepHandlers {
         record Mutation(@Nonnull ItemStack stack, @Nonnull List<EnhanceLine> lines, double durabilityAdded) {
         }
 
-        /** Best-effort restore: each stack failing independently is logged, never re-thrown. */
-        private static void restoreReagents(@Nonnull Player player, @Nonnull List<ItemStack> toRestore) {
+        /**
+         * Best-effort restore: each stack failing independently is logged, never re-thrown.
+         *
+         * <p>Routes through {@link ItemGrantUtil} rather than adding to storage directly, so a
+         * reagent lands in the hotbar, else backpack storage, else on the ground at the station
+         * block. A ritual whose reagents were already consumed can be failing precisely BECAUSE
+         * the run produced something that filled the last slot, so a storage-only restore is the
+         * one path where a full inventory silently destroys the player's materials.
+         */
+        private static void restoreReagents(@Nonnull StationStepContext ctx, @Nonnull List<ItemStack> toRestore) {
             for (ItemStack restore : toRestore) {
                 if (restore != null) {
                     try {
-                        InventoryAccess.storageOf(player).addItemStack(restore);
+                        ItemGrantUtil.grant(ctx.player, restore, ctx.store,
+                                ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
                     } catch (Throwable restoreFailure) {
                         Log.warn("STAMP restore failed for '" + restore.getItemId() + "': " + restoreFailure.getMessage());
                     }

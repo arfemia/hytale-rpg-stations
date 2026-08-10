@@ -117,10 +117,33 @@ defaults to `0` and is therefore always reached, making it the ladder's baseline
 | Field | What it grants |
 |---|---|
 | `OutputItems` | ADDITIVE items of THIS cycle's own primary output, on top of the deterministic `Yield` quantity - additive, never a multiplier, so the two numbers stay directly comparable. **Fractional**: the whole part is granted every time and the fraction left over is the chance of one more, so `1.5` pays one item always plus a second half the time and averages exactly 1.5 per cycle (a half-step tool tier is therefore authorable on the ladder floor that earns it). Everything the cycle grants is summed before that single resolution, so two rolls paying `0.5` each average one whole item. Only meaningful on a `Cycle` trigger (the validator warns otherwise, and the engine drops it); a stack that cannot fit drops at the station block rather than vanishing. |
-| `DropLists` | Native `ItemDropList` asset ids, each rolled independently in authored order through the engine's own drop-list roller. See [Native Composition](native-composition.md). |
+| `DropLists` | Native `ItemDropList` asset ids, each rolled independently in authored order through the engine's own drop-list roller. See [Native Composition](native-composition.md), and the composition note below. |
 | `Commands` | Console commands, with `{player}`/`{uuid}`/`{station}`/`{action}`/`{cycles}` placeholders substituted. |
 | `Effects` | Native EntityEffects applied to the player, id-ref-only. See [Native Composition](native-composition.md). |
 | `Contributions` | One-shot amounts posted verbatim when this roll grants - `Cycle` trigger only, and deliberately UNSCALED (never inherits the idle fraction or the action's `ContributionScale`). See [Extension Channels](extension-channels.md). |
+
+## Composing drop tables
+
+A referenced `ItemDropList` is a native asset, so it composes with Hytale's own container vocabulary
+rather than anything this mod invents. Two container types do the work:
+
+- **`Droplist`** nests another list by id (`{"Type": "Droplist", "DroplistId": "..."}`), so a shared
+  vocabulary can live in one file and be pulled from many tables. Referencing it several times in the
+  same container pulls it several times, which is how a richer tier yields more without restating any
+  item.
+- **`Multiple`** resolves EVERY child independently rather than picking one, and a child's `Weight`
+  there is its own PERCENT CHANCE. That is the opposite of `Choice`, where `Weight` is a relative
+  pick weight across `RollsMin`..`RollsMax` picks. The shipped sawmill tiers are each a `Multiple`
+  combining N `Droplist` pulls of a shared offcut list with their own `Choice` of the tier's headline
+  reward.
+
+> **A container tree made only of `Droplist` references fails asset validation** with
+> `FAIL: Container must have something to drop!`, and a failed `ItemDropList` takes the whole mod's
+> load down with it. The validator does not resolve a cross-asset reference when deciding whether a
+> container can produce anything, so **at least one concrete `Single` must sit somewhere in the
+> tree**. Every vanilla table that uses a `Droplist` does exactly this - pair the reference with a
+> real item entry, which is usually what you wanted anyway (a guaranteed base payout alongside the
+> shared roll).
 
 ## FactorRef: the one weighted-sum leaf
 

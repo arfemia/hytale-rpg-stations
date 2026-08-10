@@ -1,8 +1,12 @@
 {
-  "$Comment": "The first find tier, reached from cycle 10 of a session. It pays OFFCUTS only - one pull from the shared RPG_Station_Sawmill_Byproducts list and nothing else - so the earliest finds are the everyday material a working bench produces rather than anything precious. Life essence starts at the second tier, which is what makes reaching it feel like a step up rather than more of the same. The Multiple container resolves every child, so adding a second reference to the byproduct list here would simply double the offcuts without touching their mix.",
+  "$Comment": "The first find tier, reached from cycle 10 of a session. It pays OFFCUTS only - no life essence, which starts at the second tier so that reaching it is a change in KIND rather than more of the same.\n\nTwo things pay here: a guaranteed handful of plant fibre, the commonest thing a saw leaves behind, plus one pull from the shared RPG_Station_Sawmill_Byproducts list for whatever else the log gives up.\n\nENGINE CONSTRAINT, worth knowing before authoring your own tier: a container tree made ONLY of Droplist references fails asset validation with 'Container must have something to drop!', and a failed drop list takes the whole mod's load down with it. A Droplist container contributes drops to that check only if the list it names is already resolvable, and during validation it frequently is not, so it counts as empty. At least one concrete Single must therefore sit somewhere in the tree - which is what every vanilla table using a Droplist does. The fibre entry below is that anchor as well as a real reward, which is why this tier authors one item directly instead of leaning on the shared list alone. The reference itself resolves normally once everything is loaded, so the offcut pull works at runtime.",
   "Container": {
     "Type": "Multiple",
     "Containers": [
+      {
+        "Type": "Single",
+        "Item": { "ItemId": "Ingredient_Fibre", "QuantityMin": 1, "QuantityMax": 2 }
+      },
       {
         "Type": "Droplist",
         "DroplistId": "RPG_Station_Sawmill_Byproducts"
