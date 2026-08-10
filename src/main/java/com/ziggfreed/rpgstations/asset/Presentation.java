@@ -19,14 +19,25 @@ import com.ziggfreed.common.codec.Rotation;
  * <p>Every leaf is {@code appendInherited} so a station whose {@code Parent} sibling
  * partially overrides a nested {@code Presentation} object still inherits the leaves it did
  * not mention.
+ *
+ * <p>{@code DelayMs} is the one leaf that is not itself a cue: it offsets the WHOLE group in time,
+ * so every cue in it stays together and lands late as one moment. Because it lives here rather
+ * than on any single consumer, every site that authors a {@code Presentation} - an action's
+ * {@code Moments.Cycle}/{@code Moments.Completion}, a step's own {@code Presentation}, a
+ * {@code Roll}'s or a {@code Ladder.Floor}'s, a {@code FlairAsset} moment - can offset its cues
+ * with no extra schema.
  */
 public final class Presentation {
+
+    /** The playback offset applied when {@link #delayMs} is not authored: none, play immediately. */
+    public static final long NO_DELAY_MS = 0L;
 
     @Nullable protected String[] sounds;
     @Nullable protected ModelParticle[] particles;
     @Nullable protected Shake shake;
     @Nullable protected Interaction interaction;
     @Nullable protected EffectRef effect;
+    @Nullable protected Long delayMs;
 
     public static final BuilderCodec<Presentation> CODEC = BuilderCodec.builder(Presentation.class, Presentation::new)
             .appendInherited(new KeyedCodec<>("Sounds", new ArrayCodec<>(Codec.STRING, String[]::new), false),
@@ -45,6 +56,10 @@ public final class Presentation {
             .appendInherited(new KeyedCodec<>("Effect", EffectRef.CODEC, false),
                     (o, v) -> o.effect = v, o -> o.effect, (o, p) -> o.effect = p.effect)
             .documentation("A native EntityEffect applied at this moment (id-ref-only, with an optional DurationMs); null = none.").add()
+            .appendInherited(new KeyedCodec<>("DelayMs", Codec.LONG, false),
+                    (o, v) -> o.delayMs = v, o -> o.delayMs, (o, p) -> o.delayMs = p.delayMs)
+            .documentation("Milliseconds to hold every cue in this group before it plays; null/non-positive (the default) plays it at once. Use it to land a sound on the beat it belongs to rather than the instant the engine reached it. Playback resolution is one server tick (about 33ms at the default 30 ticks per second), so the cue fires on the first tick at or after the delay, never earlier.")
+            .addValidator(CodecWarnValidators.nonNegative("Presentation.DelayMs should not be negative.")).add()
             .build();
 
     public Presentation() {
@@ -74,12 +89,21 @@ public final class Presentation {
     @Nonnull
     public static Presentation of(@Nullable String[] sounds, @Nullable ModelParticle[] particles,
             @Nullable Shake shake, @Nullable Interaction interaction, @Nullable EffectRef effect) {
+        return of(sounds, particles, shake, interaction, effect, null);
+    }
+
+    /** Fully-populated Java-side factory carrying the playback {@code DelayMs} leaf too. */
+    @Nonnull
+    public static Presentation of(@Nullable String[] sounds, @Nullable ModelParticle[] particles,
+            @Nullable Shake shake, @Nullable Interaction interaction, @Nullable EffectRef effect,
+            @Nullable Long delayMs) {
         Presentation p = new Presentation();
         p.sounds = sounds;
         p.particles = particles;
         p.shake = shake;
         p.interaction = interaction;
         p.effect = effect;
+        p.delayMs = delayMs;
         return p;
     }
 
@@ -111,6 +135,25 @@ public final class Presentation {
     @Nullable
     public EffectRef getEffect() {
         return effect;
+    }
+
+    /**
+     * How long to hold this whole moment before its cues play, in milliseconds; null = play at
+     * once. It offsets the moment as a unit - sounds, particles, shake, interaction and effect all
+     * move together, since they are one cue authored to land at one instant.
+     */
+    @Nullable
+    public Long getDelayMs() {
+        return delayMs;
+    }
+
+    /**
+     * {@link #delayMs}, reader-defaulted to {@link #NO_DELAY_MS}: null, zero, and any negative
+     * value all mean "play immediately", so a nonsense value degrades to the undelayed cue rather
+     * than to a cue that never fires.
+     */
+    public long effectiveDelayMs() {
+        return delayMs != null && delayMs > 0 ? delayMs : NO_DELAY_MS;
     }
 
     /**

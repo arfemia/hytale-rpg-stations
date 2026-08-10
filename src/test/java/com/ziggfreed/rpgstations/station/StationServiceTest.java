@@ -29,31 +29,69 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
  */
 public class StationServiceTest {
 
-    // ==================== Delayed swing-impact due-time ====================
+    // ==================== Delayed-cue due-time (the ONE scheduler: swing impact + Presentation.DelayMs) ====================
 
     @Test
-    void scheduleImpactAt_addsTheDelayToNow() {
-        assertEquals(1140L, StationService.scheduleImpactAt(1000L, 140L));
+    void scheduleCueAt_addsTheDelayToNow() {
+        assertEquals(1140L, StationService.scheduleCueAt(1000L, 140L));
+        assertEquals(1100L, StationService.scheduleCueAt(1000L, 100L));
     }
 
     @Test
-    void impactDue_falseBeforeTheDueTime() {
-        assertFalse(StationService.impactDue(999L, 1000L));
+    void scheduleCueAt_andCueDue_agree_soAScheduledCueIsDueExactlyAtItsDelay() {
+        long due = StationService.scheduleCueAt(1000L, 100L);
+        assertFalse(StationService.cueDue(1099L, due));
+        assertTrue(StationService.cueDue(1100L, due));
     }
 
     @Test
-    void impactDue_trueAtExactlyTheDueTime() {
-        assertTrue(StationService.impactDue(1000L, 1000L));
+    void pendingMomentsAtCapacity_onlyAtOrPastTheCeiling() {
+        assertFalse(StationService.pendingMomentsAtCapacity(0));
+        assertFalse(StationService.pendingMomentsAtCapacity(StationService.MAX_PENDING_MOMENTS_PER_WORLD - 1));
+        assertTrue(StationService.pendingMomentsAtCapacity(StationService.MAX_PENDING_MOMENTS_PER_WORLD));
+        assertTrue(StationService.pendingMomentsAtCapacity(StationService.MAX_PENDING_MOMENTS_PER_WORLD + 1));
     }
 
     @Test
-    void impactDue_trueAfterTheDueTime() {
-        assertTrue(StationService.impactDue(1500L, 1000L));
+    void cueDue_falseBeforeTheDueTime() {
+        assertFalse(StationService.cueDue(999L, 1000L));
     }
 
     @Test
-    void impactDue_falseWhenNothingIsPending() {
-        assertFalse(StationService.impactDue(999_999L, 0L));
+    void cueDue_trueAtExactlyTheDueTime() {
+        assertTrue(StationService.cueDue(1000L, 1000L));
+    }
+
+    @Test
+    void cueDue_trueAfterTheDueTime() {
+        assertTrue(StationService.cueDue(1500L, 1000L));
+    }
+
+    @Test
+    void cueDue_falseWhenNothingIsPending() {
+        assertFalse(StationService.cueDue(999_999L, 0L));
+    }
+
+    // ==================== Which stops sweep this session's parked cues ====================
+
+    @Test
+    void aCompletionKeepsItsParkedCues_soAFinishedRunStillPlaysWhatItEarned() {
+        // A non-looping ritual emits its final cycle's cues and then stops itself in the same call;
+        // sweeping by session alone would silence exactly the moment worth celebrating.
+        assertFalse(StationService.dropsPendingCuesAtStop(StationService.StopReason.RITUAL_COMPLETE));
+        assertFalse(StationService.dropsPendingCuesAtStop(StationService.StopReason.INPUTS_EXHAUSTED));
+    }
+
+    @Test
+    void everyOtherStopSweeps_soAnInterruptedSessionFallsSilent() {
+        for (StationService.StopReason reason : StationService.StopReason.values()) {
+            if (reason == StationService.StopReason.RITUAL_COMPLETE
+                    || reason == StationService.StopReason.INPUTS_EXHAUSTED) {
+                continue;
+            }
+            assertTrue(StationService.dropsPendingCuesAtStop(reason),
+                    reason + " is an interrupt, so its leftover cues should not arrive after the work stopped");
+        }
     }
 
     // ==================== Item-ledger tally ====================

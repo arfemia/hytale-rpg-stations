@@ -358,6 +358,22 @@ schema is pre-release, so the renames below are hard breaks with no aliases.
   `InteractionEffects.Particles`, so a moment can layer bursts. Unauthored knobs land on plain
   playback (scale 1, a 4-second client-playback cap, no rotation or offset); the
   duration cap is authorable per burst but stays a leak guard against unbounded-spawner systems.
+- Adds `Presentation.DelayMs`, a per-moment playback offset on the shared presentation type, so
+  every site that authors a `Presentation` can land its cues on the beat they belong to rather than
+  the instant the engine reached them: an action's `Moments.Cycle`/`Moments.Completion`, a step's
+  own `Presentation`, a `Roll`'s or a `Ladder.Floor`'s, and a `FlairAsset` moment. It offsets the
+  whole group as one cue, is applied after the flair fold (so a flair can re-time a moment as well
+  as re-skin it), and resolves on the same due-time core the swing-impact cue already scheduled on.
+  Null, zero, or a negative value plays at once. A delayed cue survives the end of the run that
+  earned it (a completed ritual's final cues still play), while an interrupted session falls silent.
+  The jar's Sawmill authors `DelayMs: 100` on its cycle moment.
+- Adds three warn-only validator checks. `CYCLE_DELAY_OVERLAPS_NEXT_CYCLE` and
+  `STEP_DELAY_OVERLAPS_ITS_DURATION` catch a `Presentation.DelayMs` held longer than the window it
+  plays inside (a repeating action's own `Work.CycleMs`, or a step's authored `Duration.Ms`), the
+  timing siblings of the existing swing-impact check. `LOOT_DROPLIST_NEVER_RESOLVES` rolls every
+  referenced `ItemDropList` a few times during the full validate pass and reports a table that pays
+  out nothing every time - the shape a container tree of pure `Droplist` references takes at runtime,
+  which an existence check alone can never see.
 - Adds ref-or-inline authoring on the three leaves that reference one of this mod's own asset
   types: `LootRef.Lootables[]`, `StationStep.Stamp.Stats.Pool`, and `ActionDef.Ref` each accept an
   inline anonymous body (optionally with its own `Parent`) in place of an id, through the engine's

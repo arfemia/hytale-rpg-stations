@@ -135,6 +135,64 @@ public class StationFlairsTest {
         assertEquals("Particles_Alpha", result.getParticles()[0].getSystemId());
     }
 
+    // ==================== DelayMs overlays as an ordinary leaf ====================
+
+    @Test
+    void flairInheritsTheBaseMomentsDelayWhenItAuthorsNone() {
+        grant(Set.of("golden_saw"));
+        Presentation base = Presentation.of(new String[]{"SFX_Base"}, null, null, null, null, 100L);
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
+                moments(StationFlairs.MOMENT_CYCLE, Presentation.ofSound("SFX_Golden")));
+
+        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
+
+        assertNotNull(result);
+        assertEquals("SFX_Golden", result.getSounds()[0]);
+        assertEquals(100L, result.effectiveDelayMs(), "re-skinning a moment must not re-time it");
+    }
+
+    @Test
+    void flairsOwnDelayWinsOverTheBaseMoments() {
+        grant(Set.of("golden_saw"));
+        Presentation base = Presentation.of(new String[]{"SFX_Base"}, null, null, null, null, 100L);
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw", moments(StationFlairs.MOMENT_CYCLE,
+                Presentation.of(new String[]{"SFX_Golden"}, null, null, null, null, 400L)));
+
+        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
+
+        assertEquals(400L, result.effectiveDelayMs());
+    }
+
+    @Test
+    void flairCancelsTheBaseDelayByAuthoringZero_theOnlyWayToUndoOne() {
+        // Omitting the leaf INHERITS the base timing (the test above), so a flair that wants its cue
+        // at once has to say so with an explicit 0 - which the reader then treats as "play now".
+        grant(Set.of("golden_saw"));
+        Presentation base = Presentation.of(new String[]{"SFX_Base"}, null, null, null, null, 100L);
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw", moments(StationFlairs.MOMENT_CYCLE,
+                Presentation.of(new String[]{"SFX_Golden"}, null, null, null, null, 0L)));
+
+        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
+
+        assertNotNull(result);
+        assertEquals(0L, result.getDelayMs(), "the authored zero wins the leaf outright");
+        assertEquals(Presentation.NO_DELAY_MS, result.effectiveDelayMs());
+    }
+
+    @Test
+    void twoFlairs_laterIdWinsTheDelayLeafToo() {
+        grant(Set.of("zulu_saw", "alpha_saw"));
+        Map<String, Map<String, Presentation>> flairs = Map.of(
+                "alpha_saw", moments(StationFlairs.MOMENT_CYCLE,
+                        Presentation.of(new String[]{"SFX_Alpha"}, null, null, null, null, 50L)),
+                "zulu_saw", moments(StationFlairs.MOMENT_CYCLE,
+                        Presentation.of(new String[]{"SFX_Zulu"}, null, null, null, null, 900L)));
+
+        Presentation result = StationFlairs.effective(null, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
+
+        assertEquals(900L, result.effectiveDelayMs());
+    }
+
     // ==================== Unlocked id absent from the effective map ====================
 
     @Test

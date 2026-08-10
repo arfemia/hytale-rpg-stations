@@ -497,6 +497,59 @@ presentation-playback funnel every station moment goes through (`StationFlairs.M
 `StationFlairs.stepMomentId(actionId, stepId)`) - it is ALSO the flair-resolution choke point
 (`StationFlairs.effective` against `FlairCatalog.effectiveFlairsFor`'s merged map).
 
+**`Presentation.DelayMs` is applied INSIDE `emitMoment`, after the flair fold** (`../asset/CLAUDE.md`'s
+Presentation bullet), so the winning presentation is the one whose timing is honored and a flair can
+re-time a moment as well as re-skin it. An undelayed cue plays inline through `playMoment` (the
+extracted body, byte-identical to the pre-delay path); a delayed one is parked in
+`pendingMomentsByWorld` (a `WorldKeyedQueues<PendingMoment>`) carrying the ALREADY-RESOLVED
+presentation, so a mid-wait catalog re-fold can never change what was scheduled. Four rules bind:
+- **ONE scheduler.** `scheduleCueAt(now, delay)`/`cueDue(now, dueAt)` are the generalized pure pair
+  (renamed from `scheduleImpactAt`/`impactDue`) that the single pending swing-impact slot AND every
+  queued moment share. Do not add a second due-time rule.
+- **The queue is per WORLD, never per session, and `drainPendingMoments` runs at the TOP of
+  `tickFrameOnce`, ahead of the session loop's empty-queue early return.** `MOMENT_COMPLETION` is
+  emitted from inside `stop()`, so its cue routinely outlives its own session and, when that was the
+  world's last one, the whole session queue - a session-scoped queue would silently swallow every
+  delayed completion cue.
+- **Nothing is dropped for being late, and the delay orders cues ACROSS ticks (not within one).**
+  The drain walks the whole queue each tick and plays every entry at or past its own due time, so two
+  cues with different delays land in the order their delays put them at a resolution of one server
+  tick (about 33ms at `TickingThread.TPS` 30). Two cues coming due inside the SAME tick both play in
+  that tick, in emission order - the queue iterates in insertion order and does not sort. A cue whose
+  player has an invalid ref or has left the world is discarded (it is a positional cue for a body
+  that is no longer there). Past `MAX_PENDING_MOMENTS_PER_WORLD` a cue plays IMMEDIATELY instead of
+  queueing: the offset is the first thing worth losing, dropping the cue outright would silence the
+  station. The ceiling is read off a per-world counter (`pendingMomentCounts`) rather than the
+  queue's own `size()`, which is a full traversal on a `ConcurrentLinkedQueue`; that counter map is
+  also the KEY registry for the cross-world sweep, since `WorldKeyedQueues` exposes values only.
+- **An INTERRUPTED stop drops this session's parked cues; a COMPLETION keeps them.**
+  `dropsPendingCuesAtStop(reason)` is the pure gate, and `stop()` runs the sweep
+  (`dropPendingMoments`) only when it says so, right beside the existing `pendingImpactAtMs = 0L`
+  reset. Walking off, taking a hit, dying, or breaking a tool should not keep playing the sounds of
+  work that is no longer happening - but `RITUAL_COMPLETE` and `INPUTS_EXHAUSTED` are real
+  completions, and a non-looping ritual emits its final cycle's cues microseconds BEFORE stopping
+  itself, so a sweep keyed on session identity alone silences exactly the moment the ritual exists to
+  celebrate. **If you touch either side of this, keep `StationServiceTest`'s exhaustive
+  `dropsPendingCuesAtStop` coverage green - it is the only guard on the interaction.** The completion
+  cue itself is outside the question either way: `stop()` emits it further down, after the sweep,
+  into the world-scoped queue.
+
+**Which delay to reach for.** `Worker.Animation.Swing.Impact.DelayMs` SPLITS the swing into a second
+moment: the held cue gets its own `MOMENT_IMPACT` id, which a flair can re-skin or re-time on its
+own, independently of `MOMENT_SWING`. `Presentation.DelayMs` offsets a cue WITHIN the moment id it
+already has, leaving the moment vocabulary alone. So: author `Impact` when the late cue is a
+separate beat a flair should be able to target (the strike landing after the swing); author
+`Presentation.DelayMs` when the whole moment simply reads early and wants nudging onto its beat.
+
+Two more consequences worth knowing:
+- A flair overlays `DelayMs` like any other leaf, so a flair that OMITS it inherits the base moment's
+  timing. The only way for a flair to cancel a base delay is to author `DelayMs: 0` explicitly, which
+  the reader then treats as "play at once".
+- A `Presentation.Effect` on a cue that outlives its session is tracked on a session whose teardown
+  already ran, so it lives out its own `EffectRef.DurationMs` / the effect asset's TTL. That is the
+  lifetime the UNDELAYED completion cue has always had too - `stop()` strips tracked effects before
+  it plays that moment.
+
 **`MOMENT_RARE_FIND` plays only EARNED cues (the smart-cue rule - see `../loot/CLAUDE.md`).**
 `applyGrantResult` walks `GrantResult.getFloorPresentations()` and emits each entry on
 `MOMENT_RARE_FIND` at the block, and that list is deliberately pre-filtered by `loot.LootEngine`:
@@ -531,8 +584,10 @@ swing SFX/VFX cue TOGETHER with a one-shot re-fire of the work animation. The wo
 loop client-side by convention: a looping emote (`IsLooping:true`) with no `Swing` group behaves
 as before (client loops it, zero re-fires); a non-looping emote needs an authored
 `Swing.IntervalMs`. `runSwing` picks the animation ROUTE via `useActionSlotForSwing(seatMode)` -
-see the seat/swing routing bullet below. `scheduleImpactAt`/`impactDue` schedule an optional
-delayed impact cue (`Swing.Impact.{DelayMs, Presentation}`) on its own `MOMENT_IMPACT` moment id.
+see the seat/swing routing bullet below. `scheduleCueAt`/`cueDue` (the engine's ONE due-time pair,
+shared with every `Presentation.DelayMs` cue) schedule an optional delayed impact cue
+(`Swing.Impact.{DelayMs, Presentation}`) into the session's single pending slot, played on its own
+`MOMENT_IMPACT` moment id.
 
 ## THE camera packet shapes - written in blood, do not improvise a fourth combination
 

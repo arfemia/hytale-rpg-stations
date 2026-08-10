@@ -110,9 +110,10 @@
         }
       },
       "Moments": {
-        "$Comment": "What it sounds and looks like at the two fixed times: Cycle plays once per completed conversion, Completion once when the session ends. Both are Presentation groups a flair can re-skin per moment id.",
+        "$Comment": "What it sounds and looks like at the two fixed times: Cycle plays once per completed conversion, Completion once when the session ends. Both are Presentation groups a flair can re-skin per moment id. Cycle holds its break sound by DelayMs 100 so the plank lands a tenth of a second after the cut reads as finished rather than on the same instant the cycle ticks over; raise it to sit further behind the swing, or drop the leaf here to fire at once. Keep it well under Work.CycleMs, or the held cue lands in the next cycle instead. DelayMs is available on every Presentation in the schema, so any moment can be nudged onto its beat the same way. A flair re-skinning this moment inherits this timing unless it authors its own DelayMs, and needs an explicit 0 to play at once.",
         "Cycle": {
-          "Sounds": ["SFX_Wood_Break"]
+          "Sounds": ["SFX_Wood_Break"],
+          "DelayMs": 100
         },
         "Completion": {
           "Sounds": ["SFX_Chest_Wooden_Open_Player"],

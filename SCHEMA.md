@@ -985,6 +985,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Shake` | [Shake](#field-presentation-shake) | `null` | A one-shot camera shake: a CameraEffect asset id plus a contextual intensity. |
 | `Interaction` | [Interaction](#field-presentation-interaction) | `null` | A native RootInteraction chain fired at this moment (id-ref-only); null = none. |
 | `Effect` | [EffectRef](#field-presentation-effect) | `null` | A native EntityEffect applied at this moment (id-ref-only, with an optional DurationMs); null = none. |
+| `DelayMs` | `long` | `null` | Milliseconds to hold every cue in this group before it plays; null/non-positive (the default) plays it at once. Use it to land a sound on the beat it belongs to rather than the instant the engine reached it. Playback resolution is one server tick (about 33ms at the default 30 ticks per second), so the cue fires on the first tick at or after the delay, never earlier. |
 
 <a id="field-presentation-particles-item"></a>
 ### Presentation.Particles[]

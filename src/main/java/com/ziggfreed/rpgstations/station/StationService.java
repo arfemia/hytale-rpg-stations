@@ -14,6 +14,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.DoubleSupplier;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -212,6 +213,57 @@ public final class StationService {
     private static final StationService INSTANCE = new StationService();
 
     private final WorldKeyedQueues<StationSession> sessionsByWorld = new WorldKeyedQueues<>("rpgstations-work");
+
+    /**
+     * Cues waiting out their {@code Presentation.DelayMs}, one queue per world (see
+     * {@link #emitMoment}). Deliberately NOT session-scoped: the completion moment is emitted from
+     * inside {@link #stop}, so a queue that died with the session could never deliver a delayed
+     * completion cue. Drained at the top of {@link #tickFrameOnce}, ahead of the session loop and
+     * its empty-queue early return, so the last session of a world can still land its own farewell.
+     * The partition self-registers a {@link WorldEvictors} evictor, so an unloaded world drops its
+     * queue with everything else.
+     */
+    private final WorldKeyedQueues<PendingMoment> pendingMomentsByWorld =
+            new WorldKeyedQueues<>("rpgstations-moment");
+
+    /**
+     * The live entry count of each world's delayed-cue queue, maintained alongside
+     * {@link #pendingMomentsByWorld} so the capacity gate is O(1). A
+     * {@code ConcurrentLinkedQueue}'s own {@code size()} is a full traversal, not a counter, and the
+     * gate runs on every delayed emit - one counter keeps that read free.
+     *
+     * <p>It is also the KEY registry for the world-wide sweeps: {@code WorldKeyedQueues} exposes
+     * values but not worlds, and an entry exists here for exactly the worlds that have ever parked a
+     * cue, so {@link #dropPendingMoments} walks only those. Kept honest at both ends - every removal
+     * path decrements, and {@link #drainPendingMoments} resets a world whose queue it just emptied,
+     * so no drift can accumulate into a permanently "full" world.
+     */
+    private final ConcurrentHashMap<World, AtomicInteger> pendingMomentCounts = new ConcurrentHashMap<>();
+
+    /**
+     * How many delayed cues one world may hold at once. A cue is small and short-lived (the shipped
+     * delays are tens of milliseconds against a drain that runs every tick), so the ceiling exists
+     * purely to bound a pathological authoring - a whole server's worth of sessions each authoring a
+     * delay longer than its own cycle. Past it a cue plays IMMEDIATELY rather than queueing: the
+     * offset is the first thing worth losing, and dropping the cue outright would silence the
+     * station instead.
+     */
+    static final int MAX_PENDING_MOMENTS_PER_WORLD = 256;
+
+    /**
+     * One cue waiting out its delay: the ALREADY-RESOLVED presentation (the flair fold ran at
+     * emit time, so a re-fold mid-wait can never change what was scheduled), its session, its
+     * moment id, the position it plays at, and the millisecond it comes due.
+     *
+     * <p>The session reference is held deliberately, and may be a STOPPED one: a delayed completion
+     * cue outlives its session by construction. Everything the playback reads off it
+     * ({@code playerRef}/{@code ref}/{@code playerUuid}/{@code stationId}) stays readable after
+     * {@link #stop}.
+     */
+    private record PendingMoment(@Nonnull StationSession session, @Nonnull String momentId,
+                                 @Nonnull Presentation presentation, @Nonnull Vector3d targetPos,
+                                 long dueAtMs) {
+    }
     private final ConcurrentHashMap<UUID, StationSession> byPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, UUID> byBlock = new ConcurrentHashMap<>();
 
@@ -297,6 +349,9 @@ public final class StationService {
     }
 
     private StationService() {
+        // The counter map shadows pendingMomentsByWorld, which self-registers its own evictor, so it
+        // needs the matching registration to drop an unloaded world's entry at the same moment.
+        WorldEvictors.registerEvictor(pendingMomentCounts::remove);
     }
 
     @Nonnull
@@ -307,6 +362,7 @@ public final class StationService {
     /** Called once by the drain system when it registers, so the no-drainer warning stays silent. */
     public void attachDrainer() {
         sessionsByWorld.markDrainerAttached();
+        pendingMomentsByWorld.markDrainerAttached();
     }
 
     public int activeCount() {
@@ -831,6 +887,10 @@ public final class StationService {
      */
     public void tickFrameOnce(@Nonnull World world, @Nonnull Store<EntityStore> store,
                               @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        // Delayed presentation cues FIRST, and outside the session-empty early return below: a
+        // completion moment is emitted from inside stop(), so its cue routinely outlives both its
+        // own session and, when it was the world's last one, the whole session queue.
+        drainPendingMoments(world, store);
         ConcurrentLinkedQueue<StationSession> sessions = sessionsByWorld.peek(world);
         if (sessions == null || sessions.isEmpty()) {
             return;
@@ -877,7 +937,7 @@ public final class StationService {
                     s.nextSwingAtMs = now + s.swingIntervalMs;
                     runSwing(s, store, commandBuffer);
                 }
-                if (impactDue(now, s.pendingImpactAtMs)) {
+                if (cueDue(now, s.pendingImpactAtMs)) {
                     s.pendingImpactAtMs = 0L;
                     runImpact(s, store);
                 }
@@ -2052,6 +2112,14 @@ public final class StationService {
      * StationFlairs}'s well-known constants + {@link StationFlairs#stepMomentId}), and the flair
      * map resolved against is the UNION of the station's own inline {@code Flairs} with every
      * applicable standalone {@code asset.FlairAsset} ({@link #effectiveFlairs}).
+     *
+     * <p><b>{@code Presentation.DelayMs} is applied HERE, after the flair fold</b>, so the winning
+     * presentation is the one whose timing is honored (a flair that re-times a moment re-times the
+     * cue it actually replaced). A delayed cue is parked in this world's {@link #pendingMomentsByWorld}
+     * queue with the RESOLVED presentation and played by {@link #drainPendingMoments}; an undelayed
+     * one plays inline, byte-identically to the pre-delay path. The one shared due-time core
+     * ({@link #scheduleCueAt}/{@link #cueDue}) is the same pair the swing-impact cue schedules on -
+     * there is exactly one scheduler in this engine.
      */
     static void emitMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
                                    @Nonnull String momentId, @Nullable Presentation base,
@@ -2060,6 +2128,147 @@ public final class StationService {
         if (p == null) {
             return;
         }
+        long delayMs = p.effectiveDelayMs();
+        if (delayMs > 0 && getInstance().queueDelayedMoment(store, s, momentId, p, targetPos, delayMs)) {
+            return;
+        }
+        playMoment(store, s, p, targetPos);
+    }
+
+    /**
+     * Parks a resolved cue until its delay elapses. Returns false when it could not be queued (the
+     * world is unresolvable, or this world is already at {@link #MAX_PENDING_MOMENTS_PER_WORLD}), in
+     * which case {@link #emitMoment} plays it immediately - a lost OFFSET, never a lost cue.
+     */
+    private boolean queueDelayedMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
+                                       @Nonnull String momentId, @Nonnull Presentation p,
+                                       @Nonnull Vector3d targetPos, long delayMs) {
+        World world;
+        try {
+            world = WorldEvictors.worldOf(store);
+        } catch (Throwable t) {
+            Log.fine("STATION could not resolve the world for a delayed moment: " + t.getMessage());
+            return false;
+        }
+        ConcurrentLinkedQueue<PendingMoment> queue = pendingMomentsByWorld.queueFor(world);
+        AtomicInteger count = pendingMomentCounts.computeIfAbsent(world, k -> new AtomicInteger());
+        // Claim the slot FIRST and hand it back on refusal, so the ceiling holds exactly even if two
+        // threads ever race here - reading then incrementing could admit both at the boundary.
+        if (pendingMomentsAtCapacity(count.getAndIncrement())) {
+            count.decrementAndGet();
+            Log.fine("STATION delayed-moment queue is full for this world; playing '" + momentId + "' at once");
+            return false;
+        }
+        // The position is COPIED, deliberately: the caller's Vector3d is a live mutable engine value
+        // read a tick or more later, and a delayed cue should play where the moment happened, not
+        // wherever the player has walked to by the time it fires.
+        return queue.offer(new PendingMoment(s, momentId, p, new Vector3d(targetPos),
+                scheduleCueAt(System.currentTimeMillis(), delayMs)));
+    }
+
+    /** Pure capacity gate for one world's delayed-cue queue. */
+    static boolean pendingMomentsAtCapacity(int currentSize) {
+        return currentSize >= MAX_PENDING_MOMENTS_PER_WORLD;
+    }
+
+    /**
+     * Plays every cue in this world's delayed queue that has come due and leaves the rest parked.
+     * Nothing is ever dropped for being late: a cue plays on the first tick at or after its own due
+     * time, so two cues authored with different delays land in the order their delays put them -
+     * with a resolution of one server tick. Two cues that come due inside the SAME tick both play in
+     * that tick, in the order they were emitted; the delay orders cues across ticks, not within one.
+     *
+     * <p>Runs BEFORE the session loop in {@link #tickFrameOnce} and independently of it - a delayed
+     * completion cue belongs to a session that has already stopped, and the world may by then hold
+     * no sessions at all.
+     *
+     * <p>A cue whose player is gone (invalid ref) or has left this world is DISCARDED rather than
+     * played: it is a positional cue for a body that is no longer there.
+     */
+    private void drainPendingMoments(@Nonnull World world, @Nonnull Store<EntityStore> store) {
+        ConcurrentLinkedQueue<PendingMoment> queue = pendingMomentsByWorld.peek(world);
+        if (queue == null || queue.isEmpty()) {
+            return;
+        }
+        AtomicInteger count = pendingMomentCounts.get(world);
+        long now = System.currentTimeMillis();
+        Iterator<PendingMoment> it = queue.iterator();
+        while (it.hasNext()) {
+            PendingMoment pending = it.next();
+            if (!cueDue(now, pending.dueAtMs())) {
+                continue;
+            }
+            it.remove();
+            if (count != null) {
+                count.decrementAndGet();
+            }
+            StationSession s = pending.session();
+            if (s.ref == null || !s.ref.isValid() || s.ref.getStore() != store) {
+                continue;
+            }
+            try {
+                playMoment(store, s, pending.presentation(), pending.targetPos());
+            } catch (Throwable t) {
+                Log.fine("STATION delayed moment '" + pending.momentId() + "' failed: " + t.getMessage());
+            }
+        }
+        // Self-heal: an emptied queue pins its counter back to zero, so no accounting slip can ever
+        // accumulate into a world that reports itself permanently full.
+        if (count != null && queue.isEmpty()) {
+            count.set(0);
+        }
+    }
+
+    /**
+     * Whether a stop should discard whatever cues its session still has parked.
+     *
+     * <p>An INTERRUPT falls silent: a session that ended by walking off, taking a hit, dying, or
+     * breaking its tool should not keep playing the sounds of work that is no longer happening. A
+     * COMPLETION keeps them: the cues a finished run parked are the sound of work that DID happen,
+     * and a non-looping ritual emits its final cycle's cues microseconds before stopping itself, so
+     * sweeping by session alone would silence exactly the moment the ritual exists to celebrate.
+     *
+     * <p>The session's own COMPLETION cue is outside this either way: {@link #stop} emits it after
+     * the sweep, into a queue that belongs to the WORLD rather than the session, so a completion
+     * moment authoring a delay always plays.
+     */
+    static boolean dropsPendingCuesAtStop(@Nonnull StopReason reason) {
+        return reason != StopReason.RITUAL_COMPLETE && reason != StopReason.INPUTS_EXHAUSTED;
+    }
+
+    /**
+     * Discards every cue this session still has parked (see {@link #dropsPendingCuesAtStop} for
+     * which stops reach here). Walks {@link #pendingMomentCounts} rather than the queue partition's
+     * values because only the counter map exposes the world each queue belongs to, and its keys are
+     * exactly the worlds that have ever parked a cue.
+     */
+    private void dropPendingMoments(@Nonnull StationSession s) {
+        for (Map.Entry<World, AtomicInteger> entry : pendingMomentCounts.entrySet()) {
+            ConcurrentLinkedQueue<PendingMoment> queue = pendingMomentsByWorld.peek(entry.getKey());
+            if (queue == null) {
+                continue;
+            }
+            int removed = 0;
+            Iterator<PendingMoment> it = queue.iterator();
+            while (it.hasNext()) {
+                if (it.next().session() == s) {
+                    it.remove();
+                    removed++;
+                }
+            }
+            if (removed > 0) {
+                entry.getValue().addAndGet(-removed);
+            }
+        }
+    }
+
+    /**
+     * Plays one already-resolved presentation: {@code Sounds} (in authored order),
+     * {@code Particles}, {@code Shake}, and the two native-composition payloads. Reached either
+     * inline from {@link #emitMoment} or, for a delayed cue, from {@link #drainPendingMoments}.
+     */
+    private static void playMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
+                                   @Nonnull Presentation p, @Nonnull Vector3d targetPos) {
         String[] sounds = p.getSounds();
         if (sounds != null) {
             for (String sound : sounds) {
@@ -2080,6 +2289,11 @@ public final class StationService {
         // it). Both id-ref-only, both fail-closed (a missing id is a no-op, never a throw). The
         // EntityEffect apply is byte-parity-safe from this processing-locked frame - the shipped
         // hold effect already applies via the live store the same way (StationHoldController).
+        // An effect applied by a cue that outlives its session (the completion moment, delayed or
+        // not) is tracked on a session whose teardown has already run, so it lives out its own
+        // EffectRef.DurationMs / the effect asset's TTL instead of being stripped at stop - the same
+        // lifetime the undelayed completion cue has always had, since stop() strips tracked effects
+        // before it plays that moment.
         if (s.ref != null && s.ref.isValid()) {
             Presentation.Interaction interaction = p.getInteraction();
             if (interaction != null && interaction.hasId()) {
@@ -2208,7 +2422,7 @@ public final class StationService {
         emitMoment(store, s, StationFlairs.MOMENT_SWING, s.swingPresentation, blockPos);
 
         if (s.impactDelayMs > 0 && s.impactPresentation != null) {
-            s.pendingImpactAtMs = scheduleImpactAt(System.currentTimeMillis(), s.impactDelayMs);
+            s.pendingImpactAtMs = scheduleCueAt(System.currentTimeMillis(), s.impactDelayMs);
         }
 
         if (s.durabilityPerSwing > 0 && !s.idleMode && swingPlayer != null) {
@@ -2231,14 +2445,23 @@ public final class StationService {
         emitMoment(store, s, StationFlairs.MOMENT_IMPACT, s.impactPresentation, blockPos);
     }
 
-    /** Pure due-time scheduling for the delayed swing-impact cue. */
-    static long scheduleImpactAt(long nowMs, long delayMs) {
+    /**
+     * The ONE pure due-time scheduler in this engine: the millisecond at which a cue delayed by
+     * {@code delayMs} comes due. Shared by the single pending swing-impact slot
+     * ({@code Animation.Swing.Impact.DelayMs}) and by every queued {@code Presentation.DelayMs}
+     * cue - there is deliberately no second scheduling rule to keep in step with this one.
+     */
+    static long scheduleCueAt(long nowMs, long delayMs) {
         return nowMs + delayMs;
     }
 
-    /** Pure due-time check for the delayed swing-impact cue. */
-    static boolean impactDue(long nowMs, long pendingImpactAtMs) {
-        return pendingImpactAtMs > 0 && nowMs >= pendingImpactAtMs;
+    /**
+     * The matching pure due check: true once {@code nowMs} has reached a scheduled
+     * {@code dueAtMs}. A non-positive {@code dueAtMs} means "nothing scheduled" (the swing-impact
+     * slot's own empty value), so it is never due.
+     */
+    static boolean cueDue(long nowMs, long dueAtMs) {
+        return dueAtMs > 0 && nowMs >= dueAtMs;
     }
 
 
@@ -2351,6 +2574,14 @@ public final class StationService {
         // discarded anyway; this is the explicit "cleared at stop" guarantee).
         s.chosenOutputCategory = null;
         s.pendingImpactAtMs = 0L;
+        // An INTERRUPTED session's still-parked cues go with it, on the same reasoning the pending
+        // impact slot above is cleared: work has stopped, so its leftover sounds should not arrive
+        // afterwards. A COMPLETION keeps them - the cues of a run that finished are the sound of
+        // work that happened. The COMPLETION cue itself is emitted below, after this point, into the
+        // world-scoped queue, so a delayed completion moment survives the stop either way.
+        if (dropsPendingCuesAtStop(reason)) {
+            dropPendingMoments(s);
+        }
 
         // Placed-input custody auto-return (design 9.4): EVERY exit path, silent included - the
         // design's own binding list (re-press, walk-off, damage, death, disconnect, tool-changed,

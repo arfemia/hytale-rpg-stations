@@ -42,6 +42,13 @@ import com.ziggfreed.rpgstations.asset.Presentation;
  * The overlay-MERGE semantics themselves (per-leaf, sorted-flair-id-order stacking) are
  * UNCHANGED - only the slot identity moved from a closed enum to an open string.
  *
+ * <p>{@code DelayMs} overlays as an ordinary leaf, so a flair can re-time a moment as well as
+ * re-skin it (and inherits the base moment's own timing when it authors none). A flair that wants
+ * its cue to play AT ONCE over a delayed base moment must therefore author {@code DelayMs: 0}
+ * explicitly - omitting the leaf inherits the base timing, it does not cancel it. The delay itself
+ * is applied downstream of this fold, in {@code StationService#emitMoment}, so whichever
+ * {@code Presentation} wins here is the one whose timing is honored.
+ *
  * <p><b>Overlay semantics:</b> per LEAF, an unlocked flair's non-null value replaces the
  * current value; a leaf the flair omits falls through untouched. A flair on a moment with NO
  * base presentation ADDS one. Multiple unlocked flairs STACK, applied in SORTED flair-id
@@ -132,6 +139,7 @@ public final class StationFlairs {
         Presentation.Shake shake = base != null ? base.getShake() : null;
         Presentation.Interaction interaction = base != null ? base.getInteraction() : null;
         com.ziggfreed.rpgstations.asset.EffectRef effect = base != null ? base.getEffect() : null;
+        Long delayMs = base != null ? base.getDelayMs() : null;
         boolean overlaidAny = false;
 
         for (String flairId : new TreeSet<>(lowercased(unlockedIds))) {
@@ -159,12 +167,15 @@ public final class StationFlairs {
             if (momentPresentation.getEffect() != null) {
                 effect = momentPresentation.getEffect();
             }
+            if (momentPresentation.getDelayMs() != null) {
+                delayMs = momentPresentation.getDelayMs();
+            }
         }
 
         if (!overlaidAny) {
             return base;
         }
-        return Presentation.of(sounds, particles, shake, interaction, effect);
+        return Presentation.of(sounds, particles, shake, interaction, effect, delayMs);
     }
 
     /**

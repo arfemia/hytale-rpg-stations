@@ -119,6 +119,19 @@ fits (the fish exemplar's knife scrape reuses the vanilla dagger swing-impact so
 the vanilla metal-hit sound and gem-sparks particle) rather than authoring new audio/VFX assets for a
 mechanic that already has a natural-sounding native match.
 
+A `Presentation` also carries `DelayMs`, which is not a cue but a timing knob over the whole group:
+it holds every sound, particle, shake, interaction and effect in that moment together for the given
+number of milliseconds before they play. Reach for it when a cue reads as slightly early - the jar's
+Sawmill holds its cycle break sound by `100` so the plank lands just after the cut looks finished.
+Omit it (or author zero) to play at once. Playback resolves on the server tick, so the cue fires on
+the first tick at or after the delay, never before it.
+
+Keep a delay well under the window it plays inside - a cycle cue held for a whole `Work.CycleMs`, or
+a step cue held for its step's whole `Duration.Ms`, lands after the next cycle or the next step has
+already taken over, and `/rpgstations validate` warns about both. One thing to watch when a flair
+re-skins a delayed moment: a flair that omits `DelayMs` inherits the base moment's timing, so a
+flair that wants its cue at once has to author `DelayMs: 0` rather than leave the leaf out.
+
 ## The principle, stated plainly
 
 Every reference leaf above shares one shape: **a string id (plus, occasionally, a small override),

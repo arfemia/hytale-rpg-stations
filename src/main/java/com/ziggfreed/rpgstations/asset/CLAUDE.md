@@ -384,7 +384,20 @@ resolution section for the engine half.
   leak must never be reintroduced), `Shake` (nested `{EffectId, Intensity}`), plus TWO
   native-composition groups: `Interaction` (`{Id}`, an inner class - fires a native RootInteraction
   chain by id) and `Effect` (an [`EffectRef`](EffectRef.java) - applies a native EntityEffect by
-  id). Both id-ref-only.
+  id). Both id-ref-only. Plus **`DelayMs`** (nullable `Long`), the one leaf that is not itself a
+  cue: it offsets the WHOLE group in time so every cue in it stays together and lands late as one
+  moment. Because it lives on the shared type, EVERY `Presentation` site can re-time itself with no
+  extra schema - an action's `Moments.Cycle`/`Moments.Completion`, a step's own `Presentation`, a
+  `Roll`'s or a `Ladder.Floor`'s, a `FlairAsset` moment. Null/zero/negative all read as "play at
+  once" (`effectiveDelayMs()`), so a nonsense value degrades to the undelayed cue rather than to a
+  cue that never fires. A flair overlays it like any other leaf, so a flair OMITTING it inherits the
+  base moment's timing and needs an explicit `0` to cancel one. Engine side:
+  `station.StationService#emitMoment` applies it AFTER the flair fold (so the winning
+  `Presentation`'s timing is the one honored, and a flair can re-time as well as re-skin) onto the
+  one shared due-time core the swing-impact cue already used - see `../station/CLAUDE.md`'s
+  `emitMoment` section for the queue, its drain, the stop policy, and when to reach for
+  `Animation.Swing.Impact.DelayMs` (a separate flair-targetable moment id) instead of this leaf
+  (an offset within the moment id a cue already has).
 - **[`Puppet`](Puppet.java)** - "mount the player, hide their player model, and spawn/display a
   visual of their character model performing the steps" - one of the four `ActionDef.Worker`
   groups (ORTHOGONAL to whichever `Hold.Mount` holds the real player, never nested under `Hold`),

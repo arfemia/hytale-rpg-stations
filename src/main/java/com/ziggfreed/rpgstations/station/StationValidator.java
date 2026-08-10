@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -23,7 +24,9 @@ import com.hypixel.hytale.server.core.asset.type.item.config.ItemDropList;
 import com.hypixel.hytale.server.core.asset.type.particle.config.ParticleSystem;
 import com.hypixel.hytale.server.core.asset.type.soundevent.config.SoundEvent;
 import com.hypixel.hytale.server.core.cosmetics.EmoteAsset;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.RootInteraction;
+import com.hypixel.hytale.server.core.modules.item.ItemModule;
 import com.hypixel.hytale.server.npc.NPCPlugin;
 import com.ziggfreed.rpgstations.api.FindingSink;
 import com.ziggfreed.rpgstations.api.ValidationHook;
@@ -158,10 +161,23 @@ public final class StationValidator {
             Predicate<String> rollPoolKnown = id -> RollPoolCatalog.getInstance().get(id) != null;
             Predicate<String> stationKnown = id -> StationCatalog.getInstance().getStation(id) != null;
             Predicate<String> actionAssetKnown = id -> ActionCatalog.getInstance().get(id) != null;
+            // The drop-list predicate doubles as the reference COLLECTOR for the runtime-resolution
+            // probe below: every id the walk resolves is exactly a referenced table, so the probe
+            // needs no second traversal of the asset shapes (and picks up any FUTURE reference site
+            // for free). Only ids that EXIST are recorded - a missing one already has its own
+            // finding, and rolling it would report the same table twice.
+            Set<String> referencedDropLists = new LinkedHashSet<>();
+            Predicate<String> dropListKnown = dropListId -> {
+                boolean known = dropListKnownLive(dropListId);
+                if (known) {
+                    referencedDropLists.add(dropListId);
+                }
+                return known;
+            };
 
             List<Finding> out = new ArrayList<>(validate(stations,
                     StationValidator::langKeyKnownLive,
-                    StationValidator::dropListKnownLive,
+                    dropListKnown,
                     factorKnown,
                     lootableKnown,
                     rollPoolKnown,
@@ -169,7 +185,7 @@ public final class StationValidator {
                     stationKnown,
                     actionAssetKnown));
             out.addAll(validateLootables(LootableCatalog.getInstance().all().values(),
-                    StationValidator::dropListKnownLive, factorKnown));
+                    dropListKnown, factorKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), stationKnown));
             // Review minor (validator-standalone-action-unwired): the flagship standalone prepfish
             // ActionAsset (Ref'd from CuttingBoard) and every ExtensionAsset are validated HERE, in
@@ -178,11 +194,13 @@ public final class StationValidator {
             // check, and a Target:{Station} extension validated before its target station's layer
             // folds would false-flag EXTENSION_TARGET_UNKNOWN.
             out.addAll(validateActionAssets(actionAssets,
-                    StationValidator::dropListKnownLive, factorKnown, lootableKnown, rollPoolKnown,
+                    dropListKnown, factorKnown, lootableKnown, rollPoolKnown,
                     StationValidator::modelKnownLive, stationKnown));
             out.addAll(validateExtensions(extensions, stations, actionAssets,
-                    StationValidator::dropListKnownLive, factorKnown, lootableKnown, rollPoolKnown));
+                    dropListKnown, factorKnown, lootableKnown, rollPoolKnown));
             out.addAll(checkCustodyInputsResolveLive(stations, actionAssets));
+            // AFTER the walk above, which is what filled referencedDropLists.
+            out.addAll(checkDropListsResolveLive(referencedDropLists));
             // Third-party checks run LAST, over the same folded content the engine just walked, so
             // a hook's note sits beside the engine's own in one report. FULL pass only.
             out.addAll(runHooks(stations, actionAssets, LootableCatalog.getInstance().all().values(), extensions));
@@ -1396,6 +1414,75 @@ public final class StationValidator {
                         + " family id against the items meant to load it)", id));
     }
 
+    /**
+     * How many times a referenced drop list is rolled before an all-empty run is reported. High
+     * enough that a table which merely WEIGHTS an empty branch heavily still pays out at least once
+     * in practice, low enough to stay a trivial cost at boot.
+     */
+    private static final int DROPLIST_PROBE_ROLLS = 20;
+
+    /**
+     * LIVE check (full pass only): a referenced {@code ItemDropList} that EXISTS can still resolve
+     * to nothing forever. An {@code ItemDropList} whose container tree holds only {@code Droplist}
+     * references (with no concrete {@code Single} anywhere in it) hands back an empty roll every
+     * time, so the content it was meant to grant is silently dead - existence alone never catches
+     * it. Rolling the table {@link #DROPLIST_PROBE_ROLLS} times and finding EVERY roll empty is the
+     * resolution-failure signal; an occasional empty roll is normal weighting and never reaches the
+     * threshold.
+     *
+     * <p>Pure compute and world-thread-safe ({@code ItemModule.getRandomItemDrops} is the same
+     * native roll boundary the loot engine itself uses). Fail-open on a cold or throwing item module
+     * - the same stance {@link #dropListKnownLive} takes, since a lookup failure is not evidence the
+     * table is wrong. Warn-only, never blocks.
+     *
+     * <p>A validate run made before the drop tables have finished resolving can report a table that
+     * is in fact fine, which is why this lives in the FULL pass only (the post-load audit and
+     * {@code /rpgstations validate}) rather than the per-fold structural one, and why the finding
+     * says so.
+     */
+    @Nonnull
+    static List<Finding> checkDropListsResolveLive(@Nonnull Collection<String> dropListIds) {
+        List<Finding> out = new ArrayList<>();
+        for (String dropListId : dropListIds) {
+            if (dropListId == null || dropListId.isBlank()) {
+                continue;
+            }
+            Boolean paidOut = dropListEverPaysOutLive(dropListId);
+            if (paidOut == null || paidOut) {
+                continue;
+            }
+            out.add(Finding.warning(DOMAIN, "LOOT_DROPLIST_NEVER_RESOLVES",
+                    "ItemDropList '" + dropListId + "' rolled nothing in " + DROPLIST_PROBE_ROLLS
+                            + " consecutive rolls, so whatever references it grants nothing. A table whose"
+                            + " container tree holds only Droplist references resolves to nothing at runtime -"
+                            + " pair every Droplist reference with at least one concrete Single somewhere in"
+                            + " the tree. A validate run made before the drop tables have settled can also"
+                            + " report this; re-run it once the server is fully up before re-authoring the table.",
+                    dropListId));
+        }
+        return out;
+    }
+
+    /**
+     * {@code true} when {@code dropListId} paid out at least one stack within
+     * {@link #DROPLIST_PROBE_ROLLS} rolls, {@code false} when every roll was empty, {@code null}
+     * when the table could not be probed at all (fail open - never a finding).
+     */
+    @Nullable
+    private static Boolean dropListEverPaysOutLive(@Nonnull String dropListId) {
+        try {
+            for (int i = 0; i < DROPLIST_PROBE_ROLLS; i++) {
+                List<ItemStack> drops = ItemModule.get().getRandomItemDrops(dropListId);
+                if (drops != null && !drops.isEmpty()) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     /** Every ResourceTypes family id carried by any LIVE item, lowercased; empty on a cold/failed map. */
     @Nonnull
     private static Set<String> liveItemResourceTypeIds() {
@@ -2410,9 +2497,7 @@ public final class StationValidator {
             out.add(Finding.error(DOMAIN, "NONPOSITIVE_CYCLE_MS",
                     label + " has a nonpositive Work.CycleMs", id));
         }
-        long effectiveCycleMs = work.getCycleMs() != null && work.getCycleMs() > 0
-                ? work.getCycleMs() : StationService.DEFAULT_CYCLE_MS;
-        checkIdle(work.getIdle(), effectiveCycleMs, id, label, out);
+        checkIdle(work.getIdle(), effectiveCycleMs(work), id, label, out);
         Contribution[] posts = work.getPerCycleContributions();
         if (posts == null) {
             return;
@@ -2433,6 +2518,64 @@ public final class StationValidator {
                         label + " Work.PerCycleContributions[" + i + "].Amount should be positive for "
                                 + describeContribution(post) + " (the entry posts nothing)", id));
             }
+        }
+    }
+
+    /** The cycle cadence a {@code Work} group actually runs at: its own {@code CycleMs}, else the engine default. */
+    private static long effectiveCycleMs(@Nonnull StationAsset.Work work) {
+        return work.getCycleMs() != null && work.getCycleMs() > 0
+                ? work.getCycleMs() : StationService.DEFAULT_CYCLE_MS;
+    }
+
+    /**
+     * The {@code Moments.Cycle} sibling of {@link #checkImpact}'s {@code IMPACT_OVERLAPS_NEXT_SWING}:
+     * a cycle cue held for at least a whole cycle never lands inside the cycle that emitted it,
+     * because the next completed cycle re-plays the same moment first - so the offset reads as a cue
+     * that belongs to the wrong cycle rather than as a late one.
+     *
+     * <p>Checked only where {@code Work.CycleMs} is genuinely what paces the cycle: a REPEATING
+     * action running the implicit convert loop. An action running an authored {@code Steps} program
+     * is paced by its own step durations instead (so its cadence is not readable here), and a
+     * non-looping action completes its session on its single cycle, leaving no next cycle to overlap.
+     */
+    private static void checkCycleMomentDelay(@Nullable StationAsset.Work work, @Nullable Presentation cycle,
+                                              boolean authoredStepProgram, @Nonnull String label,
+                                              @Nonnull String id, @Nonnull List<Finding> out) {
+        if (cycle == null || work == null || authoredStepProgram || !work.effectiveLooping()) {
+            return;
+        }
+        long delayMs = cycle.effectiveDelayMs();
+        long cycleMs = effectiveCycleMs(work);
+        if (delayMs > 0 && delayMs >= cycleMs) {
+            out.add(Finding.warning(DOMAIN, "CYCLE_DELAY_OVERLAPS_NEXT_CYCLE",
+                    label + " Moments.Cycle DelayMs " + delayMs + " is >= the action's effective Work.CycleMs "
+                            + cycleMs + " (the held cue lands at or after the next completed cycle replays the"
+                            + " same moment, so it reads as belonging to the wrong cycle); keep the delay"
+                            + " comfortably under one cycle", id));
+        }
+    }
+
+    /**
+     * The per-step sibling of the two rules above: a step whose own {@code Presentation} is held for
+     * at least as long as the step's authored hold plays its cue after that step has already handed
+     * over, so the cue lands on top of whatever the program moved on to. Only checked when the step
+     * authors a {@code Duration} - a step with no hold has no window for the cue to land inside, and
+     * a delay there is a deliberate offset into the steps that follow.
+     */
+    private static void checkStepPresentationDelay(@Nonnull StationStep step, @Nonnull String stepLabel,
+                                                   @Nonnull String id, @Nonnull List<Finding> out) {
+        Presentation presentation = step.getPresentation();
+        StationStep.Duration duration = step.getDuration();
+        if (presentation == null || duration == null || duration.getMs() == null) {
+            return;
+        }
+        long delayMs = presentation.effectiveDelayMs();
+        long holdMs = duration.effectiveMs();
+        if (delayMs > 0 && holdMs > 0 && delayMs >= holdMs) {
+            out.add(Finding.warning(DOMAIN, "STEP_DELAY_OVERLAPS_ITS_DURATION",
+                    stepLabel + ".Presentation DelayMs " + delayMs + " is >= the step's own Duration.Ms "
+                            + holdMs + " (the held cue plays after this step has already handed over, landing"
+                            + " over whatever the program does next); lower the delay or lengthen the hold", id));
         }
     }
 
@@ -2867,6 +3010,9 @@ public final class StationValidator {
         }
         if (moments != null) {
             checkCompletion(moments.getCompletion(), id, actionLabel, out);
+            // Timing, not references: a Cycle cue held for a whole cycle lands in the wrong one.
+            // Completion is deliberately exempt - there is no next cycle for its cue to overlap.
+            checkCycleMomentDelay(def.getWork(), moments.getCycle(), noCycleOutput, actionLabel, id, out);
         }
         checkAnchorsMap(def.getAnchors(), actionLabel, id, stationKnown, out);
         Set<String> knownAnchorIds = new HashSet<>();
@@ -2990,6 +3136,7 @@ public final class StationValidator {
             // (station/CLAUDE.md's per-step Presentation rule) - gets the SAME native-composition
             // advisory coverage every other Presentation site does.
             checkNativeRefs(step.getPresentation(), stepLabel + ".Presentation", id, out);
+            checkStepPresentationDelay(step, stepLabel, id, out);
 
             StationStep.Repeat repeat = step.getRepeat();
             if (repeat != null) {
