@@ -529,6 +529,11 @@ final class StationStepHandlers {
      * clears the current iteration's refund ledger (review minor m1) - the consumed inputs became the
      * produced output, so a later stop never both refunds the inputs AND keeps the output. Returns
      * {@code null} on success/no-op.
+     *
+     * <p>The inventory route grants through {@link ItemGrantUtil#grantOrDrop} rather than the plain
+     * {@code grant}, because what it does next is COUNT and ANNOUNCE the stack: only
+     * {@code grantOrDrop} distinguishes "landed on the ground" from "the ground drop failed too",
+     * and a stack that reached neither place must not be reported to the player as output.
      */
     @Nullable
     static StationStepResult producePhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
@@ -578,8 +583,19 @@ final class StationStepHandlers {
         try {
             for (Ingredient item : items) {
                 int quantity = item.effectiveQuantity();
-                ItemGrantUtil.grant(ctx.player, new ItemStack(item.getItemId(), quantity), ctx.commandBuffer, ctx.store,
+                // grantOrDrop, not grant: this loop both COUNTS the output into the session ledger
+                // and ANNOUNCES it, and the plain grant result cannot tell "landed on the ground"
+                // from "the ground drop failed too". A stack that reached neither the inventory nor
+                // the world no longer exists, so counting it would put output in the end-of-session
+                // summary the player never received and toast them for it besides.
+                boolean landed = ItemGrantUtil.grantOrDrop(ctx.player, new ItemStack(item.getItemId(), quantity),
+                        ctx.commandBuffer, ctx.store,
                         ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
+                if (!landed) {
+                    Log.warn("STATION Produce step '" + step.getId() + "' lost '" + item.getItemId()
+                            + "' - no inventory room and the drop failed");
+                    continue;
+                }
                 ctx.session.producedItems.merge(item.getItemId(), quantity, Integer::sum);
                 if (ctx.session.playerRef != null) {
                     StationService.notifyItemGain(ctx.session.playerRef, item.getItemId(), quantity, false);

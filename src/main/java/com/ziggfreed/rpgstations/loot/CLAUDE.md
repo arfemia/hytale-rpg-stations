@@ -95,7 +95,13 @@ the engine UNROUNDED and resolves once per cycle (`OutputItemResolver`, below).
   passes `ThreadLocalRandom`). Called ONCE PER CYCLE over the SUMMED tally, never per roll - that is
   the whole reason the tally rides through `GrantResult` as a raw `double`: two rolls paying `0.5`
   each must average one whole item, which rounding each roll separately cannot do. A whole-number
-  tally never consults the sample at all, so a deterministic ladder floor stays deterministic.
+  tally never consults the sample at all, so a deterministic ladder floor stays deterministic. Its
+  sibling `reportable(resolvedCount, landed)` is the OTHER half of the same decision, equally pure:
+  the count a grant may be REPORTED as, which is the rolled count only when the stack genuinely
+  reached the player. "How many were rolled" and "how many were received" are different facts, and
+  the session ledger, the produced row's yield breakdown, and the item-gain toast all read the
+  second one through this ONE fold (`StationService#grantBonusOutputItems`), never the rolled count
+  sitting beside it.
 - **[`LootableCatalog`](LootableCatalog.java)** - the folded `asset.LootableAsset` store
   (`Server/RpgStations/Lootables/*.json`), `defaults < pack`, referenced by ANY `LootRef.Lootables`
   entry (an action's `Bonus`, a `StationStep.Roll` phase, or an `ExtensionAsset`'s `Bonus`

@@ -16,6 +16,10 @@ import com.ziggfreed.rpgstations.asset.Roll;
  * deterministic and the "half the time" claim is checked at both sides of the boundary rather than
  * sampled.
  *
+ * <p>Plus the second half of the same decision: {@code reportable}, the fold of the grant's outcome
+ * into the number the session ledger and the item-gain toast are allowed to show. Rolling three
+ * items and delivering none of them are different facts, and only the second one may be reported.
+ *
  * <p>Fixture amounts are this test's own; they deliberately do not mirror any shipped content.
  */
 class OutputItemResolverTest {
@@ -92,5 +96,44 @@ class OutputItemResolverTest {
         assertEquals(0, OutputItemResolver.resolve(-2.5, fixed(0.0)));
         assertEquals(0, OutputItemResolver.resolve(Double.NaN, fixed(0.0)));
         assertEquals(0, OutputItemResolver.resolve(Double.POSITIVE_INFINITY, fixed(0.0)));
+    }
+
+    // ==================== reportable: rolled count vs RECEIVED count ====================
+
+    @Test
+    void landedGrant_reportsEveryResolvedItem() {
+        assertEquals(3, OutputItemResolver.reportable(3, true));
+        assertEquals(1, OutputItemResolver.reportable(1, true),
+                "a grant that reached the player reports exactly what was rolled");
+    }
+
+    @Test
+    void failedGrant_reportsNothing() {
+        assertEquals(0, OutputItemResolver.reportable(3, false),
+                "no inventory room and the ground drop failed too: the items do not exist, so the "
+                        + "ledger and the toast must show none of them");
+        assertEquals(0, OutputItemResolver.reportable(1, false));
+    }
+
+    @Test
+    void nothingRolled_reportsNothingWhicheverWayTheGrantWent() {
+        assertEquals(0, OutputItemResolver.reportable(0, true));
+        assertEquals(0, OutputItemResolver.reportable(0, false));
+        assertEquals(0, OutputItemResolver.reportable(-1, true),
+                "a nonsense count degrades to nothing rather than to a negative ledger row");
+    }
+
+    /**
+     * The end-to-end shape of one cycle's bonus output: roll the summed tally to whole items, grant
+     * them, then report what LANDED. The two steps are deliberately separate, because the grant sits
+     * between them and only its answer decides which number the player is shown.
+     */
+    @Test
+    void resolvedThenGranted_isTheNumberTheToastReports() {
+        int rolled = OutputItemResolver.resolve(2.5, fixed(0.4));
+        assertEquals(3, rolled);
+        assertEquals(3, OutputItemResolver.reportable(rolled, true));
+        assertEquals(0, OutputItemResolver.reportable(rolled, false),
+                "the same rolled count reports as nothing once the grant landed nowhere");
     }
 }

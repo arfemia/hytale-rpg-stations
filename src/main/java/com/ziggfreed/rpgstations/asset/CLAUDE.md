@@ -765,3 +765,72 @@ they land per-leaf and are never a parallel table that can drift from the codec:
 
 **No `PackControlAsset`/`Control` map infra exists in this mod** - every fold is always additive (`replace=false`); a reload re-fires the `LoadedAssetsEvent`
 and re-folds for free, no owner-override precedence layer beyond `defaults < pack` load order.
+
+## How this schema GROWS (additive by default, and the two windows a break is allowed)
+
+The `api` artifact carries a WRITTEN additive growth policy (its own router's "Additive growth
+policy" section, at the repo's `api/src/main/java/com/ziggfreed/rpgstations/api/CLAUDE.md`:
+default-bodied interface methods, new event classes, additive getters, never a signature change).
+This is its ASSET-SIDE twin, and it exists for the same reason: these seven codecs are a published
+contract too. A pack author's JSON and a server owner's override files are written against them,
+live in repos this one cannot see, and outlive any release here. **`SCHEMA.md` is GENERATED from
+the codecs** ([`../docs/SchemaDocWriter`](../docs/SchemaDocWriter.java), `gradlew
+generateSchemaDocs`), so it can only ever describe the shape the current build has - the policy for
+CHANGING that shape belongs here, and an edit to `SCHEMA.md` is never where a growth decision gets
+recorded.
+
+**Additive growth has four shapes, and every one of them leaves already-authored files decoding
+byte-identically.**
+
+- **A new leaf is NULLABLE and `appendInherited`, and its `.documentation(...)` lands in the SAME
+  edit.** Null means "inherit, or take the reader-default", never a value, so a file written before
+  the leaf existed keeps its exact behavior and a `Parent` chain keeps per-leaf granularity through
+  it. Name the reader-default in the documentation string, since that is the only place an author
+  ever reads it; `AssetDocumentationCoverageTest` fails the build on a blank one, so the
+  documentation is not a follow-up you can defer past a build anyway.
+- **A collection leaf is PLURAL and an array from its first day** (the naming rule above), because
+  one-to-many is the growth that hurts most: `Sounds`, `DropLists`, `Particles`, `Budgets`,
+  `Conversions` each took a second entry with no schema change at all, where a singular scalar would
+  have forced a rename on every authored file. When a leaf is genuinely singular, say WHY in its
+  documentation - `Recipe` does ("two transforms means two actions").
+- **A cohesive set of new knobs is a NESTED GROUP behind one key, never flat prefixed siblings.**
+  The group is itself one nullable leaf on its parent, so adding it is additive at the parent as
+  well, and its own leaves stay independently nullable underneath, which is what keeps a partial
+  overlay meaningful. `Custody.Display`, `Look.Role`, and `FromCrafting.NativeTime` all landed this
+  way; a `HoldOffsetX`/`HoldEnabled`-shaped pair is the smell this rule exists to catch.
+- **A scalar array that needs PER-ENTRY knobs gets STRING-OR-OBJECT promotion, not a sidecar key.**
+  [`StringOrObjectCodec`](StringOrObjectCodec.java) dispatches per VALUE on the raw JSON/BSON type,
+  so every shorthand entry an author already wrote keeps decoding untouched and only an entry that
+  needs more is written as the object form beside it. `Presentation.Sounds` is the precedent: a bare
+  `"<eventId>"` string and `{EventId, DelayMs?}` are the same leaf, and a shorthand entry re-ENCODES
+  as a bare string so a hand-authored file and an encode-based test stay on the same bytes. Reach
+  for this BEFORE a parallel `SoundDelays[]`-shaped key, which would split one cue's data across two
+  places and leave the two arrays to drift out of alignment.
+
+**A HARD break - a rename or a removal with no alias - is permitted in exactly two windows, and
+nowhere else.**
+
+- **While the release the schema shipped in is still IN FLIGHT.** Nothing outside this repo is
+  authored against it yet, so the honest shape is also the cheap one, and an alias kept "just in
+  case" is permanent debt bought for nobody. The 0.1.0 window is the precedent and it was used
+  freely, wave after wave: `Camera.FaceBlockMode` renamed to `Camera.Recipe`, `Hold.Seat.Enabled`
+  replaced by `Hold.Mount`, `Loot.Tables` renamed to `Loot.Lootables`, the `StationStep.Type` union
+  replaced outright by orthogonal phase groups, and `Grants.BonusOutputCopies`,
+  `StationAsset.Recipes[]`, `Picker`, and station-level group inheritance all deleted rather than
+  deprecated.
+  **The price of the window is that the shipped JSON moves in the SAME change** - this jar's own
+  assets, `unreleased/`, and the sibling stations pack - so nothing is left decoding against a key
+  that no longer exists.
+- **As a deliberately BATCHED break at the 1.0.0 api-freeze boundary.** The api freeze is the one
+  scheduled moment consumers already expect to re-read their integration, so a break that genuinely
+  cannot be expressed additively rides that boundary WITH the rest of them: collected into one wave,
+  listed in `CHANGELOG.md` key by key with the replacement named, and with every shipped asset in
+  this repo and the sibling pack migrated in the same change. One breaking key smuggled into a
+  routine release is worse than ten announced at a boundary, because the first one an author hits
+  teaches them the schema cannot be trusted.
+
+**After 1.0.0 the default is additive, permanently.** A leaf that turned out wrong is superseded by
+a new one beside it, with its own documentation saying which leaf to author instead and the engine
+keeping the old one honest; it is not renamed under a pack author's feet. If a break looks
+unavoidable outside those two windows, that is a design conversation with the maintainer, not a
+judgment call to make inside the edit.

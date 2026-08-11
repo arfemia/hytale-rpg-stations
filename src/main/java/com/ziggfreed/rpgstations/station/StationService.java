@@ -1745,8 +1745,10 @@ public final class StationService {
      * <p>{@code tally} is the cycle's FRACTIONAL sum across every roll that granted, resolved to
      * whole items HERE, once ({@link OutputItemResolver}: the whole part always, plus one more at
      * the leftover fraction's probability). One resolution per cycle rather than one per roll is
-     * what makes two rolls paying {@code 0.5} each average a whole item; the produced row records
-     * the RESOLVED count, since that is what the player actually received.
+     * what makes two rolls paying {@code 0.5} each average a whole item; the ledger, the yield
+     * breakdown, and the toast then all report the count that actually LANDED
+     * ({@link OutputItemResolver#reportable} folds the grant outcome into the rolled count), since
+     * that is what the player received.
      *
      * <p>Deliberately SILENT: these are more of the item the cycle was already producing, and the
      * produce phase's own gain notification already fired for it - a second toast per cycle would be
@@ -1770,22 +1772,28 @@ public final class StationService {
             Log.fine("STATION Bonus OutputItems had no cycle output to add to at station '" + s.stationId + "'");
             return;
         }
+        int reported;
         try {
-            if (!ItemGrantUtil.grantOrDrop(player, new ItemStack(itemId, count), commandBuffer, store,
-                    s.blockX, s.blockY, s.blockZ)) {
-                // Nowhere to put it and the ground drop failed too: the items do not exist, so
-                // they must not be tallied into the session summary as produced.
-                Log.warn("STATION bonus output lost - no inventory room and drop failed for '" + itemId + "'");
-                return;
-            }
+            boolean landed = ItemGrantUtil.grantOrDrop(player, new ItemStack(itemId, count), commandBuffer, store,
+                    s.blockX, s.blockY, s.blockZ);
+            // The rolled count and the RECEIVED count are different facts, folded in one pure place
+            // (OutputItemResolver#reportable) so the ledger, the yield breakdown, and the toast below
+            // can never disagree about which of the two they are showing.
+            reported = OutputItemResolver.reportable(count, landed);
         } catch (Throwable t) {
             Log.fine("STATION Bonus OutputItems grant failed: " + t.getMessage());
             return;
         }
-        s.producedItems.merge(itemId, count, Integer::sum);
+        if (reported <= 0) {
+            // Nowhere to put it and the ground drop failed too: the items do not exist, so
+            // they must not be tallied into the session summary as produced.
+            Log.warn("STATION bonus output lost - no inventory room and drop failed for '" + itemId + "'");
+            return;
+        }
+        s.producedItems.merge(itemId, reported, Integer::sum);
         StationSession.YieldBreakdown breakdown = s.producedYield.get(itemId);
         if (breakdown != null) {
-            breakdown.addBonus(count);
+            breakdown.addBonus(reported);
         }
         // Tell the player about the bonus too. The Produce phase notifies only the recipe's own
         // deterministic Yield, so without this a cycle that granted one base plank plus four from
@@ -1793,7 +1801,7 @@ public final class StationService {
         // station pays, which reads as the reward not working rather than the toast being wrong.
         // Not flagged lucky: this is ordinary output of the cycle, just more of it.
         if (s.playerRef != null) {
-            notifyItemGain(s.playerRef, itemId, count, false);
+            notifyItemGain(s.playerRef, itemId, reported, false);
         }
     }
 

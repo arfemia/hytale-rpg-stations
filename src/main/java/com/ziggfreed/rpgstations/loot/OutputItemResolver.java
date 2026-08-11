@@ -48,4 +48,24 @@ public final class OutputItemResolver {
         }
         return granted;
     }
+
+    /**
+     * The ONE number a resolved {@code OutputItems} count may be REPORTED as: how many items
+     * actually reached the player. {@code resolved} when the grant landed (inventory, or the ground
+     * when the inventory was full), {@code 0} when it did not.
+     *
+     * <p>Split out from the grant call site because "how many were rolled" and "how many were
+     * received" are different facts, and every consumer of the number - the session item ledger, the
+     * produced row's yield breakdown, and the item-gain toast - must read the SECOND one. A grant
+     * result that merely says a drop was ATTEMPTED is how a lost stack came to be announced as a
+     * reward, so the caller passes the {@code landed} answer only a
+     * {@code util.ItemGrantUtil#grantOrDrop}-shaped grant can give, and every consumer reads what
+     * this returns rather than the rolled count beside it.
+     *
+     * @param resolved the whole-item count {@link #resolve} produced for this cycle
+     * @param landed   whether the stack genuinely reached the player
+     */
+    public static int reportable(int resolved, boolean landed) {
+        return landed && resolved > 0 ? resolved : 0;
+    }
 }
