@@ -30,7 +30,7 @@ import com.ziggfreed.common.codec.Vec3;
  * that isn't one, e.g. a plain {@code STRING}/{@code DOUBLE} primitive, or the ref-or-inline
  * {@code ContainedAssetCodec} used by {@code ActionDef.Ref}/{@code LootRef.Lootables}/
  * {@code Stamp.Stats.Pool} - none of those wrap a further {@code BuilderCodec}, so the walk
- * naturally stops there). A shared leaf codec ({@link Vec3#CODEC}, {@link Condition#CODEC},
+ * naturally stops there). A shared leaf codec ({@link Vec3#CODEC}, {@link Conditions#CODEC},
  * {@link Presentation#CODEC}, ...) embedded at several owner sites is walked once via an
  * identity-based visited set, not once per owner - it is documented once, not per reference.
  */
@@ -88,7 +88,7 @@ class AssetDocumentationCoverageTest {
 
     private static void walk(String path, BuilderCodec<?> codec, List<String> undocumented,
             List<String> narrated, Set<BuilderCodec<?>> visited) {
-        // Identity-based: a shared leaf codec (Vec3.CODEC, Condition.CODEC, Presentation.CODEC, ...)
+        // Identity-based: a shared leaf codec (Vec3.CODEC, Conditions.CODEC, Presentation.CODEC, ...)
         // reached from several owners is checked once, not re-flagged per reference site.
         if (!visited.add(codec)) {
             return;

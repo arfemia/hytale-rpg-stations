@@ -15,10 +15,10 @@ import org.junit.jupiter.api.Test;
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 import com.ziggfreed.common.codec.Rotation;
+import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
-import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
@@ -441,7 +441,7 @@ public class StationValidatorTest {
 
     @Test
     void unknownFactor_flaggedOnBothTheStationAndTheActionGate() {
-        Requires reqs = Requires.of(null, new Condition[] {Condition.of("yourmod:missing", null, 1.0, null)});
+        Requires reqs = Requires.of(null, new FactorCondition[] {FactorCondition.of("yourmod:missing", null, 1.0, null)});
         StationAsset stationGate = station("stationgate", ActionDef.of("Mill").withRecipe(trunkRecipe()))
                 .withRequires(reqs);
         StationAsset actionGate = station("actiongate",

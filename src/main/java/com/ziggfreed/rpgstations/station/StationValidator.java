@@ -29,6 +29,8 @@ import com.hypixel.hytale.server.core.modules.interaction.interaction.config.Roo
 import com.hypixel.hytale.server.core.modules.item.ItemModule;
 import com.hypixel.hytale.server.npc.NPCPlugin;
 import com.ziggfreed.common.codec.Rotation;
+import com.ziggfreed.common.entity.PlayerModelService;
+import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.rpgstations.api.FindingSink;
 import com.ziggfreed.rpgstations.api.ValidationHook;
 import com.ziggfreed.rpgstations.api.ValidationScope;
@@ -38,7 +40,6 @@ import com.ziggfreed.rpgstations.api.impl.ValidationHookRegistryImpl;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
-import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
@@ -63,7 +64,6 @@ import com.ziggfreed.rpgstations.util.Log;
 import com.ziggfreed.rpgstations.validation.Finding;
 import com.ziggfreed.rpgstations.validation.Report;
 import com.ziggfreed.rpgstations.validation.Severity;
-import com.ziggfreed.common.entity.PlayerModelService;
 
 /**
  * Read-only content diagnostic for station assets (design section 4.1), over the local
@@ -74,7 +74,8 @@ import com.ziggfreed.common.entity.PlayerModelService;
  * registered {@code api.ValidationHook} ({@link #runHooks}) when the rule needs to see content, or
  * in that mod's own validator otherwise. Nothing in here branches on a foreign id. The lang-key
  * presence check runs against this mod's own {@link RpgStationsLangKeys}, and the gate check is a
- * factor-known check over this mod's own {@link Requires}/{@link Condition}.
+ * factor-known check over this mod's own {@link Requires} and its shared
+ * {@link FactorCondition} gate leaves.
  *
  * <p><b>Scope-2 rewrite (leg A4, design {@code raw/rpg-stations-scope2-unified-design-2026-07-23
  * .md} section 1.9, gate outcomes binding):</b> every check touching the reshaped
@@ -1992,7 +1993,7 @@ public final class StationValidator {
      * {@code "hytale:stat"} factor id, so a ladder composing two different stat channels (the documented
      * equal-weight composition shape) would emit a spurious note at every boot. Only a genuinely
      * repeated pair fires, which in practice means a param-less zero-arg engine factor named twice
-     * (e.g. {@code rpgstations:cycle_count} in both a Condition and a Chance.Factors entry).
+     * (e.g. {@code rpgstations:cycle_count} in both a {@code Conditions} entry and a Chance.Factors entry).
      *
      * <p>Composition rules that depend on what specific ids MEAN - "these two ids are two views of
      * the same underlying number, never compose both" - belong to whichever mod owns that
@@ -2004,7 +2005,7 @@ public final class StationValidator {
         Set<String> seen = new HashSet<>();
         Set<String> reported = new HashSet<>();
         if (roll.getConditions() != null) {
-            for (Condition c : roll.getConditions()) {
+            for (FactorCondition c : roll.getConditions()) {
                 if (c != null) {
                     noteFactorPair(c.getFactor(), c.getParam(), seen, reported, label, id, out);
                 }
@@ -2089,13 +2090,13 @@ public final class StationValidator {
         }
     }
 
-    private static void checkConditionFactors(@Nullable Condition[] conditions, @Nonnull String label,
+    private static void checkConditionFactors(@Nullable FactorCondition[] conditions, @Nonnull String label,
                                               @Nonnull String id, @Nonnull Predicate<String> factorKnown,
                                               @Nonnull List<Finding> out) {
         if (conditions == null) {
             return;
         }
-        for (Condition c : conditions) {
+        for (FactorCondition c : conditions) {
             if (c == null || c.getFactor() == null || c.getFactor().isBlank()) {
                 continue;
             }
@@ -2623,7 +2624,7 @@ public final class StationValidator {
 
     /**
      * The shared {@code Requires} check, run against BOTH the station's entry gate and each
-     * action's own (the two are ANDed at engage, neither defaults the other): a {@code Condition}
+     * action's own (the two are ANDed at engage, neither defaults the other): a {@code FactorCondition}
      * referencing an unregistered factor id warns ({@code UNKNOWN_FACTOR} - fail-open at validate
      * time since providers may register later, matching {@link #validate()}'s live entry point). No
      * permission-existence check is possible (permission nodes are free text).
@@ -2633,7 +2634,7 @@ public final class StationValidator {
         if (reqs == null || reqs.getConditions() == null) {
             return;
         }
-        for (Condition c : reqs.getConditions()) {
+        for (FactorCondition c : reqs.getConditions()) {
             if (c == null || c.getFactor() == null || c.getFactor().isBlank()) {
                 continue;
             }

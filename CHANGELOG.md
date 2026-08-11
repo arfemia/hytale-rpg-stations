@@ -814,3 +814,29 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
   documentation site (a Next.js static export under `docs-site/`) was drafted and then retired
   before release in favor of this in-repo surface, so the shipped 0.1.0 docs are `README.md`, the
   `docs/` markdown guides, and `SCHEMA.md` only.
+
+### The factor vocabulary re-bases onto ziggfreed-common's shared core
+
+- Adopts `ziggfreed-common`'s shared factor vocabulary as the machinery behind this mod's own
+  factor surface, deleting the duplicated engine on this side. The `api` types third parties code
+  against (`FactorRegistry`, `StationFactorProvider`, `FactorContext`) are unchanged and remain
+  source-compatible: a registration written against them keeps compiling and behaving identically,
+  and every authored schema key stays byte-identical, so no content changes.
+  - The authored gate leaf `{Factor, Param?, Min?, Max?}` IS the shared `FactorCondition` now,
+    built through its codec factory so the `Factor` field keeps this mod's live
+    `rpgstations:factors` Asset Editor pick list. `asset/Conditions` holds the single codec
+    instance every gate site embeds.
+  - Registration gains owner attribution plus a per-provider failure ledger from the shared
+    registry, so an admin listing can name WHICH mod claimed a factor and whose provider keeps
+    failing; an unregistered id now warns once instead of resolving silently.
+  - `hytale:stat` is answered by the shared portable standard library (a straight read of the
+    acting entity's own stat map) rather than this mod's own copy of that read. The four
+    `hytale:tool_*` ids stay this engine's own, answered from the SESSION's tool snapshot, which is
+    the correct number at a station: same portable vocabulary, context-appropriate resolution.
+  - One bound-gate authority (`loot/FactorGate`) now backs every `Conditions` array evaluated
+    through a factor lookup, and the station `Requires` gate uses the shared array evaluator, which
+    names the factor that shut the gate in the deny log.
+  - Behavior note for `hytale:stat`: an unreadable stat (no live subject, an unregistered channel,
+    a blank `Param`) resolves as UNRESOLVABLE rather than `0`, so a bounds-less presence check on
+    it fails closed instead of passing. A `Min`-bounded gate and every summed `Factors` reference
+    behave exactly as before.

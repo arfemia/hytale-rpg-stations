@@ -11,18 +11,33 @@ is used.
   DIRECTLY (not back through this narrow public interface) for the engine-only extension reads
   each class's own javadoc documents (e.g. `FactorRegistryImpl.resolve`/`isKnown`,
   `StationValidator`'s known-factor check).
-- **[`FactorRegistryImpl`](FactorRegistryImpl.java)** - `ConcurrentHashMap<String,
-  StationFactorProvider>`, last-write-wins, id lowercased. `registerBuiltins()` (called once from
-  `RpgStationsPlugin#setup()`) registers every built-in - RpgStations dogfoods its OWN registry
-  rather than special-casing them. **A factor's NAMESPACE names the vocabulary's owner, not the
-  registrant**: `rpgstations:session_seconds`/`cycle_count` are session concepts (they exist only
-  because a session does), while every `hytale:` one is a straight native read that means the same
-  thing with no station involved - `tool_power` (an `ItemToolSpec` power, its native `GatherType`
-  passed as the `Param` so the addressing is explicit, defaulting to the station's own when omitted),
-  `tool_quality`, `tool_item_level`, `tool_durability_percent`, and `stat`. So two mods converging on a `hytale:` id is agreement, not a collision, and an author can
-  tell portability from the id alone. See `registerBuiltins()`'s javadoc for the full rule.
-  `resolve(...)` swallows a throwing provider (FINE log, returns `null`) - a bad third-party factor
-  provider must never crash a loot roll or a station gate check.
+- **[`FactorRegistryImpl`](FactorRegistryImpl.java)** - this mod's `FactorRegistry` surface over
+  the SHARED factor vocabulary in `ziggfreed-common` (`common.factor`), reached through
+  [`CoreFactorVocabulary`](CoreFactorVocabulary.java): the shared registry brings owner
+  attribution, per-provider failure counting, warn-once on an unregistered id, and the fail-closed
+  null sentinel, so none of that is re-derived here. Registration is last-write-wins, id
+  lowercased. `registerBuiltins()` (called once from `RpgStationsPlugin#setup()`) registers every
+  built-in - RpgStations dogfoods its OWN registry rather than special-casing them. **A factor's
+  NAMESPACE names the vocabulary's owner, not the registrant**: `rpgstations:session_seconds`/
+  `cycle_count` are session concepts (they exist only because a session does), while every
+  `hytale:` one is a straight native read that means the same thing with no station involved -
+  `tool_power` (an `ItemToolSpec` power, its native `GatherType` passed as the `Param` so the
+  addressing is explicit, defaulting to the station's own when omitted), `tool_quality`,
+  `tool_item_level`, `tool_durability_percent`, and `stat`. So two mods converging on a `hytale:`
+  id is agreement, not a collision, and an author can tell portability from the id alone. See
+  `registerBuiltins()`'s javadoc for the full rule. `resolve(...)` never propagates a throwing
+  provider - a bad third-party factor provider must never crash a loot roll or a station gate
+  check. `info()` exposes the ledger's owner + failure snapshot for an admin listing.
+- **[`CoreFactorVocabulary`](CoreFactorVocabulary.java)** - the ONE file that speaks both the
+  shared vocabulary and this mod's api types, because their simple names collide; everything else
+  names just one of them. It owns the shared registry instance, publishes a station evaluation as
+  the shared question (the station `FactorContext` rides as the PAYLOAD, with the store and the
+  acting entity also published as the shared subject leaves), and keeps a SECOND registry holding
+  the portable `hytale:` standard library so an id can be adopted wholesale
+  (`registerPortable`) without that library replacing the four tool ids this engine answers from
+  the SESSION's own tool snapshot. Same vocabulary, context-appropriate number: `hytale:stat`
+  forwards to the shared provider (which reads the acting entity's own stat map), the tool ids do
+  not.
 - **[`ContributionChannelRegistryImpl`](ContributionChannelRegistryImpl.java)** - the WRITE-side
   twin: a set of declared channel ids, lowercased, `registeredIds()` feeding the LIVE
   `rpgstations:channels` Asset-Editor dropdown exactly as `FactorRegistryImpl` feeds

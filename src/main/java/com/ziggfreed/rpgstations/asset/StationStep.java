@@ -13,6 +13,7 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.ziggfreed.common.factor.FactorCondition;
 
 /**
  * ONE step of a multi-action station's step PROGRAM, reshaped for scope-2 (design section 2.1,
@@ -47,7 +48,7 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 public final class StationStep {
 
     @Nullable protected String id;
-    @Nullable protected Condition[] conditions;
+    @Nullable protected FactorCondition[] conditions;
     @Nullable protected OnConditionFail onConditionFail;
     @Nullable protected String at;
     @Nullable protected Repeat repeat;
@@ -67,7 +68,7 @@ public final class StationStep {
             .appendInherited(new KeyedCodec<>("Id", Codec.STRING, false),
                     (o, v) -> o.id = v, o -> o.id, (o, p) -> o.id = p.id)
             .documentation("Unique step id within one action's Steps array; required when another step or extension insertion anchors on it.").add()
-            .appendInherited(new KeyedCodec<>("Conditions", new ArrayCodec<>(Condition.CODEC, Condition[]::new), false),
+            .appendInherited(new KeyedCodec<>("Conditions", new ArrayCodec<>(Conditions.CODEC, FactorCondition[]::new), false),
                     (o, v) -> o.conditions = v, o -> o.conditions, (o, p) -> o.conditions = p.conditions)
             .documentation("Gate re-checked at each iteration entry; a failing check runs OnConditionFail.").add()
             .appendInherited(new KeyedCodec<>("OnConditionFail", OnConditionFail.CODEC, false),
@@ -129,7 +130,7 @@ public final class StationStep {
     }
 
     @Nullable
-    public Condition[] getConditions() {
+    public FactorCondition[] getConditions() {
         return conditions;
     }
 

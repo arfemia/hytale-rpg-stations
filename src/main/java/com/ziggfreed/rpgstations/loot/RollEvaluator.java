@@ -5,7 +5,6 @@ import java.util.function.DoubleSupplier;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Roll;
 // FactorMath is in this same package (loot) - no import needed.
@@ -91,7 +90,7 @@ public final class RollEvaluator {
     @Nonnull
     public static Outcome evaluate(@Nonnull Roll roll, @Nonnull FactorLookup lookup,
             @Nonnull DoubleSupplier chanceRoll) {
-        if (!conditionsPass(roll.getConditions(), lookup)) {
+        if (!FactorGate.pass(roll.getConditions(), lookup::resolve)) {
             return Outcome.NONE;
         }
         if (!chancePasses(roll.getChance(), lookup, chanceRoll)) {
@@ -103,38 +102,6 @@ public final class RollEvaluator {
         Roll.Grants floorGrants = floor != null ? floor.getGrants() : null;
         Presentation floorPresentation = floor != null ? floor.getPresentation() : null;
         return new Outcome(true, topGrants, floorGrants, floorPresentation);
-    }
-
-    /** ALL conditions must pass; a null/empty array passes vacuously. Fails closed on an unresolvable factor. */
-    static boolean conditionsPass(@Nullable Condition[] conditions, @Nonnull FactorLookup lookup) {
-        if (conditions == null) {
-            return true;
-        }
-        for (Condition c : conditions) {
-            if (c == null) {
-                continue;
-            }
-            if (!conditionPasses(c, lookup)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /** A blank {@code Factor} passes vacuously; an unresolvable one fails closed. */
-    static boolean conditionPasses(@Nonnull Condition c, @Nonnull FactorLookup lookup) {
-        String factorId = c.getFactor();
-        if (factorId == null || factorId.isBlank()) {
-            return true;
-        }
-        Double value = lookup.resolve(factorId, c.getParam());
-        if (value == null) {
-            return false;
-        }
-        if (c.getMin() != null && value < c.getMin()) {
-            return false;
-        }
-        return c.getMax() == null || value <= c.getMax();
     }
 
     /**

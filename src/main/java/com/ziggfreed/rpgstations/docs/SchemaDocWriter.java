@@ -20,10 +20,9 @@ import com.hypixel.hytale.codec.WrappedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.builder.BuilderField;
 import com.hypixel.hytale.codec.codecs.EnumCodec;
-
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
-import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.rpgstations.asset.Conditions;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.FactorRef;
@@ -122,7 +121,7 @@ public final class SchemaDocWriter {
         register("FactorRef", FactorRef.CODEC);
         register("LootRef", LootRef.CODEC);
         register("Roll", Roll.CODEC);
-        register("Condition", Condition.CODEC);
+        register("Condition", Conditions.CODEC);
         register("Custody", Custody.CODEC);
         register("Puppet", Puppet.CODEC);
         register("Requires", Requires.CODEC);

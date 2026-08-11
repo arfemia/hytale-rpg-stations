@@ -66,11 +66,11 @@ resolution section for the engine half.
   - no expression nesting (standing directive 3's boundary). `FactorRef.stat(statId)` is the
   convenience for the `{"Factor":"hytale:stat","Param":"<StatId>"}` shape the loot-formula middle
   path uses (the `stat` factor provider itself is `loot/`'s scope, registered by
-  `RpgStationsPlugin`). `FactorRef` is the ADD/scale sibling of [`Condition`](Condition.java)
-  (below): `Condition` is a factor reference PLUS gate bounds (`Min`/`Max`); `FactorRef` is a
+  `RpgStationsPlugin`). `FactorRef` is the ADD/scale sibling of the shared gate leaf
+  (`Conditions`, below): that leaf is a factor reference PLUS gate bounds (`Min`/`Max`); `FactorRef` is a
   factor reference PLUS a `Weight`. An unregistered factor id resolves to 0 (fail-closed), never a
   throw.
-- **[`Contribution`](Contribution.java)** - the WRITE-side twin of `FactorRef`/`Condition`, and the
+- **[`Contribution`](Contribution.java)** - the WRITE-side twin of `FactorRef`/the gate leaf, and the
   ONE outbound numeric-post leaf: `{Channel, Param?, Amount}`. Where a `Factor` asks a registered
   provider for a number, a `Contribution` hands a number OUT - the engine forwards
   `{Channel, Param, Amount}` verbatim on `StationCycleCompletedEvent` and **never resolves a channel
@@ -90,9 +90,15 @@ resolution section for the engine half.
   as well as an id (the ref-or-inline surface below). See the `Roll`/`ActionDef` bullets for the
   concern boundary: `LootRef`/`Roll` decide what ELSE a cycle hands over, never how much of the
   cycle's own output it made (that is `Recipe.Yield`'s job alone).
-- **[`Condition`](Condition.java)** - `{Factor, Param?, Min?, Max?}`, the ONE
+- **[`Conditions`](Conditions.java)** - `{Factor, Param?, Min?, Max?}`, the ONE
   GATE leaf both `Requires.Conditions` (station/action start gate) and every `Roll`/`StationStep`
-  `Conditions` array evaluate over the api `FactorRegistry`. An unregistered factor id fails
+  `Conditions` array evaluate over the api `FactorRegistry`. The TYPE is `ziggfreed-common`'s
+  shared `FactorCondition` (one gate schema across every engine reading the shared factor
+  vocabulary); this class holds the single codec instance, built through that type's codec factory
+  so the `Factor` field carries THIS mod's live `rpgstations:factors` dropdown. Every embed site
+  references `Conditions.CODEC` - calling the factory again would publish the same shape twice.
+  Evaluation is `loot/FactorGate` (lookup-based sites) or the shared array evaluator (the
+  `Requires` gate, which resolves against the registry directly). An unregistered factor id fails
   CLOSED (a gate on a server without the referencing mod installed stays locked, never silently
   open) - never a second condition schema.
 - **REF-OR-INLINE (`CHILD_ASSET_CODEC`)** - three leaves that reference one of THIS mod's own
@@ -160,7 +166,7 @@ resolution section for the engine half.
   - `Identity` - name/desc/icon keys, shown at engage and any station-listing UI.
   - `Block` - `{Exclusive?}` (default true): one worker per placed block is a property of the
     block, never of the job run at it.
-  - `Requires` - the STATION-entry gate (permission + factor `Condition`s), evaluated once at
+  - `Requires` - the STATION-entry gate (permission + factor `Conditions`), evaluated once at
     engage and ANDed with the engaged action's own `Requires`. It is deliberately NOT a default:
     an action authoring none is gated by this one alone.
   - `Flairs` - a named cosmetic flair overrides map (per-flair-id, `{Moments}`), consulted by
@@ -693,7 +699,7 @@ resolution section for the engine half.
   switch already means). Deliberately NON-extensible (server-global singleton). Folded into
   `station.SettingsCatalog`.
 - **[`Requires`](Requires.java)** - `{Permission?, Conditions?[]}`, evaluated at station/action
-  start; any failing `Condition` denies with `ui.station.locked`.
+  start; any failing condition denies with `ui.station.locked`.
 
 ## The authoring layer on every codec
 
@@ -703,7 +709,7 @@ they land per-leaf and are never a parallel table that can drift from the codec:
 - **`.documentation("...")` on EVERY leaf.** Every `KeyedCodec` leaf reachable from the seven
   Pattern A `CODEC` statics carries a description of what the leaf does plus its default/unit;
   `AssetDocumentationCoverageTest` walks `BuilderCodec#getEntries()` (unwrapping array/map codecs
-  down to nested `BuilderCodec`s, identity-deduped so a shared leaf like `Vec3`/`Condition`/
+  down to nested `BuilderCodec`s, identity-deduped so a shared leaf like `Vec3`/`Conditions`/
   `Presentation` is checked once) and FAILS THE BUILD on a blank one. It also scans every
   `.documentation(...)` string for internal process narration (decision numbers, wave labels,
   session dates), since those strings ship in the jar schema AND the generated schema reference

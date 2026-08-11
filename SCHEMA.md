@@ -796,10 +796,10 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Factor` | `string` | `null` | The namespaced factor channel id to gate on. Unregistered = fails CLOSED (the gate never silently opens). |
-| `Param` | `string` | `null` | Optional provider-interpreted argument, opaque to this engine (for the built-in 'hytale:stat' factor, a registered EntityStatType channel id; for a third-party factor, whatever that provider documents). |
-| `Min` | `double` | `null` | Lower bound (inclusive); the resolved factor value must be >= Min. Omit for no lower bound. |
-| `Max` | `double` | `null` | Upper bound (inclusive); the resolved factor value must be <= Max. Omit for no upper bound. |
+| `Factor` | `string` | `null` | The namespaced factor id to gate on. An id nobody registered cannot resolve, so the gate fails CLOSED and the content stays hidden. |
+| `Param` | `string` | `null` | Optional provider-interpreted argument, opaque here - whatever the factor's own owner documents (a stat id, an item id, a tag). |
+| `Min` | `double` | `null` | Lower bound, inclusive: the resolved value must be >= Min. Omit for no lower bound. |
+| `Max` | `double` | `null` | Upper bound, inclusive: the resolved value must be <= Max. Omit for no upper bound. |
 
 <a id="type-custody"></a>
 ## Custody

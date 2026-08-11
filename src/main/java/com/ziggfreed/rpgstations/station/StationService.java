@@ -60,38 +60,40 @@ import com.hypixel.hytale.server.core.modules.interaction.interaction.config.Int
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.RootInteraction;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
-import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.ParticleUtil;
+import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.accessor.BlockAccessor;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.core.util.NotificationUtil;
 import com.ziggfreed.common.camera.CameraShakeService;
-import com.ziggfreed.common.effect.AppliedEffectTracker;
-import com.ziggfreed.common.effect.NativeEffectUtil;
-import com.ziggfreed.common.interaction.NativeChainFire;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.cast.WorldKeyedQueues;
 import com.ziggfreed.common.cast.step.CastKernel;
+import com.ziggfreed.common.codec.Rotation;
+import com.ziggfreed.common.codec.Vec3;
+import com.ziggfreed.common.effect.AppliedEffectTracker;
+import com.ziggfreed.common.effect.NativeEffectUtil;
 import com.ziggfreed.common.entity.PuppetNav;
 import com.ziggfreed.common.entity.performer.PerformerReconciler;
+import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.common.feedback.Notify;
 import com.ziggfreed.common.feedback.PickupMimic;
 import com.ziggfreed.common.i18n.Msg;
 import com.ziggfreed.common.i18n.NativeNames;
+import com.ziggfreed.common.interaction.NativeChainFire;
 import com.ziggfreed.common.inventory.InventoryGrant;
 import com.ziggfreed.common.sound.Sound3D;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.common.util.NumberFormatter;
 import com.ziggfreed.rpgstations.api.EnhanceLine;
 import com.ziggfreed.rpgstations.api.FactorContext;
+import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.api.SummaryContext;
 import com.ziggfreed.rpgstations.api.SummaryDecorateContext;
 import com.ziggfreed.rpgstations.api.SummaryEnricher;
-import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.SummaryEnricherRegistryImpl;
 import com.ziggfreed.rpgstations.asset.ActionDef;
-import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.EffectRef;
@@ -99,20 +101,18 @@ import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
-import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
-import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
 import com.ziggfreed.rpgstations.loot.FactorSnapshot;
 import com.ziggfreed.rpgstations.loot.LootEngine;
 import com.ziggfreed.rpgstations.loot.OutputItemResolver;
-import com.ziggfreed.rpgstations.ui.StationSummaryHud;
 import com.ziggfreed.rpgstations.pages.PickerCategories;
 import com.ziggfreed.rpgstations.pages.RpgStationPickerPage;
+import com.ziggfreed.rpgstations.ui.StationSummaryHud;
 import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.ItemDropUtil;
 import com.ziggfreed.rpgstations.util.ItemGrantUtil;
@@ -5262,7 +5262,8 @@ public final class StationService {
     /**
      * Checks {@code reqs} against {@code playerRef}: a blank/absent {@link Requires#getPermission()}
      * always passes; a null/empty {@link Requires#getConditions()} always passes. Every
-     * condition must pass (see {@link #conditionPasses}), resolved against a fresh pre-session
+     * condition must pass (the shared array evaluator, which names the first factor that shut the
+     * gate so the deny can be logged usefully), resolved against a fresh pre-session
      * {@link FactorContext} (the api {@link FactorRegistryImpl} - a degenerate context since no
      * session exists yet: {@code sessionSeconds}/{@code cycleIndex} 0, held-tool power/durability
      * not read here since no shipped station authors a tool-power gate condition; a player-standing
@@ -5282,7 +5283,7 @@ public final class StationService {
         if (permission != null && !permission.isBlank() && !playerRef.hasPermission(permission)) {
             return false;
         }
-        Condition[] conditions = reqs.getConditions();
+        FactorCondition[] conditions = reqs.getConditions();
         if (conditions == null || conditions.length == 0) {
             return true;
         }
@@ -5300,38 +5301,17 @@ public final class StationService {
                 .contributions(contributionParams(asset.getId(),
                         ActionResolver.actionTargetId(asset, action.getActionId()), action.getWork()))
                 .build();
-        FactorLookup lookup = (factorId, param) -> FactorRegistryImpl.getInstance().resolve(factorId, param, ctx);
-        for (Condition c : conditions) {
-            if (c == null) {
-                continue;
+        String failed = FactorRegistryImpl.getInstance().firstFailedCondition(conditions, ctx);
+        if (failed != null) {
+            if (!FactorRegistryImpl.getInstance().isKnown(failed)) {
+                Log.warn("STATION Requires condition references unknown factor '" + failed
+                        + "' - denying (fail closed)");
+            } else {
+                Log.fine("STATION Requires condition on factor '" + failed + "' not met - denying");
             }
-            if (!conditionPasses(c, lookup)) {
-                return false;
-            }
+            return false;
         }
         return true;
-    }
-
-    /**
-     * Pure(r) condition check over an injected {@link FactorLookup} (unit-testable without a
-     * live server): a null/blank {@code Factor} passes vacuously (an authoring mistake, not a
-     * gate); an unresolvable factor id (the lookup returns null) FAILS CLOSED; otherwise the
-     * resolved value must clear both {@code Min} (if authored) and {@code Max} (if authored).
-     */
-    static boolean conditionPasses(@Nonnull Condition c, @Nonnull FactorLookup lookup) {
-        String factorId = c.getFactor();
-        if (factorId == null || factorId.isBlank()) {
-            return true;
-        }
-        Double value = lookup.resolve(factorId, c.getParam());
-        if (value == null) {
-            Log.warn("STATION Requires condition references unknown factor '" + factorId + "' - denying (fail closed)");
-            return false;
-        }
-        if (c.getMin() != null && value < c.getMin()) {
-            return false;
-        }
-        return c.getMax() == null || value <= c.getMax();
     }
 
     // ==================== Helpers ====================

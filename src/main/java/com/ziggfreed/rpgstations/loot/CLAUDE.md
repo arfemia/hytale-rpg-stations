@@ -50,6 +50,16 @@ the engine UNROUNDED and resolves once per cycle (`OutputItemResolver`, below).
   must stay in lockstep. Its `chancePasses` is PUBLIC on purpose: it is the ONE chance-gate
   authority every `Roll.Chance` site (an action's `Bonus`, a `StationStep.Roll` phase) reuses
   rather than growing a second, subtly-different percent gate.
+- **[`FactorGate`](FactorGate.java)** - the ONE bound-gate core, the gate twin of `FactorMath`'s
+  weighted sum: every `Conditions` array evaluated through an injected `(factorId, param) ->
+  Double` lookup goes through it (a `Roll`'s gate here, a `StationStep`'s gate in
+  `station.StationStepDecisions`), so identical JSON gates identically wherever it is authored. The
+  bound TABLE itself is the shared leaf's own `FactorCondition.accepts`, not rewritten here; what
+  this class adds is the walk - a null/empty array passes, a BLANK entry is skipped (a
+  half-authored line is a validator finding, not an invisible content blackout), and an
+  unresolvable factor or an out-of-bounds value fails CLOSED. The station `Requires` gate resolves
+  against the registry directly, so it uses the shared array evaluator instead (which also names
+  the factor that shut the gate, for the deny log).
 - **[`FactorLadder`](FactorLadder.java)** - the ONE ladder core: "sum the weighted factors, pick the
   reached floor", called by EVERY ladder-shaped consumer in the schema (`RollEvaluator.highestFloor`
   here, `station.ContributionScaling.multiplier` for an action's `ContributionScale`). It exists

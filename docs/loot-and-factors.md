@@ -177,8 +177,10 @@ read the engine itself already performs:
 `Param` names a registered native `EntityStatType` - a vanilla one such as `Mana`, or any channel
 another mod registers. Because this reads the NATIVE stat substrate directly, **any mod that writes a
 native stat participates in loot formulas with zero bridge code** - RPG Stations never needs to know
-that mod exists, and the `hytale:stat` factor has no allowlist. An id nothing registers resolves to 0
-(fail-closed), so a formula written for a mod that is not installed just contributes nothing.
+that mod exists, and the `hytale:stat` factor has no allowlist. An id nothing registers cannot be
+resolved at all: it contributes nothing to a summed `Factors` array, and it fails a `Conditions`
+gate CLOSED, so a formula written for a mod that is not installed stays inert rather than springing
+a gate open.
 
 ### Item-carried stat bonuses
 

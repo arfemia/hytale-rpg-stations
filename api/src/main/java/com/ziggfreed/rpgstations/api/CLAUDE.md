@@ -20,7 +20,7 @@ id; some other mod owns what that id means. Nothing else about extension needs e
 | | READ - factors | WRITE - contributions |
 |---|---|---|
 | authored leaf | `{"Factor": "<ns>:<id>", "Param": "<opaque>"}` | `{"Channel": "<ns>:<id>", "Param": "<opaque>", "Amount": <double>}` |
-| asset type | `asset/FactorRef`, `asset/Condition` | `asset/Contribution` |
+| asset type | `asset/FactorRef`, `asset/Conditions` (the shared `FactorCondition` leaf) | `asset/Contribution` |
 | api type | [`StationFactorProvider`](StationFactorProvider.java) + [`FactorContext`](FactorContext.java) | [`StationContribution`](StationContribution.java) |
 | registry | [`FactorRegistry`](FactorRegistry.java)`.register(id, provider)` | [`ContributionChannelRegistry`](ContributionChannelRegistry.java)`.declare(id)` |
 | api accessor | `RpgStationsApi.factors()` | `RpgStationsApi.channels()` |
@@ -75,11 +75,18 @@ is the exact inverse of a permanently-opaque channel.
   conditional-lootable `Roll` (Conditions/Chance/Ladder) and every station `Requires` gate
   evaluates over. `register(factorId, provider)` is last-write-wins, id lowercased.
   `StationFactorProvider.resolve(ctx, param)` runs synchronously on the world thread and must not
-  retain `ctx`. RpgStations registers its own built-ins under the `rpgstations:` namespace
+  retain `ctx`. **These three api types are the STABLE surface; the vocabulary underneath them is
+  `ziggfreed-common`'s shared factor core** (`api/impl/CoreFactorVocabulary` adapts one to the
+  other, carrying this `FactorContext` as the shared question's payload), which is where owner
+  attribution, per-provider failure counting, and the fail-closed null sentinel come from - a
+  registration written against this interface is unaffected either way.
+  RpgStations registers its own built-ins under the `rpgstations:` namespace
   (`rpgstations:session_seconds`/`rpgstations:cycle_count`) plus the native-vocabulary ones
   (`hytale:tool_power`/`hytale:tool_quality`/`hytale:tool_item_level`/
-  `hytale:tool_durability_percent`) and the mod-agnostic
-  `stat` factor, whose `Param` addresses any registered native `EntityStatType`; an external id is
+  `hytale:tool_durability_percent`, each answered from the SESSION's own tool snapshot, which is
+  the right answer at a station) and the mod-agnostic
+  `stat` factor, adopted wholesale from the shared portable standard library, whose `Param`
+  addresses any registered native `EntityStatType`; an external id is
   namespace-prefixed by convention (`yourmod:reputation`). An unknown factor at runtime fails a
   `Condition` CLOSED (roll does not fire) and resolves a `Chance`/`Ladder` value to 0, each with a
   one-time warn.

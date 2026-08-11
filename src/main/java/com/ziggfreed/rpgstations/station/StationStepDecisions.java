@@ -9,9 +9,10 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.ziggfreed.common.entity.performer.WalkHandle;
-import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.StationStep;
+import com.ziggfreed.rpgstations.loot.FactorGate;
 import com.ziggfreed.rpgstations.loot.FactorMath;
 
 /**
@@ -89,21 +90,19 @@ final class StationStepDecisions {
     }
 
     /**
-     * Evaluate {@code conditions} against {@code lookup} (the SAME factor-lookup contract a
-     * station's {@code Requires} gate uses - {@link StationService#conditionPasses}), in order,
-     * short-circuiting on the first failure and resolving {@code onFail}'s effective result.
+     * Evaluate {@code conditions} against {@code lookup} through the shared {@link FactorGate}
+     * (the SAME bound table and blank-entry rule every other gate site in this mod uses), in
+     * order, short-circuiting on the first failure and resolving {@code onFail}'s effective
+     * result.
      */
     @Nonnull
-    static ConditionOutcome resolveConditionOutcome(@Nullable Condition[] conditions,
+    static ConditionOutcome resolveConditionOutcome(@Nullable FactorCondition[] conditions,
             @Nullable StationStep.OnConditionFail onFail, @Nonnull StationService.FactorLookup lookup) {
         if (conditions == null || conditions.length == 0) {
             return ConditionOutcome.PASS;
         }
-        for (Condition c : conditions) {
-            if (c == null) {
-                continue;
-            }
-            if (!StationService.conditionPasses(c, lookup)) {
+        for (FactorCondition c : conditions) {
+            if (!FactorGate.passes(c, lookup::resolve)) {
                 String effective = onFail != null ? onFail.effectiveResult() : StationStep.OnConditionFail.RESULT_FAIL;
                 return StationStep.OnConditionFail.RESULT_SKIP.equals(effective) ? ConditionOutcome.SKIP : ConditionOutcome.FAIL;
             }

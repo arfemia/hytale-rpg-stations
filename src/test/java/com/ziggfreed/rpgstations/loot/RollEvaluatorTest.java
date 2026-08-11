@@ -11,7 +11,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
-import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.rpgstations.asset.FactorRef;
 import com.ziggfreed.rpgstations.asset.Roll;
 
@@ -42,32 +42,6 @@ public class RollEvaluatorTest {
             out[i] = ref(factors[i]);
         }
         return out;
-    }
-
-    // ==================== conditionsPass / conditionPasses ====================
-
-    @Test
-    void conditionsPass_nullArray_passesVacuously() {
-        assertTrue(RollEvaluator.conditionsPass(null, lookup(Map.of())));
-    }
-
-    @Test
-    void conditionPasses_blankFactor_passesVacuously() {
-        assertTrue(RollEvaluator.conditionPasses(Condition.of("", null, null, null), lookup(Map.of())));
-    }
-
-    @Test
-    void conditionPasses_unresolvableFactor_failsClosed() {
-        assertFalse(RollEvaluator.conditionPasses(Condition.of("rpgstations:unknown", null, null, null), lookup(Map.of())));
-    }
-
-    @Test
-    void conditionPasses_minMaxBounds() {
-        Map<String, Double> values = Map.of("rpgstations:cycle_count", 10.0);
-        assertTrue(RollEvaluator.conditionPasses(Condition.of("rpgstations:cycle_count", null, 5.0, null), lookup(values)));
-        assertFalse(RollEvaluator.conditionPasses(Condition.of("rpgstations:cycle_count", null, 15.0, null), lookup(values)));
-        assertTrue(RollEvaluator.conditionPasses(Condition.of("rpgstations:cycle_count", null, null, 10.0), lookup(values)));
-        assertFalse(RollEvaluator.conditionPasses(Condition.of("rpgstations:cycle_count", null, null, 9.0), lookup(values)));
     }
 
     // ==================== chancePasses (scope-2: AddFactors is a weighted FactorRef[], summed) ====================
@@ -152,7 +126,7 @@ public class RollEvaluatorTest {
 
     @Test
     void evaluate_conditionsFail_producesNone() {
-        Roll roll = Roll.of("Cycle", new Condition[]{Condition.of("rpgstations:unknown", null, null, null)},
+        Roll roll = Roll.of("Cycle", new FactorCondition[]{FactorCondition.of("rpgstations:unknown", null, null, null)},
                 null, null, Roll.Grants.of(null, null));
         RollEvaluator.Outcome outcome = RollEvaluator.evaluate(roll, lookup(Map.of()), fixedRoll(0.0));
         assertFalse(outcome.isHit());
@@ -198,7 +172,7 @@ public class RollEvaluatorTest {
                         Roll.Ladder.Floor.of(25.0, t2, null)
                 });
         Roll ladderRoll = Roll.of("Cycle",
-                new Condition[]{Condition.of("rpgstations:cycle_count", null, 10.0, null)},
+                new FactorCondition[]{FactorCondition.of("rpgstations:cycle_count", null, 10.0, null)},
                 Roll.Chance.of(15.0, null, 100.0), ladder, null);
 
         Map<String, Double> earlySession = new HashMap<>();

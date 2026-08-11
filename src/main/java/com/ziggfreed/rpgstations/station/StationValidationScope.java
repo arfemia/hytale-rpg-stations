@@ -10,6 +10,7 @@ import java.util.Set;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.rpgstations.api.FactorRefView;
 import com.ziggfreed.rpgstations.api.RollView;
 import com.ziggfreed.rpgstations.api.StationContribution;
@@ -18,7 +19,6 @@ import com.ziggfreed.rpgstations.api.ValidationScope;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
-import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.FactorRef;
@@ -204,9 +204,9 @@ final class StationValidationScope implements ValidationScope {
             // The FLATTENED union, in the documented order: Conditions, then Chance.Factors,
             // then Ladder.Factors - the walk order a double-count lint reads as authoring order.
             List<FactorRefView> flat = new ArrayList<>();
-            Condition[] conditions = roll.getConditions();
+            FactorCondition[] conditions = roll.getConditions();
             if (conditions != null) {
-                for (Condition c : conditions) {
+                for (FactorCondition c : conditions) {
                     if (c != null && c.getFactor() != null && !c.getFactor().isBlank()) {
                         // A gate carries no Weight leaf; it reads its factor once, hence 1.0.
                         flat.add(new FactorRefView(c.getFactor(), c.getParam(), 1.0));

@@ -7,6 +7,7 @@ import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.ziggfreed.common.factor.FactorCondition;
 
 /**
  * The ONE weighted factor reference (scope-2 design section 1.3/4.2, decisions 20/29c): a
@@ -16,7 +17,7 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
  * {@code StationStep.Repeat.Factors}. Composition at every consumer is a flat weighted sum,
  * {@code sum(resolve(Factor, Param) * Weight)} - no expression nesting (directive 3's boundary).
  *
- * <p>This is the ADD/scale sibling of {@link Condition}: {@link Condition} is a factor reference
+ * <p>This is the ADD/scale sibling of {@link FactorCondition}: {@link FactorCondition} is a factor reference
  * PLUS gate bounds ({@code Min}/{@code Max}); {@code FactorRef} is a factor reference PLUS a
  * {@code Weight}. {@link #factor} is a namespaced id (e.g. {@code "hytale:stat"},
  * {@code "hytale:tool_power"}, {@code "yourmod:crop_quality"}); {@link #param} is an optional

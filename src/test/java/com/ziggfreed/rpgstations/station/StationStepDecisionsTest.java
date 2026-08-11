@@ -9,7 +9,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
-import com.ziggfreed.rpgstations.asset.Condition;
+import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.rpgstations.asset.FactorRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
@@ -224,26 +224,26 @@ public class StationStepDecisionsTest {
         assertEquals(StationStepDecisions.ConditionOutcome.PASS,
                 StationStepDecisions.resolveConditionOutcome(null, null, ALWAYS_TEN));
         assertEquals(StationStepDecisions.ConditionOutcome.PASS,
-                StationStepDecisions.resolveConditionOutcome(new Condition[0], null, ALWAYS_TEN));
+                StationStepDecisions.resolveConditionOutcome(new FactorCondition[0], null, ALWAYS_TEN));
     }
 
     @Test
     void conditions_allPass_resolvesPass() {
-        Condition[] conditions = {Condition.of("x", null, 5.0, null)};
+        FactorCondition[] conditions = {FactorCondition.of("x", null, 5.0, null)};
         assertEquals(StationStepDecisions.ConditionOutcome.PASS,
                 StationStepDecisions.resolveConditionOutcome(conditions, null, ALWAYS_TEN));
     }
 
     @Test
     void conditions_failWithNoOnConditionFail_defaultsToFail() {
-        Condition[] conditions = {Condition.of("x", null, 50.0, null)};
+        FactorCondition[] conditions = {FactorCondition.of("x", null, 50.0, null)};
         assertEquals(StationStepDecisions.ConditionOutcome.FAIL,
                 StationStepDecisions.resolveConditionOutcome(conditions, null, ALWAYS_TEN));
     }
 
     @Test
     void conditions_failWithSkipResult_resolvesSkip() {
-        Condition[] conditions = {Condition.of("x", null, 50.0, null)};
+        FactorCondition[] conditions = {FactorCondition.of("x", null, 50.0, null)};
         StationStep.OnConditionFail skip = StationStep.OnConditionFail.of(StationStep.OnConditionFail.RESULT_SKIP, null);
         assertEquals(StationStepDecisions.ConditionOutcome.SKIP,
                 StationStepDecisions.resolveConditionOutcome(conditions, skip, ALWAYS_TEN));
@@ -251,7 +251,7 @@ public class StationStepDecisionsTest {
 
     @Test
     void conditions_unknownFactor_failsClosed() {
-        Condition[] conditions = {Condition.of("unregistered:factor", null, null, null)};
+        FactorCondition[] conditions = {FactorCondition.of("unregistered:factor", null, null, null)};
         assertEquals(StationStepDecisions.ConditionOutcome.FAIL,
                 StationStepDecisions.resolveConditionOutcome(conditions, null, UNKNOWN));
     }

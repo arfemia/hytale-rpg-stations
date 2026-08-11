@@ -13,9 +13,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.server.core.Message;
-
 import com.ziggfreed.rpgstations.api.StationContribution;
-import com.ziggfreed.rpgstations.asset.Condition;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.Presentation;
@@ -25,8 +23,9 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
  * Pure tests for {@link StationService}'s extracted decision cores. Ported (trimmed) from the
  * MMO's {@code StationServiceTest} (RPG Stations extraction leg 2): the MMO-specific XP-factor-
  * breakdown tests and the {@code unlockedFlairIdsFrom}/{@code PlayerDataRepository} test are
- * dropped (that bookkeeping moved off {@code StationSession}, see its javadoc); the Requires
- * {@link Condition} evaluation tests are NEW this leg (design section 4.4.2).
+ * dropped (that bookkeeping moved off {@code StationSession}, see its javadoc). The {@code
+ * Requires} gate's own condition evaluation is covered by {@code loot.FactorGateTest}, which owns
+ * the one bound-gate authority every gate site in this mod shares.
  */
 public class StationServiceTest {
 
@@ -351,56 +350,6 @@ public class StationServiceTest {
     @Test
     void shouldPlayCompletion_silentZeroCycles_false() {
         assertFalse(StationService.shouldPlayCompletion(true, 0));
-    }
-
-    // ==================== Requires.Condition evaluation (new this leg, design section 4.4.2) ====================
-
-    @Test
-    void conditionPasses_blankFactor_passesVacuously() {
-        Condition c = Condition.of("", null, null, null);
-        assertTrue(StationService.conditionPasses(c, (factorId, param) -> 999.0));
-    }
-
-    @Test
-    void conditionPasses_unregisteredFactor_failsClosed() {
-        Condition c = Condition.of("hytale:tool_power", null, null, null);
-        assertFalse(StationService.conditionPasses(c, (factorId, param) -> null));
-    }
-
-    @Test
-    void conditionPasses_belowMin_fails() {
-        Condition c = Condition.of("mmoskilltree:skill_level", "WOODCUTTING", 15.0, null);
-        assertFalse(StationService.conditionPasses(c, (factorId, param) -> 10.0));
-    }
-
-    @Test
-    void conditionPasses_atOrAboveMin_passes() {
-        Condition c = Condition.of("mmoskilltree:skill_level", "WOODCUTTING", 15.0, null);
-        assertTrue(StationService.conditionPasses(c, (factorId, param) -> 15.0));
-        assertTrue(StationService.conditionPasses(c, (factorId, param) -> 20.0));
-    }
-
-    @Test
-    void conditionPasses_aboveMax_fails() {
-        Condition c = Condition.of("rpgstations:cycle_count", null, null, 10.0);
-        assertFalse(StationService.conditionPasses(c, (factorId, param) -> 11.0));
-    }
-
-    @Test
-    void conditionPasses_atOrBelowMax_passes() {
-        Condition c = Condition.of("rpgstations:cycle_count", null, null, 10.0);
-        assertTrue(StationService.conditionPasses(c, (factorId, param) -> 10.0));
-        assertTrue(StationService.conditionPasses(c, (factorId, param) -> 5.0));
-    }
-
-    @Test
-    void conditionPasses_paramForwardedToTheLookup() {
-        Condition c = Condition.of("mmoskilltree:skill_level", "MINING", 5.0, null);
-        assertTrue(StationService.conditionPasses(c, (factorId, param) -> {
-            assertEquals("mmoskilltree:skill_level", factorId);
-            assertEquals("MINING", param);
-            return 5.0;
-        }));
     }
 
     // ==================== Selection wave (decision 50/56): routing + category filter ====================

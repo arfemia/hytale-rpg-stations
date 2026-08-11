@@ -8,6 +8,7 @@ import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.ziggfreed.common.factor.FactorCondition;
 
 /**
  * ONE conditional-lootable roll: gate ({@code Conditions}/{@code Chance}) + payoff
@@ -73,7 +74,7 @@ public final class Roll {
     public static final String TRIGGER_COMPLETION = "Completion";
 
     @Nullable protected String trigger;
-    @Nullable protected Condition[] conditions;
+    @Nullable protected FactorCondition[] conditions;
     @Nullable protected Chance chance;
     @Nullable protected Ladder ladder;
     @Nullable protected Grants grants;
@@ -84,7 +85,7 @@ public final class Roll {
                     (o, v) -> o.trigger = v, o -> o.trigger, (o, p) -> o.trigger = p.trigger)
             .documentation("When this roll fires: 'Cycle' (per completed cycle, the default) or 'Completion' (at session stop).")
             .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:roll-trigger"))).add()
-            .appendInherited(new KeyedCodec<>("Conditions", new ArrayCodec<>(Condition.CODEC, Condition[]::new), false),
+            .appendInherited(new KeyedCodec<>("Conditions", new ArrayCodec<>(Conditions.CODEC, FactorCondition[]::new), false),
                     (o, v) -> o.conditions = v, o -> o.conditions, (o, p) -> o.conditions = p.conditions)
             .documentation("Gate: every Condition must pass (bounded factor checks) before the roll is considered.").add()
             .appendInherited(new KeyedCodec<>("Chance", Chance.CODEC, false),
@@ -112,14 +113,14 @@ public final class Roll {
     }
 
     @Nonnull
-    public static Roll of(@Nullable String trigger, @Nullable Condition[] conditions, @Nullable Chance chance,
+    public static Roll of(@Nullable String trigger, @Nullable FactorCondition[] conditions, @Nullable Chance chance,
             @Nullable Ladder ladder, @Nullable Grants grants) {
         return of(trigger, conditions, chance, ladder, grants, null);
     }
 
     /** As above, plus the roll-level celebration cue (see the smart-cue rule on this class). */
     @Nonnull
-    public static Roll of(@Nullable String trigger, @Nullable Condition[] conditions, @Nullable Chance chance,
+    public static Roll of(@Nullable String trigger, @Nullable FactorCondition[] conditions, @Nullable Chance chance,
             @Nullable Ladder ladder, @Nullable Grants grants, @Nullable Presentation presentation) {
         Roll r = new Roll();
         r.trigger = trigger;
@@ -137,7 +138,7 @@ public final class Roll {
     }
 
     @Nullable
-    public Condition[] getConditions() {
+    public FactorCondition[] getConditions() {
         return conditions;
     }
 

@@ -217,7 +217,7 @@ src/main/java/com/ziggfreed/rpgstations/
                              the rpg_station_use interaction, the frame-drain + damage-interrupt
                              systems, the death/disconnect teardown hooks; shutdown() -> stopAll
   api/impl/                  see api/impl/CLAUDE.md - the concrete registry/event-dispatch impl
-  asset/                     see asset/CLAUDE.md - StationAsset/LootableAsset/RpgStationsSettingsAsset/Presentation/Requires/Roll/Condition codecs
+  asset/                     see asset/CLAUDE.md - StationAsset/LootableAsset/RpgStationsSettingsAsset/Presentation/Requires/Roll/Conditions codecs
   station/                   see station/CLAUDE.md - the session engine (THE big package; the hard-won engine rules live here)
   loot/                      see loot/CLAUDE.md - LootEngine/RollEvaluator/FactorSnapshot/CommandRewardExecutor/LootableCatalog
   command/                    see command/CLAUDE.md - RpgStationsCommand (/rpgstations camera|validate, admin-gated)
@@ -284,8 +284,10 @@ reward they never received.
   (en-US only today; a locale fan-out needs no test change).
 - Orthogonal knobs, not modes; a union `Type`/`Surface`/`Trigger` discriminator between genuinely
   different code paths is not a mode.
-- DRY: shared codecs (`Condition`, `Roll`, `Presentation`) are ONE type reused everywhere they
-  apply, never duplicated per consumer.
+- DRY: shared codecs (the `Conditions` gate leaf, `Roll`, `Presentation`) are ONE type reused
+  everywhere they apply, never duplicated per consumer - and where `ziggfreed-common` already owns
+  a primitive (the factor vocabulary + its condition leaf), this mod adapts to it rather than
+  keeping a parallel copy.
 
 ## The progression-agnosticism paradigm (BINDS EVERYTHING)
 
@@ -302,7 +304,7 @@ names a namespaced id; some other mod owns what it means.
 | | READ - factors | WRITE - contributions |
 |---|---|---|
 | authored leaf | `{"Factor": "<ns>:<id>", "Param": "<opaque>"}` | `{"Channel": "<ns>:<id>", "Param": "<opaque>", "Amount": <double>}` |
-| asset type | `asset/FactorRef`, `asset/Condition` | `asset/Contribution` |
+| asset type | `asset/FactorRef`, `asset/Conditions` (common's `FactorCondition`) | `asset/Contribution` |
 | api type | `api/StationFactorProvider` + `api/FactorContext` | `api/StationContribution` |
 | registry | `FactorRegistry.register(id, provider)` | `ContributionChannelRegistry.declare(id)` |
 | api accessor | `RpgStationsApi.factors()` | `RpgStationsApi.channels()` |
@@ -364,7 +366,8 @@ between this engine and any mod that wants to hook it. Split by shape, per the n
 `implements IEvent<Void>`, dispatched `HytaleServer.get().getEventBus().dispatchFor(...)` +
 `hasListener()` on the world thread, fired from `station.StationEvents`); **request/response
 points are typed registries** on the static `RpgStationsApi` holder (`FactorRegistry` - the one
-extensible numeric vocabulary conditional lootables/`Requires` gates evaluate over;
+extensible numeric vocabulary conditional lootables/`Requires` gates evaluate over, this mod's
+stable surface over `ziggfreed-common`'s shared factor core;
 `FlairUnlockRegistry` - union of every registered per-player unlock provider;
 `SummaryEnricherRegistry` - extra ledger rows + a themeable decorate hook on the summary panel).
 See `api/CLAUDE.md` for the full type-by-type reference and `api/impl/CLAUDE.md` for the concrete

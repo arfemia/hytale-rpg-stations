@@ -48,7 +48,7 @@ public class AssetCodecInitTest {
     @Test
     void requiresAndConditionCodecs_initializeWithoutThrowing() {
         assertDoesNotThrow(() -> assertNotNull(Requires.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(Condition.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(Conditions.CODEC));
     }
 
     @Test
