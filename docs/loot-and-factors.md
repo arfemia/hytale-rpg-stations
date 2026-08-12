@@ -13,7 +13,7 @@ weighted **factor** vocabulary that also drives step iteration counts and enhanc
 "Bonus": { "Lootables": ["SawmillFinds"], "Rolls": [ /* inline Roll entries */ ] }
 ```
 
-`Lootables` references one or more standalone `Server/RpgStations/Lootables/<Name>.json` files (a
+`Lootables` references one or more standalone `Server/ZiggfreedCommon/Lootables/<Name>.json` files (a
 reusable table of rolls, shareable across stations); `Rolls` authors rolls directly at this site. Both
 resolve together when both are present - an action's own inline rolls run alongside every referenced
 table's rolls. `Yield` (on the action's `Recipe`) decides how much of the thing you made, deterministic
@@ -26,36 +26,36 @@ those two numbers in separate groups is deliberate, so neither can silently mult
 {
   "Trigger": "Cycle",
   "Conditions": [ { "Factor": "rpgstations:cycle_count", "Min": 3 } ],
-  "Chance":    { "BasePercent": 2, "Factors": [ { "Factor": "hytale:tool_power" } ], "CapPercent": 25 },
+  "Chance":    { "Base": 2, "Factors": [ { "Factor": "hytale:tool_power" } ], "Clamp": { "Max": 25 } },
   "Ladder":    { "Factors": [ { "Factor": "hytale:stat", "Param": "YourMod_Luck" },
                                { "Factor": "hytale:stat", "Param": "YourMod_Luck_Woods" } ],
                  "Floors": [ { "Min": 50,  "Grants": { "DropLists": ["SawmillFinds_T1"] } },
                              { "Min": 100, "Grants": { "DropLists": ["SawmillFinds_T2"] },
-                               "Presentation": { "Sounds": ["SFX_Coins_Land"] } } ] },
-  "Grants":    { "OutputItems": 1.5 },
-  "Presentation": { "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player"] }
+                               "Cue": "rare_find" } ] },
+  "Grants":    { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "1.5" } } ] },
+  "Cue": "cue:trophy"
 }
 ```
 
-`OutputItems` is fractional: `1.5` hands over one item every time plus a second half the time.
+the `rpgstations:output_items` reward is fractional: `1.5` hands over one item every time plus a second half the time.
 
 - `Trigger` - `Cycle` (default, once per completed work cycle) or `Completion` (once, at session
   stop). `Cycle` means THE action's cycle-completed moment whatever program shape it runs: an
   action driving the classic convert loop and one running an authored `Steps` program both fire it
-  once per completed pass. (`Grants.OutputItems` is the one payload an authored program cannot
+  once per completed pass. (the `rpgstations:output_items` reward is the one payload an authored program cannot
   honour, since such a program has no single cycle output to add copies of - see the table below.)
 - `Conditions` - a hard gate; every entry must pass a bounded factor check before the roll is even
   considered.
 - `Chance` - a probabilistic gate over the WHOLE roll (Ladder included):
-  `clamp(BasePercent + sum(resolve(factor) * Weight), 0, CapPercent)`, rolled once against a uniform
+  `clamp(Base + sum(resolve(factor) * Weight), 0, Clamp.Max)`, rolled once against a uniform
   0-100 sample. A failing Chance means nothing fires, and the Ladder is never even evaluated.
 - `Ladder` - an UNCAPPED, summed factor value looked up against a floor list; the HIGHEST reached
-  floor's own `Grants` and `Presentation` fire (a floor above a factor's "normal" range stays
+  floor's own `Grants` and `Cue` fire (a floor above a factor's "normal" range stays
   reachable via a multi-source stack). Floors are not cumulative: exactly one floor is reached, never
   several.
 - `Grants` - the reward vocabulary, below. Top-level `Grants` AND the reached floor's own `Grants` both
   apply when a Ladder is present.
-- `Presentation` - the roll's own celebration, played at the station block on the rare-find moment
+- `Cue` - a MOMENT ID the station plays at the block. The loot table names the moment; the action's own `Moments` map decides what it sounds like, and a flair overlays that. Well-known ids, a per-step `step:<actionId>:<stepId>`, and the open author-defined `cue:<yourName>` namespace all resolve. Played on the rare-find moment
   when the roll HITS. A Ladder floor carries the same leaf for its own tier, so a tiered find
   celebrates per tier and a plain chance roll celebrates on the win with no Ladder involved.
 
@@ -68,17 +68,17 @@ occasional surprise on top of whatever the cycle already pays:
 {
   "Trigger": "Cycle",
   "Chance": {
-    "BasePercent": 2,
+    "Base": 2,
     "Factors": [ { "Factor": "hytale:tool_power" } ],
-    "CapPercent": 25
+    "Clamp": { "Max": 25 }
   },
-  "Grants": { "OutputItems": 1 }
+  "Grants": { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "1" } } ] }
 }
 ```
 
-Chance resolves to `BasePercent` plus each factor's resolved value times its `Weight` (omitted, so
-`1.0`), clamped to `CapPercent`. Against the vanilla hatchets, whose Woods gather power runs `0.2` to
-`0.5`, that is a real 2.2 to 2.5 percent per cycle. `CapPercent` is doing real work even though no
+Chance resolves to `Base` plus each factor's resolved value times its `Weight` (omitted, so
+`1.0`), clamped to `Clamp.Max`. Against the vanilla hatchets, whose Woods gather power runs `0.2` to
+`0.5`, that is a real 2.2 to 2.5 percent per cycle. `Clamp.Max` is doing real work even though no
 vanilla tool comes near it: a modded tool with an extreme power value would otherwise push a
 flavourful proc towards a guarantee, and a cap is cheaper than trusting every future tool.
 
@@ -91,21 +91,21 @@ opinion about something the ladder already prices.
 
 ## The smart-cue rule: a celebration never plays over nothing
 
-A `Presentation` is always paired with the `Grants` group authored beside it - the roll's own
+A `Cue` is always paired with the `Grants` group authored beside it - the roll's own
 top-level `Grants` for the roll-level cue, the floor's own `Grants` for a floor cue:
 
 - **No `Grants` beside it** - a pure cue, played on the hit (or on the floor being reached), exactly
   as written.
 - **`Grants` beside it** - played only when applying them actually PRODUCED something: an item a
   referenced drop table's own internal weights really handed over, a command run, an effect applied,
-  an `OutputItems` amount tallied, or a contribution posted.
+  an the `rpgstations:output_items` reward amount tallied, or a contribution posted.
 
 The case this exists for: a `DropLists` entry points at a native table that carries its own internal
 empty weight, so a reached floor regularly grants nothing at all. Without the rule, a jackpot fanfare
 fires over an empty hand every time that happens. The two altitudes are judged independently, so a
 roll whose command grant landed still celebrates even when its floor's table paid nothing.
 
-A floor carrying ONLY a `Presentation` and no `Grants` is a blessed shape, not a mistake - it is the
+A floor carrying ONLY a `Cue` and no `Grants` is a blessed shape, not a mistake - it is the
 pure floor cue, a rung that announces itself without paying anything extra. The validator agrees:
 `LOOT_LADDER_FLOOR_EMPTY_GRANTS` warns only about a floor authoring NEITHER, since reaching that one
 genuinely does nothing. A floor authoring no positive `Min` is likewise legal and engine-honored - it
@@ -116,7 +116,7 @@ defaults to `0` and is therefore always reached, making it the ladder's baseline
 
 | Field | What it grants |
 |---|---|
-| `OutputItems` | ADDITIVE items of THIS cycle's own primary output, on top of the deterministic `Yield` quantity - additive, never a multiplier, so the two numbers stay directly comparable. **Fractional**: the whole part is granted every time and the fraction left over is the chance of one more, so `1.5` pays one item always plus a second half the time and averages exactly 1.5 per cycle (a half-step tool tier is therefore authorable on the ladder floor that earns it). Everything the cycle grants is summed before that single resolution, so two rolls paying `0.5` each average one whole item. Only meaningful on a `Cycle` trigger (the validator warns otherwise, and the engine drops it); a stack that cannot fit drops at the station block rather than vanishing. |
+| the `rpgstations:output_items` reward | ADDITIVE items of THIS cycle's own primary output, on top of the deterministic `Yield` quantity - additive, never a multiplier, so the two numbers stay directly comparable. **Fractional**: the whole part is granted every time and the fraction left over is the chance of one more, so `1.5` pays one item always plus a second half the time and averages exactly 1.5 per cycle (a half-step tool tier is therefore authorable on the ladder floor that earns it). Everything the cycle grants is summed before that single resolution, so two rolls paying `0.5` each average one whole item. Only meaningful on a `Cycle` trigger (the validator warns otherwise, and the engine drops it); a stack that cannot fit drops at the station block rather than vanishing. |
 | `DropLists` | Native `ItemDropList` asset ids, each rolled independently in authored order through the engine's own drop-list roller. See [Native Composition](native-composition.md), and the composition note below. |
 | `Commands` | Console commands, with `{player}`/`{uuid}`/`{station}`/`{action}`/`{cycles}` placeholders substituted. |
 | `Effects` | Native EntityEffects applied to the player, id-ref-only. See [Native Composition](native-composition.md). |
@@ -145,11 +145,11 @@ rather than anything this mod invents. Two container types do the work:
 > real item entry, which is usually what you wanted anyway (a guaranteed base payout alongside the
 > shared roll).
 
-## FactorRef: the one weighted-sum leaf
+## The factor TERM: the one weighted-sum leaf
 
 Every place a numeric factor is SUMMED - a Chance's `Factors`, a Ladder's `Factors`, a step's
 `Repeat.Factors`, an enhancement budget's `Factors`, an action's own `ContributionScale.Factors` - takes
-an array of `FactorRef`:
+an array of factor terms:
 
 ```json
 { "Factor": "hytale:stat", "Param": "YourMod_Luck", "Weight": 1.0 }

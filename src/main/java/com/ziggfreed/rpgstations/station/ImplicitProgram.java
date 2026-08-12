@@ -5,9 +5,9 @@ import java.util.List;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.ziggfreed.rpgstations.asset.LootRef;
+import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
-import com.ziggfreed.rpgstations.asset.Roll;
+import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**

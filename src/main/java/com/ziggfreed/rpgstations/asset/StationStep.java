@@ -14,6 +14,9 @@ import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 import com.ziggfreed.common.factor.FactorCondition;
+import com.ziggfreed.common.factor.FactorFormula;
+import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.stamp.StampSpec;
 
 /**
  * ONE step of a multi-action station's step PROGRAM, reshaped for scope-2 (design section 2.1,
@@ -374,7 +377,7 @@ public final class StationStep {
         @Nullable protected Integer times;
         @Nullable protected Integer min;
         @Nullable protected Integer max;
-        @Nullable protected FactorRef[] factors;
+        @Nullable protected FactorFormula.Term[] factors;
 
         public static final BuilderCodec<Repeat> CODEC = BuilderCodec.builder(Repeat.class, Repeat::new)
                 .appendInherited(new KeyedCodec<>("Times", Codec.INTEGER, false),
@@ -389,9 +392,11 @@ public final class StationStep {
                         (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max)
                 .documentation("Upper bound of the factor-resolved iteration count (the ranged route).")
                 .addValidator(CodecWarnValidators.positive("StationStep.Repeat.Max should be positive; a non-positive value floors to Min.")).add()
-                .appendInherited(new KeyedCodec<>("Factors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
+                .appendInherited(new KeyedCodec<>("Factors",
+                                new ArrayCodec<>(FactorFormula.Term.codec(AssetEditorDataSets.FACTORS),
+                                        FactorFormula.Term[]::new), false),
                         (o, v) -> o.factors = v, o -> o.factors, (o, p) -> o.factors = p.factors)
-                .documentation("Weighted factor references summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max).").add()
+                .documentation("Weighted factor terms summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max).").add()
                 .afterDecode((Repeat repeat, ExtraInfo extraInfo) -> {
                     if (repeat.times != null
                             && (repeat.min != null || repeat.max != null
@@ -413,7 +418,7 @@ public final class StationStep {
 
         @Nonnull
         public static Repeat of(@Nullable Integer times, @Nullable Integer min, @Nullable Integer max,
-                @Nullable FactorRef[] factors) {
+                @Nullable FactorFormula.Term[] factors) {
             Repeat r = new Repeat();
             r.times = times;
             r.min = min;
@@ -437,9 +442,9 @@ public final class StationStep {
             return max;
         }
 
-        /** Weighted factor references summed into the ranged count; null = a fixed {@link #times} (or a Min-only floor). */
+        /** Weighted factor terms summed into the ranged count; null = a fixed {@link #times} (or a Min-only floor). */
         @Nullable
-        public FactorRef[] getFactors() {
+        public FactorFormula.Term[] getFactors() {
             return factors;
         }
 
@@ -676,13 +681,15 @@ public final class StationStep {
      * The enhance-commit phase (design 9.5 / scope-2 3.8, the anvil's stamp step): the ONE
      * transaction commit, compute-then-commit by construction (enforced by the handler, not this
      * codec). Orthogonal payload leaves, any combination: {@link #durability} (RpgStations-native)
-     * and {@link #stats} (delegated to the api {@code EnhanceStamperRegistry}). {@link #reagents}
-     * are {@link Ingredient}s consumed FROM THE PLAYER'S INVENTORY at this step's commit.
+     * and {@link #stats} (the shared stat-roll + budget model, written through the registered
+     * stamper). {@link #reagents} are {@link Ingredient}s consumed FROM THE PLAYER'S INVENTORY at
+     * this step's commit, optionally scaled by {@link #economics}.
      */
     public static final class Stamp {
         @Nullable protected Ingredient[] reagents;
         @Nullable protected Durability durability;
-        @Nullable protected Stats stats;
+        @Nullable protected StampSpec stats;
+        @Nullable protected Economics economics;
 
         public static final BuilderCodec<Stamp> CODEC = BuilderCodec.builder(Stamp.class, Stamp::new)
                 .appendInherited(new KeyedCodec<>("Reagents", new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
@@ -692,17 +699,31 @@ public final class StationStep {
                 .appendInherited(new KeyedCodec<>("Durability", Durability.CODEC, false),
                         (o, v) -> o.durability = v, o -> o.durability, (o, p) -> o.durability = p.durability)
                 .documentation("RpgStations-native durability upgrade (AddMax). Real with no other mod installed.").add()
-                .appendInherited(new KeyedCodec<>("Stats", Stats.CODEC, false),
+                .appendInherited(new KeyedCodec<>("Stats", StampSpec.codec(AssetEditorDataSets.FACTORS), false),
                         (o, v) -> o.stats = v, o -> o.stats, (o, p) -> o.stats = p.stats)
-                .documentation("The composable stat-roll + cap model, delegated to the registered EnhanceStamper.").add()
+                .documentation("The composable stat-roll + budget model: which entries are candidates (a shared roll "
+                        + "pool, inline entries, or both), how many are picked, and the ceilings the result is held "
+                        + "under. The points are written onto the item by whichever stamper this server registered.").add()
+                .appendInherited(new KeyedCodec<>("Economics", Economics.CODEC, false),
+                        (o, v) -> o.economics = v, o -> o.economics, (o, p) -> o.economics = p.economics)
+                .documentation("Reagent-cost scaling per prior stamp count; never affects the point budget.").add()
                 .build();
 
         @Nonnull
-        public static Stamp of(@Nullable Ingredient[] reagents, @Nullable Durability durability, @Nullable Stats stats) {
+        public static Stamp of(@Nullable Ingredient[] reagents, @Nullable Durability durability,
+                @Nullable StampSpec stats) {
+            return of(reagents, durability, stats, null);
+        }
+
+        /** As above, plus the reagent-cost scaling applied to {@code reagents}. */
+        @Nonnull
+        public static Stamp of(@Nullable Ingredient[] reagents, @Nullable Durability durability,
+                @Nullable StampSpec stats, @Nullable Economics economics) {
             Stamp s = new Stamp();
             s.reagents = reagents;
             s.durability = durability;
             s.stats = stats;
+            s.economics = economics;
             return s;
         }
 
@@ -718,8 +739,14 @@ public final class StationStep {
         }
 
         @Nullable
-        public Stats getStats() {
+        public StampSpec getStats() {
             return stats;
+        }
+
+        /** Reagent-cost scaling per prior stamp count; null = a flat cost every attempt. */
+        @Nullable
+        public Economics getEconomics() {
+            return economics;
         }
 
         /**
@@ -751,282 +778,32 @@ public final class StationStep {
         }
 
         /**
-         * The composable stat-roll + cap model (design 9.5, M2's binding fixes): roll selection is
-         * EITHER {@link #pool} (a reusable {@code RollPool} id) or inline {@link #entries} (or
-         * both), picked through {@link #picks} + {@link #unique}, then clamped by {@link #caps} -
-         * resolved end to end by the PURE {@code station.StampCapEngine}.
+         * The reagent-cost-scaling model: EFFECTIVE reagent quantity =
+         * {@code ceil(baseQuantity * (1 + RepeatCostMultiplier * stampCount))}, {@code stampCount}
+         * read off the registered stamper. Absent = flat cost every attempt.
          */
-        public static final class Stats {
-            @Nullable protected String pool;
-            @Nullable protected StatRollEntry[] entries;
-            @Nullable protected Picks picks;
-            @Nullable protected Boolean unique;
-            @Nullable protected Caps caps;
+        public static final class Economics {
+            @Nullable protected Double repeatCostMultiplier;
 
-            public static final BuilderCodec<Stats> CODEC = BuilderCodec.builder(Stats.class, Stats::new)
-                    .appendInherited(new KeyedCodec<>("Pool", RollPool.CHILD_ASSET_CODEC, false),
-                            (o, v) -> o.pool = v, o -> o.pool, (o, p) -> o.pool = p.pool)
-                    .documentation("A reusable RollPool asset id to pick stat entries from (alternative/addition to inline "
-                            + "Entries). May also be an INLINE roll-pool body, optionally with its own Parent - but a "
-                            + "RollPool's single Entries array REPLACES the parent's wholesale, it never appends to it, so "
-                            + "use an ExtensionAsset (or the sibling inline Entries leaf here) to ADD entries to a shared pool.")
-                    .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:rollpools"))).add()
-                    .appendInherited(new KeyedCodec<>("Entries", new ArrayCodec<>(StatRollEntry.CODEC, StatRollEntry[]::new), false),
-                            (o, v) -> o.entries = v, o -> o.entries, (o, p) -> o.entries = p.entries)
-                    .documentation("Inline candidate stat-roll entries (shares the StatRollEntry shape with RollPool).").add()
-                    .appendInherited(new KeyedCodec<>("Picks", Picks.CODEC, false),
-                            (o, v) -> o.picks = v, o -> o.picks, (o, p) -> o.picks = p.picks)
-                    .documentation("How many pool entries the weighted route picks (Always entries are extra).").add()
-                    .appendInherited(new KeyedCodec<>("Unique", Codec.BOOLEAN, false),
-                            (o, v) -> o.unique = v, o -> o.unique, (o, p) -> o.unique = p.unique)
-                    .documentation("When true, a stat id is never picked twice in one stamp (default false).").add()
-                    .appendInherited(new KeyedCodec<>("Caps", Caps.CODEC, false),
-                            (o, v) -> o.caps = v, o -> o.caps, (o, p) -> o.caps = p.caps)
-                    .documentation("Budget/per-stat/economics clamps applied after the roll.").add()
-                    .build();
+            public static final BuilderCodec<Economics> CODEC =
+                    BuilderCodec.builder(Economics.class, Economics::new)
+                            .appendInherited(new KeyedCodec<>("RepeatCostMultiplier", Codec.DOUBLE, false),
+                                    (o, v) -> o.repeatCostMultiplier = v, o -> o.repeatCostMultiplier,
+                                    (o, p) -> o.repeatCostMultiplier = p.repeatCostMultiplier)
+                            .documentation("Scales reagent cost per prior stamp count: ceil(base * (1 + mult * stampCount)).")
+                            .addValidator(CodecWarnValidators.nonNegative("Stamp.Economics.RepeatCostMultiplier should not be negative.")).add()
+                            .build();
 
             @Nonnull
-            public static Stats of(@Nullable String pool, @Nullable StatRollEntry[] entries, @Nullable Picks picks,
-                    @Nullable Boolean unique, @Nullable Caps caps) {
-                Stats s = new Stats();
-                s.pool = pool;
-                s.entries = entries;
-                s.picks = picks;
-                s.unique = unique;
-                s.caps = caps;
-                return s;
+            public static Economics of(@Nullable Double repeatCostMultiplier) {
+                Economics e = new Economics();
+                e.repeatCostMultiplier = repeatCostMultiplier;
+                return e;
             }
 
             @Nullable
-            public String getPool() {
-                return pool;
-            }
-
-            @Nullable
-            public StatRollEntry[] getEntries() {
-                return entries;
-            }
-
-            @Nullable
-            public Picks getPicks() {
-                return picks;
-            }
-
-            /** {@link #unique}, reader-defaulted to false (duplicate stat picks allowed) when null. */
-            public boolean isUnique() {
-                return unique != null && unique;
-            }
-
-            @Nullable
-            public Caps getCaps() {
-                return caps;
-            }
-
-            /** How many pool entries a Stamp attempt picks (weighted route only - {@code Always} entries are extra). */
-            public static final class Picks {
-                @Nullable protected Integer min;
-                @Nullable protected Integer max;
-
-                public static final BuilderCodec<Picks> CODEC = BuilderCodec.builder(Picks.class, Picks::new)
-                        .appendInherited(new KeyedCodec<>("Min", Codec.INTEGER, false),
-                                (o, v) -> o.min = v, o -> o.min, (o, p) -> o.min = p.min)
-                        .documentation("The minimum number of weighted picks (reader-defaults to 1).")
-                        .addValidator(CodecWarnValidators.positive("Stamp.Stats.Picks.Min should be positive; it floors at 1 otherwise.")).add()
-                        .appendInherited(new KeyedCodec<>("Max", Codec.INTEGER, false),
-                                (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max)
-                        .documentation("The maximum number of weighted picks (reader-defaults to Min).")
-                        .addValidator(CodecWarnValidators.positive("Stamp.Stats.Picks.Max should be positive; a value below Min floors to Min.")).add()
-                        .build();
-
-                @Nonnull
-                public static Picks of(@Nullable Integer min, @Nullable Integer max) {
-                    Picks p = new Picks();
-                    p.min = min;
-                    p.max = max;
-                    return p;
-                }
-
-                @Nullable
-                public Integer getMin() {
-                    return min;
-                }
-
-                @Nullable
-                public Integer getMax() {
-                    return max;
-                }
-
-                /** {@link #min}, reader-defaulted to 1 when null/non-positive. */
-                public int effectiveMin() {
-                    return min != null && min > 0 ? min : 1;
-                }
-
-                /** {@link #max}, reader-defaulted to {@link #effectiveMin()} when null/less than it. */
-                public int effectiveMax() {
-                    int lo = effectiveMin();
-                    return max != null && max >= lo ? max : lo;
-                }
-            }
-
-            /**
-             * The cap model, re-shaped for scope-2 (design 3.8, decision 20). Every leaf is nullable
-             * and independently composable.
-             *
-             * <p><b>{@link #budgets}</b> is a list of total-budget entries, each EITHER a flat
-             * {@code {Points}} or a factor-scaled {@code {PointsPer, Factors[]}}
-             * ({@code PointsPer * sum(resolve(f) * f.Weight)}). <b>Binding rule:</b>
-             * the EFFECTIVE total budget is the MIN over every authored {@link Budget} entry.
-             * <b>{@link #perStat}</b> is a SEPARATE per-stat-id ceiling layered on top.
-             * <b>{@link #economics}</b> scales REAGENT cost per prior stamp count; it never affects
-             * the point budget.
-             */
-            public static final class Caps {
-                @Nullable protected Budget[] budgets;
-                @Nullable protected Map<String, Double> perStat;
-                @Nullable protected Economics economics;
-
-                public static final BuilderCodec<Caps> CODEC = BuilderCodec.builder(Caps.class, Caps::new)
-                        .appendInherited(new KeyedCodec<>("Budgets", new ArrayCodec<>(Budget.CODEC, Budget[]::new), false),
-                                (o, v) -> o.budgets = v, o -> o.budgets, (o, p) -> o.budgets = p.budgets)
-                        .documentation("Total-point budget entries; the EFFECTIVE budget is the MIN over every entry.").add()
-                        .appendInherited(new KeyedCodec<>("PerStat", new MapCodec<>(Codec.DOUBLE, LinkedHashMap::new), false),
-                                (o, v) -> o.perStat = v, o -> o.perStat, (o, p) -> o.perStat = p.perStat)
-                        .documentation("A per-stat-id ceiling layered ON TOP of the total budget (stat id -> max points).").add()
-                        .appendInherited(new KeyedCodec<>("Economics", Economics.CODEC, false),
-                                (o, v) -> o.economics = v, o -> o.economics, (o, p) -> o.economics = p.economics)
-                        .documentation("Reagent-cost scaling per prior stamp count; never affects the point budget.").add()
-                        .build();
-
-                @Nonnull
-                public static Caps of(@Nullable Budget[] budgets, @Nullable Map<String, Double> perStat,
-                        @Nullable Economics economics) {
-                    Caps c = new Caps();
-                    c.budgets = budgets;
-                    c.perStat = perStat;
-                    c.economics = economics;
-                    return c;
-                }
-
-                /** Total-budget entries; the effective budget is the MIN over them. Null = no total budget. */
-                @Nullable
-                public Budget[] getBudgets() {
-                    return budgets;
-                }
-
-                @Nullable
-                public Map<String, Double> getPerStat() {
-                    return perStat;
-                }
-
-                @Nullable
-                public Economics getEconomics() {
-                    return economics;
-                }
-            }
-
-            /**
-             * ONE total-budget entry (scope-2 design 3.8): EXACTLY one of a flat {@link #points} OR a
-             * factor-scaled {@code {PointsPer, Factors}} (effective = {@code PointsPer * sum(resolve(f)
-             * * f.Weight)}). Authoring both, or neither, is a content mistake (validator flags it);
-             * see {@link #isFlat()}/{@link #isFactorScaled()}. An unresolvable factor contributes 0.
-             */
-            public static final class Budget {
-                @Nullable protected Double points;
-                @Nullable protected Double pointsPer;
-                @Nullable protected FactorRef[] factors;
-
-                public static final BuilderCodec<Budget> CODEC = BuilderCodec.builder(Budget.class, Budget::new)
-                        .appendInherited(new KeyedCodec<>("Points", Codec.DOUBLE, false),
-                                (o, v) -> o.points = v, o -> o.points, (o, p) -> o.points = p.points)
-                        .documentation("A flat total budget (the flat route). Author INSTEAD of PointsPer+Factors.").add()
-                        .appendInherited(new KeyedCodec<>("PointsPer", Codec.DOUBLE, false),
-                                (o, v) -> o.pointsPer = v, o -> o.pointsPer, (o, p) -> o.pointsPer = p.pointsPer)
-                        .documentation("Per-unit budget multiplied by the summed Factors (the factor-scaled route).").add()
-                        .appendInherited(new KeyedCodec<>("Factors", new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
-                                (o, v) -> o.factors = v, o -> o.factors, (o, p) -> o.factors = p.factors)
-                        .documentation("Weighted factor references summed and multiplied by PointsPer: PointsPer * sum(resolve*Weight).").add()
-                        .afterDecode((Budget budget, ExtraInfo extraInfo) -> {
-                            if (!budget.hasExactlyOneRoute()) {
-                                extraInfo.getValidationResults().warn(
-                                        "Stamp.Stats.Caps.Budget should author exactly one of Points | PointsPer+Factors, not both or neither.");
-                            }
-                        })
-                        .build();
-
-                @Nonnull
-                public static Budget flat(@Nullable Double points) {
-                    Budget b = new Budget();
-                    b.points = points;
-                    return b;
-                }
-
-                @Nonnull
-                public static Budget scaled(@Nullable Double pointsPer, @Nullable FactorRef[] factors) {
-                    Budget b = new Budget();
-                    b.pointsPer = pointsPer;
-                    b.factors = factors;
-                    return b;
-                }
-
-                @Nullable
-                public Double getPoints() {
-                    return points;
-                }
-
-                @Nullable
-                public Double getPointsPer() {
-                    return pointsPer;
-                }
-
-                @Nullable
-                public FactorRef[] getFactors() {
-                    return factors;
-                }
-
-                /** True when the flat {@link #points} route is authored (and not the scaled route). */
-                public boolean isFlat() {
-                    return points != null && pointsPer == null;
-                }
-
-                /** True when the factor-scaled {@code {PointsPer, Factors}} route is authored (and not the flat route). */
-                public boolean isFactorScaled() {
-                    return pointsPer != null && points == null;
-                }
-
-                /** True when EXACTLY one route is authored (the exactly-one-of contract). */
-                public boolean hasExactlyOneRoute() {
-                    return isFlat() ^ isFactorScaled();
-                }
-            }
-
-            /**
-             * The reagent-cost-scaling model (design 9.5, M2 fix (b)): EFFECTIVE reagent quantity =
-             * {@code ceil(baseQuantity * (1 + RepeatCostMultiplier * stampCount))}, {@code stampCount}
-             * read off the registered stamper. Absent = flat cost every attempt.
-             */
-            public static final class Economics {
-                @Nullable protected Double repeatCostMultiplier;
-
-                public static final BuilderCodec<Economics> CODEC =
-                        BuilderCodec.builder(Economics.class, Economics::new)
-                                .appendInherited(new KeyedCodec<>("RepeatCostMultiplier", Codec.DOUBLE, false),
-                                        (o, v) -> o.repeatCostMultiplier = v, o -> o.repeatCostMultiplier,
-                                        (o, p) -> o.repeatCostMultiplier = p.repeatCostMultiplier)
-                                .documentation("Scales reagent cost per prior stamp count: ceil(base * (1 + mult * stampCount)).")
-                                .addValidator(CodecWarnValidators.nonNegative("Stamp.Stats.Caps.Economics.RepeatCostMultiplier should not be negative.")).add()
-                                .build();
-
-                @Nonnull
-                public static Economics of(@Nullable Double repeatCostMultiplier) {
-                    Economics e = new Economics();
-                    e.repeatCostMultiplier = repeatCostMultiplier;
-                    return e;
-                }
-
-                @Nullable
-                public Double getRepeatCostMultiplier() {
-                    return repeatCostMultiplier;
-                }
+            public Double getRepeatCostMultiplier() {
+                return repeatCostMultiplier;
             }
         }
     }

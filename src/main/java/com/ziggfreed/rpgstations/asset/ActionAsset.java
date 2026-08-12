@@ -2,10 +2,8 @@ package com.ziggfreed.rpgstations.asset;
 
 import java.util.LinkedHashMap;
 import java.util.Locale;
-import java.util.Map;
 
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.assetstore.codec.AssetBuilderCodec;
@@ -17,6 +15,7 @@ import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
 import com.ziggfreed.common.codec.InheritMapCodec;
+import com.ziggfreed.common.loot.LootRef;
 
 /**
  * A standalone, reusable, fourth-party-extendable ACTION (scope-2 design 1.5, decision 28a):
@@ -108,7 +107,7 @@ public final class ActionAsset implements JsonAssetWithMap<String, DefaultAssetM
      * (registered as a generated child asset in this same store), including a nested
      * {@code "Parent": "<actionAssetId>"} that inherits from a named action.
      *
-     * <p>Unlike the two single-array asset types ({@link LootableAsset}/{@link RollPool}), an inline
+     * <p>Unlike the two single-array asset types (the shared single-array loot types (a lootable, a roll pool)), an inline
      * body here is a genuine delta authoring route: every {@code ActionAsset} leaf is
      * {@code appendInherited}, so a {@code Parent} body inherits each group it does not author.
      */

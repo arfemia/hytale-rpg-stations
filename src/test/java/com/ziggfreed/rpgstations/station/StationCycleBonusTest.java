@@ -1,13 +1,8 @@
 package com.ziggfreed.rpgstations.station;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -17,16 +12,20 @@ import com.hypixel.hytale.codec.util.RawJsonReader;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
-import com.ziggfreed.rpgstations.api.FactorContext;
+import com.ziggfreed.common.loot.FactorLookup;
+import com.ziggfreed.common.loot.LootGrants;
+import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.rpgstations.asset.ActionDef;
-import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
-import com.ziggfreed.rpgstations.asset.LootRef;
-import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
-import com.ziggfreed.rpgstations.loot.FactorSnapshot;
-import com.ziggfreed.rpgstations.loot.LootEngine;
+import com.ziggfreed.rpgstations.loot.LootFixtures;
+import com.ziggfreed.rpgstations.loot.StationLootEngine;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@code Trigger: "Cycle"} means THE action's cycle-completed moment, whatever program shape runs
@@ -66,12 +65,12 @@ class StationCycleBonusTest {
                 .withBonus(bonus));
     }
 
-    private static FactorSnapshot snapshot() {
-        return new FactorSnapshot(FactorContext.builder()
-                .playerId(UUID.fromString("44444444-4444-4444-4444-444444444444"))
-                .stationId("fixtureritual")
-                .cycleIndex(1)
-                .build());
+    /**
+     * A lookup that answers nothing, which is all these cases need: every fixture roll here is
+     * ungated and un-laddered, so no factor is ever read.
+     */
+    private static FactorLookup lookup() {
+        return FactorLookup.none();
     }
 
     @AfterEach
@@ -82,7 +81,7 @@ class StationCycleBonusTest {
     @Test
     void authoredProgramAction_resolvesTheSameBonusRollsTheImplicitPathDoes() throws Exception {
         StationAsset station = ritualStation(LootRef.of(null, new Roll[] {
-                Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofDropList("Fixture_Own_Drops"))}));
+                Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootGrants.ofDropList("Fixture_Own_Drops"), null)}));
         fold(ext("ritual-ext", "{ \"Target\":{\"Action\":\"Enhance\"}, \"Bonus\":{ \"Rolls\":[ {"
                 + " \"Trigger\":\"Cycle\", \"Grants\":{\"DropLists\":[\"Fixture_Ext_Drops\"]} } ] } }"));
 
@@ -99,20 +98,19 @@ class StationCycleBonusTest {
         // One pass over the resolved rolls is what a completed program walk performs. A
         // Completion-trigger roll in the same Bonus must NOT ride it - that pass runs at stop().
         StationAsset station = ritualStation(LootRef.of(null, new Roll[] {
-                Roll.of(Roll.TRIGGER_CYCLE, null, null, null,
-                        Roll.Grants.of(null, null, null,
-                                new Contribution[] {Contribution.of("yourmod:test", "ALPHA", 4.0)})),
-                Roll.of(Roll.TRIGGER_COMPLETION, null, null, null,
-                        Roll.Grants.of(null, null, null,
-                                new Contribution[] {Contribution.of("yourmod:test", "OMEGA", 9.0)}))}));
+                Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null,
+                        LootFixtures.contribution("yourmod:test_alpha", 4.0), null),
+                Roll.of(StationLootEngine.TRIGGER_COMPLETION, null, null, null,
+                        LootFixtures.contribution("yourmod:test_omega", 9.0), null)}));
 
         List<Roll> rolls = StationService.effectiveBonusRolls(station,
                 ActionResolver.resolve(station, "Enhance"));
-        LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, snapshot(),
-                NULL_PLAYER, null, "fixtureritual", "Enhance", 1, null, NULL_STORE, 0, 0, 0);
+        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(rolls,
+                StationLootEngine.TRIGGER_CYCLE, lookup(), NULL_PLAYER, null, "fixtureritual",
+                "Enhance", 1, null, NULL_STORE, 0, 0, 0);
 
         assertEquals(1, result.getContributions().size(), "exactly the Cycle-trigger roll granted");
-        assertEquals("ALPHA", result.getContributions().get(0).getParam());
+        assertEquals("yourmod:test_alpha", result.getContributions().get(0).getChannel());
     }
 
     @Test
@@ -137,12 +135,13 @@ class StationCycleBonusTest {
         // resolves and grants it. This is what makes the no-op above the ONLY thing standing
         // between the tally and a wrong grant.
         StationAsset station = ritualStation(LootRef.of(null, new Roll[] {
-                Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0))}));
+                Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootFixtures.outputItems(2.0), null)}));
 
         List<Roll> rolls = StationService.effectiveBonusRolls(station,
                 ActionResolver.resolve(station, "Enhance"));
-        LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, snapshot(),
-                NULL_PLAYER, null, "fixtureritual", "Enhance", 1, null, NULL_STORE, 0, 0, 0);
+        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(rolls,
+                StationLootEngine.TRIGGER_CYCLE, lookup(), NULL_PLAYER, null, "fixtureritual",
+                "Enhance", 1, null, NULL_STORE, 0, 0, 0);
 
         assertEquals(2.0, result.getOutputItems());
         assertFalse(result.getDropListItems().containsKey("Fixture_Plank"),

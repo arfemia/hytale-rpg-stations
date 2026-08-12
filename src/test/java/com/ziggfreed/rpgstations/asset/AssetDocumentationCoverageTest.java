@@ -1,7 +1,5 @@
 package com.ziggfreed.rpgstations.asset;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -14,6 +12,10 @@ import com.hypixel.hytale.codec.WrappedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.builder.BuilderField;
 import com.ziggfreed.common.codec.Vec3;
+import com.ziggfreed.common.loot.LootableAsset;
+import com.ziggfreed.common.loot.stamp.RollPoolAsset;
+
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * TWO guards over the same walk, both about the shipped documentation surface: every
@@ -80,7 +82,7 @@ class AssetDocumentationCoverageTest {
         walk("StationAsset", StationAsset.CODEC, undocumented, narrated, visited);
         walk("ActionAsset", ActionAsset.CODEC, undocumented, narrated, visited);
         walk("LootableAsset", LootableAsset.CODEC, undocumented, narrated, visited);
-        walk("RollPool", RollPool.CODEC, undocumented, narrated, visited);
+        walk("RollPool", RollPoolAsset.CODEC, undocumented, narrated, visited);
         walk("FlairAsset", FlairAsset.CODEC, undocumented, narrated, visited);
         walk("ExtensionAsset", ExtensionAsset.CODEC, undocumented, narrated, visited);
         walk("RpgStationsSettingsAsset", RpgStationsSettingsAsset.CODEC, undocumented, narrated, visited);

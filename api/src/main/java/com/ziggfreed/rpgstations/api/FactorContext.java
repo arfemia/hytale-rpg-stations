@@ -149,11 +149,29 @@ public final class FactorContext {
      * addressed form was added.
      */
     public double toolPowerFor(@Nullable String gatherType) {
+        Double v = toolPowerOrNull(gatherType);
+        return v != null ? v : 0.0;
+    }
+
+    /**
+     * As {@link #toolPowerFor}, but answering {@code null} when the held tool has no spec for
+     * {@code gatherType} at all - "cannot do this job" rather than "does it badly".
+     *
+     * <p>This is the form a factor provider registers, because the shared vocabulary's one rule is
+     * that a gate never silently opens: an unanswerable reading must be {@code null} so a bounds-less
+     * condition stays shut, and {@code 0.0} would spring it. {@link #toolPowerFor} keeps the
+     * zero-defaulted shape for a caller that only ever wants a number to multiply.
+     *
+     * <p>Omitting {@code gatherType} (absent or blank) still answers {@link #toolPower()} - the
+     * station's OWN effective gather type - which is the context-appropriate resolution at a work
+     * session and deliberately differs from the portable library's "best of any type" aggregate.
+     */
+    @Nullable
+    public Double toolPowerOrNull(@Nullable String gatherType) {
         if (gatherType == null || gatherType.isBlank()) {
             return toolPower;
         }
-        Double v = toolPowersByGatherType.get(gatherType.toLowerCase(Locale.ROOT));
-        return v != null ? v : 0.0;
+        return toolPowersByGatherType.get(gatherType.toLowerCase(Locale.ROOT));
     }
 
     /** The held tool's durability percent [0,100] ({@code hytale:tool_durability_percent}); 100 when no durability tracked or none held. */
@@ -204,8 +222,8 @@ public final class FactorContext {
      * The {@code Param}s the resolved action's contributions name on {@code channel}, in authoring
      * order; EMPTY when the station posts to that channel with no params, or does not post to it
      * at all. This is how an aggregating provider (say, a bonus factor that depends on WHAT is
-     * being credited) learns the default subject set when the authored {@code Condition}/
-     * {@code FactorRef} carried no {@code Param} of its own. Channel-scoped on purpose: a flat
+     * being credited) learns the default subject set when the authored condition or weighted factor
+     * term carried no {@code Param} of its own. Channel-scoped on purpose: a flat
      * list would mix two mods' vocabularies into one indistinguishable pile.
      */
     @Nonnull

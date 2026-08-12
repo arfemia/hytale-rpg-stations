@@ -1,23 +1,24 @@
 package com.ziggfreed.rpgstations.station;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
+import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The PER-LEAF overlays ({@link ExtensionAsset}'s merge rule 5): an {@code Action}-targeted
@@ -256,7 +257,7 @@ public class ExtensionOverlayTest {
                 base.getActions()[0].getContributionScale(), ExtensionAsset.sortedForApply(List.of(retune)));
 
         assertEquals("fixture:axis", merged.getFactors()[0].getFactor(), "the base Factors survive");
-        assertEquals(4.0, merged.getFactors()[0].effectiveWeight());
+        assertEquals(4.0, merged.getFactors()[0].weightOrDefault());
         assertEquals(1, merged.getFloors().length, "an authored Floors array replaces wholesale (it is one leaf)");
         assertEquals(9.0, merged.getFloors()[0].effectiveMin());
         assertEquals(3.0, merged.getFloors()[0].effectiveScale());

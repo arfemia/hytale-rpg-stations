@@ -16,6 +16,8 @@ import com.ziggfreed.common.factor.FactorContext;
 import com.ziggfreed.common.factor.FactorProvider;
 import com.ziggfreed.common.factor.FactorRegistry;
 import com.ziggfreed.common.factor.HytaleFactors;
+import com.ziggfreed.common.loot.FactorLookup;
+import com.ziggfreed.common.loot.FactorSnapshot;
 import com.ziggfreed.common.registry.RegistryLedger;
 
 /**
@@ -110,6 +112,18 @@ final class CoreFactorVocabulary {
     Double resolve(@Nullable String factorId, @Nullable String param, @Nullable Store<EntityStore> store,
             @Nullable Ref<EntityStore> subject, @Nonnull Object payload) {
         return registry.resolve(factorId, question(param, store, subject, payload));
+    }
+
+    /**
+     * One batch's memoized reading set for a station evaluation: every {@code (factorId, param)}
+     * pair resolves AT MOST ONCE, so a chance and a ladder reading the same factor in one cycle can
+     * never see two different numbers. Build one per moment and discard it - the context it wraps
+     * holds live world-thread handles.
+     */
+    @Nonnull
+    FactorLookup snapshot(@Nullable Store<EntityStore> store, @Nullable Ref<EntityStore> subject,
+            @Nonnull Object payload) {
+        return new FactorSnapshot(registry, question(null, store, subject, payload));
     }
 
     /**

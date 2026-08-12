@@ -1,0 +1,74 @@
+{
+  "$Comment": "The sawmill's find table, referenced from the station's Bonus.Lootables. A Roll grants what ELSE a cycle handed over: how MUCH of the thing you made is the action's own Recipe.Yield plus its OutputItems rolls, and a find can only ever ADD something different, never multiply that. Finds arrive as drop-list items, a different thing from the planks those rolls add.\n\nONE roll, and its two halves answer two different questions from two different sources. The HELD TOOL decides how OFTEN a find happens (the Chance, entirely tool-driven up to a 90 percent cap on the best hatchet). TIME AT THE BENCH and the TOOL together decide how DEEP it is: the Ladder sums the session's own cycle count with 5 per quality step, so staying longer and bringing a better hatchet are two ways to reach the same tier. A quality-4 hatchet starts a session already on the second tier; a starter-grade one has to earn it in cycles. The two halves stay separately tunable - change what a tool is worth per find, or how long a tier takes, without touching the other.\n\nThe Ladder deliberately reads QUALITY ONLY rather than the full three-axis score, so every step is a whole rarity tier apart and reads directly off a floor number. Item level and gather power would put fractions between those steps for no gain in how the ladder plays.\n\nTHE TOOL SCORE in the Chance holds the SAME RATIO the Mill action's own plank ladder and ContributionScale use - quality 10, item level 0.1, gather power 1.0 - at 1.62x, so one curve ranks every hatchet identically everywhere on the bench and the trophy lands exactly on the 90 percent cap. Quality dominates, item level breaks ties inside a quality tier, and power rewards the genuinely better cutter; no two of those rank the vanilla ladder alone. On the base scale: Wood 10.6, Crude 10.55, Copper 11.3, Iron 22.3, Thorium 33.5, Cobalt 34.0, Adamantite 34.5, Onyxium 40.9, Mithril 45.5, Sawmiller's Hatchet 55.55.\n\nNote also that an ItemDropList cannot read factors at all - a drop table is a fixed weighted bag. Every 'better tool gives better loot' effect therefore has to be expressed at the Roll level, which is why the tool rides the Chance rather than anything inside the tables.\n\nEach of this jar's Sawmill lootables holds its own concern so a pack can replace exactly one: this file is the loyalty ladder any worker can reach, SawmillTrophy is the Sawmiller's Hatchet chase, and SawmillMasterworkFinds is the fourth tier that chase pays out.",
+  "Rolls": [
+    {
+      "$Comment": "ONE Condition gates the whole roll: tool quality 2 or better, so a starter Wood, Crude or Copper hatchet mills its planks but never shakes a find loose. Iron-grade steel is where finds begin, and from an eligible worker's very first cycle - there is no separate cycle-count gate, because the Ladder's own first floor already decides when each tier opens and a second gate in front of it only duplicated that.\n\nChance decides HOW OFTEN, and the hatchet drives it entirely: Chance.Base is 0, so the whole probability comes from the tool score, held under the Clamp.Max ceiling of 90 percent. The weights are the canonical ratio at 1.62x (16.2 / 0.162 / 1.62), picked so the Sawmiller's Hatchet lands exactly on that cap while the ranking stays identical to every other tool curve on the bench. Across the eligible hatchets: iron about 36 percent, the thorium-to-adamantite band 54 to 56, onyxium 66, mithril 74, and the trophy 90. Finds go from occasional to near-constant purely on the tool you bring, which is the single biggest reason to chase a better one.\n\nThe zero base is deliberate rather than an omission: the quality-2 Condition already decides WHO may find at all, so the curve is free to start from nothing and be pure tool. Raising the base lifts every eligible tool together and compresses the spread against the 90 cap, so retune the weights before the base if the spread is what needs changing.\n\nLadder decides HOW DEEP: the session's cycle count plus 5 per quality step, so the hatchet is worth a real head start rather than a rounding difference. Floors are not cumulative, so exactly one table grants. T1 sits at 5, T2 at 25 and T3 at 50, and since quality alone contributes 10 or more, every eligible worker is on T1 from their first cycle - the floor exists to set the ladder's base rather than to make anyone wait. The later tiers are where the tool and the session trade off: iron reaches T2 at cycle 15 and T3 at 40, the thorium-to-adamantite band at 10 and 35, onyxium and mithril at 5 and 30, and the trophy opens T2 immediately and T3 by cycle 25. So the best hatchet starts a session two tiers up on a starter one and reaches the top tier before the session is a quarter old.\n\nEvery step here is a whole rarity tier apart (5 points), which is the reason the Ladder reads quality alone: item level and gather power would add fractions between those steps that nobody could read off a floor number.\n\nThe tables pay offcuts from the shared byproduct list plus their own life essence: T1 offcuts alone, T2 adding essence, T3 doubling the offcuts and making essence near-certain with a small concentrated jackpot. A ten-minute session runs about 124 cycles, so once a worker crosses their own T3 line the top tier covers most of the rest of the session. A floor's own celebration only plays when its table actually paid, so the cue stays silent on a cycle whose table resolved to nothing.",
+      "Trigger": "Cycle",
+      "Conditions": [
+        {
+          "Factor": "hytale:tool_quality",
+          "Min": 2
+        }
+      ],
+      "Chance": {
+        "Base": 0,
+        "Factors": [
+          {
+            "Factor": "hytale:tool_quality",
+            "Weight": 16.2
+          },
+          {
+            "Factor": "hytale:tool_item_level",
+            "Weight": 0.162
+          },
+          {
+            "Factor": "hytale:tool_power",
+            "Weight": 1.62
+          }
+        ],
+        "Clamp": {
+          "Max": 90
+        }
+      },
+      "Ladder": {
+        "Factors": [
+          {
+            "Factor": "rpgstations:cycle_count"
+          },
+          {
+            "Factor": "hytale:tool_quality",
+            "Weight": 5
+          }
+        ],
+        "Floors": [
+          {
+            "Min": 5,
+            "Grants": {
+              "DropLists": [
+                "RPG_Station_Sawmill_T1"
+              ]
+            }
+          },
+          {
+            "Min": 25,
+            "Grants": {
+              "DropLists": [
+                "RPG_Station_Sawmill_T2"
+              ]
+            },
+            "Cue": "rare_find"
+          },
+          {
+            "Min": 50,
+            "Grants": {
+              "DropLists": [
+                "RPG_Station_Sawmill_T3"
+              ]
+            },
+            "Cue": "rare_find"
+          }
+        ]
+      }
+    }
+  ]
+}

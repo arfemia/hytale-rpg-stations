@@ -10,15 +10,16 @@ import javax.annotation.Nullable;
 
 import com.ziggfreed.common.entity.performer.WalkHandle;
 import com.ziggfreed.common.factor.FactorCondition;
+import com.ziggfreed.common.factor.FactorFormula;
+import com.ziggfreed.common.loot.FactorGate;
+import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.StationStep;
-import com.ziggfreed.rpgstations.loot.FactorGate;
-import com.ziggfreed.rpgstations.loot.FactorMath;
 
 /**
  * The PURE decision cores behind {@link StationStepRegistry}'s conditions gate,
  * {@link StationStepSemantics}'s Goto jump, and the composite step handler's {@code Repeat} +
- * {@code Duration} math - unit-tested with injected values (a {@link StationService.FactorLookup}
+ * {@code Duration} math - unit-tested with injected values (a {@link FactorLookup}
  * lambda, plain longs), zero store/engine access, mirroring {@code loot.RollEvaluator}'s role for
  * the conditional-lootable layer. Extracted so the {@code station.step} suspend/resume + branch +
  * repeat contracts are verifiable WITHOUT constructing a live {@link StationStepContext}.
@@ -67,14 +68,14 @@ final class StationStepDecisions {
      * The {@code sum(resolve(f.Factor, f.Param) * f.Weight)} contribution a {@code Repeat}'s
      * {@code Factors} weighted references add to its {@code Min} floor (0 for a fixed
      * {@code Times}, an absent {@code Factors}, or a null {@code repeat}) - the ONE weighted-sum
-     * vocabulary ({@link FactorMath}) every factor-consuming array shares.
+     * arithmetic ({@link FactorFormula#sum}) every factor-consuming array in this schema shares.
      */
     static double repeatFactorContribution(@Nullable StationStep.Repeat repeat,
             @Nonnull BiFunction<String, String, Double> lookup) {
         if (repeat == null || repeat.isFixed()) {
             return 0.0;
         }
-        return FactorMath.sum(repeat.getFactors(), lookup);
+        return FactorFormula.sum(repeat.getFactors(), lookup);
     }
 
     // ==================== Conditions gate (design 2.1's "Branch is NOT a step type" mechanism) ====================
@@ -97,7 +98,7 @@ final class StationStepDecisions {
      */
     @Nonnull
     static ConditionOutcome resolveConditionOutcome(@Nullable FactorCondition[] conditions,
-            @Nullable StationStep.OnConditionFail onFail, @Nonnull StationService.FactorLookup lookup) {
+            @Nullable StationStep.OnConditionFail onFail, @Nonnull FactorLookup lookup) {
         if (conditions == null || conditions.length == 0) {
             return ConditionOutcome.PASS;
         }

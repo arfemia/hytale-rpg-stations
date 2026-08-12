@@ -13,6 +13,7 @@ import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 import com.ziggfreed.common.codec.InheritMapCodec;
+import com.ziggfreed.common.loot.LootRef;
 
 /**
  * ONE SELF-CONTAINED ACTION: a complete job a station offers, readable top to bottom with nothing

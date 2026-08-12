@@ -78,6 +78,18 @@ public final class StationFlairs {
     private static final Set<String> WELL_KNOWN_MOMENT_IDS = Set.of(
             MOMENT_CYCLE, MOMENT_SWING, MOMENT_IMPACT, MOMENT_RARE_FIND, MOMENT_COMPLETION);
 
+    /**
+     * The prefix an author uses to mint a moment id of their own: a loot roll's {@code Cue} names a
+     * moment, and a station that wants a jackpot to sound different from an ordinary find needs
+     * more moment ids than this engine can usefully enumerate.
+     *
+     * <p>It works exactly like {@link #stepMomentId}'s prefix - an id under it always passes the
+     * typo check, so a well-known id stays spell-checked while an author-defined one is free. Name
+     * it in the roll's {@code Cue} and again as a key in the action's {@code Moments} map (or in a
+     * flair), and the two meet at the emission.
+     */
+    public static final String CUE_MOMENT_PREFIX = "cue:";
+
     private static final String STEP_MOMENT_PREFIX = "step:";
 
     private StationFlairs() {
@@ -140,7 +152,9 @@ public final class StationFlairs {
             return false;
         }
         String lower = momentId.toLowerCase(Locale.ROOT);
-        return WELL_KNOWN_MOMENT_IDS.contains(lower) || lower.startsWith(STEP_MOMENT_PREFIX);
+        return WELL_KNOWN_MOMENT_IDS.contains(lower)
+                || lower.startsWith(STEP_MOMENT_PREFIX)
+                || lower.startsWith(CUE_MOMENT_PREFIX);
     }
 
     /**

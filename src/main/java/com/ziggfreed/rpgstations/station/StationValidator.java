@@ -31,6 +31,17 @@ import com.hypixel.hytale.server.npc.NPCPlugin;
 import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.common.entity.PlayerModelService;
 import com.ziggfreed.common.factor.FactorCondition;
+import com.ziggfreed.common.factor.FactorFormula;
+import com.ziggfreed.common.loot.LootGrants;
+import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.LootableAsset;
+import com.ziggfreed.common.loot.LootableConfig;
+import com.ziggfreed.common.loot.LootableValidator;
+import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.reward.RewardSpec;
+import com.ziggfreed.common.loot.stamp.RollPoolConfig;
+import com.ziggfreed.common.loot.stamp.StampSpec;
+import com.ziggfreed.common.loot.stamp.StatRollEntry;
 import com.ziggfreed.rpgstations.api.FindingSink;
 import com.ziggfreed.rpgstations.api.ValidationHook;
 import com.ziggfreed.rpgstations.api.ValidationScope;
@@ -45,21 +56,16 @@ import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
-import com.ziggfreed.rpgstations.asset.FactorRef;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
 import com.ziggfreed.rpgstations.asset.Ingredient;
-import com.ziggfreed.rpgstations.asset.LootRef;
-import com.ziggfreed.rpgstations.asset.LootableAsset;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
-import com.ziggfreed.rpgstations.asset.Roll;
-import com.ziggfreed.rpgstations.asset.StatRollEntry;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.i18n.RpgStationsLangKeys;
-import com.ziggfreed.rpgstations.loot.LootableCatalog;
-import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
+import com.ziggfreed.rpgstations.loot.StationLootEngine;
+import com.ziggfreed.rpgstations.loot.StationRewardKinds;
 import com.ziggfreed.rpgstations.util.Log;
 import com.ziggfreed.rpgstations.validation.Finding;
 import com.ziggfreed.rpgstations.validation.Report;
@@ -79,7 +85,7 @@ import com.ziggfreed.rpgstations.validation.Severity;
  *
  * <p><b>Scope-2 rewrite (leg A4, design {@code raw/rpg-stations-scope2-unified-design-2026-07-23
  * .md} section 1.9, gate outcomes binding):</b> every check touching the reshaped
- * {@code StationStep} orthogonal-phase model, the unified {@link LootRef}/{@link FactorRef}/
+ * {@code StationStep} orthogonal-phase model, the unified {@link LootRef}/the weighted factor term/
  * {@link Ingredient} vocabulary, and the {@code StationStep.Stamp.Stats.Caps.Budgets[]} shape was
  * rewritten against the A-SCHEMA leg's rewritten codecs. New checks: {@code ACTION_REF_UNKNOWN},
  * {@code EXTENSION_TARGET_UNKNOWN}, {@code EXTENSION_PAYLOAD_MISMATCH},
@@ -160,8 +166,8 @@ public final class StationValidator {
             Collection<ActionAsset> actionAssets = ActionCatalog.getInstance().all().values();
             Collection<ExtensionAsset> extensions = ExtensionCatalog.getInstance().all().values();
             Predicate<String> factorKnown = FactorRegistryImpl.getInstance()::isKnown;
-            Predicate<String> lootableKnown = id -> LootableCatalog.getInstance().get(id) != null;
-            Predicate<String> rollPoolKnown = id -> RollPoolCatalog.getInstance().get(id) != null;
+            Predicate<String> lootableKnown = id -> LootableConfig.getInstance().resolve(id) != null;
+            Predicate<String> rollPoolKnown = id -> RollPoolConfig.getInstance().resolve(id) != null;
             Predicate<String> stationKnown = id -> StationCatalog.getInstance().getStation(id) != null;
             Predicate<String> actionAssetKnown = id -> ActionCatalog.getInstance().get(id) != null;
             // The drop-list predicate doubles as the reference COLLECTOR for the runtime-resolution
@@ -187,7 +193,7 @@ public final class StationValidator {
                     StationValidator::modelKnownLive,
                     stationKnown,
                     actionAssetKnown));
-            out.addAll(validateLootables(LootableCatalog.getInstance().all().values(),
+            out.addAll(validateLootables(LootableConfig.getInstance().all().values(),
                     dropListKnown, factorKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), stationKnown));
             // Review minor (validator-standalone-action-unwired): the flagship standalone prepfish
@@ -206,7 +212,7 @@ public final class StationValidator {
             out.addAll(checkDropListsResolveLive(referencedDropLists));
             // Third-party checks run LAST, over the same folded content the engine just walked, so
             // a hook's note sits beside the engine's own in one report. FULL pass only.
-            out.addAll(runHooks(stations, actionAssets, LootableCatalog.getInstance().all().values(), extensions));
+            out.addAll(runHooks(stations, actionAssets, LootableConfig.getInstance().all().values(), extensions));
             return out;
         } catch (Throwable t) {
             Log.warn("Station validation aborted: " + t.getMessage());
@@ -232,7 +238,7 @@ public final class StationValidator {
             List<Finding> out = new ArrayList<>(validate(StationCatalog.getInstance().all().values(),
                     ALWAYS_KNOWN, ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown, ALWAYS_KNOWN, ALWAYS_KNOWN,
                     ALWAYS_KNOWN, ALWAYS_KNOWN, ALWAYS_KNOWN));
-            out.addAll(validateLootables(LootableCatalog.getInstance().all().values(),
+            out.addAll(validateLootables(LootableConfig.getInstance().all().values(),
                     ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), ALWAYS_KNOWN));
             return out;
@@ -702,7 +708,7 @@ public final class StationValidator {
      * degrades to {@code AtEnd}), and {@code EXTENSION_STEP_MISSING_ID} (an inserted step with no
      * {@code Id}, so a LATER extension can never anchor on it). Every inline {@code Loot}/
      * {@code Rolls}/{@code Entries} payload is ALSO run through the shared {@link #checkRoll}/
-     * {@link #checkFactorRefs} cores, same as everywhere else those vocabularies appear.
+     * {@link #checkFactorTerms} cores, same as everywhere else those vocabularies appear.
      *
      * <p><b>Action targets resolve exactly the way the runtime resolves them</b>
      * ({@link #actionBodiesByTargetId}): a standalone {@link ActionAsset} id, OR a station's own
@@ -863,7 +869,7 @@ public final class StationValidator {
                 for (int i = 0; i < entries.length; i++) {
                     StatRollEntry e = entries[i];
                     if (e != null && e.getPoints() != null) {
-                        checkFactorRefs(e.getPoints().getFactors(),
+                        checkFactorTerms(e.getPoints().getFactors(),
                                 label + ".Entries[" + i + "].Points.Factors", extId, factorKnown, out);
                     }
                 }
@@ -1905,8 +1911,8 @@ public final class StationValidator {
      * The shared {@link Roll} structural core (design 4.8's "validator coverage" + the M3
      * critique fix 5, scope-2 weighted-factor unification): {@code Conditions} factor ids run
      * through {@code factorKnown} via {@link #checkConditionFactors}; {@code Chance.Factors}/
-     * {@code Ladder.Factors} (now {@link FactorRef}s) run through {@code factorKnown} via
-     * {@link #checkFactorRefs} - the SAME {@code UNKNOWN_FACTOR} code every factor-reference site
+     * {@code Ladder.Factors} (now the weighted factor terms) run through {@code factorKnown} via
+     * {@link #checkFactorTerms} - the SAME {@code UNKNOWN_FACTOR} code every factor-reference site
      * in this file uses, one code, one meaning; every {@code Grants.DropLists} entry (top-level or
      * per-floor) runs through {@code dropListKnown}; two floors of one ladder sharing a {@code Min}
      * are flagged {@code LADDER_DUPLICATE_FLOOR_MIN}; and a roll naming the same
@@ -1930,54 +1936,75 @@ public final class StationValidator {
             return;
         }
         String trigger = roll.effectiveTrigger();
+        // Everything about a roll that is TRUE OF EVERY ROLL ANYWHERE - an impossible or certain
+        // chance, an inverted clamp, an unreachable or duplicate ladder floor, a blank grant leaf,
+        // a roll that can never hand anything over - is the shared loot validator's, so identical
+        // JSON gets identical findings at a station, in a chest, and at a quest turn-in. Do not
+        // re-derive any of it here; a second copy is how two engines end up disagreeing about the
+        // same file.
+        for (Finding shared : adopt(LootableValidator.auditRoll(roll, id, null), label)) {
+            out.add(shared);
+        }
+        // What stays here is what only a STATION knows: which factor ids this engine can answer,
+        // which native drop tables exist, which grants make sense under which trigger, and the
+        // native-asset refs on a cue.
         checkConditionFactors(roll.getConditions(), label + ".Conditions", id, factorKnown, out);
         checkDuplicateFactors(roll, label, id, out);
 
-        Roll.Chance chance = roll.getChance();
+        FactorFormula chance = roll.getChance();
         if (chance != null) {
-            checkFactorRefs(chance.getFactors(), label + ".Chance.Factors", id, factorKnown, out);
-            if (chance.getBasePercent() != null && chance.getBasePercent() < 0) {
-                out.add(Finding.warning(DOMAIN, "LOOT_NEGATIVE_BASE_PERCENT",
-                        label + ".Chance has a negative BasePercent", id));
-            }
-            if (chance.getCapPercent() != null && chance.getCapPercent() <= 0) {
-                out.add(Finding.warning(DOMAIN, "LOOT_NONPOSITIVE_CAP_PERCENT",
-                        label + ".Chance has a nonpositive CapPercent - the roll can never hit", id));
-            }
+            checkFactorTerms(chance.getFactors(), label + ".Chance.Factors", id, factorKnown, out);
         }
 
-        Roll.Grants topGrants = roll.getGrants();
-        checkGrants(topGrants, label + ".Grants", id, trigger, noCycleOutput, dropListKnown, out);
-        // The roll-level celebration gets the SAME native-ref coverage a floor's own cue has always
-        // had - one Presentation type, one check, whichever altitude it is authored at. A roll that
-        // ONLY carries a cue is legitimate (a pure flourish on a lucky moment), so it counts as
-        // authoring something and never trips the empty-roll warn below.
-        checkNativeRefs(roll.getPresentation(), label + ".Presentation", id, out);
-        boolean hasAnything = (topGrants != null && !topGrants.isEmpty()) || roll.getPresentation() != null;
+        checkGrants(roll.getGrants(), label + ".Grants", id, trigger, noCycleOutput, dropListKnown, out);
+        checkCueMoment(roll.getCue(), label + ".Cue", id, out);
 
         Roll.Ladder ladder = roll.getLadder();
         if (ladder != null) {
-            hasAnything = true;
-            FactorRef[] ladderFactors = ladder.getFactors();
-            if (ladderFactors == null || ladderFactors.length == 0) {
-                out.add(Finding.warning(DOMAIN, "LOOT_LADDER_MISSING_VALUE",
-                        label + ".Ladder has no Factors - the ladder value is a constant 0, so only a"
-                                + " Min<=0 floor can ever be reached", id));
-            } else {
-                checkFactorRefs(ladderFactors, label + ".Ladder.Factors", id, factorKnown, out);
-            }
-            checkDuplicateFloorMins(ladder.getFloors(), label + ".Ladder", id, out);
+            checkFactorTerms(ladder.getFactors(), label + ".Ladder.Factors", id, factorKnown, out);
             Roll.Ladder.Floor[] floors = ladder.getFloors();
-            if (floors == null || floors.length == 0) {
-                out.add(Finding.warning(DOMAIN, "LOOT_LADDER_EMPTY", label + ".Ladder has no Floors", id));
-            } else {
+            if (floors != null) {
                 checkFloors(floors, label, id, trigger, noCycleOutput, dropListKnown, out);
             }
         }
+    }
 
-        if (!hasAnything) {
-            out.add(Finding.warning(DOMAIN, "LOOT_ROLL_EMPTY",
-                    label + " authors neither Grants nor a Ladder - it can never grant anything", id));
+    /**
+     * Re-files a shared-vocabulary finding as one of this engine's own, prefixing {@code label} so
+     * the message still points at the exact authored block. The shared validator speaks in terms of
+     * a table and a roll index; a station author is looking at
+     * {@code Station[sawmill].Actions[work].Bonus.Rolls[0]}.
+     */
+    @Nonnull
+    private static List<Finding> adopt(
+            @Nonnull List<com.ziggfreed.common.validation.Finding> shared, // FQN-OK: this mod's Finding and ziggfreed-common's meet in this method by definition
+            @Nonnull String label) {
+        List<Finding> out = new ArrayList<>(shared.size());
+        for (com.ziggfreed.common.validation.Finding f : shared) { // FQN-OK: this mod's Finding and ziggfreed-common's meet in this method by definition
+            Severity severity = switch (f.severity()) {
+                case ERROR -> Severity.ERROR;
+                case INFO -> Severity.INFO;
+                default -> Severity.WARNING;
+            };
+            out.add(new Finding(severity, DOMAIN, f.code(), label + ": " + f.message(), f.sourceId()));
+        }
+        return out;
+    }
+
+    /**
+     * A {@code Cue} is a MOMENT id, played through the same funnel every other station moment goes
+     * through - so a typo is the same warn-only typo finding an action's own {@code Moments} key
+     * gets, and a future engine moment can never break an older pack.
+     */
+    private static void checkCueMoment(@Nullable String cue, @Nonnull String label, @Nonnull String id,
+            @Nonnull List<Finding> out) {
+        if (cue == null || cue.isBlank()) {
+            return;
+        }
+        if (!StationFlairs.isKnownMomentId(cue)) {
+            out.add(Finding.warning(DOMAIN, "UNKNOWN_MOMENT_ID",
+                    label + " names moment '" + cue + "', which no engine moment answers to -"
+                            + " nothing will play unless a flair supplies it", id));
         }
     }
 
@@ -2019,15 +2046,15 @@ public final class StationValidator {
         }
     }
 
-    private static void noteFactorRefPairs(@Nullable FactorRef[] refs, @Nonnull Set<String> seen,
+    private static void noteFactorRefPairs(@Nullable FactorFormula.Term[] terms, @Nonnull Set<String> seen,
                                            @Nonnull Set<String> reported, @Nonnull String label,
                                            @Nonnull String id, @Nonnull List<Finding> out) {
-        if (refs == null) {
+        if (terms == null) {
             return;
         }
-        for (FactorRef f : refs) {
-            if (f != null) {
-                noteFactorPair(f.getFactor(), f.getParam(), seen, reported, label, id, out);
+        for (FactorFormula.Term t : terms) {
+            if (t != null) {
+                noteFactorPair(t.getFactor(), t.getParam(), seen, reported, label, id, out);
             }
         }
     }
@@ -2074,19 +2101,8 @@ public final class StationValidator {
                                 + " making it the ladder's baseline tier; confirm a baseline is"
                                 + " intended", id));
             }
-            if (f.getGrants() == null) {
-                // A floor's only reward path is its own Grants (no direct DropList leaf), but a
-                // grants-less floor carrying a Presentation is a legal PURE CUE (it plays on
-                // reach); only a floor with neither does nothing at all.
-                if (f.getPresentation() == null) {
-                    out.add(Finding.warning(DOMAIN, "LOOT_LADDER_FLOOR_EMPTY_GRANTS",
-                            fLabel + " authors neither Grants nor a Presentation - reaching it does"
-                                    + " nothing", id));
-                }
-            } else {
-                checkGrants(f.getGrants(), fLabel + ".Grants", id, trigger, noCycleOutput, dropListKnown, out);
-            }
-            checkNativeRefs(f.getPresentation(), fLabel + ".Presentation", id, out);
+            checkGrants(f.getGrants(), fLabel + ".Grants", id, trigger, noCycleOutput, dropListKnown, out);
+            checkCueMoment(f.getCue(), fLabel + ".Cue", id, out);
         }
     }
 
@@ -2108,20 +2124,20 @@ public final class StationValidator {
     }
 
     /**
-     * The shared {@link FactorRef} check (scope-2's weighted-factor vocabulary, design 1.3/4.2):
-     * the {@code FactorRef}-array sibling of {@link #checkConditionFactors}, reused everywhere a
-     * numeric factor channel is SUMMED - {@code Roll.Chance.Factors}, {@code Roll.Ladder.Factors},
-     * {@code StatRollEntry.Points.Factors}, {@code StationStep.Stamp.Stats.Caps.Budgets[]
-     * .Factors}, {@code StationStep.Repeat.Factors}. Same {@code UNKNOWN_FACTOR} code as every
-     * other factor-reference site (one code, one meaning).
+     * The weighted-term sibling of {@link #checkConditionFactors}, reused everywhere a numeric
+     * factor channel is SUMMED - {@code Roll.Chance.Factors}, {@code Roll.Ladder.Factors},
+     * {@code ContributionScale.Factors}, {@code StatRollEntry.Points.Factors}, a Stamp budget's
+     * {@code Factors}, {@code StationStep.Repeat.Factors}. Same {@code UNKNOWN_FACTOR} code as
+     * every other factor-reference site (one code, one meaning).
      */
-    private static void checkFactorRefs(@Nullable FactorRef[] factors, @Nonnull String label, @Nonnull String id,
+    private static void checkFactorTerms(@Nullable FactorFormula.Term[] factors, @Nonnull String label,
+                                        @Nonnull String id,
                                         @Nonnull Predicate<String> factorKnown, @Nonnull List<Finding> out) {
         if (factors == null) {
             return;
         }
-        for (FactorRef f : factors) {
-            if (f == null || f.getFactor() == null || f.getFactor().isBlank()) {
+        for (FactorFormula.Term f : factors) {
+            if (f == null || f.isBlank()) {
                 continue;
             }
             if (!factorKnown.test(f.getFactor())) {
@@ -2139,76 +2155,86 @@ public final class StationValidator {
      * context (a lootable table, a standalone extension payload): those are checked where they are
      * REFERENCED from an action instead, since the same table can be shared by both action shapes.
      */
-    private static void checkGrants(@Nullable Roll.Grants grants, @Nonnull String label, @Nonnull String id,
-                                    @Nonnull String trigger, boolean noCycleOutput,
-                                    @Nonnull Predicate<String> dropListKnown,
-                                    @Nonnull List<Finding> out) {
+    private static void checkGrants(@Nullable LootGrants grants, @Nonnull String label, @Nonnull String id,
+            @Nonnull String trigger, boolean noCycleOutput, @Nonnull Predicate<String> dropListKnown,
+            @Nonnull List<Finding> out) {
         if (grants == null) {
             return;
         }
         String[] dropLists = grants.getDropLists();
         if (dropLists != null) {
-            for (String dropListId : dropLists) {
+            for (int i = 0; i < dropLists.length; i++) {
+                String dropListId = dropLists[i];
                 if (dropListId == null || dropListId.isBlank()) {
-                    out.add(Finding.warning(DOMAIN, "LOOT_BLANK_DROPLIST",
-                            label + ".DropLists has a blank entry - it grants nothing", id));
-                } else if (!dropListKnown.test(dropListId)) {
-                    out.add(Finding.warning(DOMAIN, "LOOT_UNKNOWN_DROPLIST",
-                            label + " references unknown ItemDropList '" + dropListId + "'", id));
-                }
-            }
-        }
-        // Decision 51d (seam wave): a Grants.Effects[] entry is the SAME EffectRef id-ref-only
-        // vocabulary Presentation.Effect uses - the shared checkEffectRef core covers both.
-        EffectRef[] effects = grants.getEffects();
-        if (effects != null) {
-            for (int i = 0; i < effects.length; i++) {
-                checkEffectRef(effects[i], label + ".Effects[" + i + "]", id, out);
-            }
-        }
-        // OutputItems adds to the CYCLE's own output, which only a Cycle trigger has - the same
-        // shape (and the same reason) as the Contributions check below. The amount is fractional, so
-        // both checks read the reader-defaulted "grants anything at all" test rather than a count.
-        if (grants.effectiveOutputItems() > 0.0 && !Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
-            out.add(Finding.warning(DOMAIN, "LOOT_OUTPUT_ITEMS_WRONG_TRIGGER",
-                    label + " authors Grants.OutputItems under a non-Cycle Trigger ('" + trigger
-                            + "') - there is no cycle output to add items to, so the grant is dropped", id));
-        }
-        // The sibling of the wrong-trigger rule above, for the other way a cycle can have no output
-        // to add to: the action runs an authored Steps program, whose phases produce whatever they
-        // individually author rather than one recipe-driven output. The roll still evaluates, it
-        // just has nothing to multiply - so without this the content is dead with no diagnostic.
-        if (grants.effectiveOutputItems() > 0.0 && noCycleOutput
-                && Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
-            out.add(Finding.warning(DOMAIN, "LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT",
-                    label + " authors Grants.OutputItems on an action that runs an authored Steps"
-                            + " program - such a program has no single cycle output to add items to,"
-                            + " so the grant is dropped; author a Produce phase or a Grants.DropLists"
-                            + " entry instead", id));
-        }
-        // A one-shot contribution rides the cycle-completed event, which only a Cycle trigger has.
-        Contribution[] posts = grants.getContributions();
-        if (posts != null && posts.length > 0) {
-            if (!Roll.TRIGGER_CYCLE.equalsIgnoreCase(trigger)) {
-                out.add(Finding.warning(DOMAIN, "LOOT_CONTRIBUTION_WRONG_TRIGGER",
-                        label + " authors Grants.Contributions under a non-Cycle Trigger ('" + trigger
-                                + "') - there is no cycle event to forward the post on", id));
-            }
-            checkContributionChannels(posts, label + ".Contributions", id, out);
-            for (int i = 0; i < posts.length; i++) {
-                Contribution post = posts[i];
-                String postLabel = label + ".Contributions[" + i + "]";
-                if (post == null || post.getChannel() == null || post.getChannel().isBlank()) {
-                    out.add(Finding.warning(DOMAIN, "LOOT_CONTRIBUTION_MISSING_CHANNEL",
-                            postLabel + " has no Channel - the post is skipped", id));
                     continue;
                 }
-                if (post.getAmount() == null || post.getAmount() <= 0) {
-                    out.add(Finding.warning(DOMAIN, "LOOT_CONTRIBUTION_NONPOSITIVE_AMOUNT",
-                            postLabel + " has a null or nonpositive Amount - the post is skipped", id));
+                if (!dropListKnown.test(dropListId)) {
+                    out.add(Finding.warning(DOMAIN, "LOOT_UNKNOWN_DROPLIST",
+                            label + ".DropLists[" + i + "] references unknown ItemDropList '"
+                                    + dropListId + "'", id));
                 }
             }
         }
+        boolean cycleTrigger = StationLootEngine.TRIGGER_CYCLE.equalsIgnoreCase(trigger);
+        for (RewardSpec spec : grants.rewardSpecs()) {
+            String kind = spec.kind();
+            if (StationRewardKinds.KIND_EFFECT.equalsIgnoreCase(kind)) {
+                checkEffectRef(EffectRef.of(spec.param("id")), label + " effect reward", id, out);
+            } else if (StationRewardKinds.KIND_OUTPUT_ITEMS.equalsIgnoreCase(kind)) {
+                checkOutputItemsReward(spec, label, id, trigger, cycleTrigger, noCycleOutput, out);
+            } else if (StationRewardKinds.KIND_CONTRIBUTION.equalsIgnoreCase(kind)) {
+                checkContributionReward(spec, label, id, trigger, cycleTrigger, out);
+            }
+        }
+    }
+
+    /**
+     * Extra units of the cycle's own primary output only mean something where there IS one: a
+     * Completion roll fires from inside session stop with the cycle already paid out, and an
+     * authored {@code Steps} program produces whatever its phases individually author rather than
+     * one recipe-driven output. Either way the reward evaluates and then has nothing to add to, so
+     * without this the content is dead with no diagnostic.
+     */
+    private static void checkOutputItemsReward(@Nonnull RewardSpec spec, @Nonnull String label,
+            @Nonnull String id, @Nonnull String trigger, boolean cycleTrigger, boolean noCycleOutput,
+            @Nonnull List<Finding> out) {
+        if (spec.doubleParam("count", 0.0) <= 0.0) {
+            out.add(Finding.warning(DOMAIN, "LOOT_OUTPUT_ITEMS_NONPOSITIVE",
+                    label + " grants an output-items reward with no positive Count", id));
+            return;
+        }
+        if (!cycleTrigger) {
+            out.add(Finding.warning(DOMAIN, "LOOT_OUTPUT_ITEMS_WRONG_TRIGGER",
+                    label + " grants extra cycle output under a non-Cycle Trigger ('" + trigger
+                            + "') - there is no cycle output to add items to, so the grant is dropped", id));
+        } else if (noCycleOutput) {
+            out.add(Finding.warning(DOMAIN, "LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT",
+                    label + " grants extra cycle output on an action that runs an authored Steps"
+                            + " program - such a program has no single cycle output to add items to,"
+                            + " so the grant is dropped; author a Produce phase or a drop list instead", id));
+        }
+    }
+
+    /** A one-shot contribution rides the cycle-completed event, which only a Cycle trigger has. */
+    private static void checkContributionReward(@Nonnull RewardSpec spec, @Nonnull String label,
+            @Nonnull String id, @Nonnull String trigger, boolean cycleTrigger, @Nonnull List<Finding> out) {
+        String channel = spec.param("channel");
+        if (channel == null || channel.isBlank()) {
+            out.add(Finding.warning(DOMAIN, "LOOT_CONTRIBUTION_MISSING_CHANNEL",
+                    label + " grants a contribution with no Channel - nothing can interpret it", id));
+            return;
+        }
+        if (!cycleTrigger) {
+            out.add(Finding.warning(DOMAIN, "LOOT_CONTRIBUTION_WRONG_TRIGGER",
+                    label + " grants a contribution under a non-Cycle Trigger ('" + trigger
+                            + "') - there is no cycle event to forward the post on", id));
+        }
+        if (spec.doubleParam("amount", 0.0) <= 0.0) {
+            out.add(Finding.warning(DOMAIN, "LOOT_CONTRIBUTION_NONPOSITIVE_AMOUNT",
+                    label + " grants a contribution on '" + channel + "' with no positive Amount", id));
+        }
+        checkContributionChannels(new Contribution[] {Contribution.of(channel, spec.param("param"),
+                spec.doubleParam("amount", 0.0))}, label + " contribution", id, out);
     }
 
     /**
@@ -2334,7 +2360,7 @@ public final class StationValidator {
                     label + " authors Factors but no Floors - nothing consumes the summed value, so"
                             + " the multiplier is always the neutral 1.0", id));
         }
-        checkFactorRefs(scale.getFactors(), label + ".Factors", id, factorKnown, out);
+        checkFactorTerms(scale.getFactors(), label + ".Factors", id, factorKnown, out);
         if (hasFloors) {
             double[] mins = new double[floors.length];
             for (int i2 = 0; i2 < floors.length; i2++) {
@@ -3211,7 +3237,7 @@ public final class StationValidator {
 
             StationStep.Repeat repeat = step.getRepeat();
             if (repeat != null) {
-                checkFactorRefs(repeat.getFactors(), stepLabel + ".Repeat.Factors", id, factorKnown, out);
+                checkFactorTerms(repeat.getFactors(), stepLabel + ".Repeat.Factors", id, factorKnown, out);
             }
 
             StationStep.Walk walk = step.getWalk();
@@ -3307,14 +3333,13 @@ public final class StationValidator {
      * A Stamp phase's own coverage (design 9.5, scope-2 3.8's {@code Budgets[]} reshape): no
      * {@code Reagents} (a free ritual - warn, not an error, some future station may genuinely want
      * that), a {@code Stats.Pool} reference to an unknown {@code RollPool}, each inline entry's
-     * {@code Points.Factors} through the shared {@link #checkFactorRefs} core, and each
+     * {@code Points.Factors} through the shared {@link #checkFactorTerms} core, and each
      * {@code Caps.Budgets[]} entry: {@code STAMP_BUDGET_BAD_ROUTE} when neither/both of the
-     * exactly-one-of {@code {Points}}/{@code {PointsPer,Factors}} routes are authored (see {@link
-     * StationStep.Stamp.Stats.Caps.Budget#hasExactlyOneRoute()}'s own javadoc), {@code
+     * exactly-one-of {@code {Points}}/{@code {PointsPer,Factors}} routes are authored (see {@link StampSpec.Budget#hasExactlyOneRoute()}'s own javadoc), {@code
      * STAMP_NONPOSITIVE_BUDGET} for a non-positive value on whichever route IS authored,
      * {@code STAMP_BUDGET_STRAY_FACTORS} for a {@code Factors[]} authored on a flat {@code Points}
      * route (silently ignored - only {@code PointsPer} engages {@code Factors}), and a
-     * {@code Factors[]} unknown-factor check via {@link #checkFactorRefs} (the SAME
+     * {@code Factors[]} unknown-factor check via {@link #checkFactorTerms} (the SAME
      * {@code UNKNOWN_FACTOR} code every other factor reference reports through - one code, one
      * meaning, never a per-site {@code STAMP_UNKNOWN_FACTOR} twin).
      */
@@ -3324,7 +3349,7 @@ public final class StationValidator {
         if (stamp.getReagents() == null || stamp.getReagents().length == 0) {
             out.add(Finding.warning(DOMAIN, "STAMP_NO_REAGENTS", stepLabel + " authors no Reagents (a free ritual)", id));
         }
-        StationStep.Stamp.Stats stats = stamp.getStats();
+        StampSpec stats = stamp.getStats();
         if (stats == null && stamp.getDurability() == null) {
             out.add(Finding.warning(DOMAIN, "STAMP_NO_PAYLOAD",
                     stepLabel + " authors neither Stats nor Durability - this step grants nothing", id));
@@ -3347,19 +3372,19 @@ public final class StationValidator {
             for (int i = 0; i < entries.length; i++) {
                 StatRollEntry e = entries[i];
                 if (e != null && e.getPoints() != null) {
-                    checkFactorRefs(e.getPoints().getFactors(),
+                    checkFactorTerms(e.getPoints().getFactors(),
                             stepLabel + ".Stats.Entries[" + i + "].Points.Factors", id, factorKnown, out);
                 }
             }
         }
-        StationStep.Stamp.Stats.Caps caps = stats.getCaps();
+        StampSpec.Caps caps = stats.getCaps();
         if (caps == null) {
             return;
         }
-        StationStep.Stamp.Stats.Budget[] budgets = caps.getBudgets();
+        StampSpec.Budget[] budgets = caps.getBudgets();
         if (budgets != null) {
             for (int i = 0; i < budgets.length; i++) {
-                StationStep.Stamp.Stats.Budget b = budgets[i];
+                StampSpec.Budget b = budgets[i];
                 if (b == null) {
                     continue;
                 }
@@ -3383,7 +3408,7 @@ public final class StationValidator {
                                     + " (author PointsPer to use them)", id));
                 }
                 if (b.isFactorScaled()) {
-                    checkFactorRefs(b.getFactors(), bLabel + ".Factors", id, factorKnown, out);
+                    checkFactorTerms(b.getFactors(), bLabel + ".Factors", id, factorKnown, out);
                 }
             }
         }

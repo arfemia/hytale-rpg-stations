@@ -28,6 +28,14 @@ is used.
   `registerBuiltins()`'s javadoc for the full rule. `resolve(...)` never propagates a throwing
   provider - a bad third-party factor provider must never crash a loot roll or a station gate
   check. `info()` exposes the ledger's owner + failure snapshot for an admin listing.
+  **`tool_power` registers through the NULLABLE core seam** (not the primitive station-provider
+  one), so a gather type the held tool has no spec for answers "cannot tell" rather than a
+  substituted `0` - the one rule the whole vocabulary rests on. Its no-Param form deliberately stays
+  the STATION's own effective gather type rather than the portable library's best-of-any-type
+  aggregate: same id, context-appropriate number, which is why the registry is per consumer at all.
+  **`snapshotFor(ctx)`** is the memoized per-batch reading set every loot pass and step gate
+  evaluates against (the shared `loot.FactorSnapshot`), so two formulas reading one factor inside a
+  single cycle can never disagree about it; build one per moment and discard it.
 - **[`CoreFactorVocabulary`](CoreFactorVocabulary.java)** - the ONE file that speaks both the
   shared vocabulary and this mod's api types, because their simple names collide; everything else
   names just one of them. It owns the shared registry instance, publishes a station evaluation as
@@ -53,10 +61,6 @@ is used.
   registered providers; the union read iterates all of them per resolution.
 - **[`SummaryEnricherRegistryImpl`](SummaryEnricherRegistryImpl.java)** - same shape, registration
   order preserved (drives the "prepended before the engine's own rows, registration order" rule).
-- **[`EnhanceStamperRegistryImpl`](EnhanceStamperRegistryImpl.java)** - a single
-  `volatile` active slot, last-registration-wins (mirrors `FactorRegistryImpl`'s discipline, NOT
-  the union-of-all shape the list registries use). Read by
-  `station.StationStepHandlers.StampHandler` directly (not back through `RpgStationsApi`).
 - **[`StationViewImpl`](StationViewImpl.java)** - the read-only per-station projection built from
   the live `station.StationCatalog` entry at query time (never cached/stale). `flairIds()` reuses
   `station.FlairCatalog.effectiveFlairsFor` - the SAME inline-`Flairs`-UNION-`FlairAsset` merge

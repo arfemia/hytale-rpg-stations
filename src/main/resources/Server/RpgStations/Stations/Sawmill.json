@@ -39,7 +39,7 @@
         }
       },
       "Bonus": {
-        "$Comment": "Everything conditional or probabilistic about output lives here, as visible Rolls. ONE roll is authored inline: the tool ladder below, which is the whole of what this bench pays for a better hatchet, so the reward for an upgrade is a single curve you can read top to bottom. Prefer that shape - a bare Chance roll beside a ladder that already prices the same axis buys variance without giving the player a new decision. Reach for one when a station wants an outcome its ladder genuinely cannot express, and see docs/loot-and-factors.md for a worked example. Grants.OutputItems adds EXTRA units of the cycle's own product (the actual species being milled) - additive on top of Recipe.Yield, so the two numbers stay directly comparable and no file can silently multiply another's. The amount is FRACTIONAL: the whole part is granted every cycle and the fraction left over is the chance of one more, so 1.5 pays one plank always plus a second half the time. Everything the cycle grants is summed before that single resolution, so two rolls paying 0.5 each average one whole plank. Lootables pulls in three tables, one roll each: SawmillFinds is the session-loyalty ladder any worker can reach, SawmillTrophy is the Sawmiller's Hatchet chase, and SawmillMasterworkFinds is the fourth find tier that chase pays out. Finds arrive as drop-list items and the trophy as a command grant, both different things from the planks these rolls add. Keep one roll per Lootable when authoring your own: a Lootable folds by id and a later layer replaces the whole FILE, so a table holding one roll is one a pack can re-tune without inheriting anything it did not want.",
+        "$Comment": "Everything conditional or probabilistic about output lives here, as visible Rolls. ONE roll is authored inline: the tool ladder below, which is the whole of what this bench pays for a better hatchet, so the reward for an upgrade is a single curve you can read top to bottom. Prefer that shape - a bare Chance roll beside a ladder that already prices the same axis buys variance without giving the player a new decision. Reach for one when a station wants an outcome its ladder genuinely cannot express, and see docs/loot-and-factors.md for a worked example. The rpgstations:output_items reward adds EXTRA units of the cycle's own product (the actual species being milled) - additive on top of Recipe.Yield, so the two numbers stay directly comparable and no file can silently multiply another's. The amount is FRACTIONAL: the whole part is granted every cycle and the fraction left over is the chance of one more, so 1.5 pays one plank always plus a second half the time. Everything the cycle grants is summed before that single resolution, so two rolls paying 0.5 each average one whole plank. Lootables pulls in three tables, one roll each: SawmillFinds is the session-loyalty ladder any worker can reach, SawmillTrophy is the Sawmiller's Hatchet chase, and SawmillMasterworkFinds is the fourth find tier that chase pays out. Finds arrive as drop-list items and the trophy as a command grant, both different things from the planks these rolls add. Keep one roll per Lootable when authoring your own: a Lootable folds by id and a later layer replaces the whole FILE, so a table holding one roll is one a pack can re-tune without inheriting anything it did not want.",
         "Lootables": ["SawmillFinds", "SawmillTrophy", "SawmillMasterworkFinds"],
         "Rolls": [
           {
@@ -52,11 +52,11 @@
                 { "Factor": "hytale:tool_power", "Weight": 1.0 }
               ],
               "Floors": [
-                { "Min": 11.0, "Grants": { "OutputItems": 1 } },
-                { "Min": 22.0, "Grants": { "OutputItems": 1.5 } },
-                { "Min": 33.0, "Grants": { "OutputItems": 2 } },
-                { "Min": 40.0, "Grants": { "OutputItems": 3 } },
-                { "Min": 50.0, "Grants": { "OutputItems": 4 } }
+                { "Min": 11.0, "Grants": { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "1" } } ] } },
+                { "Min": 22.0, "Grants": { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "1.5" } } ] } },
+                { "Min": 33.0, "Grants": { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "2" } } ] } },
+                { "Min": 40.0, "Grants": { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "3" } } ] } },
+                { "Min": 50.0, "Grants": { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "4" } } ] } }
               ]
             }
           }
@@ -117,9 +117,38 @@
           "DelayMs": 100
         },
         "Completion": {
-          "$Comment": "Plays once when the session ends. The other id an action can author here is step:<actionId>:<stepId>, one per beat of a Steps program. rare_find is deliberately NOT authored here: that cue comes from whichever Roll or Ladder.Floor earned it, and a flair overlays THAT presentation, so an entry keyed rare_find in this map would never play.",
+          "$Comment": "Plays once when the session ends. The other ids an action can author here are step:<actionId>:<stepId>, one per beat of a Steps program, and cue:<yourName>, one per cue a loot roll names.",
           "Sounds": ["SFX_Chest_Wooden_Open_Player"],
           "Particles": [ { "SystemId": "Block_Gem_Sparks" } ]
+        },
+        "Rare_Find": {
+          "$Comment": "What an ordinary lucky find sounds like at this bench, and the first of the four-cue palette below. A Roll or a Ladder floor names a cue and this map decides what that cue IS, so re-skinning every find at once is one edit here rather than one per table - and the tables themselves stay pure numbers. Only ever plays over a find that genuinely produced something.\n\nThe three cue: ids beside it exist so a loot table can escalate without owning any presentation of its own. Author your own tables against these four names and the bench sounds right with nothing further to write; author a new name here and in your table's Cue when a fifth beat is genuinely a different moment.",
+          "Sounds": ["SFX_Coins_Land"],
+          "Particles": [ { "SystemId": "Block_Gem_Sparks" } ]
+        },
+        "cue:find_deep": {
+          "$Comment": "A find from the deeper tiers - grander than the everyday chime, short of the trophy. Name it from a Ladder floor that pays a genuinely better table.",
+          "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player"],
+          "Particles": [ { "SystemId": "Effect_Crown_Gold" } ]
+        },
+        "cue:find_apex": {
+          "$Comment": "The top of a find ladder: the deep cue plus coins and sparks, for the tier a fully invested worker reaches and nothing above it.",
+          "Sounds": [
+            "SFX_Chest_Legendary_FirstOpen_Player",
+            "SFX_Coins_Land"
+          ],
+          "Particles": [
+            { "SystemId": "Effect_Crown_Gold" },
+            { "SystemId": "Block_Gem_Sparks" }
+          ]
+        },
+        "cue:trophy": {
+          "$Comment": "The Sawmiller's Hatchet win, kept as its own moment rather than sharing rare_find so the once-in-a-session payout can sound like one. A cue: id is author-defined - name it here and again in the roll's Cue, and a flair can re-skin exactly this beat without touching ordinary finds.",
+          "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player"],
+          "Particles": [
+            { "SystemId": "Effect_Crown_Gold" },
+            { "SystemId": "Block_Gem_Sparks" }
+          ]
         }
       }
     }

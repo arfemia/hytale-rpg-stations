@@ -1,6 +1,7 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,6 +13,7 @@ import javax.annotation.Nullable;
 import org.joml.Vector3d;
 
 import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.inventory.ResourceQuantity;
@@ -19,21 +21,30 @@ import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransact
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.cast.step.StepHandler;
+import com.ziggfreed.common.command.CommandRunner;
 import com.ziggfreed.common.entity.PlayerPuppetService;
 import com.ziggfreed.common.entity.performer.WalkHandle;
+import com.ziggfreed.common.inventory.InventoryGrant;
+import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.stamp.RollPoolAsset;
+import com.ziggfreed.common.loot.stamp.RollPoolConfig;
+import com.ziggfreed.common.loot.stamp.StampCapEngine;
+import com.ziggfreed.common.loot.stamp.StampInspection;
+import com.ziggfreed.common.loot.stamp.StampPlan;
+import com.ziggfreed.common.loot.stamp.StampSpec;
+import com.ziggfreed.common.loot.stamp.Stamper;
+import com.ziggfreed.common.loot.stamp.StamperRegistry;
+import com.ziggfreed.common.loot.stamp.StatRoll;
+import com.ziggfreed.common.loot.stamp.StatRollEntry;
 import com.ziggfreed.rpgstations.api.EnhanceLine;
-import com.ziggfreed.rpgstations.api.EnhanceStamper;
-import com.ziggfreed.rpgstations.api.StampInspection;
-import com.ziggfreed.rpgstations.api.StampResult;
-import com.ziggfreed.rpgstations.api.impl.EnhanceStamperRegistryImpl;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Ingredient;
-import com.ziggfreed.rpgstations.asset.LootRef;
-import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.CommandRewardExecutor;
-import com.ziggfreed.rpgstations.loot.LootEngine;
+import com.ziggfreed.rpgstations.loot.StationLootEngine;
+import com.ziggfreed.rpgstations.station.ExtensionCatalog;
 import com.ziggfreed.rpgstations.util.InventoryAccess;
 import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
@@ -631,11 +642,12 @@ final class StationStepHandlers {
         // The SAME resolution an action's Bonus uses (referenced tables' effective rolls, incl. any
         // Lootable-targeted extension's appended ones, then the ref's own inline rolls) - a step's
         // Roll phase must never see a narrower view of a shared table than a Bonus does.
-        List<Roll> rolls = LootEngine.resolveRolls(ref, "Roll step '" + step.getId() + "'");
+        List<Roll> rolls = StationLootEngine.resolveRolls(ref, "Roll step '" + step.getId() + "'");
         if (rolls.isEmpty()) {
             return null;
         }
-        LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, ctx.snapshot,
+        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(rolls,
+                StationLootEngine.TRIGGER_CYCLE, ctx.snapshot,
                 ctx.player, ctx.session.playerRef, ctx.session.stationId,
                 ctx.action.getActionId(), ctx.cycleIndex, ctx.commandBuffer, ctx.store,
                 ctx.session.blockX, ctx.session.blockY, ctx.session.blockZ);
@@ -652,13 +664,12 @@ final class StationStepHandlers {
         if (commands == null || commands.length == 0 || ctx.session.playerRef == null) {
             return null;
         }
-        CommandRewardExecutor.Placeholders placeholders = CommandRewardExecutor.Placeholders.of(
-                ctx.session.playerRef, ctx.session.stationId, ctx.action.getActionId(), ctx.cycleIndex);
-        for (String raw : commands) {
-            if (raw != null && !raw.isBlank()) {
-                CommandRewardExecutor.run(raw, placeholders);
-            }
-        }
+        String player = ctx.session.playerRef.getUsername();
+        CommandRunner.runAllWith(CommandRewardExecutor.consoleAs(player != null ? player : ""),
+                Arrays.asList(commands),
+                CommandRewardExecutor.placeholders(ctx.session.playerRef, ctx.session.stationId,
+                        ctx.action.getActionId(), ctx.cycleIndex),
+                message -> Log.fine("STATION step commands: " + message));
         return null;
     }
 
@@ -696,19 +707,18 @@ final class StationStepHandlers {
             }
 
             // ===== COMPUTE PHASE (zero mutation, per M5) =====
-            StationStep.Stamp.Stats statsGroup = stamp.getStats();
-            EnhanceStamper stamper = EnhanceStamperRegistryImpl.getInstance().active();
+            StampSpec statsGroup = stamp.getStats();
+            Stamper stamper = StamperRegistry.get();
             StampInspection inspection = StampInspection.empty();
-            StampCapEngine.Plan plan = StampCapEngine.Plan.NOTHING_TO_GRANT;
+            StampPlan plan = StampPlan.NOTHING;
             if (statsGroup != null) {
                 if (stamper == null) {
-                    Log.fine("STAMP step '" + step.getId() + "' authors Stats with no registered EnhanceStamper "
+                    Log.fine("STAMP step '" + step.getId() + "' authors Stats with no registered stamper "
                             + "- the Stats leaf no-ops this attempt (Durability still lands)");
                 } else {
                     inspection = safeInspect(stamper, weaponStack);
-                    StampCapEngine.FactorLookup lookup = ctx.snapshot::resolve;
-                    StampCapEngine.RollSource rng = () -> ThreadLocalRandom.current().nextDouble();
-                    plan = StampCapEngine.resolve(statsGroup, inspection, lookup, rng);
+                    plan = StampCapEngine.resolve(withExtendedEntries(statsGroup), inspection,
+                            ctx.snapshot, () -> ThreadLocalRandom.current().nextDouble());
                     if (plan.denied()) {
                         return StationStepResult.fail(StationService.StopReason.ENHANCE_CAPPED,
                                 "Stamp step '" + step.getId() + "' fully capped for '"
@@ -718,7 +728,7 @@ final class StationStepHandlers {
             }
 
             Ingredient[] reagents = stamp.getReagents();
-            double repeatCostMultiplier = economicsMultiplier(statsGroup);
+            double repeatCostMultiplier = economicsMultiplier(stamp.getEconomics());
             int stampCount = stamper != null ? inspection.stampCount() : 0;
             if (reagents != null) {
                 for (Ingredient r : reagents) {
@@ -739,7 +749,7 @@ final class StationStepHandlers {
                 }
             }
 
-            if (!InventoryAccess.storageOf(ctx.player).canAddItemStacks(List.of(weaponStack))) {
+            if (!InventoryGrant.canAdd(ctx.player, weaponStack)) {
                 return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL,
                         "Stamp step '" + step.getId() + "' - no room to return the enhanced item later");
             }
@@ -793,17 +803,53 @@ final class StationStepHandlers {
         }
 
         /**
+         * The same spec with its candidate entries already FLATTENED: the named pool's own entries
+         * plus every {@code Target:{RollPool}} extension's appended ones, then the spec's own inline
+         * entries.
+         *
+         * <p>The shared engine reads a pool straight off the shared store, which is right for every
+         * other consumer and one layer short here - this engine's extension mechanism is its own, and
+         * an extension that adds a stat to a shared pool has to reach a stamp step for the same
+         * reason an extension that adds a roll to a shared table has to reach a loot pass.
+         */
+        @Nonnull
+        static StampSpec withExtendedEntries(@Nonnull StampSpec spec) {
+            String poolId = spec.getPool();
+            if (poolId == null || poolId.isBlank()) {
+                return spec;
+            }
+            RollPoolAsset pool = RollPoolConfig.getInstance().resolve(poolId);
+            StatRollEntry[] poolEntries = ExtensionCatalog.getInstance()
+                    .applyToRollPoolEntries(poolId, pool != null ? pool.getEntries() : null);
+            List<StatRollEntry> merged = new ArrayList<>();
+            if (poolEntries != null) {
+                merged.addAll(Arrays.asList(poolEntries));
+            }
+            if (spec.getEntries() != null) {
+                merged.addAll(Arrays.asList(spec.getEntries()));
+            }
+            return StampSpec.of(null, merged.toArray(StatRollEntry[]::new), spec.getPicks(),
+                    spec.isUnique(), spec.getCaps());
+        }
+
+        /**
          * PURE: applies {@code Durability.AddMax} then the (already rolled + cap-clamped) {@code plan}
          * entries via {@code stamper}, in that order, returning a {@link Mutation} (the new stack +
-         * the provider's {@link EnhanceLine} report + the max-durability delta). Both mutations are
+         * one {@link EnhanceLine} per stat written + the max-durability delta). Both mutations are
          * {@code ItemStack} with-copy operations, so no live server/Player is needed here (unit-tested
          * directly, incl. a THROWING stamper - proves a mutation failure never reaches
          * {@link StationCustodyClaim#setUniqueStack}, the caller's job).
+         *
+         * <p>Each line carries the stat id and its points, plus the label the STAMPER gave it - the
+         * same object that just wrote the stat is the one that knows what it is called, in what
+         * colour, in the player's own locale, so it is asked rather than second-guessed. A stamper
+         * with no wording answers null and the line stays label-less, which the summary reports
+         * plainly; this engine still learns no stat vocabulary either way.
          */
         @Nonnull
         static Mutation applyStampMutation(@Nonnull ItemStack weaponStack,
-                @Nullable StationStep.Stamp.Durability durabilityGroup, @Nonnull StampCapEngine.Plan plan,
-                @Nullable EnhanceStamper stamper) {
+                @Nullable StationStep.Stamp.Durability durabilityGroup, @Nonnull StampPlan plan,
+                @Nullable Stamper stamper) {
             ItemStack mutated = weaponStack;
             double durabilityAdded = 0.0;
             if (durabilityGroup != null && durabilityGroup.getAddMax() != null && durabilityGroup.getAddMax() > 0) {
@@ -814,9 +860,12 @@ final class StationStepHandlers {
             }
             List<EnhanceLine> lines = List.of();
             if (!plan.entries().isEmpty() && stamper != null) {
-                StampResult result = stamper.apply(mutated, plan.entries());
-                mutated = result.stack();
-                lines = result.lines();
+                mutated = stamper.apply(mutated, plan.entries());
+                List<EnhanceLine> written = new ArrayList<>(plan.entries().size());
+                for (StatRoll entry : plan.entries()) {
+                    written.add(new EnhanceLine(entry.statId(), entry.points(), safeDescribe(stamper, entry)));
+                }
+                lines = List.copyOf(written);
             }
             return new Mutation(mutated, lines, durabilityAdded);
         }
@@ -847,13 +896,29 @@ final class StationStepHandlers {
             }
         }
 
-        /** Never-throwing {@link EnhanceStamper#inspect} - a bad third-party stamper must never crash a ritual. */
+        /**
+         * Never-throwing {@link Stamper#describe} - the stamper's own wording for a stat it just
+         * wrote, or null. A stamper that throws here costs its line a LABEL and nothing else: the
+         * stat was already applied, and the summary's plain fallback still reports it.
+         */
+        @Nullable
+        private static Message safeDescribe(@Nonnull Stamper stamper, @Nonnull StatRoll entry) {
+            try {
+                return stamper.describe(entry);
+            } catch (Throwable t) {
+                Log.warn("STAMP stamper describe threw for '" + entry.statId()
+                        + "', reporting it plainly: " + t.getMessage());
+                return null;
+            }
+        }
+
+        /** Never-throwing {@link Stamper#inspect} - a bad third-party stamper must never crash a ritual. */
         @Nonnull
-        private static StampInspection safeInspect(@Nonnull EnhanceStamper stamper, @Nonnull ItemStack stack) {
+        private static StampInspection safeInspect(@Nonnull Stamper stamper, @Nonnull ItemStack stack) {
             try {
                 return stamper.inspect(stack);
             } catch (Throwable t) {
-                Log.warn("STAMP EnhanceStamper#inspect threw, treating as bare: " + t.getMessage());
+                Log.warn("STAMP stamper inspect threw, treating as bare: " + t.getMessage());
                 return StampInspection.empty();
             }
         }
@@ -876,16 +941,16 @@ final class StationStepHandlers {
             return out;
         }
 
-        /** {@code Stats.Caps.Economics.RepeatCostMultiplier}, or 0 (flat cost) when unauthored. */
-        private static double economicsMultiplier(@Nullable StationStep.Stamp.Stats statsGroup) {
-            if (statsGroup == null || statsGroup.getCaps() == null || statsGroup.getCaps().getEconomics() == null) {
+        /** {@code Economics.RepeatCostMultiplier}, or 0 (flat cost) when unauthored. */
+        private static double economicsMultiplier(@Nullable StationStep.Stamp.Economics economics) {
+            if (economics == null) {
                 return 0.0;
             }
-            Double m = statsGroup.getCaps().getEconomics().getRepeatCostMultiplier();
+            Double m = economics.getRepeatCostMultiplier();
             return m != null ? m : 0.0;
         }
 
-        /** {@code ceil(baseQuantity * (1 + RepeatCostMultiplier * stampCount))} (design 9.5, critique M2 fix (b)). */
+        /** {@code ceil(baseQuantity * (1 + RepeatCostMultiplier * stampCount))}. */
         private static int effectiveReagentQuantity(int baseQuantity, double repeatCostMultiplier, int stampCount) {
             if (repeatCostMultiplier <= 0.0 || stampCount <= 0) {
                 return baseQuantity;

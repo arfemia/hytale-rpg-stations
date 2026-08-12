@@ -62,8 +62,10 @@ public class FactorRegistryImplTest {
         // An explicit Param addresses any native GatherType, case-insensitively.
         assertEquals(0.05, FactorRegistryImpl.getInstance().resolve("hytale:tool_power", "Rocks", c));
         assertEquals(0.05, FactorRegistryImpl.getInstance().resolve("hytale:tool_power", "rocks", c));
-        // A gather type the held tool has no spec for is 0, never the station default.
-        assertEquals(0.0, FactorRegistryImpl.getInstance().resolve("hytale:tool_power", "OreMithril", c));
+        // A gather type the held tool has no spec for FAILS CLOSED: "cannot do this job at all" is
+        // a different answer from "does it badly", so a bounds-less gate on it stays shut and a
+        // formula term contributes nothing rather than a substituted zero.
+        assertNull(FactorRegistryImpl.getInstance().resolve("hytale:tool_power", "OreMithril", c));
     }
 
     @Test

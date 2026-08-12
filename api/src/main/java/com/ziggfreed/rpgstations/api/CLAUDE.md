@@ -20,7 +20,7 @@ id; some other mod owns what that id means. Nothing else about extension needs e
 | | READ - factors | WRITE - contributions |
 |---|---|---|
 | authored leaf | `{"Factor": "<ns>:<id>", "Param": "<opaque>"}` | `{"Channel": "<ns>:<id>", "Param": "<opaque>", "Amount": <double>}` |
-| asset type | `asset/FactorRef`, `asset/Conditions` (the shared `FactorCondition` leaf) | `asset/Contribution` |
+| asset type | the shared `FactorFormula.Term` (a weighted READ) and `asset/Conditions` (the shared `FactorCondition` gate leaf) | `asset/Contribution` |
 | api type | [`StationFactorProvider`](StationFactorProvider.java) + [`FactorContext`](FactorContext.java) | [`StationContribution`](StationContribution.java) |
 | registry | [`FactorRegistry`](FactorRegistry.java)`.register(id, provider)` | [`ContributionChannelRegistry`](ContributionChannelRegistry.java)`.declare(id)` |
 | api accessor | `RpgStationsApi.factors()` | `RpgStationsApi.channels()` |
@@ -63,7 +63,7 @@ is the exact inverse of a permanently-opaque channel.
   `get()` before RpgStations finishes `setup()` (or when it is simply not installed) throws
   `IllegalStateException` - a caller MUST presence-check the plugin first; this method performs no
   detection of its own. Exposes `factors()`, `channels()`, `validationHooks()`, `flairUnlocks()`,
-  `summaryEnrichers()`, `enhanceStampers()`, a read-only `stations()` catalog view, and
+  `summaryEnrichers()`, a read-only `stations()` catalog view, and
   **`stationCount()`** - the cheap presence-check/count path (`stationCount() > 0`), a
   default-bodied method (`stations().size()`) the shipped implementation overrides with the direct
   catalog size so a caller who only wants a count never pays for materializing a full
@@ -119,7 +119,7 @@ is the exact inverse of a permanently-opaque channel.
   content checks that run inside `StationValidator`'s FULL validate pass, so a mod owning a factor
   family or a channel keeps its composition rules WITH the vocabulary instead of this engine
   hardcoding them. The views expose both the reference structure and the formula numbers
-  (`Chance.BasePercent`/`CapPercent`, ladder floor thresholds and values, factor `Weight`s,
+  (the chance formula's `Base` and its `Clamp.Max`, ladder floor thresholds and values, term `Weight`s,
   contribution `Amount`s). `FindingSink` is info/warn only; every hook is try-guarded; nothing here
   can block an asset. This is the correct home for a rule like "do not sum this aggregate factor
   AND the channels it aggregates" - the engine cannot know that, and must not pretend to.
@@ -128,21 +128,22 @@ is the exact inverse of a permanently-opaque channel.
   consults the UNION across every registered provider. No provider registered = empty set = base
   presentations only. Persistence is the REGISTERING mod's own concern - RpgStations never stores
   a per-player fact.
-- **[`EnhanceStamperRegistry`](EnhanceStamperRegistry.java)** / **[`EnhanceStamper`](EnhanceStamper.java)**
-  / **[`StampInspection`](StampInspection.java)** / **[`StatRoll`](StatRoll.java)** /
-  **[`StampResult`](StampResult.java)** / **[`EnhanceLine`](EnhanceLine.java)** - the anvil Stamp step's
-  `Stats`-leaf delegate: a SINGLE active slot (last-registration-wins, `FactorRegistry`'s discipline,
-  NOT `FlairUnlockRegistry`'s union-of-all shape - there is one "how does this server encode
-  enhancement points" answer at a time). `EnhanceStamper` is a lean 2-method contract RpgStations'
-  own `station.StampCapEngine` calls: `inspect(stack)` reads the stack's CURRENT enhancement state
-  (format-opaque to RpgStations - only the registered stamper knows the encoding) BEFORE
-  any roll/cap math runs (zero mutation); `apply(stack, entries)` writes the ALREADY rolled +
-  cap-clamped entries (RpgStations never re-derives a cap here) and returns a **`StampResult`** (the
-  mutated stack PLUS a `List<EnhanceLine>` enhancements-metadata report - one line per stat actually
-  written, each a `{statId, points, Message label}` the provider composes and RpgStations renders
-  VERBATIM in the session summary, so no stat vocabulary leaks into this mod; empty = durability-only
-  / silent), called only after every compute-phase validation already passed. `null` from
-  `active()` = no stamper registered = the Stats leaf no-ops (Durability still lands).
+- **The stamper contract is NOT here any more.** How a server encodes "N points of stat X" onto an
+  item is a shared question every mod that stamps gear answers the same way, so it lives in
+  `ziggfreed-common`'s `loot.stamp` package: register a `Stamper` (a 2-method
+  `inspect`/`apply` contract) through the static `StamperRegistry`, which keeps the same single
+  ACTIVE slot, last-registration-wins discipline the api registry had. `StampInspection`, `StatRoll`
+  and the whole roll + budget engine moved with it. With no stamper registered the Stamp step's
+  `Stats` leaf no-ops and `Durability` still lands, exactly as before.
+- **[`EnhanceLine`](EnhanceLine.java)** - one line of what a stamp WROTE: `{statId, points, label?}`.
+  The structured half is always there because this engine rolled it; the `label` is nullable and
+  usually absent, because what a stamped stat is CALLED belongs to whichever mod owns that
+  vocabulary and this engine has none. With no label the session summary paints the id and its
+  points plainly (never an empty row - the ledger's text reaches the client verbatim); consumer-
+  composed summary rows live on `SummaryEnricherRegistry` alongside every other one.
+  `StationEnhanceCompletedEvent` carries the lines either way. **A stamp step produces its lines
+  through `EnhanceLine.of`, which leaves the label unset**, so treat the labelled form as the
+  decorated case and the unlabelled one as what ships.
 - **[`SummaryEnricherRegistry`](SummaryEnricherRegistry.java)** / **[`SummaryEnricher`](SummaryEnricher.java)**
   / **[`SummaryContext`](SummaryContext.java)** / **[`SummaryDecorateContext`](SummaryDecorateContext.java)**
   - `rows(ctx)` returns extra ledger rows PREPENDED before the engine's own item rows
@@ -160,14 +161,15 @@ is the exact inverse of a permanently-opaque channel.
 - **`StationCycleCompletedEvent`'s two lists (plus `contributionScale()`)** - `contributions()`
   carries the action's own `Work.PerCycleContributions` at their ALREADY-SCALED amounts: the
   engine applies the action's own `ContributionScale` ladder (a `../asset/CLAUDE.md`
-  `{Factors[], Floors[]}` group, the SAME `loot.FactorLadder` core `Roll.Ladder` uses) BEFORE
+  `{Factors[], Floors[]}` group following the SAME weighted-sum-then-highest-floor rule
+  `Roll.Ladder` does) BEFORE
   dispatch (and, on an idle cycle, the amounts are also pre-scaled by `Work.Idle.Fraction` on top
   of that). **`contributionScale()`** reports the resolved multiplier back for DISPLAY ONLY (`1.0`
   when no ladder is authored or no floor was reached) - grant `contributions()` verbatim; a
   listener that forgot to multiply therefore cannot under-award, and one that multiplied again
   cannot over-award. It is exposed purely so a listener can SHOW why a cycle was worth what it was
   (a "x2.5 tool" line in a summary); `oneShotContributions()` is never touched by it.
-  `oneShotContributions()` carries `Roll.Grants.Contributions` find grants, kept SEPARATE because
+  `oneShotContributions()` carries a find's own one-shot contribution grants, kept SEPARATE because
   they are DELIBERATELY UNSCALED - post each at its stated amount, touched by neither
   `ContributionScale` nor the idle fraction. There is deliberately **no `toolMultiplier()`**: the
   engine applies no BAKED curve of its own to an amount it never interprets (that role belongs to

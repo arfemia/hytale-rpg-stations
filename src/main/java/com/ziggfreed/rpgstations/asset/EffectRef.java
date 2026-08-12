@@ -16,7 +16,7 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
  * <ul>
  *   <li>a station/step/flair {@link Presentation#getEffect()} - the per-moment effect (a single
  *   nullable {@code Effect} group);
- *   <li>a loot {@link Roll.Grants#getEffects()} - a reward-time effect array ({@code Effects[]}).
+ *   <li>a loot an {@code rpgstations:effect} reward - a reward-time effect array ({@code Effects[]}).
  * </ul>
  *
  * <p>{@link #id} is the native {@code EntityEffect} asset id (e.g. a vanilla buff/haze effect);

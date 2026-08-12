@@ -1,20 +1,18 @@
 package com.ziggfreed.rpgstations.asset;
 
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
-import java.util.function.Supplier;
 
 import javax.annotation.Nonnull;
 
-import com.hypixel.hytale.builtin.asseteditor.event.AssetEditorRequestDataSetEvent;
 import com.hypixel.hytale.event.EventRegistry;
+import com.ziggfreed.common.asset.EditorDataSets;
+import com.ziggfreed.common.loot.LootableConfig;
+import com.ziggfreed.common.loot.stamp.RollPoolConfig;
 import com.ziggfreed.common.ui.hud.HudPosition;
 import com.ziggfreed.rpgstations.api.impl.ContributionChannelRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
-import com.ziggfreed.rpgstations.loot.LootableCatalog;
-import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
+import com.ziggfreed.rpgstations.loot.StationLootEngine;
 import com.ziggfreed.rpgstations.station.ActionCatalog;
 import com.ziggfreed.rpgstations.station.StationCameraPreset;
 import com.ziggfreed.rpgstations.station.StationCatalog;
@@ -24,10 +22,11 @@ import com.ziggfreed.rpgstations.util.Log;
  * Serves the value lists behind every {@code UIEditor.Dropdown} dataset id this package's codecs
  * declare, so the in-game Asset Editor offers a real pick list instead of a free-text field.
  *
- * <p>The mechanism is the engine's own keyed {@code AssetEditorRequestDataSetEvent}: the editor
- * asks for a dataset by id, a registered handler fills {@code setResults(...)}. The first-party
- * {@code ItemCategories} handler is the shape this class follows exactly, one registration per
- * dataset id.
+ * <p>The registration mechanism itself is the shared {@code asset.EditorDataSets} primitive (the
+ * engine's own keyed {@code AssetEditorRequestDataSetEvent}, one registration per dataset id, guarded
+ * end to end so a server build without the Asset Editor module degrades to plain free-text fields
+ * rather than failing plugin startup). What lives here is only WHICH datasets this mod serves and
+ * what answers them.
  *
  * <p>Two flavors of dataset live here:
  * <ul>
@@ -92,58 +91,36 @@ public final class AssetEditorDataSets {
     }
 
     /**
-     * Register one handler per dataset id. Called once from {@code RpgStationsPlugin#setup()};
-     * the whole body is try-guarded there, so a server build without the Asset Editor module
-     * degrades to plain free-text fields rather than failing plugin startup.
+     * Register one handler per dataset id. Called once from {@code RpgStationsPlugin#setup()}.
      */
     public static void register(@Nonnull EventRegistry registry) {
-        live(registry, STATIONS, () -> StationCatalog.getInstance().all().keySet());
-        live(registry, ACTIONS, () -> ActionCatalog.getInstance().all().keySet());
-        live(registry, LOOTABLES, () -> LootableCatalog.getInstance().all().keySet());
-        live(registry, ROLLPOOLS, () -> RollPoolCatalog.getInstance().all().keySet());
-        live(registry, FACTORS, () -> FactorRegistryImpl.getInstance().registeredIds());
-        live(registry, CHANNELS, () -> ContributionChannelRegistryImpl.getInstance().registeredIds());
+        EditorDataSets.live(registry, STATIONS, () -> StationCatalog.getInstance().all().keySet());
+        EditorDataSets.live(registry, ACTIONS, () -> ActionCatalog.getInstance().all().keySet());
+        EditorDataSets.live(registry, LOOTABLES, () -> LootableConfig.getInstance().all().keySet());
+        EditorDataSets.live(registry, ROLLPOOLS, () -> RollPoolConfig.getInstance().all().keySet());
+        EditorDataSets.live(registry, FACTORS, () -> FactorRegistryImpl.getInstance().registeredIds());
+        EditorDataSets.live(registry, CHANNELS, () -> ContributionChannelRegistryImpl.getInstance().registeredIds());
 
         // StationAsset.Hold.Mount.Surface, compared case-insensitively by StationValidator and
         // the two mount controllers it discriminates between.
-        fixed(registry, MOUNT_SURFACE, "Block", "Entity");
-        fixed(registry, CAMERA_PRESETS, cameraPresetIds());
-        fixed(registry, HIDE_ROUTE, Puppet.HIDE_ROUTE_SCALE, Puppet.HIDE_ROUTE_EFFECT, Puppet.HIDE_ROUTE_NONE);
-        fixed(registry, LOOK_SOURCE, Puppet.LOOK_SOURCE_PLAYER_CLONE, Puppet.LOOK_SOURCE_MODEL,
+        EditorDataSets.fixed(registry, MOUNT_SURFACE, "Block", "Entity");
+        EditorDataSets.fixed(registry, CAMERA_PRESETS, cameraPresetIds());
+        EditorDataSets.fixed(registry, HIDE_ROUTE, Puppet.HIDE_ROUTE_SCALE, Puppet.HIDE_ROUTE_EFFECT, Puppet.HIDE_ROUTE_NONE);
+        EditorDataSets.fixed(registry, LOOK_SOURCE, Puppet.LOOK_SOURCE_PLAYER_CLONE, Puppet.LOOK_SOURCE_MODEL,
                 Puppet.LOOK_SOURCE_NPC_ROLE);
-        fixed(registry, SKIN_SOURCE, Puppet.SKIN_SOURCE_PLAYER_CLONE, Puppet.SKIN_SOURCE_ROLE_DEFAULT);
-        fixed(registry, PROP_SOURCE, Puppet.PROP_SOURCE_MIRROR_HELD, Puppet.PROP_SOURCE_ITEM_ID,
+        EditorDataSets.fixed(registry, SKIN_SOURCE, Puppet.SKIN_SOURCE_PLAYER_CLONE, Puppet.SKIN_SOURCE_ROLE_DEFAULT);
+        EditorDataSets.fixed(registry, PROP_SOURCE, Puppet.PROP_SOURCE_MIRROR_HELD, Puppet.PROP_SOURCE_ITEM_ID,
                 Puppet.PROP_SOURCE_NONE);
-        fixed(registry, PROP_SLOT, Puppet.PROP_SLOT_HOTBAR, Puppet.PROP_SLOT_UTILITY);
-        fixed(registry, CONSUME_FROM, StationStep.Consume.FROM_INVENTORY, StationStep.Consume.FROM_CUSTODY);
-        fixed(registry, PRODUCE_TO, StationStep.Produce.TO_INVENTORY, StationStep.Produce.TO_CUSTODY);
-        fixed(registry, CONDITION_FAIL_RESULT, StationStep.OnConditionFail.RESULT_SKIP,
+        EditorDataSets.fixed(registry, PROP_SLOT, Puppet.PROP_SLOT_HOTBAR, Puppet.PROP_SLOT_UTILITY);
+        EditorDataSets.fixed(registry, CONSUME_FROM, StationStep.Consume.FROM_INVENTORY, StationStep.Consume.FROM_CUSTODY);
+        EditorDataSets.fixed(registry, PRODUCE_TO, StationStep.Produce.TO_INVENTORY, StationStep.Produce.TO_CUSTODY);
+        EditorDataSets.fixed(registry, CONDITION_FAIL_RESULT, StationStep.OnConditionFail.RESULT_SKIP,
                 StationStep.OnConditionFail.RESULT_FAIL);
-        fixed(registry, ROLL_TRIGGER, Roll.TRIGGER_CYCLE, Roll.TRIGGER_COMPLETION);
+        EditorDataSets.fixed(registry, ROLL_TRIGGER, StationLootEngine.TRIGGER_CYCLE,
+                StationLootEngine.TRIGGER_COMPLETION);
         // ActionInput.Function, resolved against the held item's live shape by ActionResolver.
-        fixed(registry, ACTION_FUNCTION, "Weapon", "Armor", "Tool");
-        fixed(registry, HUD_POSITIONS, hudPositions());
-    }
-
-    /** Register a dataset answered from a live catalog / registry at request time. */
-    private static void live(@Nonnull EventRegistry registry, @Nonnull String dataSet,
-            @Nonnull Supplier<Collection<String>> source) {
-        registry.register(AssetEditorRequestDataSetEvent.class, dataSet, event -> {
-            try {
-                List<String> ids = new ArrayList<>(source.get());
-                Collections.sort(ids);
-                event.setResults(ids.toArray(String[]::new));
-            } catch (Throwable t) {
-                Log.fine("STATION asset-editor dataset '" + dataSet + "' failed: " + t.getMessage());
-            }
-        });
-    }
-
-    /** Register a dataset whose values are a closed, compile-time-known set. */
-    private static void fixed(@Nonnull EventRegistry registry, @Nonnull String dataSet,
-            @Nonnull String... values) {
-        registry.register(AssetEditorRequestDataSetEvent.class, dataSet,
-                event -> event.setResults(values.clone()));
+        EditorDataSets.fixed(registry, ACTION_FUNCTION, "Weapon", "Armor", "Tool");
+        EditorDataSets.fixed(registry, HUD_POSITIONS, hudPositions());
     }
 
     /** Every {@link StationCameraPreset} spelled the way {@code Camera.Recipe} parses it. */

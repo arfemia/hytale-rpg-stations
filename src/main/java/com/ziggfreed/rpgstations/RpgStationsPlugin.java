@@ -30,24 +30,18 @@ import com.ziggfreed.common.asset.AssetStoreRegistrar;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.entity.performer.PerformerIdentityComponent;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
-import com.ziggfreed.rpgstations.api.impl.EnhanceStamperRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.AssetEditorDataSets;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
-import com.ziggfreed.rpgstations.asset.LootableAsset;
-import com.ziggfreed.rpgstations.asset.RollPool;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.command.RpgStationsCommand;
 import com.ziggfreed.rpgstations.interaction.StationRetrieveInteraction;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
-import com.ziggfreed.rpgstations.loot.LootableCatalog;
-import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
 import com.ziggfreed.rpgstations.station.ActionCatalog;
-import com.ziggfreed.rpgstations.station.DefaultEnhanceStamper;
 import com.ziggfreed.rpgstations.station.ExtensionCatalog;
 import com.ziggfreed.rpgstations.station.FlairCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
@@ -70,7 +64,7 @@ import com.ziggfreed.rpgstations.util.Log;
  *
  * <p>Setup registers the station engine (asset store, catalog fold, the {@code rpg_station_use}
  * interaction, the frame-drain system, the damage-interrupt system), the conditional-lootable
- * layer ({@link LootableAsset} store), the engine {@link RpgStationsSettingsAsset} store, AND the
+ * layer, the engine {@link RpgStationsSettingsAsset} store, AND the
  * extension surface: {@link RpgStationsApi#set} injects {@link RpgStationsApiImpl} before anything
  * else runs, then {@link FactorRegistryImpl#registerBuiltins} registers the {@code rpgstations:}
  * built-in factors through that SAME api-backed registry (design section 3.2, dogfooded). It
@@ -120,7 +114,6 @@ public class RpgStationsPlugin extends JavaPlugin {
     protected void setup() {
         RpgStationsApi.set(RpgStationsApiImpl.getInstance());
         FactorRegistryImpl.getInstance().registerBuiltins();
-        EnhanceStamperRegistryImpl.getInstance().register(new DefaultEnhanceStamper());
         // Performer identity component (seam wave decision 48/55): a library ECS component has no
         // owning plugin, so THIS consumer registers it once at setup() - without it, a performer
         // still spawns/despawns but the orphan-reconcile sweep finds nothing (TYPE stays null,
@@ -129,8 +122,6 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerStationAssetStore();
         registerActionAssetStore();
         registerExtensionAssetStore();
-        registerLootableAssetStore();
-        registerRollPoolAssetStore();
         registerFlairAssetStore();
         registerSettingsAssetStore();
         registerAssetEditorDataSets();
@@ -453,67 +444,10 @@ public class RpgStationsPlugin extends JavaPlugin {
     }
 
     /**
-     * Registers the {@link LootableAsset} Pattern-A store at {@code Server/RpgStations/Lootables}
-     * and folds every loaded entry into {@link LootableCatalog} (design section 4.5.1).
-     */
-    private void registerLootableAssetStore() {
-        AssetStoreRegistrar.registerStore(
-                LootableAsset.class,
-                new DefaultAssetMap<String, LootableAsset>(),
-                "RpgStations/Lootables",
-                LootableAsset::getId,
-                LootableAsset.CODEC,
-                null);
-        getEventRegistry().register(LoadedAssetsEvent.class, LootableAsset.class,
-                RpgStationsPlugin::onLootableAssetsLoaded);
-    }
-
-    private static void onLootableAssetsLoaded(
-            LoadedAssetsEvent<String, LootableAsset, DefaultAssetMap<String, LootableAsset>> event) {
-        DefaultAssetMap<String, LootableAsset> assetMap = event.getAssetMap();
-        Map<String, LootableAsset> layer = new LinkedHashMap<>();
-        for (Map.Entry<String, LootableAsset> entry : assetMap.getAssetMap().entrySet()) {
-            layer.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
-        }
-        LootableCatalog.getInstance().fold(layer, false);
-        Log.info("Lootable asset layer: folded " + layer.size() + " lootable table(s) into LootableCatalog: "
-                + layer.keySet());
-    }
-
-    /**
-     * Registers the {@link RollPool} Pattern-A store at {@code Server/RpgStations/RollPools}
-     * (design section 9.5, phase 2 leg E) and folds every loaded entry into
-     * {@link RollPoolCatalog} - the anvil's Stamp step's {@code Stats.Pool} reference target.
-     */
-    private void registerRollPoolAssetStore() {
-        AssetStoreRegistrar.registerStore(
-                RollPool.class,
-                new DefaultAssetMap<String, RollPool>(),
-                "RpgStations/RollPools",
-                RollPool::getId,
-                RollPool.CODEC,
-                null);
-        getEventRegistry().register(LoadedAssetsEvent.class, RollPool.class,
-                RpgStationsPlugin::onRollPoolAssetsLoaded);
-    }
-
-    private static void onRollPoolAssetsLoaded(
-            LoadedAssetsEvent<String, RollPool, DefaultAssetMap<String, RollPool>> event) {
-        DefaultAssetMap<String, RollPool> assetMap = event.getAssetMap();
-        Map<String, RollPool> layer = new LinkedHashMap<>();
-        for (Map.Entry<String, RollPool> entry : assetMap.getAssetMap().entrySet()) {
-            layer.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
-        }
-        RollPoolCatalog.getInstance().fold(layer, false);
-        Log.info("RollPool asset layer: folded " + layer.size() + " roll pool(s) into RollPoolCatalog: "
-                + layer.keySet());
-    }
-
-    /**
      * Registers the {@link FlairAsset} Pattern-A store at {@code Server/RpgStations/Flairs}
      * (design section 9.6, phase 2 leg F - the open flair/moment vocabulary's asset-driven half)
      * and folds every loaded entry into {@link FlairCatalog}; {@link StationValidator#runStructuralAndLog}
-     * re-runs on THIS fold too (unlike Lootable/RollPool) for the same structural per-station/
+     * re-runs on THIS fold too (unlike the shared loot stores) for the same structural per-station/
      * per-flair coverage - its own {@code Stations}-references-a-known-id check is a cross-layer
      * reference check now deferred to the post-load audit (D4 fix), like every other one.
      */

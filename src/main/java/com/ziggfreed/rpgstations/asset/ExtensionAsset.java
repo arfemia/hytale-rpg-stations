@@ -22,6 +22,9 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.stamp.StatRollEntry;
 
 /**
  * The ONE additive-extension asset (scope-2 design 1.8, decision 27): a fourth party extends a
@@ -185,10 +188,10 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
             .appendInherited(new KeyedCodec<>("Custody", Custody.CODEC, false),
                     (a, v) -> a.custody = v, a -> a.custody, (a, p) -> a.custody = p.custody)
             .documentation("Custody overlay (Action target), merged PER LEAF at every depth: an overlay carrying only Display never clears the base's States, MaxQuantity or Input.").add()
-            .appendInherited(new KeyedCodec<>("Rolls", new ArrayCodec<>(Roll.CODEC, Roll[]::new), false),
+            .appendInherited(new KeyedCodec<>("Rolls", new ArrayCodec<>(Roll.codec(AssetEditorDataSets.FACTORS), Roll[]::new), false),
                     (a, v) -> a.rolls = v, a -> a.rolls, (a, p) -> a.rolls = p.rolls)
             .documentation("Appended Rolls (Lootable target).").add()
-            .appendInherited(new KeyedCodec<>("Entries", new ArrayCodec<>(StatRollEntry.CODEC, StatRollEntry[]::new), false),
+            .appendInherited(new KeyedCodec<>("Entries", new ArrayCodec<>(StatRollEntry.codec(AssetEditorDataSets.FACTORS), StatRollEntry[]::new), false),
                     (a, v) -> a.entries = v, a -> a.entries, (a, p) -> a.entries = p.entries)
             .documentation("Appended StatRollEntry entries (RollPool target).").add()
             .build();

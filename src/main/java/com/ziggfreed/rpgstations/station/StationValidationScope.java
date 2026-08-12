@@ -11,6 +11,9 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.ziggfreed.common.factor.FactorCondition;
+import com.ziggfreed.common.factor.FactorFormula;
+import com.ziggfreed.common.loot.LootGrants;
+import com.ziggfreed.common.loot.reward.RewardSpec;
 import com.ziggfreed.rpgstations.api.FactorRefView;
 import com.ziggfreed.rpgstations.api.RollView;
 import com.ziggfreed.rpgstations.api.StationContribution;
@@ -19,14 +22,13 @@ import com.ziggfreed.rpgstations.api.ValidationScope;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
-import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
-import com.ziggfreed.rpgstations.asset.FactorRef;
-import com.ziggfreed.rpgstations.asset.LootRef;
-import com.ziggfreed.rpgstations.asset.LootableAsset;
-import com.ziggfreed.rpgstations.asset.Roll;
+import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.LootableAsset;
+import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
+import com.ziggfreed.rpgstations.loot.StationRewardKinds;
 
 /**
  * Builds the read-only {@link ValidationScope} the FULL validate pass hands to every registered
@@ -194,9 +196,10 @@ final class StationValidationScope implements ValidationScope {
             this.site = site;
             this.trigger = roll.effectiveTrigger();
 
-            Roll.Chance chance = roll.getChance();
-            this.chanceBasePercent = chance != null ? chance.getBasePercent() : null;
-            this.chanceCapPercent = chance != null ? chance.getCapPercent() : null;
+            FactorFormula chance = roll.getChance();
+            this.chanceBasePercent = chance != null ? chance.getBase() : null;
+            this.chanceCapPercent = chance != null && chance.getClamp() != null
+                    ? chance.getClamp().getMax() : null;
 
             Roll.Ladder ladder = roll.getLadder();
             this.ladderFactors = viewFactorRefs(ladder != null ? ladder.getFactors() : null);
@@ -217,8 +220,7 @@ final class StationValidationScope implements ValidationScope {
             flat.addAll(this.ladderFactors);
             this.factors = List.copyOf(flat);
 
-            List<StationContribution> top = viewContributions(
-                    roll.getGrants() != null ? roll.getGrants().getContributions() : null);
+            List<StationContribution> top = viewContributions(roll.getGrants());
             this.contributions = top;
 
             List<LadderFloorView> floors = new ArrayList<>();
@@ -232,8 +234,7 @@ final class StationValidationScope implements ValidationScope {
                     if (floor == null) {
                         continue;
                     }
-                    List<StationContribution> floorPosts = viewContributions(
-                            floor.getGrants() != null ? floor.getGrants().getContributions() : null);
+                    List<StationContribution> floorPosts = viewContributions(floor.getGrants());
                     for (StationContribution c : floorPosts) {
                         channels.add(c.channel().toLowerCase(Locale.ROOT));
                     }
@@ -245,31 +246,40 @@ final class StationValidationScope implements ValidationScope {
         }
 
         @Nonnull
-        private static List<FactorRefView> viewFactorRefs(@Nullable FactorRef[] refs) {
-            if (refs == null || refs.length == 0) {
+        private static List<FactorRefView> viewFactorRefs(@Nullable FactorFormula.Term[] terms) {
+            if (terms == null || terms.length == 0) {
                 return List.of();
             }
-            List<FactorRefView> out = new ArrayList<>(refs.length);
-            for (FactorRef f : refs) {
-                if (f != null && f.getFactor() != null && !f.getFactor().isBlank()) {
-                    out.add(new FactorRefView(f.getFactor(), f.getParam(), f.effectiveWeight()));
+            List<FactorRefView> out = new ArrayList<>(terms.length);
+            for (FactorFormula.Term t : terms) {
+                if (t != null && !t.isBlank()) {
+                    out.add(new FactorRefView(t.getFactor(), t.getParam(), t.weightOrDefault()));
                 }
             }
             return List.copyOf(out);
         }
 
+        /**
+         * The one-shot contribution posts inside a grants group. A contribution is a registered
+         * REWARD KIND now, so this reads the {@code Rewards} array for entries naming the station's
+         * own contribution kind rather than a dedicated leaf - the projection a hook sees is
+         * unchanged, which is the point.
+         */
         @Nonnull
-        private static List<StationContribution> viewContributions(@Nullable Contribution[] posts) {
-            if (posts == null || posts.length == 0) {
+        private static List<StationContribution> viewContributions(@Nullable LootGrants grants) {
+            if (grants == null) {
                 return List.of();
             }
-            List<StationContribution> out = new ArrayList<>(posts.length);
-            for (Contribution c : posts) {
-                if (c == null || c.getChannel() == null || c.getChannel().isBlank()) {
+            List<StationContribution> out = new ArrayList<>();
+            for (RewardSpec spec : grants.rewardSpecs()) {
+                if (!StationRewardKinds.KIND_CONTRIBUTION.equalsIgnoreCase(spec.kind())) {
                     continue;
                 }
-                Double amount = c.getAmount();
-                out.add(new StationContribution(c.getChannel(), c.getParam(), amount == null ? 0.0 : amount));
+                String channel = spec.param("channel");
+                if (channel == null || channel.isBlank()) {
+                    continue;
+                }
+                out.add(new StationContribution(channel, spec.param("param"), spec.doubleParam("amount", 0.0)));
             }
             return List.copyOf(out);
         }

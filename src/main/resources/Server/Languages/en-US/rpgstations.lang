@@ -47,6 +47,7 @@ ui.station.gain.produced = {0}
 ui.station.summary.lucky = (Lucky!)
 ui.station.summary.items_more = +{0} more
 ui.station.summary.enhance_durability = Durability +{0}
+ui.station.summary.enhance_stat = {0} +{1}
 ui.station.picker.title = Choose what to produce
 ui.station.picker.hint = This station can make more than one thing from what you are holding.
 ui.station.picker.locked = Requires {0}

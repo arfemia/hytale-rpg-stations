@@ -15,7 +15,7 @@ import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
-import com.ziggfreed.rpgstations.asset.LootRef;
+import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 

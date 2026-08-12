@@ -1,19 +1,21 @@
 package com.ziggfreed.rpgstations.asset;
 
+import org.junit.jupiter.api.Test;
+
+import com.hypixel.hytale.assetstore.AssetExtraInfo;
+import com.hypixel.hytale.codec.util.RawJsonReader;
+import com.ziggfreed.common.loot.stamp.StampSpec;
+import com.ziggfreed.common.loot.stamp.StatRollEntry;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.Test;
-
-import com.hypixel.hytale.assetstore.AssetExtraInfo;
-import com.hypixel.hytale.codec.util.RawJsonReader;
-
 /**
  * Scope-2 {@link StationStep} phase-model codec + pure cores: {@link StationStep.Repeat} clamp
- * math, {@link StationStep.Stamp.Stats.Budget} exactly-one-of, {@link Ingredient}
+ * math, {@link StampSpec.Budget} exactly-one-of, {@link Ingredient}
  * exactly-one-of, and per-leaf native {@code Parent} inheritance of a step's nested phase group.
  * Decodes a step via a wrapping {@link StationAsset} (steps are never top-level assets).
  */
@@ -50,7 +52,7 @@ public class StationStepCodecTest {
         assertEquals(1, r.getMin());
         assertEquals(4, r.getMax());
         assertEquals("MMO_Luck", r.getFactors()[0].getParam());
-        assertEquals(0.5, r.getFactors()[0].effectiveWeight());
+        assertEquals(0.5, r.getFactors()[0].weightOrDefault());
     }
 
     @Test
@@ -85,15 +87,15 @@ public class StationStepCodecTest {
                 + " \"Stats\": { \"Caps\": { \"Budgets\": ["
                 + "   { \"Points\": 30 },"
                 + "   { \"PointsPer\": 0.5, \"Factors\": [ { \"Factor\": \"stat\", \"Param\": \"MMO_Level_SMITHING\" } ] } ],"
-                + " \"PerStat\": { \"MMO_CritChance\": 10 },"
-                + " \"Economics\": { \"RepeatCostMultiplier\": 1.25 } } } } } ]");
+                + " \"PerStat\": { \"MMO_CritChance\": 10 } } },"
+                + " \"Economics\": { \"RepeatCostMultiplier\": 1.25 } } } ]");
         StationStep.Stamp stamp = s[0].getStamp();
         assertNotNull(stamp);
         assertEquals("Coal", stamp.getReagents()[0].getItemId());
         assertEquals(2, stamp.getReagents()[0].effectiveQuantity());
 
-        StationStep.Stamp.Stats.Caps caps = stamp.getStats().getCaps();
-        StationStep.Stamp.Stats.Budget[] budgets = caps.getBudgets();
+        StampSpec.Caps caps = stamp.getStats().getCaps();
+        StampSpec.Budget[] budgets = caps.getBudgets();
         assertEquals(2, budgets.length);
 
         assertTrue(budgets[0].isFlat());
@@ -107,16 +109,16 @@ public class StationStepCodecTest {
         assertEquals("MMO_Level_SMITHING", budgets[1].getFactors()[0].getParam());
 
         assertEquals(10.0, caps.getPerStat().get("MMO_CritChance"));
-        assertEquals(1.25, caps.getEconomics().getRepeatCostMultiplier());
+        assertEquals(1.25, stamp.getEconomics().getRepeatCostMultiplier());
     }
 
     @Test
     void stampBudget_bothRoutesAuthored_isNotExactlyOne() {
-        StationStep.Stamp.Stats.Budget both = new StationStep.Stamp.Stats.Budget();
+        StampSpec.Budget both = new StampSpec.Budget();
         // Author both Points and PointsPer via the exposed factories is impossible; assert the guards on a hand-built.
-        assertFalse(StationStep.Stamp.Stats.Budget.flat(30.0).isFactorScaled());
-        assertTrue(StationStep.Stamp.Stats.Budget.flat(30.0).hasExactlyOneRoute());
-        assertTrue(StationStep.Stamp.Stats.Budget.scaled(0.5, null).hasExactlyOneRoute());
+        assertFalse(StampSpec.Budget.flat(30.0).isFactorScaled());
+        assertTrue(StampSpec.Budget.flat(30.0).hasExactlyOneRoute());
+        assertTrue(StampSpec.Budget.scaled(0.5, null).hasExactlyOneRoute());
         assertFalse(both.hasExactlyOneRoute(), "neither route authored = not exactly one");
     }
 
@@ -143,7 +145,7 @@ public class StationStepCodecTest {
         assertEquals(1.0, entry.getPoints().effectiveMin());
         assertEquals(3.0, entry.getPoints().effectiveMax());
         assertEquals("MMO_Level_SMITHING", entry.getPoints().getFactors()[0].getParam());
-        assertEquals(0.1, entry.getPoints().getFactors()[0].effectiveWeight());
+        assertEquals(0.1, entry.getPoints().getFactors()[0].weightOrDefault());
     }
 
     // ==================== Native Parent per-leaf inheritance of a step phase group ====================
@@ -153,15 +155,15 @@ public class StationStepCodecTest {
         AssetExtraInfo.Data pData = new AssetExtraInfo.Data(StationAsset.class, "anvil_parent", null);
         StationAsset parent = StationAsset.CODEC.decodeAndInheritJsonAsset(
                 RawJsonReader.fromJsonString("{ \"Actions\": [ { \"Id\": \"enhance\", \"Steps\": ["
-                        + " { \"Id\": \"stamp\", \"Stamp\": { \"Stats\": { \"Caps\": {"
-                        + " \"Budgets\": [ { \"Points\": 30 } ], \"Economics\": { \"RepeatCostMultiplier\": 1.25 } } } } } ] } ] }"),
+                        + " { \"Id\": \"stamp\", \"Stamp\": { \"Economics\": { \"RepeatCostMultiplier\": 1.25 },"
+                        + " \"Stats\": { \"Caps\": { \"Budgets\": [ { \"Points\": 30 } ] } } } } ] } ] }"),
                 null, new AssetExtraInfo<>(pData));
         // The whole Actions array inherits wholesale (validated in StationAssetCodecTest); here we assert the
         // parent's own budget decoded so downstream can trust the shape.
-        StationStep.Stamp.Stats.Caps caps = parent.getActions()[0].getSteps()[0]
-                .getStamp().getStats().getCaps();
+        StationStep.Stamp stamp = parent.getActions()[0].getSteps()[0].getStamp();
+        StampSpec.Caps caps = stamp.getStats().getCaps();
         assertEquals(30.0, caps.getBudgets()[0].getPoints());
-        assertEquals(1.25, caps.getEconomics().getRepeatCostMultiplier());
+        assertEquals(1.25, stamp.getEconomics().getRepeatCostMultiplier());
         assertNull(caps.getPerStat());
     }
 }

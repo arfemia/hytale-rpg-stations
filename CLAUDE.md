@@ -13,7 +13,7 @@ camera <preset>|list` + `/rpgstations validate`); **phase 2 legs A-G are LANDED*
 (multi-action schema + step engine), leg C (placed-input custody + block states + sawmill
 migration), leg D (the `Hold.Mount` knob family - the Block/Entity surface discriminator, the
 standing work mount), leg E (the anvil arc - the `Stamp` step, composable roll+cap models,
-the `EnhanceStamperRegistry` api registry, AND the live wiring that makes multi-action stations
+the stamper delegate seam, AND the live wiring that makes multi-action stations
 actually run: diegetic action selection at engage, an authored-`Steps` program dispatch path,
 `Work.Looping` session completion), leg F (the open flair/moment vocabulary - the fixed
 `Slot` enum retired for open string moment ids, a new standalone `FlairAsset` type ANY mod can
@@ -81,7 +81,7 @@ is a pure beat); `StationAsset.Loot`/`ActionDef.Loot`/`StationStep.Roll` all tak
 a reusable action instead of always inlining one; a new `asset.ExtensionAsset` type
 (`Server/RpgStations/Extensions/*.json`) is the ONE additive fourth-party extension mechanism
 (Station/Action/Lootable/RollPool targets, additive-only, base-wins key collisions) superseding
-ad hoc full-file pack overrides; the Stamp step's `Caps` re-shaped onto a weighted `FactorRef`
+ad hoc full-file pack overrides; the Stamp step's `Caps` re-shaped onto a weighted factor-term
 budget vocabulary (`Budgets[]`) that also now drives
 loot chances, ladder values, and roll magnitudes (one factor vocabulary everywhere). The
 multi-station seam - `StationStep.Walk`/`At`, `Produce.To:"Custody"`, and `ActionDef.Anchors`
@@ -103,12 +103,12 @@ used to share a station-level default now share by REFERENCE (`Ref` to the same 
 an action authors AT MOST ONE `Recipe`, gated by that action's own `Tool`; two variants that used
 to be two `Recipes[]` entries are now two `ActionDef`s, since the diegetic `Select` match already
 IS the "try this, else that" chain one level up. `Roll.Grants.BonusOutputCopies` is deleted;
-`Roll.Grants.OutputItems` (a `Double`, additive extra units of the cycle's own primary output;
+the `rpgstations:output_items` reward (additive extra units of the cycle's own primary output;
 FRACTIONAL by maintainer ruling - the whole part every time plus the leftover fraction as the chance
 of one more, summed across the cycle and resolved once by `loot.OutputItemResolver`)
 is now the ONLY probabilistic-output leaf, and `Recipe.Yield` is purely deterministic
 (`Base`/`Scale`/`Min`/`Max`, no ladder, no roll). A new `ActionDef.ContributionScale` group (a
-factor ladder over the SAME `loot.FactorLadder` core `Roll.Ladder` uses) pre-scales
+factor ladder following the SAME rules a loot `Roll.Ladder` does) pre-scales
 `Work.PerCycleContributions` before the cycle-completed event dispatches, reporting the resolved
 multiplier back for display only (`StationCycleCompletedEvent.contributionScale()`).
 `ExtensionAsset`'s per-leaf overlay (rule 5) gained a third payload, `ContributionScale`, beside
@@ -134,6 +134,27 @@ with the direct catalog size) is the cheap presence-check/count companion to `st
 rewritten for this restructure); this router's own release-scope and history sections below stay
 accurate for everything they describe except the `Recipes[]`/station-level-group language this
 restructure superseded.
+
+**The SHARED-LOOT RE-BASE landed on top of all of it (pre-release, so the schema moved freely).**
+This mod no longer owns a loot model. `Roll` and everything inside it (`Conditions`, `Chance`,
+`Ladder`, `Grants`, the `Cue`), `LootRef`, the `Lootable` and `RollPool` asset types and their
+stores, `StatRollEntry`, the stamp roll + budget engine, and the stamper contract are all
+`ziggfreed-common`'s (`com.ziggfreed.common.loot`, `loot.stamp`, `loot.reward`), so identical JSON
+behaves identically at a station, in a chest and at a quest turn-in. Four consequences an author or
+a maintainer meets immediately:
+- **Loot content moved house**: `Server/ZiggfreedCommon/Lootables/*.json` and
+  `Server/ZiggfreedCommon/RollPools/*.json`, both registered by the shared library, not by this mod.
+- **A `Chance` is the shared `{Base, Factors, Clamp}` formula** (`BasePercent`/`CapPercent` are
+  gone), and every `Factors` array is the shared weighted `FactorFormula.Term` (this mod's own
+  `FactorRef` is gone).
+- **A `Cue` is a MOMENT ID, not a presentation body.** The loot layer names a moment; the station
+  decides what it sounds like, through the same `emitMoment` funnel every other station moment uses.
+  The open `cue:<yourName>` namespace sits beside the well-known ids and `step:<actionId>:<stepId>`.
+- **The three station-only payouts are registered reward KINDS** inside `Grants.Rewards`:
+  `rpgstations:output_items`, `rpgstations:contribution`, `rpgstations:effect`. They COLLECT onto
+  the pass rather than acting, which is why they are a per-pass registry seeded from the
+  process-wide vocabulary (`loot.StationRewardKinds`). The `api` artifact went to **0.2.0** for the
+  stamper retirement.
 
 Design
 authority (scope-2): `../../.claude/research/raw/rpg-stations-scope2-unified-design-2026-07-23.md`
@@ -204,8 +225,9 @@ api/                                                   the extension-surface (fr
   src/main/java/com/ziggfreed/rpgstations/api/         see api/CLAUDE.md
 src/main/resources/
   manifest.json                                        Group Ziggfreed, IncludesAssetPack:true, ServerVersion Update 5
-  Server/RpgStations/{Stations,Actions,Lootables,RollPools,Flairs,Extensions,Settings}/
-                                                        the seven Pattern A asset stores this mod registers
+  Server/RpgStations/{Stations,Actions,Flairs,Extensions,Settings}/
+                                                        the five Pattern A asset stores this mod registers
+  Server/ZiggfreedCommon/Lootables/                      the Sawmill's loot tables (the SHARED library's store)
   Server/Item/{Items,RootInteractions}/                 the jar's OWN default Sawmill block + its RootInteraction
   Server/Drops/, Server/Emote/                           the standalone Sawmill's native-namespace drop tables + work emote
   Server/Entity/Effects/RPG/                             RPG_Station_Hold.json (the effect-mode movement-lock effect)
@@ -213,13 +235,14 @@ src/main/resources/
   Common/UI/Custom/Pages/RpgStationSummary.ui           the session-summary panel
 src/main/java/com/ziggfreed/rpgstations/
   RpgStationsPlugin.java     JavaPlugin entry: injects the api singleton, registers the built-in
-                             rpgstations: factors, the three asset stores + their catalog folds,
+                             rpgstations: factors, this mod's own asset stores + their catalog folds,
                              the rpg_station_use interaction, the frame-drain + damage-interrupt
                              systems, the death/disconnect teardown hooks; shutdown() -> stopAll
   api/impl/                  see api/impl/CLAUDE.md - the concrete registry/event-dispatch impl
-  asset/                     see asset/CLAUDE.md - StationAsset/LootableAsset/RpgStationsSettingsAsset/Presentation/Requires/Roll/Conditions codecs
+  asset/                     see asset/CLAUDE.md - StationAsset/ActionAsset/ExtensionAsset/FlairAsset/RpgStationsSettingsAsset/Presentation/Requires/Conditions codecs
   station/                   see station/CLAUDE.md - the session engine (THE big package; the hard-won engine rules live here)
-  loot/                      see loot/CLAUDE.md - LootEngine/RollEvaluator/FactorSnapshot/CommandRewardExecutor/LootableCatalog
+  loot/                      see loot/CLAUDE.md - StationLootEngine/StationRewardKinds/OutputItemResolver/CommandRewardExecutor
+                              (the loot MODEL + evaluator + Lootable/RollPool stores are ziggfreed-common's)
   command/                    see command/CLAUDE.md - RpgStationsCommand (/rpgstations camera|validate, admin-gated)
   interaction/                see interaction/CLAUDE.md - StationUseInteraction (the rpg_station_use RootInteraction handler)
   ui/                         see ui/CLAUDE.md - StationSummaryHud (extends common's KeyedCustomHud)
@@ -304,7 +327,7 @@ names a namespaced id; some other mod owns what it means.
 | | READ - factors | WRITE - contributions |
 |---|---|---|
 | authored leaf | `{"Factor": "<ns>:<id>", "Param": "<opaque>"}` | `{"Channel": "<ns>:<id>", "Param": "<opaque>", "Amount": <double>}` |
-| asset type | `asset/FactorRef`, `asset/Conditions` (common's `FactorCondition`) | `asset/Contribution` |
+| asset type | common's `FactorFormula.Term` (a weighted read), `asset/Conditions` (common's `FactorCondition` gate) | `asset/Contribution` |
 | api type | `api/StationFactorProvider` + `api/FactorContext` | `api/StationContribution` |
 | registry | `FactorRegistry.register(id, provider)` | `ContributionChannelRegistry.declare(id)` |
 | api accessor | `RpgStationsApi.factors()` | `RpgStationsApi.channels()` |
@@ -318,7 +341,7 @@ because it interprets none.** That asymmetry is the whole ruling in one line.
 Scaling is decided by the authoring SITE, never a flag on the record:
 `Work.PerCycleContributions[]` posts every completed cycle and IS scaled (the action's own
 `ContributionScale` ladder, pre-applied by the engine before dispatch, and pre-scaled by
-`Work.Idle.Fraction` on an idle cycle); `Roll.Grants.Contributions[]` posts once and
+`Work.Idle.Fraction` on an idle cycle); an `rpgstations:contribution` loot reward posts once and
 is VERBATIM, inheriting neither. Same record, two documented meanings, no mode.
 
 **Three rules resolve every remaining case.**
@@ -466,13 +489,13 @@ fix layers on cleanly.
 - **Leg E (LANDED, this mod + a consumer bridge + the pack)**: the anvil arc - the
   `Stamp` step un-reserved (`asset.StationStep.Stamp{Reagents,Durability,Stats}`, nested
   `Stats{Pool,Entries,Picks,Unique,Caps}`; **scope-2 (wave 2) re-shaped `Caps` onto a weighted
-  `Budgets[]`/`FactorRef` vocabulary - see
+  `Budgets[]`/factor-term vocabulary - see
   `station/CLAUDE.md`'s anvil-arc bullet and `asset/CLAUDE.md`'s `StationStep` bullet for the
   current shape**), a
-  NEW `asset.RollPool` Pattern-A store (`Server/RpgStations/RollPools/*.json`, `loot.RollPoolCatalog`)
+  roll-pool store (now the shared `Server/ZiggfreedCommon/RollPools/*.json` -> `RollPoolConfig`)
   + the shared `asset.StatRollEntry` codec both `RollPool.Entries` and inline `Stats.Entries` use,
-  the PURE `station.StampCapEngine` (roll + weighted-pick/`Picks`/`Unique` + the M2-bound
-  cap-composition MIN rule, unit-tested with fixture caps - `StampCapEngineTest`), and
+  the PURE stamp roll + cap engine (weighted-pick/`Picks`/`Unique` + the cap-composition MIN
+  rule; now the shared `loot.stamp.StampCapEngine`), and
   `station.StationStepHandlers.StampHandler` (compute-then-commit per critique M5: roll/cap-clamp
   + reagent-availability + weapon-return-room validated with ZERO mutation first, then reagent
   consumption and the `applyStampMutation` weapon mutation each run under their OWN try/catch that
@@ -492,7 +515,7 @@ fix layers on cleanly.
   placement - the pre-existing count-only model would have silently reset a placed weapon's
   durability/prior enhancements to a bare fresh stack on auto-return, an item-loss-equivalent bug
   the bulk sawmill-logs case never exercised. See `station/CLAUDE.md`'s Stamp bullet for the full
-  file-by-file detail and `api/CLAUDE.md`'s `EnhanceStamperRegistry` entry for the api contract;
+  file-by-file detail and `api/CLAUDE.md` for the stamper contract's current home;
   the shipped Anvil content lives in its own pack's repo.
   **Deviations from the design doc's literal prose** (all evidence-grounded, see each site's own
   javadoc): the Convert action matches vanilla `Metal_Bars` (not the doc's placeholder
@@ -505,10 +528,11 @@ fix layers on cleanly.
   plain `Duration{Ms}` beats on the orthogonal-phase `StationStep`, see `station/CLAUDE.md`'s
   step-engine section**; the placeholder empty `Roll`
   step in the doc's example was dropped (the Stamp step's OWN roll engine already covers stat
-  rolling, a second roll layer added nothing); `EnhanceStamper` is a lean 2-method
-  `inspect`/`apply` contract, not the doc's literal `StampContext`/`StampResult` shape (the api is
-  unfrozen pre-1.0.0, free to reshape - RpgStations owns all the roll/cap math, so the stamper
-  needs nothing richer). Whatever progression a pack layers on top of the anvil is that pack's
+  rolling, a second roll layer added nothing); the stamper stayed a lean 2-method
+  `inspect`/`apply` contract rather than the doc's literal `StampContext`/`StampResult` shape,
+  because the roll/cap math sits outside it and the write boundary needs nothing richer (the
+  shared-loot re-base above moved that contract to `ziggfreed-common`'s `loot.stamp.Stamper`, where
+  it kept exactly that shape). Whatever progression a pack layers on top of the anvil is that pack's
   consumer mod's business and lives in that mod's own repo, never here.
 - **Leg F (LANDED, this mod)**: the open flair/moment vocabulary (design section 9.6) - the fixed
   `station.StationFlairs.Slot` enum (`CYCLE`/`SWING`/`RARE_FIND`/`COMPLETION`) is RETIRED for an

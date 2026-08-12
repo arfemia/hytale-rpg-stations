@@ -1,9 +1,5 @@
 package com.ziggfreed.rpgstations.station;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -16,6 +12,10 @@ import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.common.factor.FactorCondition;
+import com.ziggfreed.common.factor.FactorFormula;
+import com.ziggfreed.common.loot.LootGrants;
+import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
@@ -23,17 +23,19 @@ import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
-import com.ziggfreed.rpgstations.asset.FactorRef;
 import com.ziggfreed.rpgstations.asset.Ingredient;
-import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
-import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
+import com.ziggfreed.rpgstations.loot.LootFixtures;
+import com.ziggfreed.rpgstations.loot.StationLootEngine;
 import com.ziggfreed.rpgstations.validation.Finding;
 import com.ziggfreed.rpgstations.validation.Severity;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The singleton-free {@link StationValidator} core under the ACTION-FIRST schema: a station is
@@ -338,7 +340,7 @@ public class StationValidatorTest {
     void contributionScaleFactorsWithoutFloors_flagged() {
         StationAsset a = station("factorsonly", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withContributionScale(ContributionScale.of(
-                        new FactorRef[] {FactorRef.of("yourmod:axis", null, 1.0)}, null)));
+                        new FactorFormula.Term[] {FactorFormula.Term.of("yourmod:axis", null, 1.0)}, null)));
         assertTrue(codes(validate(a)).contains("CONTRIBUTION_SCALE_FACTORS_WITHOUT_FLOORS"));
     }
 
@@ -346,7 +348,7 @@ public class StationValidatorTest {
     void contributionScaleUnknownFactor_flagged() {
         StationAsset a = station("unknownaxis", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withContributionScale(ContributionScale.of(
-                        new FactorRef[] {FactorRef.of("yourmod:axis", null, 1.0)},
+                        new FactorFormula.Term[] {FactorFormula.Term.of("yourmod:axis", null, 1.0)},
                         new ContributionScale.Floor[] {ContributionScale.Floor.of(5.0, 2.0)})));
         List<Finding> findings = StationValidator.validate(List.of(a), ANY_LANG, ANY_DROP, NO_FACTOR);
         assertTrue(codes(findings).contains("UNKNOWN_FACTOR"));
@@ -356,7 +358,7 @@ public class StationValidatorTest {
     void contributionScaleDuplicateFloorMin_flagged() {
         StationAsset a = station("dupfloor", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withContributionScale(ContributionScale.of(
-                        new FactorRef[] {FactorRef.of("yourmod:axis", null, 1.0)},
+                        new FactorFormula.Term[] {FactorFormula.Term.of("yourmod:axis", null, 1.0)},
                         new ContributionScale.Floor[] {
                                 ContributionScale.Floor.of(5.0, 2.0),
                                 ContributionScale.Floor.of(5.0, 3.0)})));
@@ -475,7 +477,7 @@ public class StationValidatorTest {
     void unknownDropList_flagged() {
         StationAsset a = station("baddrop", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withBonus(LootRef.of(null, new Roll[] {
-                        Roll.of(null, null, null, null, Roll.Grants.ofDropList("Missing_Drops"))})));
+                        Roll.of(null, null, null, null, LootGrants.ofDropList("Missing_Drops"), null)})));
         List<Finding> findings = StationValidator.validate(List.of(a), ANY_LANG, NO_DROP, ANY_FACTOR);
         assertTrue(codes(findings).contains("LOOT_UNKNOWN_DROPLIST"));
     }
@@ -483,26 +485,26 @@ public class StationValidatorTest {
     @Test
     void emptyRoll_flagged() {
         StationAsset a = station("emptyroll", ActionDef.of("Mill").withRecipe(trunkRecipe())
-                .withBonus(LootRef.of(null, new Roll[] {Roll.of(null, null, null, null, null)})));
-        assertTrue(codes(validate(a)).contains("LOOT_ROLL_EMPTY"));
+                .withBonus(LootRef.of(null, new Roll[] {Roll.of(null, null, null, null, null, null)})));
+        assertTrue(codes(validate(a)).contains("LOOT_NO_ROLL_CONTENT"));
     }
 
     @Test
     void duplicateLadderFloorMin_flagged() {
         Roll roll = Roll.of(null, null, null,
-                Roll.Ladder.of(new FactorRef[] {FactorRef.of("yourmod:axis", null, 1.0)},
+                Roll.Ladder.of(new FactorFormula.Term[] {FactorFormula.Term.of("yourmod:axis", null, 1.0)},
                         new Roll.Ladder.Floor[] {
-                                Roll.Ladder.Floor.of(5.0, Roll.Grants.ofOutputItems(1.0), null),
-                                Roll.Ladder.Floor.of(5.0, Roll.Grants.ofOutputItems(2.0), null)}),
-                null);
+                                Roll.Ladder.Floor.of(5.0, LootFixtures.outputItems(1.0), null),
+                                Roll.Ladder.Floor.of(5.0, LootFixtures.outputItems(2.0), null)}),
+                null, null);
         StationAsset a = station("dupladder", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
-        assertTrue(codes(validate(a)).contains("LADDER_DUPLICATE_FLOOR_MIN"));
+        assertTrue(codes(validate(a)).contains("LOOT_DUPLICATE_FLOOR"));
     }
 
     @Test
     void outputItemsOnACompletionRoll_flagged() {
-        Roll roll = Roll.of(Roll.TRIGGER_COMPLETION, null, null, null, Roll.Grants.ofOutputItems(2.0));
+        Roll roll = Roll.of(StationLootEngine.TRIGGER_COMPLETION, null, null, null, LootFixtures.outputItems(2.0), null);
         StationAsset a = station("badtrigger", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
         assertTrue(codes(validate(a)).contains("LOOT_OUTPUT_ITEMS_WRONG_TRIGGER"),
@@ -515,7 +517,7 @@ public class StationValidatorTest {
      */
     @Test
     void aFractionOnlyOutputItemsAmountOnACompletionRoll_isStillFlagged() {
-        Roll roll = Roll.of(Roll.TRIGGER_COMPLETION, null, null, null, Roll.Grants.ofOutputItems(0.5));
+        Roll roll = Roll.of(StationLootEngine.TRIGGER_COMPLETION, null, null, null, LootFixtures.outputItems(0.5), null);
         StationAsset a = station("badtriggerfraction", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
         assertTrue(codes(validate(a)).contains("LOOT_OUTPUT_ITEMS_WRONG_TRIGGER"));
@@ -523,7 +525,7 @@ public class StationValidatorTest {
 
     @Test
     void outputItemsOnACycleRoll_isClean() {
-        Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0));
+        Roll roll = Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootFixtures.outputItems(2.0), null);
         StationAsset a = station("goodtrigger", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
         assertFalse(codes(validate(a)).contains("LOOT_OUTPUT_ITEMS_WRONG_TRIGGER"));
@@ -533,7 +535,7 @@ public class StationValidatorTest {
 
     @Test
     void outputItemsOnAStepsActionBonus_flagged() {
-        Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0));
+        Roll roll = Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootFixtures.outputItems(2.0), null);
         StationAsset a = station("ritualbonus", ActionDef.of("Enhance")
                 .withSteps(new StationStep[] {StationStep.of("Beat")})
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
@@ -543,7 +545,7 @@ public class StationValidatorTest {
 
     @Test
     void outputItemsOnAStepRollPhase_flagged() {
-        Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0));
+        Roll roll = Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootFixtures.outputItems(2.0), null);
         StationAsset a = station("ritualstep", ActionDef.of("Enhance")
                 .withSteps(new StationStep[] {
                         StationStep.of("Beat").withRoll(LootRef.of(null, new Roll[] {roll}))}));
@@ -560,7 +562,7 @@ public class StationValidatorTest {
                 "{ \"Steps\": [ { \"Id\": \"Beat\", \"Duration\": { \"Ms\": 100 } } ] }");
         ActionCatalog.getInstance().fold(Map.of("ritualfixture", base), true);
         try {
-            Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0));
+            Roll roll = Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootFixtures.outputItems(2.0), null);
             StationAsset a = station("refbonus", ActionDef.of("Enhance", "ritualfixture")
                     .withBonus(LootRef.of(null, new Roll[] {roll})));
             assertTrue(codes(validate(a)).contains("LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT"),
@@ -579,7 +581,7 @@ public class StationValidatorTest {
                 + " \"Output\": [{ \"ItemId\": \"Fixture_Plank\", \"Quantity\": 2 }] } ] } }");
         ActionCatalog.getInstance().fold(Map.of("millfixture", base), true);
         try {
-            Roll roll = Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofOutputItems(2.0));
+            Roll roll = Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootFixtures.outputItems(2.0), null);
             StationAsset a = station("refmill", ActionDef.of("Mill", "millfixture")
                     .withBonus(LootRef.of(null, new Roll[] {roll})));
             assertFalse(codes(validate(a)).contains("LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT"));
@@ -590,9 +592,8 @@ public class StationValidatorTest {
 
     @Test
     void contributionsOnACompletionRoll_flagged() {
-        Roll roll = Roll.of(Roll.TRIGGER_COMPLETION, null, null, null,
-                Roll.Grants.of(null, null, null,
-                        new Contribution[] {Contribution.of("yourmod:test", "ALPHA", 5.0)}));
+        Roll roll = Roll.of(StationLootEngine.TRIGGER_COMPLETION, null, null, null,
+                LootFixtures.contribution("yourmod:test", 5.0), null);
         StationAsset a = station("badpost", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
         assertTrue(codes(validate(a)).contains("LOOT_CONTRIBUTION_WRONG_TRIGGER"));

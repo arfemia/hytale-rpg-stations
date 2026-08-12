@@ -72,8 +72,7 @@ the WHOLE set executes:
   the fifth plank, which is what makes the trophy the bench's one endgame upgrade. Any doc claiming
   "up to four" predates the trophy.
   **The Sawmill's three shipped lootables are split by REPLACEABILITY, not by theme - ONE ROLL
-  EACH.** A `Lootable` folds by id and a later layer replaces the whole FILE (`LootableCatalog.fold`
-  is a `putAll`), so **which rolls share a file decides what a layering mod must inherit in order to
+  EACH.** A `Lootable` folds by id and a later layer replaces the whole FILE (the fold is a `putAll`), so **which rolls share a file decides what a layering mod must inherit in order to
   re-tune one of them.** Any roll another mod is expected to reshape therefore gets its own file.
   **Keep that split when adding a station: one file per independently replaceable concern**, and
   when in doubt split, since merging later is free and unpicking a shipped id is not. The shipped
@@ -88,14 +87,14 @@ the WHOLE set executes:
   on the TROPHY's own axes (`tool_quality >= 5`, `tool_item_level >= 50`, `tool_power >= 0.55`, each
   exactly one notch above `SawmillTrophy`'s own gate and unreachable by any forgeable vanilla tool),
   no cycle GATE since the trophy already proved that loyalty - the cycle count drives the CHANCE
-  instead (15 percent rising 0.5 a cycle, `CapPercent` 75, so the cap lands at cycle 120 and a
+  instead (15 percent rising 0.5 a cycle, `Clamp.Max` 75, so the cap lands at cycle 120 and a
   ten-minute session only just reaches it). Deliberate contrast with `SawmillFinds`, where the TOOL
   drives frequency and the session drives depth: here the tool has already done its work by
   unlocking the roll, so the session is the only variable left. Pays `RPG_Station_Sawmill_T4`, the
   one find table with no empty entry.
   **`SawmillTrophy` (`Lootables/SawmillTrophy.json`) is ONE roll**, the chase itself: all three tool
   axes at the vanilla Mithril hatchet's own values (`tool_quality >= 4`, `tool_item_level >= 50`,
-  `tool_power >= 0.5`) plus `cycle_count >= 5`, a visible `Chance.BasePercent` of `0.04` (1 in 2500)
+  `tool_power >= 0.5`) plus `cycle_count >= 5`, a visible `Chance.Base` of `0.04` (1 in 2500)
   with NO factors - deliberately the plainest possible curve, since a luck-scaled one reads channels
   this mod knows nothing about - granting inline through its own top-level `Grants.Commands`
   (`give {player} RPG_Tool_Hatchet_Sawmiller`) with its own top-level `Presentation`. It is the
@@ -121,8 +120,10 @@ the WHOLE set executes:
   bullet below.
 - **Extensions**: `asset.ExtensionAsset` (`Server/RpgStations/Extensions/*.json`) folds into
   `ExtensionCatalog` - see its own bullet below.
-- **Lootables/RollPools/Flairs/Settings**: unchanged catalog shape (`loot.LootableCatalog`,
-  `loot.RollPoolCatalog`, `FlairCatalog`, `SettingsCatalog`) - see `../loot/CLAUDE.md`.
+- **Flairs/Settings**: unchanged catalog shape (`FlairCatalog`, `SettingsCatalog`).
+- **Lootables/RollPools are the SHARED library's stores** at `Server/ZiggfreedCommon/{Lootables,
+  RollPools}/`, folded into `LootableConfig`/`RollPoolConfig` - this mod registers neither. What
+  stays station-side is the pass around them; see `../loot/CLAUDE.md`.
 
 ## Sessions
 
@@ -267,10 +268,10 @@ per-step-clip detection); `Actions` in `ActionResolver.effectiveActions`; `Conve
 `ExtensionCatalog.fold` AND `ActionCatalog.fold` both call
 `StationCatalog.invalidateResolvedConversions()`, since the three stores fold in no guaranteed order
 and a layer arriving after the first conversion resolve would otherwise never be seen; `Rolls`
-inside `loot.LootEngine.resolveRolls`, at the point a
+inside `loot.StationLootEngine.resolveRolls`, at the point a
 referenced lootable table is read (so a table gains its extended rolls at EVERY reference site - an
 action's `Bonus` and a step's `Roll` phase both route through that one resolution); `Entries` inside
-`StampCapEngine.candidateEntries`, at the point a `Stamp.Stats.Pool` is read. Those last two read
+`StationStepHandlers.StampHandler.withExtendedEntries`, at the point a `Stamp.Stats.Pool` is read. Those last two read
 their catalog per call and derive nothing, so unlike `Conversions` they need no invalidation
 companion.
 
@@ -371,7 +372,15 @@ the same gate the engage checked.
 
 `ConversionCheck` (built off `StationAsset.Conversion.Input`/`Output`, resolved via
 `firstRunnableConversion`/`firstRunnableConversionFromCustody`) carries the resolved action's
-`Recipe` unchanged, so the produce phase reads THAT recipe's own `Yield`. The sneak+F picker's
+`Recipe` unchanged, so the produce phase reads THAT recipe's own `Yield`.
+
+**The output-room question is `ziggfreed-common`'s `InventoryGrant.canAdd`/`canAddAll`, never a
+container read of our own** - the probe half of the very granter `util.ItemGrantUtil` hands outputs
+over with, so "is there room" and "where did it land" can never disagree. Both conversion scans and
+the Stamp phase's return-room check read it. A single stack therefore also counts a free hotbar
+slot, which is exactly what the grant would have used; a multi-output batch is answered against
+backpack storage alone, since no container can answer for a batch the granter places one stack at a
+time. The sneak+F picker's
 category strip and custody's derived acceptance matcher still read the WHOLE effective conversion
 set of the resolved action (`StationService#allConversionsFor`), because both answer "what can
 this action make/accept at all", not "what runs this cycle" - that flatten is unaffected by the
@@ -380,7 +389,8 @@ still hold several conversions (e.g. the sawmill's 33 species x category combina
 
 **`ContributionScaling`** ([`ContributionScaling.java`](ContributionScaling.java)) is the pure
 resolution of an action's `ContributionScale` ladder into ONE multiplier, over the SAME
-`loot.FactorLadder` core `Roll.Ladder` uses. `StationService` calls
+ladder rules a loot `Roll.Ladder` follows (an empty `Factors` resolves to 0, a `Min <= 0` floor IS
+reachable, an equal-`Min` tie goes to the LAST authored floor). `StationService` calls
 `ContributionScaling.multiplier(action.getContributionScale(), snapshot::resolve)` at both
 per-cycle contribution sites and PRE-SCALES every `Work.PerCycleContributions` amount before
 `StationCycleCompletedEvent` dispatches, reporting the resolved multiplier back on
@@ -442,7 +452,7 @@ conversion driving it can). `StationYield` is now just `resolveQuantity`/`applyT
 `floor(base * Scale)` clamped into `[max(1, Min), Max]` - with NO ladder, NO roll, and NO
 `FactorSnapshot` dependency at all; a null `Yield` is the IDENTITY (the conversion's own authored
 quantity, untouched). **Everything probabilistic moved to the loot layer**: a `Roll` in the
-action's own `Bonus` (evaluated by `loot.LootEngine`/`RollEvaluator` off the SAME per-cycle
+action's own `Bonus` (evaluated by `loot.StationLootEngine` over the shared roll core, off the SAME per-cycle
 `FactorSnapshot` `runRealCycle` builds once for the whole cycle - "one aggregation, several
 consumers") tallies `Grants.OutputItems`, and `StationService#grantBonusOutputItems` hands out
 additional units of `s.cycleOutputItemId` (the cycle's own resolved primary output,
@@ -470,7 +480,7 @@ the quality one is an asset-map index resolve, not a raw index compare - see its
 1000ms heartbeat (terminate checks: ref/store validity, block-gone, walk-off `MaxMoveMeters`,
 crouch exit, held-tool still matching, `MaxDurationMs` cap, the engine-toggle check via
 `SettingsCatalog`; hold TTL refresh) + per-`Work.CycleMs` cycle (Convert transaction with
-output-room PRE-check before consume; loot rolls via `loot/LootEngine`; `StationEvents
+output-room PRE-check before consume; loot rolls via `loot/StationLootEngine`; `StationEvents
 .fireCycleCompleted`; the cycle `Presentation` at the block via `emitMoment`). A multi-action
 station's authored `Steps` program dispatches through the step engine above instead of the
 classic Convert transaction; the implicit single-step program (`ImplicitProgram`) is what a
@@ -479,7 +489,7 @@ station with no `Actions`/`Steps` gets, so both paths converge on the SAME step 
 **`Trigger: "Cycle"` means THE action's cycle-completed moment, whatever program shape runs it.**
 Both program shapes resolve the action's effective `Bonus` through the ONE
 `StationService#effectiveBonusRolls` (its own group plus every matching extension's, expanded by
-`LootEngine.resolveRolls`), and they differ only in WHERE the `Cycle` pass fires: the implicit
+`loot.StationLootEngine#resolveRolls`), and they differ only in WHERE the `Cycle` pass fires: the implicit
 convert program folds those rolls into its own `Roll` phase at build time, while an authored `Steps`
 program has no such phase, so `dispatchProgram` runs the pass itself on a COMPLETED walk
 (`rollCycleBonus`, gated by its `bonusAtCompletion` flag so the implicit route never double-rolls).
@@ -519,9 +529,10 @@ an AUTHORED step id, else `cycle`. The implicit convert loop an action with no `
 `cycle` too - its one step is engine-synthesized (`ImplicitProgram.ID_WORK`, which no author ever
 wrote), and its iteration IS the cycle, so a flair re-skins the classic work loop by the same `cycle`
 id the docs name for it rather than by a `step:` id derived from an engine-internal name.
-`rare_find` is the one well-known moment an action's own `Moments` can never supply: it is emitted
-only WITH the earning `Roll`/`Ladder.Floor` cue in hand, so the base always outranks the map
-(`RARE_FIND_MOMENT_NEVER_PLAYS` warns on such an entry; a flair keyed `rare_find` still overlays it).
+**A loot CUE is a moment id like any other**, so `rare_find` (and any author-defined `cue:<name>`)
+IS action-authorable now: the loot layer names the moment and the map decides what it sounds like.
+That is the whole reason the cue stopped being a presentation body - one edit re-skins every table
+that names it, and the tables stay pure numbers.
 
 **`Presentation.DelayMs` is applied INSIDE `emitMoment`, after the flair fold** (`../asset/CLAUDE.md`'s
 Presentation bullet), so the winning presentation is the one whose timing is honored and a flair can
@@ -589,8 +600,9 @@ Two more consequences worth knowing:
   it plays that moment.
 
 **`MOMENT_RARE_FIND` plays only EARNED cues (the smart-cue rule - see `../loot/CLAUDE.md`).**
-`applyGrantResult` walks `GrantResult.getFloorPresentations()` and emits each entry on
-`MOMENT_RARE_FIND` at the block, and that list is deliberately pre-filtered by `loot.LootEngine`:
+`applyGrantResult` walks `GrantResult.getCues()` and emits each CUE ID at the block through
+`emitMoment` with a null base, so the action's own `Moments` entry for that id (and every applicable
+flair) supplies the presentation. That list is deliberately pre-filtered by the shared loot engine:
 BOTH cue altitudes ride it (a `Roll`'s own top-level `Presentation` when the roll hit, and a reached
 `Ladder.Floor`'s, roll cue first when one roll carries both), and each was admitted only if it is a
 PURE cue (no `Grants` group authored beside it) or its own paired grants group actually PRODUCED
@@ -964,7 +976,7 @@ try-guarded and fired only inside the `RETRIEVE` branch, so every denial/no-op p
 
 ## The anvil arc - the Stamp step + roll/cap engine (mechanism unchanged; Caps reshaped)
 
-[`StampCapEngine`](StampCapEngine.java) (pure, unit-tested via `StampCapEngineTest`) is called
+The shared `loot.stamp.StampCapEngine` (pure, unit-tested in the library) is called
 ONLY from `StationStepHandlers`'s Stamp phase handler: compute-then-commit (roll + weighted-pick/
 `Picks`/`Unique` + cap-clamp validated with ZERO mutation first, then reagent consumption and the
 weapon mutation each run under their OWN try/catch that restores exactly what was consumed on
@@ -972,7 +984,7 @@ failure - `claim.setUniqueStack` is the LAST line, reached only on full success)
 composition is re-anchored on the scope-2 `Budgets[]` shape** (`../asset/CLAUDE.md`'s Stamp
 bullet: MIN over every `Budget` entry, `PerStat` layered on top, `Economics` unchanged) - the
 engine's MIN-composition RULE is identical to pre-scope-2, only the authoring shape changed;
-`StampCapEngineTest`'s fixtures were re-anchored on it. `ActionResolver.selectActionByFamily` (a DIFFERENT NAME from
+`ActionResolver.selectActionByFamily` (a DIFFERENT NAME from
 `selectAction`, never an overload) is the resource-type-FAMILY-aware selection entry
 `StationService` calls from `selectActionForHeld`/`liveFunctionOf`. `StationCatalog`'s
 `resolvedConversions(asset, actionId, recipe)` caches the derived conversions per
@@ -985,9 +997,16 @@ non-repeating authored Steps program (e.g. the anvil's Enhance) gets INSTANT fir
 (`s.nextCycleAtMs = now`, no `CycleMs` latency eaten before the ritual's only cycle).
 **Enhancement outcome reporting** (`StationEnhanceOutcome` on `StationSession
 #enhanceOutcomes`, `StationEvents#fireEnhanceCompleted`, `StationService#enhanceLedgerRows`) is
-vocabulary-agnostic - the stamper's `List<EnhanceLine>` renders verbatim, plus one engine-owned
+vocabulary-agnostic - a stamper line with a `label` renders verbatim, one WITHOUT a label falls back
+to the engine's plain `<statId> +N` row (`ui.station.summary.enhance_stat`), plus one engine-owned
 `Durability +N` row, so a bare anvil with no registered stamper still reports its durability
-enhancement. See `../api/CLAUDE.md`'s `EnhanceStamperRegistry` entry for the api contract; the
+enhancement. **A ledger row must never carry nothing** - its text goes straight to the client, and a
+summary silent about the stats a ritual just applied reads as a ritual that did nothing; that is why
+the unlabelled path has its own fixtures in `StationEnhanceLedgerRowsTest`, since `EnhanceLine.of`
+(the only factory a Stamp step uses) always leaves the label unset. The stamper contract itself is
+the shared `loot.stamp.Stamper`, installed through the static `StamperRegistry`; an `EnhanceLine`
+carries the stat id and its points with the display label left to a consumer (see
+`../api/CLAUDE.md`). The
 shipped Anvil content lives in its own pack's repo.
 
 ## The puppet presentation engine (unchanged)
@@ -1087,7 +1106,7 @@ mod's own concern; this engine stores no per-player fact). The open STRING momen
 `Stations` list applies - a same-flair-id `FlairAsset` entry wins. `api.impl.StationViewImpl
 .flairIds()` and `StationCatalog.allFlairIds()` both reuse the SAME merge point. See
 `../loot/CLAUDE.md` for the `LootRef`/`Roll` evaluation engine this package calls into per cycle
-and per step `Roll` phase (both routes are the SAME `loot.LootEngine` call - one roll engine,
+and per step `Roll` phase (both routes are the SAME `loot.StationLootEngine` call - one roll engine,
 whether the source is a station's implicit cycle or an authored step's `Roll` phase) - including the
 SMART-CUE rule, which decides over there which `MOMENT_RARE_FIND` cues this package is ever handed
 (see the `emitMoment` section above: a `Roll` carries its own top-level `Presentation` beside the
@@ -1114,7 +1133,7 @@ nor any of its own groups authored), `AMBIGUOUS_ACTION_INPUT`/`UNREACHABLE_ACTIO
 action's `Select` can never win because an earlier one's already matches every context it would),
 `RECIPE_ENTRY_EMPTY` (an action's own `Recipe` group with neither `Conversions` nor
 `FromCrafting` - it can never run a cycle), `LOOT_OUTPUT_ITEMS_WRONG_TRIGGER` (a
-`Roll.Grants.OutputItems` authored under a `Completion` trigger, which has no cycle output to add
+an `rpgstations:output_items` reward authored under a `Completion` trigger, which has no cycle output to add
 to), `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` (its sibling for the other way a cycle can have no output:
 the action runs an authored `Steps` program - its OWN, or the one its `Ref` base authors, read
 through `ActionResolver.effectiveStepsOf` - so the roll evaluates but has nothing to multiply),
@@ -1151,7 +1170,7 @@ unit-tested.
 
 **Contribution-channel checks**: `MISSING_CONTRIBUTION_CHANNEL` / `NONPOSITIVE_CONTRIBUTION_AMOUNT`
 on a `Work.PerCycleContributions` entry, `LOOT_CONTRIBUTION_WRONG_TRIGGER` (a
-`Roll.Grants.Contributions` on a `Completion` roll, which fires from inside `stop()` with no cycle
+an `rpgstations:contribution` reward on a `Completion` roll, which fires from inside `stop()` with no cycle
 event left to ride) / `LOOT_CONTRIBUTION_MISSING_CHANNEL` / `LOOT_CONTRIBUTION_NONPOSITIVE_AMOUNT`,
 and `UNKNOWN_CHANNEL` - the exact mirror of `UNKNOWN_FACTOR`: a `Channel` nobody declared through
 `api.ContributionChannelRegistry` warns and echoes the declared set, then forwards anyway.

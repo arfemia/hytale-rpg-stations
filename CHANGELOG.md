@@ -815,6 +815,59 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
   before release in favor of this in-repo surface, so the shipped 0.1.0 docs are `README.md`, the
   `docs/` markdown guides, and `SCHEMA.md` only.
 
+### The loot layer re-bases onto ziggfreed-common's shared core
+
+- Adopts `ziggfreed-common`'s shared loot core as this mod's loot layer, deleting the duplicated
+  model and evaluator on this side, so identical JSON now behaves identically at a station, in a
+  chest, and at a quest turn-in. The engine, the seams and the shipped Sawmill behave as before;
+  what changed is where the vocabulary lives and, in four places, how it is spelled.
+  - **Loot tables and roll pools are the shared library's assets**: `Server/ZiggfreedCommon/
+    Lootables/<Name>.json` and `Server/ZiggfreedCommon/RollPools/<Name>.json`, registered by
+    `ziggfreed-common` rather than by this mod. Ids, case-insensitive matching and the
+    replace-by-id fold are unchanged, as is `ExtensionAsset`'s ability to append rolls to a table
+    or entries to a pool - both appends still reach every site that reads them.
+  - **A `Roll.Chance` is the shared `{Base, Factors, Clamp}` formula**, read as a percentage and
+    held inside `0..100` whatever the terms say. `BasePercent` becomes `Base` and `CapPercent`
+    becomes `Clamp.Max`. A ladder's `Factors` stays a bare weighted-term array, because a ladder
+    has no base to stand on and no ceiling to hold it.
+  - **Every `Factors` array is the shared weighted factor TERM** (`{Factor, Param?, Weight?}`), the
+    same leaf at a chance, a ladder, a `ContributionScale`, a stat-roll's `Points`, a Stamp budget
+    and a step's `Repeat`. The shape an author writes is unchanged.
+  - **A celebration is a `Cue`, a MOMENT ID string, not an inline `Presentation` body.** The loot
+    table names a moment and the station decides what it sounds like, through the same emission
+    funnel every other station moment uses - so re-skinning every find at once is one edit in an
+    action's `Moments` map rather than one per table, and a flair can target a find cue by name.
+    Well-known moment ids, a per-step `step:<actionId>:<stepId>` and the OPEN author-defined
+    `cue:<yourName>` namespace all resolve. The smart-cue rule is unchanged: a cue beside grants
+    rides only once those grants genuinely produced something. The shipped Sawmill publishes a
+    four-cue palette (`rare_find`, `cue:find_deep`, `cue:find_apex`, `cue:trophy`) a table can name
+    with no presentation of its own.
+  - **The three station-only payouts are registered reward KINDS** inside `Grants.Rewards`, so they
+    compose with `Items`, `DropLists`, `Commands` and anything another mod registered:
+    `rpgstations:output_items` (`{"Count": "1.5"}`, replacing `Grants.OutputItems`),
+    `rpgstations:contribution` (`{"Channel", "Param"?, "Amount"}`, replacing
+    `Grants.Contributions`), and `rpgstations:effect` (`{"Id", "DurationMs"?}`, replacing
+    `Grants.Effects`). Every rule around them is unchanged: output items stay fractional and summed
+    once per cycle, contributions stay one-shot and unscaled, and effect teardown still differs by
+    trigger.
+  - **A `StatRollEntry` authoring `Weight: 0` now means NEVER DRAWN**, not "the default 1". Omit
+    `Weight` for the neutral 1.0.
+- **The stamper contract moves to `ziggfreed-common`** (`loot.stamp.Stamper`, installed through the
+  static `StamperRegistry`), taking `StampInspection`, `StatRoll` and the whole roll + budget engine
+  with it. The api artifact goes to **0.2.0**: `EnhanceStamper`, `EnhanceStamperRegistry`,
+  `StampInspection`, `StampResult`, `StatRoll` and `RpgStationsApi.enhanceStampers()` are removed,
+  and a mod that stamped gear registers a `Stamper` instead. `EnhanceLine` stays, with its `label`
+  now optional - what a stamped stat is CALLED belongs to whichever mod owns that vocabulary, so the
+  summary paints the id and its points plainly and a consumer supplies the styled row through
+  `SummaryEnricherRegistry`.
+- `Stamp.Stats.Caps.Economics` moves up one level to `Stamp.Economics`: it prices the REAGENTS and
+  never touches the point budget, so it sits beside the reagents rather than among the ceilings.
+- `hytale:tool_power` registers through the nullable resolution seam, so a gather type the held tool
+  has no spec for answers "cannot tell" rather than `0` - a bounds-less gate on it stays shut. The
+  no-`Param` form still answers the station's own effective gather type. The held-tool power fold
+  now goes through the shared reader, which keeps the STRONGEST spec when a tool authors one gather
+  type twice (it previously kept the last).
+
 ### The factor vocabulary re-bases onto ziggfreed-common's shared core
 
 - Adopts `ziggfreed-common`'s shared factor vocabulary as the machinery behind this mod's own

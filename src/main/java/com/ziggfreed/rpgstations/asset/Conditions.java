@@ -13,7 +13,7 @@ import com.ziggfreed.common.factor.FactorCondition;
  *
  * <p>Used wherever a factor value must PASS a bound - a station's or an action's {@code Requires}
  * gate, a {@code Roll.Conditions} entry, a {@code StationStep.Conditions} entry. The scale/add
- * sibling {@link FactorRef} ({@code Factor}/{@code Param}/{@code Weight}) is used wherever a factor
+ * sibling factor TERM ({@code Factor}/{@code Param}/{@code Weight}) is used wherever a factor
  * value is SUMMED instead. One codec each, so a gate authored at any site behaves identically.
  *
  * <p><b>ONE instance, deliberately.</b> The factory mints a fresh codec per call, so every embed

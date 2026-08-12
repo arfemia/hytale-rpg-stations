@@ -80,9 +80,9 @@ station content names both by id:
   "Bonus": {
     "Rolls": [ {
       "Trigger": "Cycle",
-      "Chance": { "BasePercent": 3,
+      "Chance": { "Base": 3,
                   "Factors": [ { "Factor": "yourmod:reputation", "Param": "guild" } ],
-                  "CapPercent": 20 },
+                  "Clamp": { "Max": 20 } },
       "Grants": {
         "DropLists": ["RPG_Station_Sawmill_T1"],
         "Contributions": [

@@ -1,17 +1,22 @@
 package com.ziggfreed.rpgstations.asset;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
+import com.ziggfreed.common.loot.LootGrants;
+import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.reward.RewardSpec;
+import com.ziggfreed.rpgstations.loot.StationRewardKinds;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The {@link StationAsset} codec surface under the ACTION-FIRST schema: a station keeps only
@@ -397,67 +402,77 @@ public class StationAssetCodecTest {
         StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Bonus\": {"
                 + " \"Lootables\": [\"FixtureFinds\"],"
                 + " \"Rolls\": [ { \"Trigger\": \"Cycle\","
-                + "   \"Chance\": { \"BasePercent\": 25, \"CapPercent\": 80 },"
-                + "   \"Grants\": { \"OutputItems\": 2, \"DropLists\": [\"Fixture_T1\"] } } ] } } ] }");
+                + "   \"Chance\": { \"Base\": 25, \"Clamp\": { \"Max\": 80 } },"
+                + "   \"Grants\": { \"DropLists\": [\"Fixture_T1\"],"
+                + "     \"Rewards\": [ { \"Kind\": \"rpgstations:output_items\","
+                + "       \"Params\": { \"Count\": \"2\" } } ] } } ] } } ] }");
         LootRef bonus = a.getActions()[0].getBonus();
         assertEquals("FixtureFinds", bonus.getLootables()[0]);
         Roll roll = bonus.getRolls()[0];
         assertEquals("Cycle", roll.effectiveTrigger());
-        assertEquals(25.0, roll.getChance().getBasePercent());
-        assertEquals(2.0, roll.getGrants().effectiveOutputItems());
+        assertEquals(25.0, roll.getChance().getBase());
+        assertEquals(80.0, roll.getChance().getClamp().getMax());
         assertEquals("Fixture_T1", roll.getGrants().getDropLists()[0]);
-    }
-
-    @Test
-    void grantsOutputItems_readerDefaultsToZeroAndCountsTowardEmptiness() {
-        assertEquals(0.0, Roll.Grants.of(null, null).effectiveOutputItems());
-        assertEquals(0.0, Roll.Grants.ofOutputItems(-3.0).effectiveOutputItems());
-        assertTrue(Roll.Grants.of(null, null).isEmpty());
-        assertFalse(Roll.Grants.ofOutputItems(1.0).isEmpty(),
-                "an OutputItems-only Grants group genuinely grants something");
-        assertFalse(Roll.Grants.ofOutputItems(0.5).isEmpty(),
-                "a fraction-only amount grants an item some of the time, so it is not empty");
+        RewardSpec extraOutput = roll.getGrants().rewardSpecs().get(0);
+        assertEquals(StationRewardKinds.KIND_OUTPUT_ITEMS, extraOutput.kind());
+        assertEquals(2.0, extraOutput.doubleParam("count", 0.0));
     }
 
     /**
-     * A Roll carries its OWN top-level celebration, so a plain chance roll needs no degenerate
-     * one-floor Ladder to hang a cue on. It decodes through the SAME shared Presentation type a
-     * Ladder floor's cue uses, and the two are independent leaves that can both be authored.
+     * Extra units of the cycle's own output are a registered REWARD KIND, so the same
+     * {@code Grants} shape reaches this engine's own payouts and any other mod's without the loot
+     * layer knowing what either means.
      */
     @Test
-    void bonus_rollDecodesItsOwnTopLevelPresentation() throws Exception {
+    void grantsOutputItemsReward_readerDefaultsAndEmptiness() {
+        assertTrue(LootGrants.of(null, null, null, null).isEmpty());
+        LootGrants extra = LootGrants.of(null, null, null, new LootGrants.Reward[] {
+                LootGrants.Reward.of(StationRewardKinds.KIND_OUTPUT_ITEMS, Map.of("Count", "0.5"))});
+        assertFalse(extra.isEmpty(),
+                "a fraction-only amount grants an item some of the time, so it is not empty");
+        assertEquals(0.5, extra.rewardSpecs().get(0).doubleParam("count", 0.0));
+    }
+
+    /**
+     * A Roll carries its OWN top-level cue, so a plain chance roll needs no degenerate one-floor
+     * Ladder to hang one on. A cue is a MOMENT ID the granting site plays, never a presentation
+     * body - the same id an action's {@code Moments} map and a flair both key on.
+     */
+    @Test
+    void bonus_rollDecodesItsOwnTopLevelCue() throws Exception {
         StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Bonus\": { \"Rolls\": [ {"
-                + " \"Trigger\": \"Cycle\", \"Chance\": { \"BasePercent\": 0.5 },"
+                + " \"Trigger\": \"Cycle\", \"Chance\": { \"Base\": 0.5 },"
                 + " \"Grants\": { \"Commands\": [\"give {player} Fixture_Trophy\"] },"
-                + " \"Presentation\": { \"Sounds\": [\"Fixture_Fanfare\"],"
-                + "   \"Particles\": [ { \"SystemId\": \"Fixture_Sparks\" } ] } } ] } } ] }");
+                + " \"Cue\": \"cue:trophy\" } ] } } ] }");
         Roll roll = a.getActions()[0].getBonus().getRolls()[0];
 
-        assertNotNull(roll.getPresentation());
-        assertEquals("Fixture_Fanfare", roll.getPresentation().getSounds()[0].getEventId());
-        assertEquals("Fixture_Sparks", roll.getPresentation().getParticles()[0].getSystemId());
+        assertEquals("cue:trophy", roll.getCue());
         assertNull(roll.getLadder(), "no ladder is needed to carry a roll-level cue");
     }
 
     @Test
-    void bonus_rollPresentationOmitted_decodesNull() throws Exception {
+    void bonus_rollCueOmitted_decodesNull() throws Exception {
         StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Bonus\": { \"Rolls\": [ {"
                 + " \"Grants\": { \"DropLists\": [\"Fixture_T1\"] } } ] } } ] }");
-        assertNull(a.getActions()[0].getBonus().getRolls()[0].getPresentation());
+        assertNull(a.getActions()[0].getBonus().getRolls()[0].getCue());
     }
 
     /** The amount is FRACTIONAL: a half-step tier is authorable on the floor that earns it. */
     @Test
-    void bonus_ladderFloorGrantsOutputItems() throws Exception {
+    void bonus_ladderFloorGrantsExtraOutput() throws Exception {
         StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Bonus\": { \"Rolls\": [ {"
                 + " \"Ladder\": { \"Factors\": [ { \"Factor\": \"hytale:tool_quality\", \"Weight\": 10.0 } ],"
-                + "   \"Floors\": [ { \"Min\": 11, \"Grants\": { \"OutputItems\": 1 } },"
-                + "                 { \"Min\": 33, \"Grants\": { \"OutputItems\": 2.5 } } ] } } ] } } ] }");
+                + "   \"Floors\": [ { \"Min\": 11, \"Grants\": { \"Rewards\": [ { \"Kind\":"
+                + "        \"rpgstations:output_items\", \"Params\": { \"Count\": \"1\" } } ] } },"
+                + "                 { \"Min\": 33, \"Grants\": { \"Rewards\": [ { \"Kind\":"
+                + "        \"rpgstations:output_items\", \"Params\": { \"Count\": \"2.5\" } } ] } } ] } } ] } } ] }");
         Roll.Ladder ladder = a.getActions()[0].getBonus().getRolls()[0].getLadder();
         assertEquals("hytale:tool_quality", ladder.getFactors()[0].getFactor());
-        assertEquals(10.0, ladder.getFactors()[0].effectiveWeight());
-        assertEquals(1.0, ladder.getFloors()[0].getGrants().effectiveOutputItems());
-        assertEquals(2.5, ladder.getFloors()[1].getGrants().effectiveOutputItems(),
+        assertEquals(10.0, ladder.getFactors()[0].weightOrDefault());
+        assertEquals(1.0, ladder.getFloors()[0].getGrants().rewardSpecs().get(0)
+                .doubleParam("count", 0.0));
+        assertEquals(2.5, ladder.getFloors()[1].getGrants().rewardSpecs().get(0)
+                        .doubleParam("count", 0.0),
                 "a whole-number floor and a fractional one decode through the same leaf");
     }
 
@@ -471,7 +486,7 @@ public class StationAssetCodecTest {
                 + " \"Floors\": [ { \"Min\": 11, \"Scale\": 2.0 }, { \"Min\": 33 } ] } } ] }");
         ContributionScale scale = a.getActions()[0].getContributionScale();
         assertEquals(2, scale.getFactors().length);
-        assertEquals(1.0, scale.getFactors()[1].effectiveWeight());
+        assertEquals(1.0, scale.getFactors()[1].weightOrDefault());
         assertEquals(11.0, scale.getFloors()[0].effectiveMin());
         assertEquals(2.0, scale.getFloors()[0].effectiveScale());
         assertEquals(ContributionScale.NEUTRAL_SCALE, scale.getFloors()[1].effectiveScale(),

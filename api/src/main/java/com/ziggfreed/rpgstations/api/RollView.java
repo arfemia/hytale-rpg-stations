@@ -46,11 +46,18 @@ public interface RollView {
     @Nonnull
     List<FactorRefView> factors();
 
-    /** The authored {@code Chance.BasePercent}; null when unauthored (or no Chance group at all). */
+    /**
+     * The authored {@code Chance.Base}, read as a percentage; null when unauthored (or no
+     * {@code Chance} group at all). The method keeps its {@code Percent} suffix because the unit is
+     * what a hook needs to know: a chance formula is evaluated in percent whatever its terms say.
+     */
     @Nullable
     Double chanceBasePercent();
 
-    /** The authored {@code Chance.CapPercent}; null when unauthored (or no Chance group at all). */
+    /**
+     * The authored {@code Chance.Clamp.Max}, read as a percentage - the ceiling a stacking bonus may
+     * never pass; null when unauthored (or no {@code Chance}/{@code Clamp} group at all).
+     */
     @Nullable
     Double chanceCapPercent();
 

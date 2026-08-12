@@ -13,7 +13,7 @@ only the four things that genuinely belong to the STATION - `Identity`, `Block`,
 work cadence, custody, worker presentation, moments) lives INSIDE an [`ActionDef`](ActionDef.java)
 entry; an action reads its own groups, or the [`ActionAsset`](ActionAsset.java) its `Ref` names,
 and nothing else. File/folder layout:
-`Server/RpgStations/{Stations,Actions,Lootables,RollPools,Flairs,Extensions,Settings}/`. The
+`Server/RpgStations/{Stations,Actions,Flairs,Extensions,Settings}/` (loot tables and roll pools are the shared library's, at `Server/ZiggfreedCommon/{Lootables,RollPools}/`). The
 multi-station seam (`ActionDef.Anchors`, `StationStep.Walk`/`At`, `Produce.To:"Custody"`) fully
 EXECUTES, with no decode-only decoys anywhere in the schema. See `../station/CLAUDE.md`'s
 resolution section for the engine half.
@@ -56,21 +56,28 @@ resolution section for the engine half.
   discriminator stays at GROUP level beside `Items`, so one phase draws every item from - and
   writes every item to - the same place. Both phases are ALL-OR-NOTHING: availability is checked
   across every entry before anything is removed.
-- **[`FactorRef`](FactorRef.java)** - the ONE weighted factor reference (`{Factor, Param?,
-  Weight?}`, `Weight` defaults 1.0), reused everywhere a numeric factor channel is SUMMED - and
-  spelled `Factors` at EVERY one of those sites, so an author learns one key name rather than
-  several: `Roll.Chance.Factors`, `Roll.Ladder.Factors`, `ContributionScale.Factors`,
-  `StatRollEntry.Points.Factors`, `StationStep.Stamp.Stats.Caps.Budgets[].Factors`,
-  `StationStep.Repeat.Factors`. The arithmetic stays documented on the OWNING group, where it
-  belongs. Composition at every site is a flat weighted sum, `sum(resolve(Factor,Param) * Weight)`
-  - no expression nesting (standing directive 3's boundary). `FactorRef.stat(statId)` is the
-  convenience for the `{"Factor":"hytale:stat","Param":"<StatId>"}` shape the loot-formula middle
-  path uses (the `stat` factor provider itself is `loot/`'s scope, registered by
-  `RpgStationsPlugin`). `FactorRef` is the ADD/scale sibling of the shared gate leaf
-  (`Conditions`, below): that leaf is a factor reference PLUS gate bounds (`Min`/`Max`); `FactorRef` is a
-  factor reference PLUS a `Weight`. An unregistered factor id resolves to 0 (fail-closed), never a
-  throw.
-- **[`Contribution`](Contribution.java)** - the WRITE-side twin of `FactorRef`/the gate leaf, and the
+- **THE LOOT VOCABULARY IS `ziggfreed-common`'s.** A `Roll` and everything inside it -
+  `Conditions`, the `Chance` formula, the `Ladder`, `Grants`, the `Cue` - plus `LootRef`, the
+  `Lootable` and `RollPool` asset types, `StatRollEntry` and the whole stamp roll + budget model all
+  live in `com.ziggfreed.common.loot` (+ `loot.stamp`), so identical JSON behaves identically at a
+  station, in a chest, and at a quest turn-in. Read that package's routers for the model; the
+  bullets below cover only where this schema EMBEDS it and what a station adds.
+- **The weighted factor TERM** (`{Factor, Param?, Weight?}`, `Weight` defaults 1.0) is the shared
+  `FactorFormula.Term`, spelled `Factors` at EVERY site a numeric factor channel is SUMMED so an
+  author learns one key name rather than several: `Roll.Chance.Factors`, `Roll.Ladder.Factors`,
+  `ContributionScale.Factors`, `StatRollEntry.Points.Factors`, a Stamp budget's `Factors`,
+  `StationStep.Repeat.Factors`. Composition at every site is a flat weighted sum,
+  `sum(resolve(Factor,Param) * Weight)` - no expression nesting (standing directive 3's boundary).
+  It is the ADD/scale sibling of the shared gate leaf (`Conditions`, below): that leaf is a factor
+  reference PLUS bounds (`Min`/`Max`), a term is one PLUS a `Weight`. A gate FAILS CLOSED on a
+  factor nobody can answer; a term contributes 0 and the sum still produces a number - two rules
+  because they answer different questions, and each is the safe answer to its own.
+- **`Roll.Chance` is the full `{Base, Factors, Clamp}` formula**, read as a PERCENTAGE and held
+  inside `0..100` whatever the terms say. `Base` is the flat chance with no bonuses; `Clamp.Max` is
+  the ceiling a stacking bonus may never pass. A ladder's `Factors` stays a bare term array, because
+  a ladder has no base to stand on and no ceiling to hold it and a `Base`/`Clamp` pair there would
+  be two knobs that never do anything.
+- **[`Contribution`](Contribution.java)** - the WRITE-side twin of the read vocabulary, and the
   ONE outbound numeric-post leaf: `{Channel, Param?, Amount}`. Where a `Factor` asks a registered
   provider for a number, a `Contribution` hands a number OUT - the engine forwards
   `{Channel, Param, Amount}` verbatim on `StationCycleCompletedEvent` and **never resolves a channel
@@ -79,17 +86,15 @@ resolution section for the engine half.
   `Dropdown(AssetEditorDataSets.CHANNELS)` fed LIVE off
   `api.impl.ContributionChannelRegistryImpl#registeredIds`, and an id nobody declared is a
   fail-open `UNKNOWN_CHANNEL` warn that still forwards. Used at exactly two SITES, and the site is
-  the discriminator (see the `Roll` bullet): `ActionDef.Work.PerCycleContributions[]` (scaled by
-  the action's own `ContributionScale`, below) and `Roll.Grants.Contributions[]` (one-shot,
-  verbatim).
-- **[`LootRef`](LootRef.java)** - the ONE loot-reference group (`{Lootables[], Rolls[]}`).
-  `Lootables` are referenced [`LootableAsset`](LootableAsset.java) ids; `Rolls` are inline
-  [`Roll`](Roll.java)s authored directly at the site; both resolve when both are authored. Reused
-  at EVERY site an action, step, or extension references loot: `ActionDef.Bonus`,
-  `StationStep.Roll`, `ExtensionAsset.Bonus`. A `Lootables` entry accepts an INLINE lootable body
-  as well as an id (the ref-or-inline surface below). See the `Roll`/`ActionDef` bullets for the
-  concern boundary: `LootRef`/`Roll` decide what ELSE a cycle hands over, never how much of the
-  cycle's own output it made (that is `Recipe.Yield`'s job alone).
+  the discriminator: `ActionDef.Work.PerCycleContributions[]` (scaled by the action's own
+  `ContributionScale`, below) and a `rpgstations:contribution` REWARD inside a `Roll`'s `Grants`
+  (one-shot, verbatim).
+- **`LootRef`** (shared) - the ONE loot-reference group (`{Lootables[], Rolls[]}`).
+  `Lootables` are `LootableAsset` ids at `Server/ZiggfreedCommon/Lootables/<Name>.json`; `Rolls` are
+  inline `Roll`s authored at the site; both resolve when both are authored. Reused at EVERY site an
+  action, step, or extension references loot: `ActionDef.Bonus`, `StationStep.Roll`,
+  `ExtensionAsset.Bonus`. A `Lootables` entry accepts an INLINE lootable body as well as an id (the
+  ref-or-inline surface below). See the `ActionDef` bullet for the
 - **[`Conditions`](Conditions.java)** - `{Factor, Param?, Min?, Max?}`, the ONE
   GATE leaf both `Requires.Conditions` (station/action start gate) and every `Roll`/`StationStep`
   `Conditions` array evaluate over the api `FactorRegistry`. The TYPE is `ziggfreed-common`'s
@@ -97,7 +102,7 @@ resolution section for the engine half.
   vocabulary); this class holds the single codec instance, built through that type's codec factory
   so the `Factor` field carries THIS mod's live `rpgstations:factors` dropdown. Every embed site
   references `Conditions.CODEC` - calling the factory again would publish the same shape twice.
-  Evaluation is `loot/FactorGate` (lookup-based sites) or the shared array evaluator (the
+  Evaluation is the shared `loot.FactorGate` (lookup-based sites) or the shared array evaluator (the
   `Requires` gate, which resolves against the registry directly). An unregistered factor id fails
   CLOSED (a gate on a server without the referencing mod installed stays locked, never silently
   open) - never a second condition schema.
@@ -105,7 +110,7 @@ resolution section for the engine half.
   asset types accept either a plain id string or an inline anonymous body, via the engine's own
   `ContainedAssetCodec` (declared as a `CHILD_ASSET_CODEC` constant on each referenced type, the
   first-party `CameraShake` pattern): `LootRef.Lootables[]` ->
-  [`LootableAsset`](LootableAsset.java), `StationStep.Stamp.Stats.Pool` -> [`RollPool`](RollPool.java),
+  the shared `LootableAsset`, `StationStep.Stamp.Stats.Pool` -> the shared `RollPoolAsset`,
   and `ActionDef.Ref` -> [`ActionAsset`](ActionAsset.java). An inline body may carry its own
   `"Parent"`, and the leaf also emits a TYPED cross-reference into the generated schema reference
   instead of an untyped string. **Native asset references stay id-only** (`Presentation.Interaction`,
@@ -130,7 +135,7 @@ resolution section for the engine half.
 - **[`EffectRef`](EffectRef.java)** - the ONE native-EntityEffect
   reference leaf (`{Id, DurationMs?}`, id-ref-only, never inlines the effect body).
   Reused at every altitude an effect payload lands: `Presentation.Effect` (a single per-moment
-  effect group), `Roll.Grants.Effects[]` (a reward-time effect array), and `Puppet.Hide.Effect` (the
+  effect group), a `rpgstations:effect` reward's own `Id`/`DurationMs` params, and `Puppet.Hide.Effect` (the
   `Hide.Route: "Effect"` arm's configuration). Two effect-shaped leaves deliberately STAY bare ids:
   `Hold.EffectId` (the movement hold's lifetime is engine-owned - a short TTL re-applied every
   heartbeat, so an authored duration would be inert or would defeat the decay-as-release safety net)
@@ -210,7 +215,7 @@ resolution section for the engine half.
   - **Where it runs**: `Anchors` (named multi-station anchor declarations), `Steps` (an authored
     [`StationStep`](StationStep.java) program; absent = "build the implicit program from
     `Recipe`").
-  - **What else it hands over**: `Bonus` (a [`LootRef`](LootRef.java) - referenced `Lootables[]`
+  - **What else it hands over**: `Bonus` (the shared `LootRef` - referenced `Lootables[]`
     plus inline `Rolls[]`; `Recipe.Yield` decides how much of the thing you made, `Bonus` decides
     what else you got), `ContributionScale` (below).
   - **How the person looks doing it**: `Worker` (below).
@@ -263,7 +268,8 @@ resolution section for the engine half.
     "sometimes you get an extra" are both authored as visible rolls beside the deterministic number,
     rather than hidden inside it. A null `Yield` is the IDENTITY (the conversion's own authored quantity, untouched).
   - **`ContributionScale`** - a factor ladder (`{Factors[], Floors[]}`, the SAME
-    `loot.FactorLadder` core `Roll.Ladder` uses) multiplying every `Work.PerCycleContributions`
+    weighted-sum-then-highest-floor rule `Roll.Ladder` follows; the pure core is
+    `station.ContributionScaling` over the shared `FactorFormula.sum`) multiplying every `Work.PerCycleContributions`
     amount before it is forwarded. **The engine PRE-SCALES**: the resolved multiplier is applied
     to each amount before `StationCycleCompletedEvent` dispatches, and the multiplier itself rides
     that event (`contributionScale()`) for DISPLAY only - a listener that forgot to multiply
@@ -403,24 +409,28 @@ resolution section for the engine half.
     coverage is the anchor/walk check set (`ANCHOR_STATION_UNKNOWN`/`WALK_TARGET_UNKNOWN_ANCHOR`/
     `STEP_AT_UNKNOWN_ANCHOR`/`WALK_REQUIRES_PUPPET`).
   - **`Stamp`** (the anvil's enhance-commit step, compute-then-commit, handler-enforced):
-    `{Reagents: Ingredient[], Durability{AddMax}, Stats{Pool?, Entries?, Picks{Min,Max}, Unique,
-    Caps}}`. `Reagents` are `Ingredient`s consumed FROM THE PLAYER'S INVENTORY (not custody).
-    `Stats.Pool`/`Entries` share [`StatRollEntry`](StatRollEntry.java) with
-    [`RollPool`](RollPool.java). `Caps`: `Budgets: Budget[]` (each EXACTLY one of a flat
-    `{Points}` or a factor-scaled `{PointsPer, Factors[]}` = `PointsPer *
-    sum(resolve(f)*f.Weight)`; the EFFECTIVE total budget is the MIN over every `Budgets` entry),
-    `PerStat: Map<String,Double>` (a per-stat-id ceiling layered ON TOP), `Economics
-    {RepeatCostMultiplier}` (reagent cost scaling per prior stamp count, reads `StackStats`/the
-    registered stamper's count). Resolved end to end by the PURE `station.StampCapEngine`
-    (unit-tested).
-- **[`StatRollEntry`](StatRollEntry.java)** - one candidate stat-roll entry `{Stat, Points{Min,
-  Max, Factors[]}, Weight, Always}`, shared verbatim by `RollPool.Entries` and inline
-  `StationStep.Stamp.Stats.Entries`. `Points.Factors` (a `FactorRef[]`) -
-  rolled points = `uniform(Min,Max) + sum(resolve(f)*f.Weight)`, clamped by the Stamp caps. The
-  same `FactorRef` vocabulary that drives loot chances drives roll magnitudes.
-- **[`RollPool`](RollPool.java)** - `Server/RpgStations/RollPools/<Name>.json` (id = lowercased
+    `{Reagents: Ingredient[], Durability{AddMax}, Stats: StampSpec, Economics{RepeatCostMultiplier}}`.
+    `Reagents` are `Ingredient`s consumed FROM THE PLAYER'S INVENTORY (not custody).
+    **`Stats` is the shared `loot.stamp.StampSpec`** (`{Pool?, Entries?, Picks{Min,Max}, Unique,
+    Caps{Budgets[], PerStat}}`) - which entries are candidates, how many are picked, and the
+    ceilings the result is held under; each `Budgets` entry is EXACTLY one of a flat `{Points}` or a
+    factor-scaled `{PointsPer, Factors[]}`, and the EFFECTIVE budget is the MIN over every entry.
+    The roll + clamp is the pure shared `StampCapEngine`, and the WRITE goes through whichever
+    `Stamper` this server registered.
+    **`Economics` sits on `Stamp` itself, not inside `Caps`**: it scales the REAGENT cost per prior
+    stamp count (`ceil(base * (1 + mult * stampCount))`) and never touches the point budget, so it
+    belongs beside the reagents it prices rather than among the ceilings it does not affect.
+- **`StatRollEntry`** (shared) - one candidate stat-roll entry `{Stat, Points{Min, Max,
+  Factors[]}, Weight, Always}`, shared verbatim by a roll pool's `Entries` and a Stamp step's inline
+  `Stats.Entries`. Rolled points are `uniform(Min,Max) + sum(resolve(f) * f.Weight)`, clamped by the
+  Stamp caps - the same weighted-term vocabulary that drives loot chances drives roll magnitudes.
+  **An authored `Weight: 0` means NEVER DRAWN**, not "the default 1": a zero-weight entry owns no
+  band in the lottery and is stepped over. Omit `Weight` for the neutral 1.0.
+- **`RollPoolAsset`** (shared) - `Server/ZiggfreedCommon/RollPools/<Name>.json` (id = lowercased
   filename), body `{Entries: [StatRollEntry, ...]}`, referenced by a Stamp step's `Stats.Pool`.
-  Folded into `loot.RollPoolCatalog`.
+  A `Target:{RollPool}` `ExtensionAsset` appends to it, and that append is applied where the Stamp
+  step READS the pool (`StationStepHandlers.StampHandler.withExtendedEntries`), so an added stat is
+  a genuine candidate everywhere the pool is used.
 - **[`Presentation`](Presentation.java)** - this mod's OWN codec, deliberately direct: a moment
   plays its cues here with no feedback-service indirection layer, and every leaf on it is
   genuinely PLAYED. Leaves: **`Sounds`** (a `SoundCue[]` played in authored order, so a thud plus a
@@ -497,75 +507,54 @@ resolution section for the engine half.
   `Offset {0.0, -0.4, 1.15}`, `Rotation {Yaw: 0.0}`, `Prop {MirrorHeld, Hotbar}`, the in-game-tuned
   values); the pack-shipped Anvil authors its own. A pack re-skins any of them through an
   `ExtensionAsset`'s `Puppet` per-leaf overlay (rule 5 below), never a full-file station override.
-- **[`Roll`](Roll.java)** - the conditional-lootable roll: `Trigger` (`Cycle`/`Completion`),
-  `Conditions[]`, `Chance{BasePercent, Factors[], CapPercent}`, `Ladder{Factors[], Floors[]}`,
-  `Grants{OutputItems, DropLists[], Commands[], Effects[], Contributions[]}` (top-level AND
-  per-floor, both fire; `Effects[]` is an [`EffectRef`](EffectRef.java) array applying native
-  EntityEffects on grant), plus a top-level `Presentation` (the SMART-CUE rule, below).
-  `Chance.Factors` and `Ladder.Factors` are both weighted `FactorRef[]`s
-  summed BEFORE their use, so a ladder composes two `stat` channels like `YourMod_Luck` +
-  `YourMod_Luck_Woods` (the loot middle path's composition exemplar; a single-factor ladder
-  authors a one-element array). **`Grants.DropLists` is a plural ARRAY** - each entry rolls
-  independently in authored order, so "a guaranteed common table plus a rare table" is two entries
-  rather than a synthetic merged `ItemDropList` or two whole `Roll`s with duplicated
-  `Conditions`/`Chance`/`Ladder`. Binding evaluation rules: a `Ladder.Floor` has no direct
-  drop-list leaf (every floor routes through its own `Grants`); top-level `Grants` AND the reached
-  floor's `Grants` both apply; a failing `Chance` means the `Ladder` never evaluates.
-  **The SMART-CUE rule (binds BOTH presentation altitudes: the roll's own top-level
-  `Presentation` and a `Ladder.Floor`'s).** A celebration never plays over nothing. Each cue is
-  paired with the `Grants` group authored BESIDE it (the roll's own top-level `Grants` for the
-  roll-level cue, the floor's own for a floor cue): with NO grants beside it the cue is pure
-  presentation and plays on the plain hit/reach, and with grants authored it plays only once
-  applying them actually PRODUCED something (a drop-table item that genuinely landed after that
-  table's own internal weights resolved, a command run, an effect applied, an `OutputItems` amount
-  tallied, or a contribution posted). The case it exists for: a `DropLists` entry naming a native
-  table that carries its own internal empty weight grants nothing on a real share of its reaches,
-  and without the rule the jackpot fanfare fired anyway. The two altitudes are judged
-  INDEPENDENTLY and both can play in one pass. The roll-level leaf also retires the degenerate
-  workaround it replaced - a one-floor `Min: 0` Ladder authored purely to hang a cue on a plain
-  chance roll (which the validator flagged as an unreachable floor besides). Enforced engine-side
-  in `loot.LootEngine.rollAndGrant`, which is why `applyGrants` reports a boolean; see
-  `../loot/CLAUDE.md`.
-  **`Grants.OutputItems` is ALL probabilistic output**: a `Double`, ADDITIVE items of the
-  cycle's own primary output, handed over on top of the deterministic `Recipe.Yield` quantity -
-  additive, never a multiplier on the produced stack, so this number and the `Yield` number stay
-  directly comparable even though they are authored in different groups. **FRACTIONAL** (maintainer
-  ruling): the whole part is granted every time and the leftover fraction is the chance of ONE more,
-  so `1.5` pays one item always plus a second half the time and averages exactly 1.5. That is what
-  makes a half-step ladder rung authorable ON the floor that earns it - the alternative (a roll
-  banded to one quality tier beside the ladder) does not compose, since a modded tool matching the
-  band while reaching a HIGHER floor would collect both. Everything a cycle grants is SUMMED first
-  and resolved to whole items exactly once (`loot.OutputItemResolver`, called from
-  `StationService#grantBonusOutputItems` with `ThreadLocalRandom`), so two rolls paying `0.5` each
-  average one whole item rather than rounding twice. Meaningful only under a
-  `Cycle` trigger (`LOOT_OUTPUT_ITEMS_WRONG_TRIGGER` warns and the engine drops it on a
-  `Completion` roll, which fires from inside `stop()` with no cycle output left to add to). `Yield`
-  owns "how much of the thing you made" end to end; a Roll decides only what ELSE a cycle handed
-  over, and never touches the cycle's own output.
-  **`Grants.Contributions[]`** is a one-shot array of the SAME [`Contribution`](Contribution.java)
-  record `Work.PerCycleContributions` uses - one record, two authoring SITES, and the site fixes
-  the meaning: a find's grant is not "per cycle", and it BYPASSES both scalings a per-cycle entry
-  goes through (the `ContributionScale` ladder and the idle fraction), riding its own
-  `StationCycleCompletedEvent.oneShotContributions()` list so a rare find is worth
-  the same whatever tool the player holds. That is why the per-cycle key spells `PerCycle` out loud
-  and this one does not: the two sites must never read as the same blob in an author's eye. There
-  is deliberately no `Scaled` knob on the record (meaningless here, and it would let an author
-  defeat the one-shot rule); the first-party precedent for site-fixed meaning is
-  `EntityStatType`'s `MinValueEffects`/`MaxValueEffects`, one type whose meaning is fixed purely by
-  the key it hangs under. `Cycle`-trigger only (a Completion roll fires from inside
-  `stop()`, after the last cycle event; the validator warns).
-  Shared by `LootRef.getRolls()` (every LootRef site) and `LootableAsset.getRolls()`.
-- **[`LootableAsset`](LootableAsset.java)** - `Server/RpgStations/Lootables/<Name>.json` (id =
-  lowercased filename), body `{Rolls: [Roll, ...]}`, referenced by a `LootRef.Lootables` entry
-  (an action, step, or extension may combine any number of shared tables with its own inline
-  `Rolls`). Three standalone lootables ship in this jar's resources, all alive with RpgStations
-  alone (BUILT-IN factors only - `rpgstations:cycle_count` for the session-loyalty ladder, plus the
+- **`Roll`** (shared) - `{Trigger, Conditions[], Chance, Ladder{Factors[], Floors[]}, Grants, Cue}`.
+  At a station `Trigger` is `Cycle` (every completed cycle) or `Completion` (once, at session stop);
+  the rest is the shared model, including the SMART-CUE rule (a cue beside grants rides only once
+  those grants genuinely produced something) and the stacking of top-level and reached-floor grants.
+  Two things a station author needs on top of that:
+  - **A `Cue` is a MOMENT ID**, not a presentation body: the loot layer names a moment and the
+    station decides what it sounds like. It resolves through the SAME `emitMoment` funnel every
+    other station moment does, so an action's own `Moments` entry for that id plays it and every
+    applicable flair overlays it. Well-known ids (`rare_find`, `cycle`, `swing`, `impact`,
+    `completion`), a per-step `step:<actionId>:<stepId>`, and the OPEN author-defined
+    `cue:<yourName>` namespace all pass the typo check - mint a `cue:` id whenever a jackpot should
+    sound different from an ordinary find, and author the matching key in the action's `Moments`.
+    The jar's Sawmill publishes a four-cue palette (`rare_find`, `cue:find_deep`, `cue:find_apex`,
+    `cue:trophy`) that a table can name with no presentation of its own.
+  - **Three station payouts are registered reward KINDS** inside `Grants.Rewards`, so they compose
+    with `Items`/`DropLists`/`Commands` and with anything another mod registered:
+    - `rpgstations:output_items` (`{"Count": "1.5"}`) - ADDITIVE units of the cycle's own primary
+      output, on top of the deterministic `Recipe.Yield` quantity. Additive is load-bearing: the two
+      numbers stay directly comparable and no file can silently multiply another's. **FRACTIONAL** -
+      the whole part every time plus the leftover fraction as the chance of ONE more, so `1.5` pays
+      one always plus a second half the time and averages exactly 1.5. That is what makes a
+      half-step ladder rung authorable ON the floor that earns it. Everything a cycle grants is
+      SUMMED first and resolved to whole items exactly once (`loot.OutputItemResolver`), so two
+      rolls paying `0.5` each average one whole item rather than rounding twice. `Cycle` trigger
+      only, and only where the action HAS a single cycle output
+      (`LOOT_OUTPUT_ITEMS_WRONG_TRIGGER`/`LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` warn).
+    - `rpgstations:contribution` (`{"Channel", "Param"?, "Amount"}`) - a ONE-SHOT post of the same
+      `{Channel, Param, Amount}` shape `Work.PerCycleContributions` uses. The site fixes the
+      meaning: a find's grant is not "per cycle", and it BYPASSES both scalings a per-cycle entry
+      goes through (the `ContributionScale` ladder and the idle fraction), riding its own
+      `StationCycleCompletedEvent.oneShotContributions()` list so a rare find is worth the same
+      whatever tool the player holds. `Cycle` trigger only (the validator warns).
+    - `rpgstations:effect` (`{"Id", "DurationMs"?}`) - a native `EntityEffect` applied to the
+      worker. Teardown differs by trigger, deliberately: a `Cycle`-trigger effect is session-tracked
+      and stripped when the session stops, while a `Completion`-trigger one applies from INSIDE that
+      same stop (after teardown already ran) and persists for its own duration as a finishing
+      reward.
+- **`LootableAsset`** (shared) - `Server/ZiggfreedCommon/Lootables/<Name>.json` (id = lowercased
+  filename), body `{Rolls: [Roll, ...]}`, referenced by a `LootRef.Lootables` entry (an action,
+  step, or extension may combine any number of shared tables with its own inline `Rolls`). Three
+  standalone lootables ship in this jar's resources, all alive with RpgStations alone (BUILT-IN
+  factors only - `rpgstations:cycle_count` for the session-loyalty ladder, plus the
   `hytale:tool_quality`/`tool_item_level`/`tool_power` native reads the trophy gates need; nothing
   another mod has to register): `SawmillFinds` (the loyalty ladder), `SawmillTrophy` (the hatchet
   chase) and `SawmillMasterworkFinds` (the T4 tier that chase pays out). Their one roll each covers
-  the whole Roll vocabulary - a conditioned chance + ladder, a roll-level `Presentation` on a plain
-  chance roll, and a Conditions-only tier - see `../station/CLAUDE.md`'s Sawmill content bullet for
-  the numbers. **A fold REPLACES by id at whole-FILE granularity, so which rolls share a file is an
+  the whole Roll vocabulary - a conditioned chance + ladder, a roll-level cue on a plain chance
+  roll, and a Conditions-only tier - see `../station/CLAUDE.md`'s Sawmill content bullet for the
+  numbers. **A fold REPLACES by id at whole-FILE granularity, so which rolls share a file is an
   extension-point decision, not a filing one:** those three are one roll each precisely because a
   layering mod re-tuning any of them should never have to inherit the other two. Split by default
   when authoring a station - merging ids later is free, unpicking a shipped one is not.
@@ -752,7 +741,7 @@ they land per-leaf and are never a parallel table that can drift from the codec:
   to fail plugin startup (a failure degrades every dropdown to a free-text field). Two flavors:
   LIVE sets read straight off this mod's own runtime catalogs/registries at request time
   (`rpgstations:stations`/`actions`/`lootables`/`rollpools` off `station.StationCatalog`/
-  `ActionCatalog`/`loot.LootableCatalog`/`RollPoolCatalog`, `rpgstations:factors` off
+  `ActionCatalog`/the shared `LootableConfig`/`RollPoolConfig`, `rpgstations:factors` off
   `api.impl.FactorRegistryImpl#registeredIds`, `rpgstations:channels` off
   `api.impl.ContributionChannelRegistryImpl#registeredIds` - so an asset reload or a late
   third-party factor/channel registration simply widens the next answer, and an empty answer is

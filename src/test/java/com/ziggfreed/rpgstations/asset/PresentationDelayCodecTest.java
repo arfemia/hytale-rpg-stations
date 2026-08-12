@@ -1,13 +1,13 @@
 package com.ziggfreed.rpgstations.asset;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * The shared {@link Presentation} {@code DelayMs} leaf: it decodes at EVERY altitude a
@@ -62,18 +62,19 @@ public class PresentationDelayCodecTest {
         assertEquals(40L, a.getSteps()[0].getPresentation().effectiveDelayMs());
     }
 
+    /**
+     * A ROLL names a cue, and the MOMENT that cue resolves to is where the timing lives - so a
+     * find can be re-timed for every table that names it in one place, and a table stays pure
+     * numbers.
+     */
     @Test
-    void decodesOnARollAndOnALadderFloor() throws Exception {
-        StationAsset asset = decodeStation("{ \"Actions\": [ { \"Id\": \"a\", \"Bonus\": { \"Rolls\": [ {"
-                + " \"Trigger\": \"Cycle\","
-                + " \"Presentation\": { \"Sounds\": [\"Fixture_Roll_Cue\"], \"DelayMs\": 75 },"
-                + " \"Ladder\": { \"Floors\": [ { \"Min\": 1.0,"
-                + " \"Presentation\": { \"Sounds\": [\"Fixture_Floor_Cue\"], \"DelayMs\": 300 } } ] }"
-                + " } ] } } ] }");
-        Roll roll = asset.getActions()[0].getBonus().getRolls()[0];
+    void decodesOnTheMomentARollCueNames() throws Exception {
+        ActionDef a = inlineAction("{ \"Rare_Find\": { \"Sounds\": [\"Fixture_Roll_Cue\"], \"DelayMs\": 75 },"
+                        + " \"cue:trophy\": { \"Sounds\": [\"Fixture_Floor_Cue\"], \"DelayMs\": 300 } }",
+                "[ { \"Id\": \"x\" } ]");
 
-        assertEquals(75L, roll.getPresentation().effectiveDelayMs());
-        assertEquals(300L, roll.getLadder().getFloors()[0].getPresentation().effectiveDelayMs());
+        assertEquals(75L, a.getMoments().get("Rare_Find").effectiveDelayMs());
+        assertEquals(300L, a.getMoments().get("cue:trophy").effectiveDelayMs());
     }
 
     @Test

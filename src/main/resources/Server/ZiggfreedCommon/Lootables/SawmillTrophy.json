@@ -1,0 +1,35 @@
+{
+  "$Comment": "The Sawmiller's Hatchet chase: the one roll that hands over the sawmill's trophy tool. It is the only roll in this file, which is what makes it cheap to re-tune - a Lootable folds by id and a later layer replaces the whole file, so a mod or pack wanting different odds ships its own Server/ZiggfreedCommon/Lootables/SawmillTrophy.json and inherits nothing else along with it. Only one version of a given id is ever live, so an override cannot accidentally hand out two hatchets.\n\nThe chance here is flat on purpose: one visible Chance.Base with no factors, so the odds read at a glance and hold for every worker. If you want the chase to reward some notion of luck or progression, that is exactly what an override is for - add Chance.Factors reading whichever stat channels your own mod registers.\n\nThe Conditions AND together. Cycle 5 onward, so a passer-by tapping the bench never rolls. Then all three tool axes at the vanilla Mithril hatchet's own values: quality 4 (Epic or better), item level 50, and Woods gather power 0.5, read through the Param-less hytale:tool_power form that takes the station's own gather type. Onyxium clears quality and power but misses item level, so this stays the top rung's trophy rather than the top floor's.\n\nChance.Base 0.04 IS 1 in 2500, so an eligible worker averages one trophy per 2500 cycles, on the order of one per twenty-five full sessions - a genuine chase item.\n\nThe win grants through this roll's own Grants: a command handing the hatchet over, rather than a drop table, so the payout is certain once the chance lands. The Presentation plays at the station block the instant it does. A celebration only ever plays over something actually granted, and a command grant always counts as produced, so this fanfare accompanies every win and can never fire on its own.\n\nThe reward compounds at the bench: a Sawmiller's Hatchet in hand scores 55.55 on the Mill action's yield ladder, which unlocks its 50 floor for a fifth plank per cycle, the matching contribution tier, and the fourth find tier in SawmillMasterworkFinds.",
+  "Rolls": [
+    {
+      "Trigger": "Cycle",
+      "Conditions": [
+        {
+          "Factor": "rpgstations:cycle_count",
+          "Min": 5
+        },
+        {
+          "Factor": "hytale:tool_quality",
+          "Min": 4
+        },
+        {
+          "Factor": "hytale:tool_item_level",
+          "Min": 50
+        },
+        {
+          "Factor": "hytale:tool_power",
+          "Min": 0.5
+        }
+      ],
+      "Chance": {
+        "Base": 0.04
+      },
+      "Grants": {
+        "Commands": [
+          "give {player} RPG_Tool_Hatchet_Sawmiller"
+        ]
+      },
+      "Cue": "cue:trophy"
+    }
+  ]
+}

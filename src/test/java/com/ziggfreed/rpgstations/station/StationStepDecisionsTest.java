@@ -1,19 +1,20 @@
 package com.ziggfreed.rpgstations.station;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.common.factor.FactorCondition;
-import com.ziggfreed.rpgstations.asset.FactorRef;
+import com.ziggfreed.common.factor.FactorFormula;
+import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationStep;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The pure decision cores behind the {@code station.step} conditions gate, the Goto branch, the
@@ -77,7 +78,7 @@ public class StationStepDecisionsTest {
     void repeat_rangedWithFactors_clampsRoundMinPlusContribution() {
         // Min 1, Max 4, one factor weight 0.2 over a value of 10 -> contribution 2.0 -> round(1+2)=3.
         StationStep.Repeat r = StationStep.Repeat.of(null, 1, 4,
-                new FactorRef[]{FactorRef.of("stat", "MMO_X", 0.2)});
+                new FactorFormula.Term[]{FactorFormula.Term.of("stat", "MMO_X", 0.2)});
         double contribution = StationStepDecisions.repeatFactorContribution(r, ALWAYS_TEN_BI);
         assertEquals(2.0, contribution, 1e-9);
         assertEquals(3, StationStepDecisions.resolveRepeatCount(r, contribution));
@@ -86,7 +87,7 @@ public class StationStepDecisionsTest {
     @Test
     void repeat_rangedClampsToMax() {
         StationStep.Repeat r = StationStep.Repeat.of(null, 1, 2,
-                new FactorRef[]{FactorRef.of("stat", "MMO_X", 1.0)});
+                new FactorFormula.Term[]{FactorFormula.Term.of("stat", "MMO_X", 1.0)});
         double contribution = StationStepDecisions.repeatFactorContribution(r, ALWAYS_TEN_BI); // 10.0
         assertEquals(2, StationStepDecisions.resolveRepeatCount(r, contribution), "clamped to Max");
     }
@@ -216,8 +217,8 @@ public class StationStepDecisionsTest {
 
     // ==================== Conditions gate ====================
 
-    private static final StationService.FactorLookup ALWAYS_TEN = (factorId, param) -> 10.0;
-    private static final StationService.FactorLookup UNKNOWN = (factorId, param) -> null;
+    private static final FactorLookup ALWAYS_TEN = (factorId, param) -> 10.0;
+    private static final FactorLookup UNKNOWN = (factorId, param) -> null;
 
     @Test
     void conditions_absent_pass() {

@@ -33,6 +33,7 @@ ui.station.gain.produced = {0}
 ui.station.summary.lucky = (Sorte!)
 ui.station.summary.items_more = +{0} mais
 ui.station.summary.enhance_durability = Durabilidade +{0}
+ui.station.summary.enhance_stat = {0} +{1}
 ui.station.picker.title = Escolha o que produzir
 ui.station.picker.hint = Esta estação pode fazer mais de uma coisa com o que você está segurando.
 ui.station.picker.locked = Requer {0}

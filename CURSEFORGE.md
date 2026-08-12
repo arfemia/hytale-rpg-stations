@@ -136,11 +136,15 @@ every other asset the engine loads.
 |---|---|
 | `Server/RpgStations/Stations/` | Station definitions - the work loop, its tool gate, its loot, its actions |
 | `Server/RpgStations/Actions/` | Standalone, reusable actions a station attaches by reference |
-| `Server/RpgStations/Lootables/` | Reusable conditional-loot tables |
-| `Server/RpgStations/RollPools/` | Reusable enhancement stat-roll pools |
 | `Server/RpgStations/Flairs/` | Cosmetic unlock overlays |
 | `Server/RpgStations/Extensions/` | Additive extensions onto another pack's content |
 | `Server/RpgStations/Settings/` | The one server-wide `Settings.json` - engine on/off, session-summary HUD |
+| `Server/ZiggfreedCommon/Lootables/` | Reusable conditional-loot tables |
+| `Server/ZiggfreedCommon/RollPools/` | Reusable enhancement stat-roll pools |
+
+The last two folders belong to the shared Ziggfreed Common library rather than to this mod, because
+the loot model is shared: the same table, authored once, behaves the same way at a station as it
+does anywhere else a mod built on that library rolls loot.
 
 The Settings asset (`Server/RpgStations/Settings/Settings.json`) is the mod's on/off switch and its
 session-summary HUD tuning, layered like any other asset - there is no separate config file for it.

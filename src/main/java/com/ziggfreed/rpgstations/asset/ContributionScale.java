@@ -7,19 +7,19 @@ import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
+import com.ziggfreed.common.factor.FactorFormula;
 
 /**
  * The per-action multiplier ladder over an action's {@code Work.PerCycleContributions} amounts:
- * sum {@link #factors} (the shared weighted {@link FactorRef} sum), look the result up against
- * {@link #floors}, and multiply every per-cycle amount by the reached floor's {@code Scale}. No
- * floor reached (or no ladder authored at all) is the neutral {@code 1.0}.
+ * sum {@link #factors} (the shared weighted-term sum), look the result up against {@link #floors},
+ * and multiply every per-cycle amount by the reached floor's {@code Scale}. No floor reached (or no
+ * ladder authored at all) is the neutral {@code 1.0}.
  *
- * <p><b>It is the SAME ladder core every other ladder in this schema uses</b>
- * ({@code loot.FactorLadder}, shared with {@code Roll.Ladder}), so identical {@code {Factors,
- * Floors}} JSON behaves identically here: an absent/empty {@code Factors} resolves the value to
- * {@code 0.0}, a floor's {@code Min} reader-defaults to {@code 0} and a {@code Min <= 0} floor is
- * reachable, and two floors sharing a {@code Min} resolve to the LAST authored one (the validator
- * warns about the duplicate).
+ * <p><b>Same {@code {Factors, Floors}} shape, same rules, as a loot roll's own ladder</b>: an
+ * absent/empty {@code Factors} resolves the value to {@code 0.0}, a floor's {@code Min}
+ * reader-defaults to {@code 0} and a {@code Min <= 0} floor is reachable, and two floors sharing a
+ * {@code Min} resolve to the LAST authored one (the validator warns about the duplicate). What
+ * differs is only what a floor PAYS: a loot floor grants, this one multiplies.
  *
  * <p><b>The engine PRE-SCALES.</b> The resolved multiplier is applied to each forwarded amount
  * before the cycle-completed event is dispatched, and the multiplier itself rides that event for
@@ -42,13 +42,14 @@ public final class ContributionScale {
     /** The multiplier when no ladder is authored, or no floor is reached (neutral). */
     public static final double NEUTRAL_SCALE = 1.0;
 
-    @Nullable protected FactorRef[] factors;
+    @Nullable protected FactorFormula.Term[] factors;
     @Nullable protected Floor[] floors;
 
     public static final BuilderCodec<ContributionScale> CODEC =
             BuilderCodec.builder(ContributionScale.class, ContributionScale::new)
                     .appendInherited(new KeyedCodec<>("Factors",
-                                    new ArrayCodec<>(FactorRef.CODEC, FactorRef[]::new), false),
+                                    new ArrayCodec<>(FactorFormula.Term.codec(AssetEditorDataSets.FACTORS),
+                                            FactorFormula.Term[]::new), false),
                             (o, v) -> o.factors = v, o -> o.factors, (o, p) -> o.factors = p.factors)
                     .documentation("Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0.").add()
                     .appendInherited(new KeyedCodec<>("Floors",
@@ -61,16 +62,16 @@ public final class ContributionScale {
     }
 
     @Nonnull
-    public static ContributionScale of(@Nullable FactorRef[] factors, @Nullable Floor[] floors) {
+    public static ContributionScale of(@Nullable FactorFormula.Term[] factors, @Nullable Floor[] floors) {
         ContributionScale c = new ContributionScale();
         c.factors = factors;
         c.floors = floors;
         return c;
     }
 
-    /** The weighted factor references summed to the ladder value; null/empty resolves to 0. */
+    /** The weighted factor terms summed to the ladder value; null/empty resolves to 0. */
     @Nullable
-    public FactorRef[] getFactors() {
+    public FactorFormula.Term[] getFactors() {
         return factors;
     }
 

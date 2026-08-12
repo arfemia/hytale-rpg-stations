@@ -20,7 +20,7 @@ import com.ziggfreed.common.codec.InheritMapCodec;
  * A standalone, ANY-mod-authorable cosmetic flair layer (design section 9.6, phase 2 leg F): the
  * asset-driven half of the open flair/moment vocabulary. Loaded from
  * {@code Server/RpgStations/Flairs/<Name>.json} (Pattern A, id = lowercased filename, mirrors
- * {@link LootableAsset}/{@link RollPool}'s exact registration shape). Folded ONTO the per-station
+ * the shared loot types's exact registration shape). Folded ONTO the per-station
  * flair map at catalog time ({@code station.FlairCatalog#effectiveFlairsFor}) - a station's own
  * inline {@link StationAsset.Flair} entries remain a pure authoring convenience, and a
  * {@code FlairAsset} from ANY installed pack/mod merges in under ITS OWN id as the flair id.

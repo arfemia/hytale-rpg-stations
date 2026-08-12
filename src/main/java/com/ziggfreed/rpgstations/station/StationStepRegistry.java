@@ -5,6 +5,7 @@ import javax.annotation.Nullable;
 
 import com.ziggfreed.common.cast.step.StepHandler;
 import com.ziggfreed.common.cast.step.StepRegistry;
+import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -75,7 +76,7 @@ final class StationStepRegistry extends StepRegistry<String, StationStepContext,
     /** {@code null} = every condition passed (or none authored) - proceed to the composite handler. */
     @Nullable
     private static StationStepResult checkConditions(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
-        StationService.FactorLookup lookup = ctx.snapshot::resolve;
+        FactorLookup lookup = ctx.snapshot::resolve;
         StationStepDecisions.ConditionOutcome outcome = StationStepDecisions.resolveConditionOutcome(
                 step.getConditions(), step.getOnConditionFail(), lookup);
         return switch (outcome) {

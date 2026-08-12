@@ -39,11 +39,11 @@ succeed (compute-then-commit) - a Stamp step never leaves an item or an inventor
 A candidate roll is a `StatRollEntry`: `{Stat, Points{Min,Max,Factors?}, Weight, Always}`. `Stat`
 is opaque to RPG Stations itself - the registered stamper interprets what a "stat" id means. The
 rolled point value is `uniform(Min, Max)`, optionally plus a weighted `Factors` sum (the same
-[FactorRef](loot-and-factors.md) vocabulary loot chances use). An entry with `Always: true` is granted
+[factor-term](loot-and-factors.md) vocabulary loot chances use). An entry with `Always: true` is granted
 unconditionally on every stamp, independent of the weighted pool - so one Stamp can mix a guaranteed
 baseline stat with weighted bonus rolls.
 
-Entries come from EITHER a reusable, shared `Server/RpgStations/RollPools/<Name>.json` table
+Entries come from EITHER a reusable, shared `Server/ZiggfreedCommon/RollPools/<Name>.json` table
 (referenced via `Stats.Pool`) OR inline `Stats.Entries`, or both at once - both authoring routes share
 the exact same entry shape, so an engine change never has to special-case which route produced an
 entry.

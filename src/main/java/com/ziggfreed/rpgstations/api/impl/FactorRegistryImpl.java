@@ -13,6 +13,7 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.common.factor.FactorProvider;
 import com.ziggfreed.common.factor.HytaleFactors;
+import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.common.registry.RegistryLedger;
 import com.ziggfreed.rpgstations.api.FactorContext;
 import com.ziggfreed.rpgstations.api.FactorRegistry;
@@ -114,7 +115,14 @@ public final class FactorRegistryImpl implements FactorRegistry {
     public void registerBuiltins() {
         register("rpgstations:session_seconds", OWNER, (ctx, param) -> (double) ctx.sessionSeconds());
         register("rpgstations:cycle_count", OWNER, (ctx, param) -> (double) ctx.cycleIndex());
-        register(HytaleFactors.TOOL_POWER, OWNER, (ctx, param) -> ctx.toolPowerFor(param));
+        // tool_power goes through the NULLABLE core seam rather than the primitive station-provider
+        // one, so a gather type the held tool has no spec for answers "cannot tell" instead of 0 -
+        // which is what keeps a bounds-less gate on it shut. The no-Param form deliberately stays
+        // the STATION's own effective gather type rather than the portable "best of any type"
+        // aggregate: at a work session that is the context-appropriate answer, and the vocabulary is
+        // per consumer precisely so it can be.
+        core.register(HytaleFactors.TOOL_POWER, OWNER, CoreFactorVocabulary.wrap((payload, param) ->
+                payload instanceof FactorContext station ? station.toolPowerOrNull(param) : null));
         register(HytaleFactors.TOOL_DURABILITY_PERCENT, OWNER, (ctx, param) -> ctx.toolDurabilityPercent());
         register(HytaleFactors.TOOL_QUALITY, OWNER, (ctx, param) -> ctx.toolQuality());
         register(HytaleFactors.TOOL_ITEM_LEVEL, OWNER, (ctx, param) -> ctx.toolItemLevel());
@@ -130,6 +138,19 @@ public final class FactorRegistryImpl implements FactorRegistry {
     @Nullable
     public Double resolve(@Nullable String factorId, @Nullable String param, @Nonnull FactorContext ctx) {
         return core.resolve(factorId, param, ctx.store(), subjectOf(ctx), ctx);
+    }
+
+    /**
+     * One batch's memoized {@code (factorId, param) -> value} reading set for {@code ctx}: every
+     * distinct pair is resolved AT MOST ONCE, so two formulas reading the same factor inside one
+     * cycle can never disagree about it.
+     *
+     * <p>Build one per moment and discard it. The context carries live world-thread handles, so a
+     * snapshot held across moments is both stale and unsafe.
+     */
+    @Nonnull
+    public FactorLookup snapshotFor(@Nonnull FactorContext ctx) {
+        return core.snapshot(ctx.store(), subjectOf(ctx), ctx);
     }
 
     /**

@@ -1,9 +1,5 @@
 package com.ziggfreed.rpgstations.asset;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -18,6 +14,12 @@ import org.junit.jupiter.api.Test;
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.assetstore.JsonAsset;
 import com.hypixel.hytale.codec.util.RawJsonReader;
+import com.ziggfreed.common.loot.LootableAsset;
+import com.ziggfreed.common.loot.stamp.RollPoolAsset;
+
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Decodes every {@code RpgStations} asset this jar SHIPS (and every one the companion pack ships,
@@ -59,8 +61,8 @@ public class ShippedAssetDecodeTest {
                     RawJsonReader.fromJsonString(body), null, info(ExtensionAsset.class, key)),
             "Lootables", (body, key) -> LootableAsset.CODEC.decodeAndInheritJsonAsset(
                     RawJsonReader.fromJsonString(body), null, info(LootableAsset.class, key)),
-            "RollPools", (body, key) -> RollPool.CODEC.decodeAndInheritJsonAsset(
-                    RawJsonReader.fromJsonString(body), null, info(RollPool.class, key)),
+            "RollPools", (body, key) -> RollPoolAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(RollPoolAsset.class, key)),
             "Flairs", (body, key) -> FlairAsset.CODEC.decodeAndInheritJsonAsset(
                     RawJsonReader.fromJsonString(body), null, info(FlairAsset.class, key)),
             "Settings", (body, key) -> RpgStationsSettingsAsset.CODEC.decodeAndInheritJsonAsset(

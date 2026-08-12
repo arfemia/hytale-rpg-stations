@@ -58,13 +58,6 @@ public interface RpgStationsApi {
     @Nonnull
     SummaryEnricherRegistry summaryEnrichers();
 
-    /**
-     * The Stamp step's {@code Stats}-leaf delegate registry: a single active
-     * {@link EnhanceStamper} slot, last-registration-wins.
-     */
-    @Nonnull
-    EnhanceStamperRegistry enhanceStampers();
-
     /** A read-only snapshot of every currently-folded station (objective target names, soft-warns, ...). */
     @Nonnull
     Collection<StationView> stations();

@@ -1,10 +1,5 @@
 package com.ziggfreed.rpgstations.station;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,22 +10,31 @@ import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
-import com.ziggfreed.rpgstations.api.StampInspection;
-import com.ziggfreed.rpgstations.api.StatRoll;
+import com.ziggfreed.common.loot.LootGrants;
+import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.LootableAsset;
+import com.ziggfreed.common.loot.LootableConfig;
+import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.stamp.RollPoolAsset;
+import com.ziggfreed.common.loot.stamp.RollPoolConfig;
+import com.ziggfreed.common.loot.stamp.StampCapEngine;
+import com.ziggfreed.common.loot.stamp.StampInspection;
+import com.ziggfreed.common.loot.stamp.StampPlan;
+import com.ziggfreed.common.loot.stamp.StampSpec;
+import com.ziggfreed.common.loot.stamp.StatRoll;
+import com.ziggfreed.common.loot.stamp.StatRollEntry;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.Ingredient;
-import com.ziggfreed.rpgstations.asset.LootRef;
-import com.ziggfreed.rpgstations.asset.LootableAsset;
-import com.ziggfreed.rpgstations.asset.Roll;
-import com.ziggfreed.rpgstations.asset.RollPool;
-import com.ziggfreed.rpgstations.asset.StatRollEntry;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
-import com.ziggfreed.rpgstations.loot.LootEngine;
-import com.ziggfreed.rpgstations.loot.LootableCatalog;
-import com.ziggfreed.rpgstations.loot.RollPoolCatalog;
+import com.ziggfreed.rpgstations.loot.StationLootEngine;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Determinism coverage for the {@link ExtensionCatalog} pure merge cores (scope-2 design 1.8,
@@ -152,10 +156,10 @@ public class ExtensionCatalogTest {
 
     @Test
     void mergeBonus_unionsLootablesAndRolls() throws Exception {
-        com.ziggfreed.rpgstations.asset.LootRef base =
-                com.ziggfreed.rpgstations.asset.LootRef.of(new String[]{"sawmillfinds"}, null);
+        LootRef base =
+                LootRef.of(new String[]{"sawmillfinds"}, null);
         ExtensionAsset a = ext("a", "{ \"Target\":{\"Action\":\"mill\"}, \"Bonus\":{ \"Lootables\":[\"sawmillluck\"] } }");
-        com.ziggfreed.rpgstations.asset.LootRef merged =
+        LootRef merged =
                 ExtensionCatalog.mergeLoot(base, ExtensionAsset.sortedForApply(List.of(a)));
         assertEquals(List.of("sawmillfinds", "sawmillluck"), List.of(merged.getLootables()));
     }
@@ -261,8 +265,8 @@ public class ExtensionCatalogTest {
     void clearFoldedExtensions() {
         ExtensionCatalog.getInstance().fold(Map.of(), true);
         StationCatalog.getInstance().fold(Map.of(), true);
-        LootableCatalog.getInstance().fold(Map.of(), true);
-        RollPoolCatalog.getInstance().fold(Map.of(), true);
+        // The shared loot stores are keyed by id and every fixture here uses its own,
+        // so a later merge of the same id replaces it outright and nothing leaks.
     }
 
     @Test
@@ -358,14 +362,13 @@ public class ExtensionCatalogTest {
     void live_lootableRollsReachEveryReferenceOfThatTable() throws Exception {
         // The Lootable payload applies at the table READ, so a referencing LootRef sees the base
         // table's rolls plus the extension's appended ones, in that order.
-        LootableCatalog.getInstance().fold(Map.of("fixturefinds",
+        LootableConfig.getInstance().mergePackLayer(Map.of("fixturefinds",
                 LootableAsset.of("fixturefinds", new Roll[] {
-                        Roll.of(Roll.TRIGGER_CYCLE, null, null, null, Roll.Grants.ofDropList("Fixture_Base_Drops"))})),
-                true);
+                        Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootGrants.ofDropList("Fixture_Base_Drops"), null)})));
         fold(ext("finds-ext", "{ \"Target\":{\"Lootable\":\"FixtureFinds\"}, \"Rolls\":[ {"
                 + " \"Trigger\":\"Cycle\", \"Grants\":{\"DropLists\":[\"Fixture_Extra_Drops\"]} } ] }"));
 
-        List<Roll> rolls = LootEngine.resolveRolls(LootRef.of(new String[] {"FixtureFinds"}, null));
+        List<Roll> rolls = StationLootEngine.resolveRolls(LootRef.of(new String[] {"FixtureFinds"}, null));
         assertEquals(List.of("Fixture_Base_Drops", "Fixture_Extra_Drops"), dropListIds(rolls),
                 "the appended roll lands AFTER the table's own");
     }
@@ -374,15 +377,15 @@ public class ExtensionCatalogTest {
     void live_rollPoolEntriesReachAStampStepsCandidateSet() throws Exception {
         // The RollPool payload applies where a Stamp step reads its Pool, so an appended entry is a
         // genuine candidate. Both entries are Always, so the roll is deterministic without an RNG.
-        RollPoolCatalog.getInstance().fold(Map.of("fixturepool",
-                RollPool.of("fixturepool", new StatRollEntry[] {
-                        StatRollEntry.of("Fixture_Base_Stat", StatRollEntry.Points.of(2.0, 2.0), null, true)})),
-                true);
+        RollPoolConfig.getInstance().mergePackLayer(Map.of("fixturepool",
+                RollPoolAsset.of("fixturepool", new StatRollEntry[] {
+                        StatRollEntry.of("Fixture_Base_Stat", StatRollEntry.Points.of(2.0, 2.0, null), null, true)})));
         fold(ext("pool-ext", "{ \"Target\":{\"RollPool\":\"FixturePool\"}, \"Entries\":[ {"
                 + " \"Stat\":\"Fixture_Added_Stat\", \"Points\":{\"Min\":3,\"Max\":3}, \"Always\":true } ] }"));
 
-        StampCapEngine.Plan plan = StampCapEngine.resolve(
-                StationStep.Stamp.Stats.of("FixturePool", null, null, null, null),
+        StampPlan plan = StampCapEngine.resolve(
+                StationStepHandlers.StampHandler.withExtendedEntries(
+                        StampSpec.of("FixturePool", null, null, false, null)),
                 StampInspection.empty(), (id, param) -> null, () -> 0.0);
         List<String> stats = new ArrayList<>();
         for (StatRoll r : plan.entries()) {

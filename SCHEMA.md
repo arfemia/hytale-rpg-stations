@@ -11,15 +11,18 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 - [ActionDef](#type-actiondef)
 - [StationStep](#type-stationstep)
 - [Ingredient](#type-ingredient)
-- [FactorRef](#type-factorref)
+- [FactorTerm](#type-factorterm)
+- [FactorFormula](#type-factorformula)
 - [LootRef](#type-lootref)
 - [Roll](#type-roll)
+- [LootGrants](#type-lootgrants)
 - [Condition](#type-condition)
 - [Custody](#type-custody)
 - [Puppet](#type-puppet)
 - [Requires](#type-requires)
 - [Presentation](#type-presentation)
 - [StatRollEntry](#type-statrollentry)
+- [StampSpec](#type-stampspec)
 - [RollPool](#type-rollpool)
 - [LootableAsset](#type-lootableasset)
 - [FlairAsset](#type-flairasset)
@@ -137,7 +140,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Factors` | array of [FactorRef](#type-factorref) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
 | `Floors` | array of [Floor](#field-actionasset-contributionscale-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
 
 <a id="field-actionasset-worker"></a>
@@ -368,7 +371,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Factors` | array of [FactorRef](#type-factorref) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
 | `Floors` | array of [Floor](#field-actiondef-contributionscale-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
 
 <a id="field-actiondef-worker"></a>
@@ -561,7 +564,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Times` | `integer` | `null` | A fixed iteration count. Authored INSTEAD of Min/Max/Factors (the fixed route). |
 | `Min` | `integer` | `null` | Lower bound of the factor-resolved iteration count (the ranged route). |
 | `Max` | `integer` | `null` | Upper bound of the factor-resolved iteration count (the ranged route). |
-| `Factors` | array of [FactorRef](#type-factorref) | `null` | Weighted factor references summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max). |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor terms summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max). |
 
 <a id="field-stationstep-duration"></a>
 ### StationStep.Duration
@@ -609,7 +612,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Reagents` | array of [Ingredient](#type-ingredient) | `null` | Ingredient reagents consumed from the player's inventory at this step's commit. |
 | `Durability` | [Durability](#field-stationstep-stamp-durability) | `null` | RpgStations-native durability upgrade (AddMax). Real with no other mod installed. |
-| `Stats` | [Stats](#field-stationstep-stamp-stats) | `null` | The composable stat-roll + cap model, delegated to the registered EnhanceStamper. |
+| `Stats` | [StampSpec](#type-stampspec) | `null` | The composable stat-roll + budget model: which entries are candidates (a shared roll pool, inline entries, or both), how many are picked, and the ceilings the result is held under. The points are written onto the item by whichever stamper this server registered. |
+| `Economics` | [Economics](#field-stationstep-stamp-economics) | `null` | Reagent-cost scaling per prior stamp count; never affects the point budget. |
 
 <a id="field-stationstep-puppet-prop"></a>
 #### StationStep.Puppet.Prop
@@ -627,45 +631,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `AddMax` | `double` | `null` | The amount added to the stack's MaxDurability (and its current durability). |
 
-<a id="field-stationstep-stamp-stats"></a>
-#### StationStep.Stamp.Stats
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `Pool` | id, or inline [RollPool](#type-rollpool) | `null` | A reusable RollPool asset id to pick stat entries from (alternative/addition to inline Entries). May also be an INLINE roll-pool body, optionally with its own Parent - but a RollPool's single Entries array REPLACES the parent's wholesale, it never appends to it, so use an ExtensionAsset (or the sibling inline Entries leaf here) to ADD entries to a shared pool. |
-| `Entries` | array of [StatRollEntry](#type-statrollentry) | `null` | Inline candidate stat-roll entries (shares the StatRollEntry shape with RollPool). |
-| `Picks` | [Picks](#field-stationstep-stamp-stats-picks) | `null` | How many pool entries the weighted route picks (Always entries are extra). |
-| `Unique` | `boolean` | `null` | When true, a stat id is never picked twice in one stamp (default false). |
-| `Caps` | [Caps](#field-stationstep-stamp-stats-caps) | `null` | Budget/per-stat/economics clamps applied after the roll. |
-
-<a id="field-stationstep-stamp-stats-picks"></a>
-##### StationStep.Stamp.Stats.Picks
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `Min` | `integer` | `null` | The minimum number of weighted picks (reader-defaults to 1). |
-| `Max` | `integer` | `null` | The maximum number of weighted picks (reader-defaults to Min). |
-
-<a id="field-stationstep-stamp-stats-caps"></a>
-##### StationStep.Stamp.Stats.Caps
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `Budgets` | array of [Budget](#field-stationstep-stamp-stats-caps-budgets-item) | `null` | Total-point budget entries; the EFFECTIVE budget is the MIN over every entry. |
-| `PerStat` | map of `double` | `null` | A per-stat-id ceiling layered ON TOP of the total budget (stat id -> max points). |
-| `Economics` | [Economics](#field-stationstep-stamp-stats-caps-economics) | `null` | Reagent-cost scaling per prior stamp count; never affects the point budget. |
-
-<a id="field-stationstep-stamp-stats-caps-budgets-item"></a>
-###### StationStep.Stamp.Stats.Caps.Budgets[]
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `Points` | `double` | `null` | A flat total budget (the flat route). Author INSTEAD of PointsPer+Factors. |
-| `PointsPer` | `double` | `null` | Per-unit budget multiplied by the summed Factors (the factor-scaled route). |
-| `Factors` | array of [FactorRef](#type-factorref) | `null` | Weighted factor references summed and multiplied by PointsPer: PointsPer * sum(resolve*Weight). |
-
-<a id="field-stationstep-stamp-stats-caps-economics"></a>
-###### StationStep.Stamp.Stats.Caps.Economics
+<a id="field-stationstep-stamp-economics"></a>
+#### StationStep.Stamp.Economics
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
@@ -680,116 +647,94 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | A native Item.ResourceTypes family id (the 'any log' route); INPUT only. Exactly one of ItemId \| ResourceTypeId. |
 | `Quantity` | `integer` | `null` | The item count; reader-defaults to 1 when omitted or non-positive. |
 
-<a id="type-factorref"></a>
-## FactorRef
+<a id="type-factorterm"></a>
+## FactorTerm
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Factor` | `string` | `null` | The namespaced factor channel id (e.g. 'hytale:stat', 'hytale:tool_power'). Unregistered = resolves to 0 (fail-closed). |
-| `Param` | `string` | `null` | Optional provider-interpreted argument, opaque to this engine (for the built-in 'hytale:stat' factor, a registered EntityStatType channel id; for a third-party factor, whatever that provider documents). |
-| `Weight` | `double` | `null` | Multiplier on this factor's resolved value; reader-defaults to 1.0 when omitted. Composition is sum(resolve * Weight). |
+| `Factor` | `string` | `null` | The namespaced factor id to read. An id nobody can answer contributes 0 to the sum rather than voiding it, so an optional bonus stays optional. |
+| `Param` | `string` | `null` | Optional provider-interpreted argument, opaque here - whatever the factor's own owner documents (a stat id, an item id, a tag). Each term is read with its own Param, so one factor id can appear twice with different arguments. |
+| `Weight` | `double` | `null` | What one point of this factor is worth in the result. Omit for 1.0; author a fraction to make a factor a nudge, or a negative number to make it a penalty. |
+
+<a id="type-factorformula"></a>
+## FactorFormula
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Base` | `double` | `null` | The value before any factor is added. Omit for 0. This is what the formula is worth when nothing else resolves, so author it whenever the result must never be 0. |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | The weighted readings added to Base. A term whose factor cannot be answered contributes 0, so an optional bonus from an absent mod costs only that bonus. |
+| `Clamp` | [Clamp](#field-factorformula-clamp) | `null` | Inclusive bounds applied to the finished sum. Author Min as the floor the value may never fall through, whatever is missing. |
+
+<a id="field-factorformula-clamp"></a>
+### FactorFormula.Clamp
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | Inclusive floor: a result below this is raised to it. Omit for no floor. |
+| `Max` | `double` | `null` | Inclusive ceiling: a result above this is lowered to it. Omit for no ceiling. |
 
 <a id="type-lootref"></a>
 ## LootRef
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Lootables` | array of id, or inline [LootableAsset](#type-lootableasset) | `null` | Referenced LootableAsset ids (case-insensitive at resolve); each table's Rolls evaluate. An entry may also be an INLINE lootable body, optionally with its own Parent - but a LootableAsset's single Rolls array REPLACES the parent's wholesale, it never appends to it, so use an ExtensionAsset (or the sibling inline Rolls leaf here) to ADD rolls to a shared table. |
-| `Rolls` | array of [Roll](#type-roll) | `null` | Inline Rolls authored directly at this site, in addition to any referenced Lootables. |
+| `Lootables` | array of id, or inline [LootableAsset](#type-lootableasset) | `null` | Shared loot table ids; each table's rolls evaluate here. An entry may instead be a whole table written inline, but a table's Rolls replace rather than append on inherit, so use the sibling Rolls leaf below to ADD to a shared table. |
+| `Rolls` | array of [Roll](#type-roll) | `null` | Rolls written directly here, evaluated after any referenced tables'. |
 
 <a id="type-roll"></a>
 ## Roll
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Trigger` | `string` | `null` | When this roll fires: 'Cycle' (per completed cycle, the default) or 'Completion' (at session stop). |
-| `Conditions` | array of [Condition](#type-condition) | `null` | Gate: every Condition must pass (bounded factor checks) before the roll is considered. |
-| `Chance` | [Chance](#field-roll-chance) | `null` | Probabilistic gate over the WHOLE roll (Ladder included); absent = a deterministic pass. |
-| `Ladder` | [Ladder](#field-roll-ladder) | `null` | A floor ladder over a summed factor value; the highest reached floor's Grants fire. |
-| `Grants` | [Grants](#field-roll-grants) | `null` | Top-level rewards granted when the roll fires (in addition to any reached Ladder floor's Grants). |
-| `Presentation` | [Presentation](#type-presentation) | `null` | Played at the station block on the rare-find moment when this roll HITS (its Conditions and Chance both passed), so a plain chance roll can carry its own celebration without a one-floor Ladder standing in for it. Smart cue: with no top-level Grants authored beside it this is a pure cue and always plays on the hit; with Grants authored it plays only when applying them actually produced something (an item a referenced drop table's own internal weights really handed over, a command run, an effect applied, an OutputItems amount tallied, or a contribution posted), so a table that resolves to nothing never fires a fanfare over an empty hand. A reached Ladder floor's own Presentation is judged the same way against that floor's own Grants, and both can play. |
-
-<a id="field-roll-chance"></a>
-### Roll.Chance
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `BasePercent` | `double` | `null` | The flat base chance in percent (0..100) before any factor contributions. |
-| `Factors` | array of [FactorRef](#type-factorref) | `null` | Weighted factor references summed onto BasePercent: sum(resolve(Factor, Param) * Weight). |
-| `CapPercent` | `double` | `null` | The maximum effective chance in percent; the summed chance clamps to [0, CapPercent]. Absent = 100. |
+| `Trigger` | `string` | `null` | Which moment this roll answers to. The granting site names the moments it offers; omit to fire on that site's plain default moment. |
+| `Conditions` | array of [Condition](#type-condition) | `null` | Every entry must pass before the roll is considered. A factor nobody can answer shuts the gate, so a roll gated on an absent mod stays hidden. |
+| `Chance` | [FactorFormula](#type-factorformula) | `null` | The percentage chance the whole roll fires, rolled once. Base is the flat chance with no bonuses; each factor term adds its weighted reading; Clamp.Max is the ceiling a stacking bonus may never pass. Omit the whole group for a roll that always fires. |
+| `Ladder` | [Ladder](#field-roll-ladder) | `null` | Tiers over a summed factor value; the highest reached floor pays out ON TOP of the top-level Grants. |
+| `Grants` | [LootGrants](#type-lootgrants) | `null` | What this roll hands over whenever its gates passed, whether or not a ladder floor was also reached. |
+| `Cue` | `string` | `null` | An opaque celebration id the granting site plays (a sound, a toast). With no Grants beside it, it always plays on the hit; with Grants beside it, only once they actually produced something. |
 
 <a id="field-roll-ladder"></a>
 ### Roll.Ladder
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Factors` | array of [FactorRef](#type-factorref) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
-| `Floors` | array of [Floor](#field-roll-ladder-floors-item) | `null` | The reward floors; the HIGHEST floor whose Min <= the summed value grants. |
-
-<a id="field-roll-grants"></a>
-### Roll.Grants
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `OutputItems` | `double` | `null` | ADDITIVE items of the cycle's own primary output, handed over on top of the deterministic Yield quantity. FRACTIONAL: the whole part is granted every time and the fraction left over is the chance of ONE more, so 1.5 pays one item always plus a second half the time and averages exactly 1.5 per cycle. That makes a half-step tier authorable directly on the ladder floor that earns it, instead of needing a separate banded roll beside it. Everything a single cycle grants is summed FIRST and resolved once, so two rolls paying 0.5 each average one whole item rather than rounding twice. Additive, never a multiplier on the produced stack, so this number and the Yield number stay directly comparable even though they are authored in different groups. Cycle trigger ONLY (a Completion-trigger roll has no cycle output to add to; the validator warns and the engine drops it). |
-| `DropLists` | array of `string` | `null` | Native ItemDropList asset ids, each rolled independently in authored order via ItemModule.getRandomItemDrops (a guaranteed common table plus a rare one is two entries). |
-| `Commands` | array of `string` | `null` | Commands run with {player}/{uuid}/{station}/{action}/{cycles} placeholders substituted. |
-| `Effects` | array of [EffectRef](#field-roll-grants-effects-item) | `null` | Native EntityEffects (id-ref-only, each with an optional DurationMs) applied to the player when the roll grants. Teardown differs by Trigger, deliberately: a Cycle-trigger roll's effect is session-tracked and torn down when the session stops; a Completion-trigger roll's effect applies from INSIDE that same stop (after its teardown already ran) and deliberately PERSISTS for its own authored/asset duration as a finishing reward, never stripped by this session. |
-| `Contributions` | array of [Contribution](#field-roll-grants-contributions-item) | `null` | One-shot amounts posted verbatim when this roll grants. Cycle trigger ONLY (a Completion-trigger roll has no cycle event to ride on; the validator warns) and DELIBERATELY UNSCALED: unlike the station's own Work.PerCycleContributions, a find's grant never inherits the idle fraction. |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | The readings summed into the ladder value before the floor lookup. One entry is the common case; several let a tier be earned from more than one source. Omit for a value of 0, which still reaches a Min 0 floor. |
+| `Floors` | array of [Floor](#field-roll-ladder-floors-item) | `null` | The tiers. The HIGHEST floor whose Min the summed value reaches pays out, and only that one - floors are not cumulative. |
 
 <a id="field-roll-ladder-floors-item"></a>
 #### Roll.Ladder.Floors[]
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
-| `Grants` | [Grants](#field-roll-ladder-floors-item-grants) | `null` | This floor's ONLY reward path; there is deliberately no sibling drop-list leaf. |
-| `Presentation` | [Presentation](#type-presentation) | `null` | Played at the station block on the rare-find moment when this floor is REACHED. Smart cue: with no Grants authored on this floor it is a pure cue and always plays on the reach; with Grants authored it plays only when applying them actually produced something (an item a referenced drop table's own internal weights really handed over, a command run, an effect applied, an OutputItems amount tallied, or a contribution posted), so a table that resolves to nothing never fires a fanfare over an empty hand. The roll's own top-level Presentation is judged the same way against the roll's own Grants, and both can play. |
+| `Min` | `double` | `null` | The summed value this tier needs, inclusive. Omit for 0, and a 0 tier IS reachable - author one as the baseline everybody gets. |
+| `Grants` | [LootGrants](#type-lootgrants) | `null` | What reaching this tier hands over, on top of the roll's own Grants. |
+| `Cue` | `string` | `null` | An opaque celebration id for reaching this tier, judged against THIS floor's own Grants exactly as the roll-level cue is judged against the roll's. |
 
-<a id="field-roll-grants-effects-item"></a>
-#### Roll.Grants.Effects[]
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `Id` | `string` | `null` | The native EntityEffect asset id to apply (id-ref-only; never inlines the effect body). |
-| `DurationMs` | `long` | `null` | Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL. |
-
-<a id="field-roll-grants-contributions-item"></a>
-#### Roll.Grants.Contributions[]
+<a id="type-lootgrants"></a>
+## LootGrants
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Channel` | `string` | `null` | The namespaced channel id this contribution posts to (e.g. 'yourmod:crop_quality'), opaque to this engine - it is never resolved here, only forwarded. Pick it from the rpgstations:channels dropdown, or declare your own via ContributionChannelRegistry. |
-| `Param` | `string` | `null` | Optional channel-interpreted argument, opaque to this engine - whatever the channel's owner documents (commonly the specific thing being credited). |
-| `Amount` | `double` | `null` | The amount posted. Scaling is decided by WHERE this entry is authored - see the owning group's documentation. |
+| `Items` | array of [Item](#field-lootgrants-items-item) | `null` | Exact items to hand over, each {Item, Count}. The direct form: it needs no other asset and no other mod. Use DropLists instead when the outcome should be random. |
+| `DropLists` | array of `string` | `null` | Native ItemDropList asset ids. Each rolls INDEPENDENTLY, in authored order, so a guaranteed table plus a rare one is two entries. The table's own weights decide what comes out, including nothing at all. |
+| `Commands` | array of `string` | `null` | Console commands run when this grants, with the granting site's placeholders substituted (commonly {player} and {uuid}). A positional /give count is rewritten to --quantity= for you, since the engine ignores the positional form. |
+| `Rewards` | array of [Reward](#field-lootgrants-rewards-item) | `null` | Registered reward kinds to pay out, each {Kind, Params}. This is how a roll reaches currency, experience, an effect, or anything else a mod on this server registered. |
 
-<a id="field-roll-ladder-floors-item-grants"></a>
-##### Roll.Ladder.Floors[].Grants
-
-| Key | Type | Default | Documentation |
-|---|---|---|---|
-| `OutputItems` | `double` | `null` | ADDITIVE items of the cycle's own primary output, handed over on top of the deterministic Yield quantity. FRACTIONAL: the whole part is granted every time and the fraction left over is the chance of ONE more, so 1.5 pays one item always plus a second half the time and averages exactly 1.5 per cycle. That makes a half-step tier authorable directly on the ladder floor that earns it, instead of needing a separate banded roll beside it. Everything a single cycle grants is summed FIRST and resolved once, so two rolls paying 0.5 each average one whole item rather than rounding twice. Additive, never a multiplier on the produced stack, so this number and the Yield number stay directly comparable even though they are authored in different groups. Cycle trigger ONLY (a Completion-trigger roll has no cycle output to add to; the validator warns and the engine drops it). |
-| `DropLists` | array of `string` | `null` | Native ItemDropList asset ids, each rolled independently in authored order via ItemModule.getRandomItemDrops (a guaranteed common table plus a rare one is two entries). |
-| `Commands` | array of `string` | `null` | Commands run with {player}/{uuid}/{station}/{action}/{cycles} placeholders substituted. |
-| `Effects` | array of [EffectRef](#field-roll-ladder-floors-item-grants-effects-item) | `null` | Native EntityEffects (id-ref-only, each with an optional DurationMs) applied to the player when the roll grants. Teardown differs by Trigger, deliberately: a Cycle-trigger roll's effect is session-tracked and torn down when the session stops; a Completion-trigger roll's effect applies from INSIDE that same stop (after its teardown already ran) and deliberately PERSISTS for its own authored/asset duration as a finishing reward, never stripped by this session. |
-| `Contributions` | array of [Contribution](#field-roll-ladder-floors-item-grants-contributions-item) | `null` | One-shot amounts posted verbatim when this roll grants. Cycle trigger ONLY (a Completion-trigger roll has no cycle event to ride on; the validator warns) and DELIBERATELY UNSCALED: unlike the station's own Work.PerCycleContributions, a find's grant never inherits the idle fraction. |
-
-<a id="field-roll-ladder-floors-item-grants-effects-item"></a>
-###### Roll.Ladder.Floors[].Grants.Effects[]
+<a id="field-lootgrants-items-item"></a>
+### LootGrants.Items[]
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Id` | `string` | `null` | The native EntityEffect asset id to apply (id-ref-only; never inlines the effect body). |
-| `DurationMs` | `long` | `null` | Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL. |
+| `Item` | `string` | `null` | The item asset id to hand over (the item file's name). |
+| `Count` | `integer` | `null` | How many. Omit for 1. A stack that does not fit goes wherever the granting site sends overflow, so a full inventory never silently eats the find. |
 
-<a id="field-roll-ladder-floors-item-grants-contributions-item"></a>
-###### Roll.Ladder.Floors[].Grants.Contributions[]
+<a id="field-lootgrants-rewards-item"></a>
+### LootGrants.Rewards[]
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Channel` | `string` | `null` | The namespaced channel id this contribution posts to (e.g. 'yourmod:crop_quality'), opaque to this engine - it is never resolved here, only forwarded. Pick it from the rpgstations:channels dropdown, or declare your own via ContributionChannelRegistry. |
-| `Param` | `string` | `null` | Optional channel-interpreted argument, opaque to this engine - whatever the channel's owner documents (commonly the specific thing being credited). |
-| `Amount` | `double` | `null` | The amount posted. Scaling is decided by WHERE this entry is authored - see the owning group's documentation. |
+| `Kind` | `string` | `null` | The registered reward kind that pays this out. A kind nobody registered pays nothing, so a line written for an absent mod costs only that line. |
+| `Params` | map of `string` | `null` | The arguments handed to that kind, as text. Which keys mean what is documented by whoever owns the kind (the built-in item kind reads Item and Count). |
 
 <a id="type-condition"></a>
 ## Condition
@@ -1025,19 +970,55 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Stat` | `string` | `null` | The stat id this entry rolls points into (opaque to this engine; the registered EnhanceStamper interprets it). |
-| `Points` | [Points](#field-statrollentry-points) | `null` | The point value range (with optional weighted factor scaling) a hit on this entry rolls within. |
-| `Weight` | `double` | `null` | Relative pick weight in the weighted route (default 1.0, must be > 0 to ever be picked). |
-| `Always` | `boolean` | `null` | When true, granted unconditionally on every stamp (independent of the weighted pool and Picks). Default false. |
+| `Stat` | `string` | `null` | Which stat this entry awards points in. Opaque to the roll engine; whatever writes the stamp on this server decides what it does. |
+| `Points` | [Points](#field-statrollentry-points) | `null` | How many points a hit on this entry is worth. Omit for 1. |
+| `Weight` | `double` | `null` | How likely this entry is relative to its siblings. Omit for 1; set 0 to park an entry so it is never drawn without deleting it. |
+| `Always` | `boolean` | `null` | When true this entry lands EVERY time, outside the lottery: it costs no pick and its Weight is ignored. Author it for the baseline every stamp should carry. |
 
 <a id="field-statrollentry-points"></a>
 ### StatRollEntry.Points
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Min` | `double` | `null` | Inclusive lower bound of the rolled point value (reader-defaults to 1.0). |
-| `Max` | `double` | `null` | Inclusive upper bound of the rolled point value (reader-defaults to Min - a fixed value). |
-| `Factors` | array of [FactorRef](#type-factorref) | `null` | Weighted factor references summed ONTO the rolled points: sum(resolve(Factor, Param) * Weight). |
+| `Min` | `double` | `null` | The lowest a hit can roll, inclusive. Omit for 1. |
+| `Max` | `double` | `null` | The highest a hit can roll, inclusive. Omit (or match Min) for a fixed value. |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted readings ADDED to the rolled value, so a better tool or a higher skill makes the same entry worth more. A reading nobody can answer adds 0. |
+
+<a id="type-stampspec"></a>
+## StampSpec
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Pool` | id, or inline [RollPoolAsset](#type-rollpool) | `null` | A shared RollPool id to draw candidate outcomes from. May instead be a whole pool written inline. Combine it with Entries below to add site-specific outcomes. |
+| `Entries` | array of [StatRollEntry](#type-statrollentry) | `null` | Candidate outcomes written here directly, evaluated alongside any pool's. |
+| `Picks` | [Picks](#field-stampspec-picks) | `null` | How many entries the lottery draws. Omit for none, which leaves only the Always entries - a deliberate default, so a spec with no Picks is fully predictable. |
+| `Unique` | `boolean` | `null` | When true the same stat is never drawn twice in one stamp, so several picks mean several different stats. Omit to let a lucky stat come up twice and stack. |
+| `Caps` | [Caps](#field-stampspec-caps) | `null` | What holds the result down, measured against what the item already carries. |
+
+<a id="field-stampspec-picks"></a>
+### StampSpec.Picks
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `integer` | `null` | The fewest entries drawn. Omit for 1. |
+| `Max` | `integer` | `null` | The most entries drawn. Omit (or match Min) for a fixed count. |
+
+<a id="field-stampspec-caps"></a>
+### StampSpec.Caps
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Budgets` | array of [Budget](#field-stampspec-caps-budgets-item) | `null` | Total-point ceilings. The one that binds is the LOWEST of them, so a flat hard maximum and a factor-scaled earned allowance can sit side by side. Omit for no total ceiling at all. |
+| `PerStat` | map of `double` | `null` | A ceiling on one stat id, on top of the total. Author it to stop a lucky run piling every point into the same stat. |
+
+<a id="field-stampspec-caps-budgets-item"></a>
+#### StampSpec.Caps.Budgets[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Points` | `double` | `null` | A flat ceiling. Write this INSTEAD of PointsPer, not beside it. |
+| `PointsPer` | `double` | `null` | How much ceiling each point of the summed Factors is worth. Write this with Factors INSTEAD of a flat Points. |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | The readings summed and multiplied by PointsPer. A reading nobody can answer adds 0, which tightens this ceiling rather than removing it. |
 
 <a id="type-rollpool"></a>
 ## RollPool
@@ -1045,8 +1026,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Tags` | map of array of `string` | `null` | Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.<br><br>For example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.<br><br>Tags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**. |
-| `Name` | `string` | `null` | Ignored - the roll pool id comes from the asset filename, not this key. Kept as a schema field for editor display only. |
-| `Entries` | array of [StatRollEntry](#type-statrollentry) | `null` | The candidate stat-roll entries this reusable pool contributes to a Stamp step. |
+| `Name` | `string` | `null` | A human-readable label for editors. The pool's id comes from the filename, so changing this changes nothing at runtime. |
+| `Entries` | array of [StatRollEntry](#type-statrollentry) | `null` | The candidate outcomes this pool offers. Authoring this in a file with a Parent REPLACES the parent's entries entirely rather than adding to them. |
 
 <a id="type-lootableasset"></a>
 ## LootableAsset
@@ -1054,8 +1035,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Tags` | map of array of `string` | `null` | Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.<br><br>For example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.<br><br>Tags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**. |
-| `Name` | `string` | `null` | Ignored - the lootable id comes from the asset filename, not this key. Kept as a schema field for editor display only. |
-| `Rolls` | array of [Roll](#type-roll) | `null` | The conditional-lootable rolls this reusable table contributes. |
+| `Name` | `string` | `null` | A human-readable label for editors. The table's id comes from the filename, so changing this changes nothing at runtime. |
+| `Rolls` | array of [Roll](#type-roll) | `null` | The rolls this table contributes. Authoring this in a file with a Parent REPLACES the parent's rolls entirely rather than adding to them. |
 
 <a id="type-flairasset"></a>
 ## FlairAsset
@@ -1112,7 +1093,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Factors` | array of [FactorRef](#type-factorref) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
 | `Floors` | array of [Floor](#field-extensionasset-contributionscale-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
 
 <a id="field-extensionasset-conversions-item"></a>

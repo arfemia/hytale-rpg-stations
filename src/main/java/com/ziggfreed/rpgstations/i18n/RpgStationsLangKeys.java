@@ -32,7 +32,10 @@ import javax.annotation.Nonnull;
  * when the yield actually moved the number, so its presence is itself the signal that the tool is
  * earning something; the wording stays tool-shaped, never progression-shaped.
  * Round-7 (D-6) adds {@code ui.station.summary.enhance_durability} (the engine-owned durability
- * row of the enhancement session summary, {@code StationService#enhanceLedgerRows}); round-7 (D-4)
+ * row of the enhancement session summary, {@code StationService#enhanceLedgerRows}) and
+ * {@code ui.station.summary.enhance_stat}, the same summary's plain per-stat row for a stat no mod
+ * supplied a styled label for (a wordless "{0} +{1}" format string, identical in all nine locales -
+ * the stat id is an opaque token this engine cannot translate); round-7 (D-4)
  * also drops the quantity from {@code ui.station.gain.produced}'s value (now bare {@code {0}}) so
  * the toast matches a native pickup exactly - the quantity rides the item-slot count badge.
  * Decision 48 (batch-2 spike extension, 2026-07-24) adds the {@code command.npcspike.prop_*}/
@@ -115,6 +118,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.summary.lucky",
             "rpgstations.ui.station.summary.items_more",
             "rpgstations.ui.station.summary.enhance_durability",
+            "rpgstations.ui.station.summary.enhance_stat",
             "rpgstations.ui.station.gain.produced",
             "rpgstations.station.sawmill.name",
             "rpgstations.station.sawmill.desc",

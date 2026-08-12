@@ -1,12 +1,21 @@
 package com.ziggfreed.rpgstations.asset;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-
 import org.junit.jupiter.api.Test;
-import com.ziggfreed.common.codec.Vec3;
+
 import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.common.codec.TagMatch;
+import com.ziggfreed.common.codec.Vec3;
+import com.ziggfreed.common.factor.FactorFormula;
+import com.ziggfreed.common.loot.LootGrants;
+import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.LootableAsset;
+import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.stamp.RollPoolAsset;
+import com.ziggfreed.common.loot.stamp.StampSpec;
+import com.ziggfreed.common.loot.stamp.StatRollEntry;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * Forces static init of every RpgStations asset codec so a lower-case {@code KeyedCodec} key
@@ -51,20 +60,25 @@ public class AssetCodecInitTest {
         assertDoesNotThrow(() -> assertNotNull(Conditions.CODEC));
     }
 
+    /**
+     * The shared loot codecs this schema embeds. They are not this mod's to define, but they ARE
+     * this mod's to load: a static-init failure in any of them takes the station store down at
+     * server start exactly as one in a codec authored here would.
+     */
     @Test
     void rollCodecAndNestedGroups_initializeWithoutThrowing() {
         assertDoesNotThrow(() -> assertNotNull(Roll.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(Roll.Chance.CODEC));
         assertDoesNotThrow(() -> assertNotNull(Roll.Ladder.CODEC));
         assertDoesNotThrow(() -> assertNotNull(Roll.Ladder.Floor.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(Roll.Grants.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(LootGrants.CODEC));
     }
 
-    /** Scope-2 shared leaves (design 1.3): the ONE Ingredient / FactorRef / LootRef codecs. */
+    /** The shared leaves every site embeds: the ONE Ingredient / factor-term / LootRef codecs. */
     @Test
     void sharedLeafCodecs_initializeWithoutThrowing() {
         assertDoesNotThrow(() -> assertNotNull(Ingredient.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(FactorRef.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(FactorFormula.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(FactorFormula.Term.CODEC));
         assertDoesNotThrow(() -> assertNotNull(LootRef.CODEC));
     }
 
@@ -81,7 +95,7 @@ public class AssetCodecInitTest {
 
     @Test
     void rollPoolAndStatRollEntryCodecs_initializeWithoutThrowing() {
-        assertDoesNotThrow(() -> assertNotNull(RollPool.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(RollPoolAsset.CODEC));
         assertDoesNotThrow(() -> assertNotNull(StatRollEntry.CODEC));
         assertDoesNotThrow(() -> assertNotNull(StatRollEntry.Points.CODEC));
     }
@@ -121,9 +135,10 @@ public class AssetCodecInitTest {
         assertDoesNotThrow(() -> assertNotNull(StationStep.Repeat.CODEC));
         assertDoesNotThrow(() -> assertNotNull(StationStep.Duration.CODEC));
         assertDoesNotThrow(() -> assertNotNull(StationStep.Stamp.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(StationStep.Stamp.Stats.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(StationStep.Stamp.Stats.Caps.CODEC));
-        assertDoesNotThrow(() -> assertNotNull(StationStep.Stamp.Stats.Budget.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StationStep.Stamp.Economics.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StampSpec.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StampSpec.Caps.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StampSpec.Budget.CODEC));
         assertDoesNotThrow(() -> assertNotNull(StationStep.PuppetOverride.CODEC));
     }
 

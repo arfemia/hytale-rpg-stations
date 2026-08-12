@@ -1,14 +1,14 @@
 package com.ziggfreed.rpgstations.station;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 import java.util.Map;
 import java.util.function.BiFunction;
 
 import org.junit.jupiter.api.Test;
 
+import com.ziggfreed.common.factor.FactorFormula;
 import com.ziggfreed.rpgstations.asset.ContributionScale;
-import com.ziggfreed.rpgstations.asset.FactorRef;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * The PURE {@link ContributionScaling} resolution: an action's {@code ContributionScale} ladder into
@@ -22,11 +22,11 @@ public class ContributionScalingTest {
         return (factorId, param) -> values.get(factorId);
     }
 
-    private static ContributionScale scale(FactorRef[] factors, ContributionScale.Floor... floors) {
+    private static ContributionScale scale(FactorFormula.Term[] factors, ContributionScale.Floor... floors) {
         return ContributionScale.of(factors, floors);
     }
 
-    private static final FactorRef AXIS = FactorRef.of("fixture:axis", null, 1.0);
+    private static final FactorFormula.Term AXIS = FactorFormula.Term.of("fixture:axis", null, 1.0);
 
     // ==================== The neutral cases ====================
 
@@ -39,13 +39,13 @@ public class ContributionScalingTest {
     @Test
     void ladderWithNoFloors_isTheNeutralMultiplier() {
         assertEquals(ContributionScale.NEUTRAL_SCALE,
-                ContributionScaling.multiplier(scale(new FactorRef[] {AXIS}),
+                ContributionScaling.multiplier(scale(new FactorFormula.Term[] {AXIS}),
                         lookup(Map.of("fixture:axis", 99.0))));
     }
 
     @Test
     void noFloorReached_isTheNeutralMultiplier() {
-        ContributionScale s = scale(new FactorRef[] {AXIS}, ContributionScale.Floor.of(10.0, 3.0));
+        ContributionScale s = scale(new FactorFormula.Term[] {AXIS}, ContributionScale.Floor.of(10.0, 3.0));
         assertEquals(ContributionScale.NEUTRAL_SCALE,
                 ContributionScaling.multiplier(s, lookup(Map.of("fixture:axis", 4.0))));
     }
@@ -54,7 +54,7 @@ public class ContributionScalingTest {
 
     @Test
     void theHighestReachedFloorSuppliesTheMultiplier() {
-        ContributionScale s = scale(new FactorRef[] {AXIS},
+        ContributionScale s = scale(new FactorFormula.Term[] {AXIS},
                 ContributionScale.Floor.of(10.0, 2.0),
                 ContributionScale.Floor.of(20.0, 3.0),
                 ContributionScale.Floor.of(30.0, 4.0));
@@ -68,7 +68,7 @@ public class ContributionScalingTest {
 
     @Test
     void floorsAreNotCumulative_theHighestOneWinsOutright() {
-        ContributionScale s = scale(new FactorRef[] {AXIS},
+        ContributionScale s = scale(new FactorFormula.Term[] {AXIS},
                 ContributionScale.Floor.of(1.0, 2.0),
                 ContributionScale.Floor.of(2.0, 3.0));
         assertEquals(3.0, ContributionScaling.multiplier(s, lookup(Map.of("fixture:axis", 5.0))),
@@ -77,9 +77,9 @@ public class ContributionScalingTest {
 
     @Test
     void factorsAreSummedWithTheirWeightsBeforeTheFloorLookup() {
-        ContributionScale s = scale(new FactorRef[] {
-                        FactorRef.of("fixture:quality", null, 10.0),
-                        FactorRef.of("fixture:power", null, 1.0)},
+        ContributionScale s = scale(new FactorFormula.Term[] {
+                        FactorFormula.Term.of("fixture:quality", null, 10.0),
+                        FactorFormula.Term.of("fixture:power", null, 1.0)},
                 ContributionScale.Floor.of(11.0, 2.5));
         // 1 x 10.0 + 0.5 x 1.0 = 10.5, one rung short.
         assertEquals(ContributionScale.NEUTRAL_SCALE, ContributionScaling.multiplier(s,
@@ -91,7 +91,7 @@ public class ContributionScalingTest {
 
     @Test
     void anUnresolvableFactorContributesZero_soAMissingProviderNeverInflatesTheMultiplier() {
-        ContributionScale s = scale(new FactorRef[] {AXIS}, ContributionScale.Floor.of(1.0, 5.0));
+        ContributionScale s = scale(new FactorFormula.Term[] {AXIS}, ContributionScale.Floor.of(1.0, 5.0));
         assertEquals(ContributionScale.NEUTRAL_SCALE, ContributionScaling.multiplier(s, lookup(Map.of())));
     }
 
@@ -104,7 +104,7 @@ public class ContributionScalingTest {
 
     @Test
     void equalMinFloors_resolveToTheLastAuthoredOne() {
-        ContributionScale s = scale(new FactorRef[] {AXIS},
+        ContributionScale s = scale(new FactorFormula.Term[] {AXIS},
                 ContributionScale.Floor.of(5.0, 2.0),
                 ContributionScale.Floor.of(5.0, 7.0));
         assertEquals(7.0, ContributionScaling.multiplier(s, lookup(Map.of("fixture:axis", 5.0))),
@@ -113,14 +113,14 @@ public class ContributionScalingTest {
 
     @Test
     void aFloorAuthoringNoScale_isTheNeutralMultiplierRatherThanZero() {
-        ContributionScale s = scale(new FactorRef[] {AXIS}, ContributionScale.Floor.of(1.0, null));
+        ContributionScale s = scale(new FactorFormula.Term[] {AXIS}, ContributionScale.Floor.of(1.0, null));
         assertEquals(ContributionScale.NEUTRAL_SCALE,
                 ContributionScaling.multiplier(s, lookup(Map.of("fixture:axis", 5.0))));
     }
 
     @Test
     void aNullHoleInTheFloorsArray_canNeverWin() {
-        ContributionScale s = ContributionScale.of(new FactorRef[] {AXIS},
+        ContributionScale s = ContributionScale.of(new FactorFormula.Term[] {AXIS},
                 new ContributionScale.Floor[] {ContributionScale.Floor.of(1.0, 2.0), null});
         assertEquals(2.0, ContributionScaling.multiplier(s, lookup(Map.of("fixture:axis", 99.0))));
     }

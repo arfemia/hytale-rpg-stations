@@ -11,7 +11,7 @@ import com.ziggfreed.common.factor.FactorCondition;
 
 /**
  * The ONE outbound numeric-post leaf: {@code {Channel, Param?, Amount}}. This is the WRITE-side
- * twin of {@link FactorRef}/{@link FactorCondition}'s read side, and it works the same way in reverse -
+ * twin of the weighted factor term and {@link FactorCondition}'s read side, and it works the same way in reverse -
  * a namespaced channel id plus an opaque {@code Param}, resolved by nobody here. Where a
  * {@code Factor} asks a registered provider for a number, a {@code Contribution} hands a number
  * OUT: this engine forwards {@code {Channel, Param, Amount}} verbatim on the cycle-completed event

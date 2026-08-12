@@ -4,16 +4,36 @@
     {
       "Trigger": "Cycle",
       "Conditions": [
-        { "Factor": "hytale:tool_quality", "Min": 5 },
-        { "Factor": "hytale:tool_item_level", "Min": 50 },
-        { "Factor": "hytale:tool_power", "Min": 0.55 }
+        {
+          "Factor": "hytale:tool_quality",
+          "Min": 5
+        },
+        {
+          "Factor": "hytale:tool_item_level",
+          "Min": 50
+        },
+        {
+          "Factor": "hytale:tool_power",
+          "Min": 0.55
+        }
       ],
       "Chance": {
-        "BasePercent": 15,
-        "Factors": [{ "Factor": "rpgstations:cycle_count", "Weight": 0.5 }],
-        "CapPercent": 75
+        "Base": 15,
+        "Factors": [
+          {
+            "Factor": "rpgstations:cycle_count",
+            "Weight": 0.5
+          }
+        ],
+        "Clamp": {
+          "Max": 75
+        }
       },
-      "Grants": { "DropLists": ["RPG_Station_Sawmill_T4"] }
+      "Grants": {
+        "DropLists": [
+          "RPG_Station_Sawmill_T4"
+        ]
+      }
     }
   ]
 }

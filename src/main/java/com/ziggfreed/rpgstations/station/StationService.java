@@ -16,7 +16,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.DoubleSupplier;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -73,6 +72,7 @@ import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.common.effect.AppliedEffectTracker;
 import com.ziggfreed.common.effect.NativeEffectUtil;
+import com.ziggfreed.common.entity.HeldItemUtil;
 import com.ziggfreed.common.entity.PuppetNav;
 import com.ziggfreed.common.entity.performer.PerformerReconciler;
 import com.ziggfreed.common.factor.FactorCondition;
@@ -82,6 +82,9 @@ import com.ziggfreed.common.i18n.Msg;
 import com.ziggfreed.common.i18n.NativeNames;
 import com.ziggfreed.common.interaction.NativeChainFire;
 import com.ziggfreed.common.inventory.InventoryGrant;
+import com.ziggfreed.common.loot.FactorLookup;
+import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.common.sound.Sound3D;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.common.util.NumberFormatter;
@@ -98,18 +101,15 @@ import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.Ingredient;
-import com.ziggfreed.rpgstations.asset.LootRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
-import com.ziggfreed.rpgstations.asset.Roll;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
-import com.ziggfreed.rpgstations.loot.FactorSnapshot;
-import com.ziggfreed.rpgstations.loot.LootEngine;
 import com.ziggfreed.rpgstations.loot.OutputItemResolver;
+import com.ziggfreed.rpgstations.loot.StationLootEngine;
 import com.ziggfreed.rpgstations.pages.PickerCategories;
 import com.ziggfreed.rpgstations.pages.RpgStationPickerPage;
 import com.ziggfreed.rpgstations.ui.StationSummaryHud;
@@ -335,18 +335,6 @@ public final class StationService {
 
     /** One player's pending picker choice: the block it was made at + the chosen category id. */
     private record PendingSelection(@Nonnull String blockKey, @Nonnull String category) {
-    }
-
-    /**
-     * A single-shot {@code (factorId, param) -> value} lookup, pure/testable independent of the
-     * live api registry (used by {@link #conditionPasses}). {@link #checkRequires} builds one
-     * inline against {@link FactorRegistryImpl} + a fresh {@link FactorContext} (leg 4 - replaces
-     * the leg-3 stand-in static {@code factorLookup} field).
-     */
-    @FunctionalInterface
-    interface FactorLookup {
-        @Nullable
-        Double resolve(@Nonnull String factorId, @Nullable String param);
     }
 
     private StationService() {
@@ -1117,7 +1105,7 @@ public final class StationService {
         // end. ONE FactorSnapshot still serves the whole cycle (the Bonus rolls below and any Stamp
         // phase read it), so two ladders reading the same factor can never disagree.
         StationAsset.Yield yield = check.recipe != null ? check.recipe.getYield() : null;
-        FactorSnapshot snapshot = new FactorSnapshot(
+        FactorLookup snapshot = FactorRegistryImpl.getInstance().snapshotFor(
                 buildFactorContext(s, store, player, action, attemptCycleIndex));
         Ingredient[] yieldedOutputs = StationYield.applyToOutputs(yield, check.outputs);
         recordYieldBreakdown(s, check.outputs, yieldedOutputs);
@@ -1183,12 +1171,12 @@ public final class StationService {
     /**
      * The action's EFFECTIVE {@code Bonus} rolls: its own group, plus every matching
      * {@code ExtensionAsset}'s appended lootables and inline rolls, expanded through
-     * {@link LootEngine#resolveRolls}. The ONE resolution all THREE Bonus read sites share - the
+     * {@link StationLootEngine#resolveRolls}. The ONE resolution all THREE Bonus read sites share - the
      * implicit convert cycle (which folds them into its program's own Roll phase), an authored
      * program's completed pass, and the session's Completion pass - so no route can ever see a
      * different effective Bonus than another for the same action.
      *
-     * <p>Trigger filtering is deliberately NOT done here: {@link LootEngine#rollAndGrant} takes the
+     * <p>Trigger filtering is deliberately NOT done here: {@link StationLootEngine#rollAndGrant} takes the
      * trigger and skips every roll that does not carry it, so one resolution serves the
      * {@code Cycle} and {@code Completion} passes alike.
      */
@@ -1200,7 +1188,7 @@ public final class StationService {
         if (target != null) {
             bonus = ExtensionCatalog.getInstance().applyToActionBonus(asset.getId(), target, bonus);
         }
-        return LootEngine.resolveRolls(bonus);
+        return StationLootEngine.resolveRolls(bonus);
     }
 
     /**
@@ -1295,7 +1283,7 @@ public final class StationService {
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
             int attemptCycleIndex, int startIndex, boolean resuming,
-            @Nullable FactorSnapshot presetSnapshot, boolean bonusAtCompletion) {
+            @Nullable FactorLookup presetSnapshot, boolean bonusAtCompletion) {
         if (!resuming) {
             // A FRESH cycle attempt explicitly zeroes the suspend deadline AND the per-step
             // iteration counter before the walk starts, so a fresh program's very first Duration
@@ -1304,8 +1292,9 @@ public final class StationService {
             s.stepDeadlineMs = 0L;
             s.stepIteration = 0;
         }
-        FactorSnapshot snapshot = presetSnapshot != null ? presetSnapshot
-                : new FactorSnapshot(buildFactorContext(s, store, player, action, attemptCycleIndex));
+        FactorLookup snapshot = presetSnapshot != null ? presetSnapshot
+                : FactorRegistryImpl.getInstance().snapshotFor(
+                        buildFactorContext(s, store, player, action, attemptCycleIndex));
         StationStepContext ctx = new StationStepContext(s, store, commandBuffer, player, action, snapshot,
                 steps, attemptCycleIndex);
 
@@ -1489,7 +1478,7 @@ public final class StationService {
                                  @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player) {
         // An idle cycle scales the same way a real one does, off its own fresh snapshot (no cycle
         // program ran to build one): amount x idleFraction x contributionScale.
-        FactorSnapshot snapshot = new FactorSnapshot(
+        FactorLookup snapshot = FactorRegistryImpl.getInstance().snapshotFor(
                 buildFactorContext(s, store, player, action, s.cyclesDone + 1));
         double scale = ContributionScaling.multiplier(action.getContributionScale(), snapshot::resolve);
         onCycleCompleted(s, store, commandBuffer, action, true, s.cyclesDone, scale);
@@ -1637,12 +1626,13 @@ public final class StationService {
     private static void rollCycleBonus(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nullable CommandBuffer<EntityStore> commandBuffer,
             @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
-            @Nonnull FactorSnapshot snapshot, int cycleIndex) {
+            @Nonnull FactorLookup snapshot, int cycleIndex) {
         List<Roll> rolls = effectiveBonusRolls(asset, action);
         if (rolls.isEmpty()) {
             return;
         }
-        LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_CYCLE, snapshot, player,
+        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(rolls,
+                StationLootEngine.TRIGGER_CYCLE, snapshot, player,
                 s.playerRef, s.stationId, action.getActionId(), cycleIndex, commandBuffer, store,
                 s.blockX, s.blockY, s.blockZ);
         applyGrantResult(s, store, commandBuffer, player, result);
@@ -1669,15 +1659,16 @@ public final class StationService {
         if (player == null) {
             return;
         }
-        FactorSnapshot snapshot = new FactorSnapshot(buildFactorContext(s, store, player, action, s.cyclesDone));
-        LootEngine.GrantResult result = LootEngine.rollAndGrant(rolls, Roll.TRIGGER_COMPLETION, snapshot, player,
+        FactorLookup snapshot = FactorRegistryImpl.getInstance().snapshotFor(buildFactorContext(s, store, player, action, s.cyclesDone));
+        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(rolls,
+                StationLootEngine.TRIGGER_COMPLETION, snapshot, player,
                 s.playerRef, s.stationId, s.actionId, s.cyclesDone, commandBuffer, store,
                 s.blockX, s.blockY, s.blockZ);
         applyGrantResult(s, store, commandBuffer, player, result);
     }
 
     /**
-     * Folds a {@link LootEngine.GrantResult} into the session's item ledger, plays every
+     * Folds a {@link StationLootEngine.GrantResult} into the session's item ledger, plays every
      * reached floor's {@code Presentation} through {@link #emitMoment} on {@link
      * StationFlairs#MOMENT_RARE_FIND}, and fires a round-5 item-specific GOLD "what you gained"
      * notification ({@link #notifyItemGain}, {@code lucky=true}) per distinct granted item id -
@@ -1686,7 +1677,7 @@ public final class StationService {
      */
     static void applyGrantResult(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nullable CommandBuffer<EntityStore> commandBuffer,
-            @Nullable Player player, @Nonnull LootEngine.GrantResult result) {
+            @Nullable Player player, @Nonnull StationLootEngine.GrantResult result) {
         if (!result.anyGranted()) {
             return;
         }
@@ -1694,17 +1685,21 @@ public final class StationService {
         for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
             s.luckItems.merge(e.getKey(), e.getValue(), Integer::sum);
         }
-        // Roll.Grants.Contributions: buffer the one-shot posts for THIS cycle's completed event,
-        // which forwards them on oneShotContributions. LootEngine only ever collects them for a
-        // Cycle trigger, so a Completion-trigger roll never queues one nothing would drain. Every
+        // A rpgstations:contribution reward buffers its one-shot post for THIS cycle's completed
+        // event, which forwards them on oneShotContributions. The pass only ever collects them under
+        // a Cycle trigger, so a Completion-trigger roll never queues one nothing would drain. Every
         // entry here already passed Contribution#isPostable (non-blank channel, positive amount).
         for (Contribution post : result.getContributions()) {
             s.pendingOneShotContributions.add(
                     new StationContribution(post.getChannel(), post.getParam(), post.getAmount()));
         }
+        // A CUE is a moment id, so each one plays through the same emitMoment funnel every other
+        // station moment does - which means the action's own Moments entry for that id, plus every
+        // applicable flair overlay, gets its say. Passing a null base is what hands the resolution
+        // to that map: the loot layer names the moment, this engine decides what it sounds like.
         Vector3d blockPos = new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5);
-        for (Presentation p : result.getFloorPresentations()) {
-            emitMoment(store, s, StationFlairs.MOMENT_RARE_FIND, p, blockPos);
+        for (String cue : result.getCues()) {
+            emitMoment(store, s, cue, null, blockPos);
         }
         if (s.playerRef != null) {
             for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
@@ -2073,20 +2068,25 @@ public final class StationService {
     /**
      * The enhance ledger rows for the summary panel (design section 9.5, phase 2 round-7 D-6):
      * per committed {@link StationEnhanceOutcome}, one row per {@link EnhanceLine} the registered
-     * stamper reported (the {@code line.label()} renders VERBATIM - the provider owns the stat
-     * vocabulary, wording, and per-stat color, so no foreign stat vocabulary reaches this engine),
-     * plus, when a stamp added max durability, ONE engine-owned durability row the engine composes
-     * AND colors itself ({@link #ENHANCE_ROW_COLOR} - durability is RpgStations-native, real even
-     * with no stamper registered). Extracted pure/static so it unit-tests without a live session
-     * service; the icon is the enhanced item itself.
+     * stamper reported, plus, when a stamp added max durability, ONE engine-owned durability row the
+     * engine composes AND colors itself ({@link #ENHANCE_ROW_COLOR} - durability is RpgStations-native,
+     * real even with no stamper registered). Extracted pure/static so it unit-tests without a live
+     * session service; the icon is the enhanced item itself.
+     *
+     * <p>A line's {@code label()} renders VERBATIM when it has one - the mod that owns the stat
+     * vocabulary owns its wording and its per-stat color, so no foreign stat vocabulary reaches this
+     * engine. When it has none, the row still says the plain true thing: the stat's own id and the
+     * points added to it. A row must never carry nothing - the ledger sends its text straight to the
+     * client - and staying silent about a stat the ritual just applied would leave the player unable
+     * to tell an enhancement from a failure.
      */
     @Nonnull
     static List<StationSummaryHud.LedgerRow> enhanceLedgerRows(@Nonnull List<StationEnhanceOutcome> outcomes) {
         List<StationSummaryHud.LedgerRow> rows = new ArrayList<>();
         for (StationEnhanceOutcome outcome : outcomes) {
             for (EnhanceLine line : outcome.lines()) {
-                rows.add(new StationSummaryHud.LedgerRow(outcome.itemId(), line.points(), line.label(),
-                        SummaryRow.Kind.ENHANCE));
+                rows.add(new StationSummaryHud.LedgerRow(outcome.itemId(), line.points(),
+                        enhanceStatLine(line), SummaryRow.Kind.ENHANCE));
             }
             if (outcome.durabilityAdded() > 0) {
                 Message line = RpgMsg.tr("ui.station.summary.enhance_durability",
@@ -2096,6 +2096,25 @@ public final class StationService {
             }
         }
         return rows;
+    }
+
+    /**
+     * One enhance line's summary text: the provider's own styled label when it supplied one, else the
+     * engine's plain report of the stat id and its points.
+     *
+     * <p>The fallback is deliberately unglamorous rather than absent. This engine owns no stat
+     * vocabulary, so it cannot name what {@code Damage} or {@code Swing_Speed} means to a player - but
+     * it does know that the ritual just wrote that many points of it, and saying so is strictly better
+     * than an empty row on the one panel that reports what an enhancement did.
+     */
+    @Nonnull
+    private static Message enhanceStatLine(@Nonnull EnhanceLine line) {
+        Message label = line.label();
+        if (label != null) {
+            return label;
+        }
+        return RpgMsg.tr("ui.station.summary.enhance_stat", line.statId(),
+                NumberFormatter.grouped(line.points())).color(ENHANCE_ROW_COLOR);
     }
 
     /** Formats a durability delta for the summary row: a whole number drops its trailing {@code .0}. */
@@ -2563,6 +2582,10 @@ public final class StationService {
      * {@code FactorContext} rather than read live at resolve time, so the pre-session
      * {@code Requires} gate (which builds a context with no live {@code Store}) still answers
      * correctly instead of degrading to 0. Try-guarded like its sibling reads.
+     *
+     * <p>The fold itself is the shared {@code entity.HeldItemUtil.toolPowersOf}, so a gather type a
+     * tool authors TWICE keeps the STRONGEST spec here exactly as it does everywhere else that
+     * reads a tool's powers.
      */
     @Nonnull
     private static Map<String, Double> resolveHeldToolPowers(@Nonnull Player player) {
@@ -2570,17 +2593,7 @@ public final class StationService {
             ItemStack held = InventoryAccess.activeHotbarItemOf(player);
             Item item = held != null ? held.getItem() : null;
             ItemTool itemTool = item != null ? item.getTool() : null;
-            ItemToolSpec[] specs = itemTool != null ? itemTool.getSpecs() : null;
-            if (specs == null || specs.length == 0) {
-                return Map.of();
-            }
-            Map<String, Double> out = new LinkedHashMap<>(specs.length);
-            for (ItemToolSpec spec : specs) {
-                if (spec != null && spec.getGatherType() != null && !spec.getGatherType().isBlank()) {
-                    out.put(spec.getGatherType(), (double) spec.getPower());
-                }
-            }
-            return out;
+            return HeldItemUtil.toolPowersOf(itemTool != null ? itemTool.getSpecs() : null);
         } catch (Throwable t) {
             Log.fine("STATION could not resolve the held tool's gather powers: " + t.getMessage());
             return Map.of();
@@ -3674,7 +3687,6 @@ public final class StationService {
         boolean sawInputWithoutRoom = false;
         try {
             var combined = InventoryAccess.combinedBackpackStorageHotbarOf(player);
-            var backpack = InventoryAccess.storageOf(player);
             for (StationAsset.Conversion c : conversions) {
                 if (!runnableShape(c)) {
                     continue;
@@ -3699,7 +3711,7 @@ public final class StationService {
                 if (!hasEveryInput || (!itemInputs.isEmpty() && !combined.canRemoveItemStacks(itemInputs))) {
                     continue;
                 }
-                if (!backpack.canAddItemStacks(outputStacks(c))) {
+                if (!InventoryGrant.canAddAll(player, outputStacks(c))) {
                     sawInputWithoutRoom = true;
                     continue;
                 }
@@ -3786,7 +3798,6 @@ public final class StationService {
         }
         boolean sawInputWithoutRoom = false;
         try {
-            var backpack = InventoryAccess.storageOf(player);
             for (StationAsset.Conversion c : conversions) {
                 if (!runnableShape(c)) {
                     continue;
@@ -3805,7 +3816,7 @@ public final class StationService {
                 if (!hasEveryInput) {
                     continue;
                 }
-                if (!backpack.canAddItemStacks(outputStacks(c))) {
+                if (!InventoryGrant.canAddAll(player, outputStacks(c))) {
                     sawInputWithoutRoom = true;
                     continue;
                 }

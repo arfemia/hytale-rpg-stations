@@ -1,14 +1,12 @@
 package com.ziggfreed.rpgstations.loot;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.function.DoubleSupplier;
 
 import org.junit.jupiter.api.Test;
 
-import com.ziggfreed.rpgstations.asset.Roll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * The PURE fractional-to-whole-items resolution: the whole part every time, the leftover fraction as
@@ -81,9 +79,9 @@ class OutputItemResolverTest {
      */
     @Test
     void twoHalfGrantsSumToAWholeItemBeforeResolution() {
-        LootEngine.GrantResult result = new LootEngine.GrantResult();
-        LootEngine.applyGrants(Roll.Grants.ofOutputItems(0.5), DropListGranters.empty(), null, result, true);
-        LootEngine.applyGrants(Roll.Grants.ofOutputItems(0.5), DropListGranters.empty(), null, result, true);
+        StationLootEngine.GrantResult result = new StationLootEngine.GrantResult(true);
+        result.outputItems(0.5);
+        result.outputItems(0.5);
 
         assertEquals(1.0, result.getOutputItems(), 1e-9);
         assertEquals(1, OutputItemResolver.resolve(result.getOutputItems(), NEVER_UNDER),

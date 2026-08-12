@@ -3,15 +3,13 @@ package com.ziggfreed.rpgstations.station;
 import java.util.List;
 
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
-
+import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.rpgstations.asset.StationStep;
-import com.ziggfreed.rpgstations.loot.FactorSnapshot;
 
 /**
  * The {@code C} (context) type parameter of the {@code station.step} {@link StationStepKernel}
@@ -28,13 +26,13 @@ final class StationStepContext {
     @Nonnull final CommandBuffer<EntityStore> commandBuffer;
     @Nonnull final Player player;
     @Nonnull final ActionResolver.ResolvedAction action;
-    @Nonnull final FactorSnapshot snapshot;
+    @Nonnull final FactorLookup snapshot;
     @Nonnull final List<StationStep> steps;
 
     /**
      * This attempt's 1-based cycle index (design section 7.2's cycle-completed event contract):
      * {@code session.cyclesDone + 1} for a real cycle, computed ONCE before the walk starts and
-     * used by BOTH the {@link FactorSnapshot}'s context and a {@code Roll}/{@code Command} step's
+     * used by BOTH the factor snapshot's context and a {@code Roll}/{@code Command} step's
      * placeholder substitution - deliberately NOT {@code session.cyclesDone} read live (that
      * field only advances after the whole program COMPLETES, matching the pre-refactor "only
      * count a real success" invariant; see {@code StationService#runRealCycle}).
@@ -43,7 +41,7 @@ final class StationStepContext {
 
     StationStepContext(@Nonnull StationSession session, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull Player player,
-            @Nonnull ActionResolver.ResolvedAction action, @Nonnull FactorSnapshot snapshot,
+            @Nonnull ActionResolver.ResolvedAction action, @Nonnull FactorLookup snapshot,
             @Nonnull List<StationStep> steps, int cycleIndex) {
         this.session = session;
         this.store = store;
