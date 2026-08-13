@@ -54,14 +54,17 @@ public final class CommandRewardExecutor {
     /**
      * The dispatcher station command grants run through: the server console, with {@code player}
      * named as the acting username so a command that reads one resolves it. A refused command is
-     * logged and swallowed - a failed command costs its own line, never the cycle that earned it.
+     * logged and ANSWERED false, so the runner counts it as a line that did not run rather than as a
+     * grant that landed - a failed command costs its own line, never the cycle that earned it.
      */
     @Nonnull
     public static CommandRunner.Dispatcher consoleAs(@Nonnull String player) {
         return command -> {
             if (!CommandExecutor.executeAsConsole(command, player)) {
                 Log.fine("STATION loot command grant was refused: '" + command + "'");
+                return false;
             }
+            return true;
         };
     }
 }

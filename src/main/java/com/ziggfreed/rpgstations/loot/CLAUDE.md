@@ -10,11 +10,13 @@ first; this one covers only what a STATION adds on top.
 ## What lives here
 
 - **[`StationLootEngine`](StationLootEngine.java)** - the station-shaped pass. Three jobs:
-  - **Extension-aware table resolution** (`resolveRolls`). A referenced table's rolls are its
-    EFFECTIVE ones - whatever it authors plus every `Target:{Lootable}` `ExtensionAsset`'s appended
-    rolls. The merge belongs at THIS read rather than at each caller, so a table gains its extended
-    rolls at every reference site (an action's `Bonus`, a step's `Roll` phase) and no site can be
-    left seeing the unextended table.
+  - **Extension-aware table resolution** (`resolve`, answering the shared `LootEngine.Resolved`).
+    A referenced table's rolls are its EFFECTIVE ones - whatever it authors plus every
+    `Target:{Lootable}` `ExtensionAsset`'s appended rolls - and its `Pool` comes back beside them,
+    each table keeping its own bag rather than the bags being poured together. The merge belongs at
+    THIS read rather than at each caller, so a table gains its extended rolls at every reference
+    site (an action's `Bonus`, a step's `Roll` phase) and no site can be left seeing the unextended
+    table, or seeing only half of it.
   - **The station sinks.** Item and drop-list grants go hotbar-first, then backpack storage, then a
     ground drop at the station block (`util.ItemGrantUtil` over the shared `InventoryGrant`), so a
     stack that fits nowhere still lands as a ground item rather than being discarded. Commands run
@@ -57,6 +59,12 @@ first; this one covers only what a STATION adds on top.
 - **A pass always carries a Subject**, even with no resolvable `PlayerRef`. A null subject switches
   the whole reward leaf off, which would silently cost the collecting kinds as well as the paying
   ones.
+- **A POOL is drawn on the CYCLE pass only.** A pool names no trigger, so the shared engine draws
+  one at a site's default moment, and a station's default moment is the completed work cycle. The
+  completion pass reads the SAME resolution, so drawing there too would hand one session its bag
+  twice; it evaluates that table's `Completion`-trigger rolls and nothing else. That is why the
+  station pass calls the shared engine twice - rolls under the station's own trigger, picks on the
+  default moment - and folds both tallies into one `GrantResult`.
 - **Every grant path owes its own notification.** The Produce phase only ever announces the recipe's
   own deterministic `Yield`, so a bonus that is not separately notified makes every toast
   under-report - a cycle paying one base plank plus four from the tool ladder announcing a single

@@ -257,7 +257,7 @@ matches every station (including a caller with none); a scoped one only its own.
 **Where each one is applied** (there is no decode-only payload): `Puppet`/`Custody`/
 `ContributionScale`/`Anchors` layer inside `ActionResolver.applyExtensionOverlays`, so every reader
 of a `ResolvedAction` sees them at once; `Bonus`/`PerCycleContributions` at `StationService`'s
-per-cycle read sites (`Bonus` through the ONE `effectiveBonusRolls` all three of its read routes
+per-cycle read sites (`Bonus` through the ONE `effectiveBonus` all three of its read routes
 share; `PerCycleContributions` through BOTH `onCycleCompleted`'s forwarded list AND
 `contributionParams`, the channel/`Param` projection every `FactorContext` carries - a factor
 reading `contributionParams(channel)` must see exactly what the cycle will post); `Steps` in
@@ -268,9 +268,10 @@ per-step-clip detection); `Actions` in `ActionResolver.effectiveActions`; `Conve
 `ExtensionCatalog.fold` AND `ActionCatalog.fold` both call
 `StationCatalog.invalidateResolvedConversions()`, since the three stores fold in no guaranteed order
 and a layer arriving after the first conversion resolve would otherwise never be seen; `Rolls`
-inside `loot.StationLootEngine.resolveRolls`, at the point a
+inside `loot.StationLootEngine.resolve`, at the point a
 referenced lootable table is read (so a table gains its extended rolls at EVERY reference site - an
-action's `Bonus` and a step's `Roll` phase both route through that one resolution); `Entries` inside
+action's `Bonus` and a step's `Roll` phase both route through that one resolution, which also hands
+back that table's `Pool`); `Entries` inside
 `StationStepHandlers.StampHandler.withExtendedEntries`, at the point a `Stamp.Stats.Pool` is read. Those last two read
 their catalog per call and derive nothing, so unlike `Conversions` they need no invalidation
 companion.
@@ -487,12 +488,14 @@ classic Convert transaction; the implicit single-step program (`ImplicitProgram`
 station with no `Actions`/`Steps` gets, so both paths converge on the SAME step engine.
 
 **`Trigger: "Cycle"` means THE action's cycle-completed moment, whatever program shape runs it.**
-Both program shapes resolve the action's effective `Bonus` through the ONE
-`StationService#effectiveBonusRolls` (its own group plus every matching extension's, expanded by
-`loot.StationLootEngine#resolveRolls`), and they differ only in WHERE the `Cycle` pass fires: the implicit
-convert program folds those rolls into its own `Roll` phase at build time, while an authored `Steps`
-program has no such phase, so `dispatchProgram` runs the pass itself on a COMPLETED walk
+Both program shapes read the action's effective `Bonus` through the ONE
+`StationService#effectiveBonus` (its own group plus every matching extension's) and expand it
+through the ONE `loot.StationLootEngine#resolve` (each referenced table's extension-composed rolls
+AND its pool), and they differ only in WHERE the `Cycle` pass fires: the implicit convert program
+hands that whole ref to its own `Roll` phase, while an authored `Steps` program has no such phase,
+so `dispatchProgram` runs the pass itself on a COMPLETED walk
 (`rollCycleBonus`, gated by its `bonusAtCompletion` flag so the implicit route never double-rolls).
+A referenced table's POOL draws on the `Cycle` pass only - see `../loot/CLAUDE.md`.
 It fires BEFORE `onCycleCompleted`, so a `Grants.Contributions` find rides that same cycle's event
 on either route. Exactly one moment per completed pass: a suspend/resume pair is still ONE pass, and
 an idle-practice cycle rolls no loot at all by design. The one grant kind that still lands nowhere

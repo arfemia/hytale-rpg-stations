@@ -25,8 +25,8 @@ import com.ziggfreed.common.command.CommandRunner;
 import com.ziggfreed.common.entity.PlayerPuppetService;
 import com.ziggfreed.common.entity.performer.WalkHandle;
 import com.ziggfreed.common.inventory.InventoryGrant;
+import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootRef;
-import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.common.loot.stamp.RollPoolAsset;
 import com.ziggfreed.common.loot.stamp.RollPoolConfig;
 import com.ziggfreed.common.loot.stamp.StampCapEngine;
@@ -640,13 +640,14 @@ final class StationStepHandlers {
             return null;
         }
         // The SAME resolution an action's Bonus uses (referenced tables' effective rolls, incl. any
-        // Lootable-targeted extension's appended ones, then the ref's own inline rolls) - a step's
-        // Roll phase must never see a narrower view of a shared table than a Bonus does.
-        List<Roll> rolls = StationLootEngine.resolveRolls(ref, "Roll step '" + step.getId() + "'");
-        if (rolls.isEmpty()) {
+        // Lootable-targeted extension's appended ones, plus each table's own pool, then the ref's own
+        // inline rolls) - a step's Roll phase must never see a narrower view of a shared table than a
+        // Bonus does.
+        LootEngine.Resolved resolved = StationLootEngine.resolve(ref, "Roll step '" + step.getId() + "'");
+        if (resolved.rolls().isEmpty() && resolved.pools().isEmpty()) {
             return null;
         }
-        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(rolls,
+        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(resolved,
                 StationLootEngine.TRIGGER_CYCLE, ctx.snapshot,
                 ctx.player, ctx.session.playerRef, ctx.session.stationId,
                 ctx.action.getActionId(), ctx.cycleIndex, ctx.commandBuffer, ctx.store,

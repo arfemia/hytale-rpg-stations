@@ -13,6 +13,7 @@ import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.loot.FactorLookup;
+import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootGrants;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.Roll;
@@ -35,10 +36,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * and inert under the other.
  *
  * <p>Covered here at the two seams a test JVM can reach without a running server: the ONE
- * {@link StationService#effectiveBonusRolls} resolution both program shapes read (an authored
- * program's action resolves the same rolls, extension appends included), one pass over those rolls
- * granting exactly the {@code Cycle}-trigger ones, and the {@code OutputItems} tally still landing
- * nowhere under an authored program. The dispatch wiring itself
+ * {@link StationService#effectiveBonus} read both program shapes share (an authored program's
+ * action resolves the same rolls, extension appends included), one pass over those rolls granting
+ * exactly the {@code Cycle}-trigger ones, and the {@code OutputItems} tally still landing nowhere
+ * under an authored program. The dispatch wiring itself
  * ({@code dispatchProgram}'s {@code bonusAtCompletion} flag) needs a live store and player.
  */
 class StationCycleBonusTest {
@@ -85,8 +86,7 @@ class StationCycleBonusTest {
         fold(ext("ritual-ext", "{ \"Target\":{\"Action\":\"Enhance\"}, \"Bonus\":{ \"Rolls\":[ {"
                 + " \"Trigger\":\"Cycle\", \"Grants\":{\"DropLists\":[\"Fixture_Ext_Drops\"]} } ] } }"));
 
-        List<Roll> rolls = StationService.effectiveBonusRolls(station,
-                ActionResolver.resolve(station, "Enhance"));
+        List<Roll> rolls = resolvedBonus(station).rolls();
 
         assertEquals(2, rolls.size(),
                 "an authored-program action resolves its own Bonus plus every extension append");
@@ -103,9 +103,7 @@ class StationCycleBonusTest {
                 Roll.of(StationLootEngine.TRIGGER_COMPLETION, null, null, null,
                         LootFixtures.contribution("yourmod:test_omega", 9.0), null)}));
 
-        List<Roll> rolls = StationService.effectiveBonusRolls(station,
-                ActionResolver.resolve(station, "Enhance"));
-        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(rolls,
+        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(resolvedBonus(station),
                 StationLootEngine.TRIGGER_CYCLE, lookup(), NULL_PLAYER, null, "fixtureritual",
                 "Enhance", 1, null, NULL_STORE, 0, 0, 0);
 
@@ -137,15 +135,19 @@ class StationCycleBonusTest {
         StationAsset station = ritualStation(LootRef.of(null, new Roll[] {
                 Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootFixtures.outputItems(2.0), null)}));
 
-        List<Roll> rolls = StationService.effectiveBonusRolls(station,
-                ActionResolver.resolve(station, "Enhance"));
-        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(rolls,
+        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(resolvedBonus(station),
                 StationLootEngine.TRIGGER_CYCLE, lookup(), NULL_PLAYER, null, "fixtureritual",
                 "Enhance", 1, null, NULL_STORE, 0, 0, 0);
 
         assertEquals(2.0, result.getOutputItems());
         assertFalse(result.getDropListItems().containsKey("Fixture_Plank"),
                 "the count is reported, never granted here");
+    }
+
+    /** The ritual action's effective Bonus, resolved the way every live route resolves it. */
+    private static LootEngine.Resolved resolvedBonus(StationAsset station) {
+        return StationLootEngine.resolve(
+                StationService.effectiveBonus(station, ActionResolver.resolve(station, "Enhance")));
     }
 
     private static void fold(ExtensionAsset... exts) {

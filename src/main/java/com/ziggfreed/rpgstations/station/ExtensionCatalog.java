@@ -52,7 +52,7 @@ import com.ziggfreed.rpgstations.util.Log;
  * per-cycle read sites; {@code Steps} applies where a session's authored program is read for
  * dispatch; {@code Conversions} applies inside {@code StationCatalog.resolvedConversions} before
  * that derivation is cached; {@code Actions} applies in {@code ActionResolver.effectiveActions};
- * {@code Rolls} applies where {@code loot.LootEngine.resolveRolls} reads a referenced lootable
+ * {@code Rolls} applies where {@code loot.StationLootEngine.resolve} reads a referenced lootable
  * table, and {@code Entries} where {@code StampCapEngine} gathers a Stamp step's candidate pool
  * entries. Those last two read their catalog per call and derive nothing, so unlike
  * {@code Conversions} they need no cache-invalidation companion.

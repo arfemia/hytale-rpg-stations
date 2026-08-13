@@ -727,6 +727,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Item` | `string` | `null` | The item asset id to hand over (the item file's name). |
 | `Count` | `integer` | `null` | How many. Omit for 1. A stack that does not fit goes wherever the granting site sends overflow, so a full inventory never silently eats the find. |
+| `CountMax` | `integer` | `null` | The top of a varying quantity, inclusive: the payout is drawn evenly between Count and this. Omit for exactly Count. A value below Count is ignored rather than inverting the range. |
 
 <a id="field-lootgrants-rewards-item"></a>
 ### LootGrants.Rewards[]
@@ -1037,6 +1038,25 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Tags` | map of array of `string` | `null` | Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.<br><br>For example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.<br><br>Tags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**. |
 | `Name` | `string` | `null` | A human-readable label for editors. The table's id comes from the filename, so changing this changes nothing at runtime. |
 | `Rolls` | array of [Roll](#type-roll) | `null` | The rolls this table contributes. Authoring this in a file with a Parent REPLACES the parent's rolls entirely rather than adding to them. |
+| `Pool` | [LootPool](#field-lootableasset-pool) | `null` | A bag of competing outcomes, of which only as many as the pool's own Rolls formula works out to are drawn. Use it for the part of a payout that varies; use the Rolls list above for the part everybody gets. |
+| `ContributesTo` | `string` | `null` | Another table's id to fold this file's rolls and pool entries INTO, on top of what that table already has. The way to enrich a table shipped by someone else without owning its file. How many picks the merged pool makes stays the target's decision. |
+
+<a id="field-lootableasset-pool"></a>
+### LootableAsset.Pool
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Rolls` | [FactorFormula](#type-factorformula) | `null` | How many picks this pool makes, as an ordinary formula. Base is the picks the moment earns with no bonuses; a term weighted one over N adds a pick per N points of that reading; Clamp.Max is the ceiling. Omit the whole group for a single pick. The answer is taken down to a whole number of picks. |
+| `Entries` | array of [Entry](#field-lootableasset-pool-entries-item) | `null` | The competing outcomes. Picks are drawn WITH replacement, so one entry can come up twice in a three-pick draw. Authoring this in a file with a Parent REPLACES the parent's entries rather than adding to them. |
+
+<a id="field-lootableasset-pool-entries-item"></a>
+#### LootableAsset.Pool.Entries[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Weight` | `double` | `null` | How often this entry comes up relative to its neighbours. Omit for 1. A weight of 0 is never picked, which is how an entry is parked without deleting it. |
+| `Conditions` | array of [Condition](#type-condition) | `null` | Every entry must pass before this outcome competes at all. This is where a premium entry says what earns it, and where an outcome says it only happens on a win. A factor nobody can answer keeps the entry out of the bag. |
+| `Grants` | [LootGrants](#type-lootgrants) | `null` | What being picked hands over. The same four leaves a roll grants through, so an entry can pay items, a native drop list, commands, or any registered reward kind. |
 
 <a id="type-flairasset"></a>
 ## FlairAsset

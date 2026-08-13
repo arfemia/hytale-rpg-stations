@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.common.loot.FactorLookup;
+import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootGrants;
 import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.common.loot.reward.RewardHandler;
@@ -43,8 +44,8 @@ class StationRewardKindsTest {
         for (int i = 0; i < grants.length; i++) {
             rolls[i] = Roll.of(trigger, null, null, null, grants[i], null);
         }
-        return StationLootEngine.rollAndGrant(List.of(rolls), trigger, FactorLookup.none(),
-                () -> 0.0, null, null, WORKER, null, "fixture");
+        return StationLootEngine.rollAndGrant(new LootEngine.Resolved(List.of(rolls), List.of()),
+                trigger, FactorLookup.none(), () -> 0.0, null, null, WORKER, null, "fixture");
     }
 
     @Test
@@ -102,7 +103,7 @@ class StationRewardKindsTest {
     @Test
     void aRollWhoseTriggerDoesNotMatch_isNeverEvaluated() {
         StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(
-                List.of(cycleRoll(LootFixtures.outputItems(3.0))),
+                new LootEngine.Resolved(List.of(cycleRoll(LootFixtures.outputItems(3.0))), List.of()),
                 StationLootEngine.TRIGGER_COMPLETION, FactorLookup.none(), () -> 0.0,
                 null, null, WORKER, null, "fixture");
 

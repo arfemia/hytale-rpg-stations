@@ -83,8 +83,8 @@ import com.ziggfreed.common.i18n.NativeNames;
 import com.ziggfreed.common.interaction.NativeChainFire;
 import com.ziggfreed.common.inventory.InventoryGrant;
 import com.ziggfreed.common.loot.FactorLookup;
+import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootRef;
-import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.common.sound.Sound3D;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.common.util.NumberFormatter;
@@ -1116,11 +1116,10 @@ public final class StationService {
         s.cycleOutputItemId = primaryOutput != null ? primaryOutput.getItemId() : null;
         StationStep.Produce produceStep = StationStep.Produce.of(yieldedOutputs,
                 StationStep.Produce.TO_INVENTORY);
-        // The action's effective Bonus rolls ride the implicit program's own Roll phase, so this
-        // route resolves them at BUILD time rather than at completion.
-        Roll[] resolvedRolls = effectiveBonusRolls(asset, action).toArray(new Roll[0]);
-        List<StationStep> steps = ImplicitProgram.build(consumeStep, produceStep, resolvedRolls,
-                action.getPresentation());
+        // The action's effective Bonus rides the implicit program's own Roll phase, which is why this
+        // route runs no separate completion-time pass.
+        List<StationStep> steps = ImplicitProgram.build(consumeStep, produceStep,
+                effectiveBonus(asset, action), action.getPresentation());
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps,
                 attemptCycleIndex, 0, false, snapshot, false);
     }
@@ -1169,26 +1168,27 @@ public final class StationService {
     }
 
     /**
-     * The action's EFFECTIVE {@code Bonus} rolls: its own group, plus every matching
-     * {@code ExtensionAsset}'s appended lootables and inline rolls, expanded through
-     * {@link StationLootEngine#resolveRolls}. The ONE resolution all THREE Bonus read sites share - the
-     * implicit convert cycle (which folds them into its program's own Roll phase), an authored
-     * program's completed pass, and the session's Completion pass - so no route can ever see a
-     * different effective Bonus than another for the same action.
+     * The action's EFFECTIVE {@code Bonus}: its own group, plus every matching
+     * {@code ExtensionAsset}'s appended lootables and inline rolls. The ONE read all THREE Bonus
+     * routes share - the implicit convert cycle (which hands it to its program's own Roll phase),
+     * an authored program's completed pass, and the session's Completion pass - so no route can
+     * ever see a different effective Bonus than another for the same action.
      *
-     * <p>Trigger filtering is deliberately NOT done here: {@link StationLootEngine#rollAndGrant} takes the
-     * trigger and skips every roll that does not carry it, so one resolution serves the
-     * {@code Cycle} and {@code Completion} passes alike.
+     * <p>What each referenced table HOLDS is resolved one step later, by
+     * {@link StationLootEngine#resolve}, so every route reads a shared table the same way: its
+     * extension-composed rolls and its pool alike. Trigger filtering is deliberately not done at
+     * either step - {@link StationLootEngine#rollAndGrant} takes the trigger and skips every roll
+     * that does not carry it, so one read serves the {@code Cycle} and {@code Completion} passes.
      */
-    @Nonnull
-    static List<Roll> effectiveBonusRolls(@Nonnull StationAsset asset,
+    @Nullable
+    static LootRef effectiveBonus(@Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action) {
         LootRef bonus = action.getBonus();
         String target = ActionResolver.actionTargetId(asset, action.getActionId());
         if (target != null) {
             bonus = ExtensionCatalog.getInstance().applyToActionBonus(asset.getId(), target, bonus);
         }
-        return StationLootEngine.resolveRolls(bonus);
+        return bonus;
     }
 
     /**
@@ -1615,7 +1615,7 @@ public final class StationService {
      * runs.
      *
      * <p>Same snapshot, same {@link #applyGrantResult} handoff, and the same effective
-     * {@link #effectiveBonusRolls} the other two routes read. {@code Grants.OutputItems} is the one
+     * {@link #effectiveBonus} the other two routes read. {@code Grants.OutputItems} is the one
      * thing that still lands nowhere here: an authored program has no single cycle output to add
      * items to ({@code s.cycleOutputItemId} stays null and
      * {@link #grantBonusOutputItems} no-ops), which is exactly what the
@@ -1627,11 +1627,11 @@ public final class StationService {
             @Nullable CommandBuffer<EntityStore> commandBuffer,
             @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
             @Nonnull FactorLookup snapshot, int cycleIndex) {
-        List<Roll> rolls = effectiveBonusRolls(asset, action);
-        if (rolls.isEmpty()) {
+        LootEngine.Resolved resolved = StationLootEngine.resolve(effectiveBonus(asset, action));
+        if (resolved.rolls().isEmpty() && resolved.pools().isEmpty()) {
             return;
         }
-        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(rolls,
+        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(resolved,
                 StationLootEngine.TRIGGER_CYCLE, snapshot, player,
                 s.playerRef, s.stationId, action.getActionId(), cycleIndex, commandBuffer, store,
                 s.blockX, s.blockY, s.blockZ);
@@ -1651,8 +1651,10 @@ public final class StationService {
             return;
         }
         ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, s.actionId);
-        List<Roll> rolls = effectiveBonusRolls(asset, action);
-        if (rolls.isEmpty()) {
+        // A pool names no trigger, so a completion pass evaluates this action's Completion-trigger
+        // rolls only; its tables' pools were drawn on the cycles that ran.
+        LootEngine.Resolved resolved = StationLootEngine.resolve(effectiveBonus(asset, action));
+        if (resolved.rolls().isEmpty()) {
             return;
         }
         Player player = store.getComponent(s.ref, Player.getComponentType());
@@ -1660,7 +1662,7 @@ public final class StationService {
             return;
         }
         FactorLookup snapshot = FactorRegistryImpl.getInstance().snapshotFor(buildFactorContext(s, store, player, action, s.cyclesDone));
-        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(rolls,
+        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(resolved,
                 StationLootEngine.TRIGGER_COMPLETION, snapshot, player,
                 s.playerRef, s.stationId, s.actionId, s.cyclesDone, commandBuffer, store,
                 s.blockX, s.blockY, s.blockZ);

@@ -5,6 +5,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.common.loot.LootGrants;
+import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.StationStep;
@@ -28,7 +29,7 @@ public class ImplicitProgramTest {
         StationStep.Produce produce = StationStep.Produce.ofOne("Wood_Hardwood_Planks", 2, "Inventory");
         Presentation cyclePresentation = Presentation.ofSound("SFX_Wood_Break");
 
-        List<StationStep> steps = ImplicitProgram.build(consume, produce, new Roll[0], cyclePresentation);
+        List<StationStep> steps = ImplicitProgram.build(consume, produce, null, cyclePresentation);
 
         assertEquals(1, steps.size(), "scope-2 collapses the four-step program onto ONE step");
         StationStep step = steps.get(0);
@@ -41,16 +42,17 @@ public class ImplicitProgramTest {
         StationStep.Consume consume = StationStep.Consume.ofOne("Wood_Oak_Trunk", null, 1, "Inventory");
         StationStep.Produce produce = StationStep.Produce.ofOne("Wood_Hardwood_Planks", 2, "Inventory");
         Roll[] rolls = new Roll[]{Roll.of("Cycle", null, null, null, LootGrants.ofDropList("Fixture_Drops"), null)};
+        LootRef bonus = LootRef.of(new String[]{"fixture_table"}, rolls);
         Presentation cyclePresentation = Presentation.ofSound("SFX_Wood_Break");
 
-        List<StationStep> steps = ImplicitProgram.build(consume, produce, rolls, cyclePresentation);
+        List<StationStep> steps = ImplicitProgram.build(consume, produce, bonus, cyclePresentation);
         StationStep step = steps.get(0);
 
         assertSame(consume, step.getConsume());
         assertSame(produce, step.getProduce());
+        assertSame(bonus, step.getRoll(),
+                "the whole Bonus ref rides the Roll phase, so a referenced table's pool reaches it too");
         assertSame(rolls, step.getRoll().getRolls());
-        assertNull(step.getRoll().getLootables(),
-                "the implicit program pre-resolves lootable refs - no Lootables ref on the built step");
         assertSame(cyclePresentation, step.getPresentation());
     }
 
@@ -59,7 +61,7 @@ public class ImplicitProgramTest {
         StationStep.Consume consume = StationStep.Consume.ofOne("X", null, 1, "Inventory");
         StationStep.Produce produce = StationStep.Produce.ofOne("Y", 1, "Inventory");
 
-        List<StationStep> steps = ImplicitProgram.build(consume, produce, new Roll[0], null);
+        List<StationStep> steps = ImplicitProgram.build(consume, produce, null, null);
 
         assertNull(steps.get(0).getPresentation(), "a station with no cycle Presentation authors no presentation phase");
     }
@@ -69,7 +71,7 @@ public class ImplicitProgramTest {
         StationStep.Consume consume = StationStep.Consume.ofOne("X", null, 1, "Inventory");
         StationStep.Produce produce = StationStep.Produce.ofOne("Y", 1, "Inventory");
 
-        List<StationStep> steps = ImplicitProgram.build(consume, produce, new Roll[0], null);
+        List<StationStep> steps = ImplicitProgram.build(consume, produce, null, null);
 
         assertEquals(ImplicitProgram.ID_WORK, steps.get(0).getId());
     }

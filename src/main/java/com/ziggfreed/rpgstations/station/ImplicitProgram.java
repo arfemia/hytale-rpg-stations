@@ -7,7 +7,6 @@ import javax.annotation.Nullable;
 
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
-import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**
@@ -24,9 +23,8 @@ import com.ziggfreed.rpgstations.asset.StationStep;
  *
  * <p>Zero engine/store touch - takes only already-resolved value objects
  * ({@link StationStep.Consume}/{@link StationStep.Produce} built from a live {@code ConversionCheck}
- * pick, an already-{@code LootEngine.resolveRolls}-resolved {@link Roll} array wrapped into a
- * {@link LootRef}, and the resolved action's {@code Moments.Cycle} {@link Presentation}) so it is
- * unit-testable without a live server.
+ * pick, the action's effective {@link LootRef}, and the resolved action's {@code Moments.Cycle}
+ * {@link Presentation}) so it is unit-testable without a live server.
  */
 final class ImplicitProgram {
 
@@ -37,19 +35,19 @@ final class ImplicitProgram {
 
     /**
      * Build the single-step implicit program (a one-element list, so the dispatch choke point sees
-     * the SAME {@code List<StationStep>} shape an authored program yields). {@code resolvedRolls}
-     * is the action's {@code Bonus} group ALREADY resolved through {@code loot.LootEngine#resolveRolls}
-     * (Lootables + inline Rolls concatenated) - the {@code Roll} phase never re-resolves a
-     * {@code LootRef.Lootables} reference, it only evaluates the inline array it is handed (mirroring
-     * how an AUTHORED step's own inline {@code Rolls} works, so one Roll phase serves both origins).
+     * the SAME {@code List<StationStep>} shape an authored program yields). {@code bonus} is the
+     * action's effective {@code Bonus} group - the ref itself, referenced tables and inline rolls
+     * alike - handed to the {@code Roll} phase exactly as an AUTHORED step's own {@code Roll} ref
+     * is, so ONE resolution serves both origins and a referenced table's pool reaches this route
+     * too.
      */
     @Nonnull
     static List<StationStep> build(@Nonnull StationStep.Consume consume, @Nonnull StationStep.Produce produce,
-            @Nonnull Roll[] resolvedRolls, @Nullable Presentation cyclePresentation) {
+            @Nullable LootRef bonus, @Nullable Presentation cyclePresentation) {
         StationStep step = StationStep.of(ID_WORK)
                 .withConsume(consume)
                 .withProduce(produce)
-                .withRoll(LootRef.of(null, resolvedRolls))
+                .withRoll(bonus)
                 .withPresentation(cyclePresentation);
         return List.of(step);
     }

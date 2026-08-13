@@ -368,7 +368,7 @@ public class ExtensionCatalogTest {
         fold(ext("finds-ext", "{ \"Target\":{\"Lootable\":\"FixtureFinds\"}, \"Rolls\":[ {"
                 + " \"Trigger\":\"Cycle\", \"Grants\":{\"DropLists\":[\"Fixture_Extra_Drops\"]} } ] }"));
 
-        List<Roll> rolls = StationLootEngine.resolveRolls(LootRef.of(new String[] {"FixtureFinds"}, null));
+        List<Roll> rolls = StationLootEngine.resolve(LootRef.of(new String[] {"FixtureFinds"}, null)).rolls();
         assertEquals(List.of("Fixture_Base_Drops", "Fixture_Extra_Drops"), dropListIds(rolls),
                 "the appended roll lands AFTER the table's own");
     }

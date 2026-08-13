@@ -21,6 +21,7 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.common.loot.LootEngine;
+import com.ziggfreed.common.loot.LootPool;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.LootableAsset;
 import com.ziggfreed.common.loot.LootableConfig;
@@ -35,8 +36,8 @@ import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * The STATION-shaped half of the loot pass: it resolves which rolls a site evaluates (this engine's
- * own extension composition), wires the shared loot engine's seams to a work session's world, and
+ * The STATION-shaped half of the loot pass: it resolves what a site evaluates (this engine's own
+ * extension composition), wires the shared loot engine's seams to a work session's world, and
  * reports back the three station-only outcomes a cycle needs in its hands.
  *
  * <p>The rolling itself - conditions, chance, ladder, grants, and the smart-cue rule - is
@@ -48,7 +49,9 @@ import com.ziggfreed.rpgstations.util.Log;
  *   <li><b>Extension-aware table resolution.</b> A referenced table's rolls are its EFFECTIVE ones:
  *       whatever it authors, plus every {@code Target:{Lootable}} extension's appended rolls. The
  *       merge belongs at THIS read rather than at each caller, so a table gains its extended rolls
- *       everywhere it is referenced and no site can be left seeing the unextended table.</li>
+ *       everywhere it is referenced and no site can be left seeing the unextended table. The table's
+ *       {@code Pool} rides along with them, so a station referencing a pooled table draws that bag
+ *       exactly as a chest would.</li>
  *   <li><b>The station sinks.</b> Item grants go hotbar-first, then backpack storage, then a ground
  *       drop at the station block; native drop lists roll through {@code ItemModule} and grant the
  *       same way. A stack that fits nowhere still lands as a ground item rather than being
@@ -185,10 +188,10 @@ public final class StationLootEngine {
 
     // ==================== resolution ====================
 
-    /** The rolls a {@link LootRef} evaluates, with this engine's extension composition applied. */
+    /** Everything a {@link LootRef} evaluates, with this engine's extension composition applied. */
     @Nonnull
-    public static List<Roll> resolveRolls(@Nullable LootRef loot) {
-        return resolveRolls(loot, "Bonus.Lootables");
+    public static LootEngine.Resolved resolve(@Nullable LootRef loot) {
+        return resolve(loot, "Bonus.Lootables");
     }
 
     /**
@@ -196,15 +199,22 @@ public final class StationLootEngine {
      * {@code "Roll step 'Strike'"}), so one resolution serves every reference site without any of
      * them losing its own diagnostic.
      *
+     * <p>A referenced table contributes BOTH halves of what it holds: its rolls (its own, plus every
+     * {@code Target:{Lootable}} extension's appended ones) and its {@code Pool}. Each table keeps its
+     * own pool rather than the pools being poured together, because a pool is a bag whose entries
+     * compete for the same picks - merging two would change the odds inside both. Two referenced
+     * tables draw twice, once each.
+     *
      * <p>An id no table answers to is SKIPPED rather than failing the pass - one bad reference must
      * not cost a player the rest of the loot, and the validator catches the same mistake at
      * authoring time where it is cheap to fix.
      */
     @Nonnull
-    public static List<Roll> resolveRolls(@Nullable LootRef loot, @Nonnull String siteLabel) {
-        List<Roll> out = new ArrayList<>();
+    public static LootEngine.Resolved resolve(@Nullable LootRef loot, @Nonnull String siteLabel) {
+        List<Roll> rolls = new ArrayList<>();
+        List<LootPool> pools = new ArrayList<>();
         if (loot == null) {
-            return out;
+            return new LootEngine.Resolved(rolls, pools);
         }
         String[] lootables = loot.getLootables();
         if (lootables != null) {
@@ -217,27 +227,29 @@ public final class StationLootEngine {
                     Log.fine("STATION " + siteLabel + " references unknown lootable '" + tableId + "'");
                     continue;
                 }
-                Roll[] rolls = ExtensionCatalog.getInstance().applyToLootableRolls(tableId, table.getRolls());
-                if (rolls != null) {
-                    out.addAll(Arrays.asList(rolls));
+                Roll[] extended = ExtensionCatalog.getInstance().applyToLootableRolls(tableId, table.getRolls());
+                if (extended != null) {
+                    rolls.addAll(Arrays.asList(extended));
                 }
+                pools.addAll(table.poolOrEmpty());
             }
         }
         Roll[] inline = loot.getRolls();
         if (inline != null) {
-            out.addAll(Arrays.asList(inline));
+            rolls.addAll(Arrays.asList(inline));
         }
-        return out;
+        return new LootEngine.Resolved(rolls, pools);
     }
 
     // ==================== the pass ====================
 
     /**
-     * Evaluate and apply every roll answering to {@code trigger}, against ONE {@code lookup} for the
-     * whole batch. {@code store}/{@code blockX,Y,Z} are the ground-drop fallback target.
+     * Evaluate and apply everything {@code resolved} holds that answers to {@code trigger}, against
+     * ONE {@code lookup} for the whole batch. {@code store}/{@code blockX,Y,Z} are the ground-drop
+     * fallback target.
      */
     @Nonnull
-    public static GrantResult rollAndGrant(@Nonnull List<Roll> rolls, @Nonnull String trigger,
+    public static GrantResult rollAndGrant(@Nonnull LootEngine.Resolved resolved, @Nonnull String trigger,
             @Nonnull FactorLookup lookup, @Nonnull Player player, @Nullable PlayerRef playerRef,
             @Nonnull String stationId, @Nonnull String actionId, int cycleIndex,
             @Nullable CommandBuffer<EntityStore> commandBuffer,
@@ -246,7 +258,7 @@ public final class StationLootEngine {
                 id -> rollAndGrantDropList(id, player, commandBuffer, store, blockX, blockY, blockZ);
         LootEngine.ItemSink items = (itemId, count) ->
                 grantItem(itemId, count, player, commandBuffer, store, blockX, blockY, blockZ);
-        return rollAndGrant(rolls, trigger, lookup, () -> ThreadLocalRandom.current().nextDouble(),
+        return rollAndGrant(resolved, trigger, lookup, () -> ThreadLocalRandom.current().nextDouble(),
                 items, dropLists, subjectOf(player, playerRef),
                 playerRef != null
                         ? CommandRewardExecutor.placeholders(playerRef, stationId, actionId, cycleIndex)
@@ -257,30 +269,47 @@ public final class StationLootEngine {
     /**
      * The seam-driven core, with every engine handle already reduced to an injected function, so a
      * fixture test drives a whole pass against a PINNED table outcome instead of live randomness.
+     *
+     * <p>Rolls answer to a trigger and a pool does not, which is why the two halves are applied in
+     * two calls rather than one. A referenced table's pool is drawn on the CYCLE pass, the station's
+     * own default moment: drawing it again on the completion pass would hand one session the same
+     * bag twice, so the completion pass evaluates that table's Completion-trigger rolls and nothing
+     * else. Rolls apply before pool picks, matching the shared engine's own order.
      */
     @Nonnull
-    static GrantResult rollAndGrant(@Nonnull List<Roll> rolls, @Nonnull String trigger,
+    static GrantResult rollAndGrant(@Nonnull LootEngine.Resolved resolved, @Nonnull String trigger,
             @Nonnull FactorLookup lookup, @Nonnull DoubleSupplier chanceSample,
             @Nullable LootEngine.ItemSink items, @Nullable LootEngine.DropListSink dropLists,
             @Nonnull Subject subject, @Nullable Map<String, String> placeholders,
             @Nonnull String sourceId) {
         GrantResult result = new GrantResult(TRIGGER_CYCLE.equalsIgnoreCase(trigger));
         RewardKindRegistry kinds = StationRewardKinds.forPass(result);
-        LootEngine.Sinks.Builder sinks = LootEngine.Sinks.builder()
+        LootEngine.Sinks.Builder builder = LootEngine.Sinks.builder()
                 .items(items)
                 .dropLists(dropLists)
                 .rewards(kinds, subject)
                 .sourceId("station:" + sourceId)
                 .warn(message -> Log.fine("STATION loot " + message));
         if (placeholders != null) {
-            sinks.commands(CommandRewardExecutor.consoleAs(placeholders.getOrDefault("player", "")),
+            builder.commands(CommandRewardExecutor.consoleAs(placeholders.getOrDefault("player", "")),
                     placeholders);
         }
-        LootEngine.Result shared = LootEngine.rollAndGrant(rolls, trigger, lookup, chanceSample, sinks.build());
-        result.dropListItems.putAll(shared.getItems());
+        LootEngine.Sinks sinks = builder.build();
+        absorb(result, LootEngine.rollAndGrant(resolved.rolls(), trigger, lookup, chanceSample, sinks));
+        if (result.cycleTrigger && !resolved.pools().isEmpty()) {
+            absorb(result, LootEngine.rollAndGrant(List.of(), resolved.pools(), null, lookup,
+                    chanceSample, sinks));
+        }
+        return result;
+    }
+
+    /** Fold one shared-engine pass into the station tally, so two calls read as one pass. */
+    private static void absorb(@Nonnull GrantResult result, @Nonnull LootEngine.Result shared) {
+        for (Map.Entry<String, Integer> entry : shared.getItems().entrySet()) {
+            result.dropListItems.merge(entry.getKey(), entry.getValue(), Integer::sum);
+        }
         result.cues.addAll(shared.getCues());
         result.commandsRun += shared.getCommandsRun();
-        return result;
     }
 
     /**
