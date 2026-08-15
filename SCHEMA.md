@@ -735,7 +735,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Kind` | `string` | `null` | The registered reward kind that pays this out. A kind nobody registered pays nothing, so a line written for an absent mod costs only that line. |
-| `Params` | map of `string` | `null` | The arguments handed to that kind, as text. Which keys mean what is documented by whoever owns the kind (the built-in item kind reads Item and Count). |
+| `Params` | map of `scalarString` | `null` | The arguments handed to that kind. Which keys mean what is documented by whoever owns the kind (the built-in item kind reads Item and Count). A number or true/false may be written bare (Count: 3); other values take quotes. |
 
 <a id="type-condition"></a>
 ## Condition
