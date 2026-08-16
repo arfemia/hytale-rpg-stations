@@ -300,15 +300,15 @@ public class RpgStationsPlugin extends JavaPlugin {
      *
      * <p>Two structures inside this engine self-register a per-world evictor at construction (the
      * session queue partition and the frame-gate map), and both rely on somebody calling
-     * {@code WorldEvictors.onWorldRemoved}. Nothing here ever did - the fan-out only fired at all
-     * when a co-installed mod happened to register its own listener, which made this mod's per-world
-     * cleanup correct only in the presence of another mod. Standalone, an unloaded world's session
-     * queue, its frame gate, and every block-keyed entry naming it survived for the whole uptime,
-     * pinning the {@code World} object itself.
-     *
-     * <p>Ordering is load-bearing: this engine's own teardown runs FIRST (it reads the per-world
-     * session queue the shared fan-out is about to drop), then the shared fan-out. A second
-     * registrant elsewhere in the process is harmless - every evictor is an idempotent removal.
+     * {@code WorldEvictors.onWorldRemoved}. {@code ziggfreed-common}'s own plugin does that
+     * unconditionally from its {@code setup()} (its {@code RemoveWorldEvent} listener), so the
+     * shared fan-out fires whenever the library is installed, with or without any other consumer.
+     * This mod's registration here is deliberate REDUNDANCY, kept for ORDERING: this engine's own
+     * teardown must run FIRST (it reads the per-world session queue the shared fan-out is about to
+     * drop), so it calls the fan-out itself right after, and the library's later call for the same
+     * world is a no-op because {@code WorldEvictors} guards against a second eviction of an
+     * already-removed world. A second registrant elsewhere in the process is harmless for the same
+     * reason - every evictor is an idempotent removal.
      *
      * <p><b>Two limits of this hook, both inherent to the event and stated so they are not
      * mistaken for guarantees.</b>
