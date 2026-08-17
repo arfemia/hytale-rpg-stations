@@ -1123,6 +1123,20 @@ singleton. [`StationValidator`](StationValidator.java) keeps its two-pass struct
 posture: `validateStructural()`/`runStructuralAndLog()` runs at EVERY asset-load fold (every
 check except cross-layer reference-existence ones); `validate()`/`runAndLog()` (the FULL set)
 runs ONCE post-load from the first `PlayerReadyEvent` and on demand from `/rpgstations validate`.
+
+**The result vocabulary is ziggfreed-common's, and this mod owns no copy of it.**
+`com.ziggfreed.common.validation.{Finding, Severity, ValidationReport}`, imported by short name:
+a finding is `{severity, code, message, sourceId, domain}` built via
+`Finding.error/warning/info(DOMAIN, code, message, sourceId)`, and `ValidationReport` supplies
+`summarize`/`problemCount`/`format`/`logAll`. `StationValidator.logReport` is the ONE log shape
+(the headline, WARN when `problemCount > 0`, then `logAll` with `Log::warn` for errors and
+`Log::info` for the rest); its per-line format is the library's
+`Station validation '<sourceId>' [CODE]: message`, so nothing here formats a finding by hand.
+The one thing that stays local is `atBlock(shared, label)`: it prefixes a shared loot-engine
+finding's message with the authored block (`Station[sawmill].Actions[work].Bonus.Rolls[0]`), which
+the loot validator cannot know, and re-files it under this engine's `DOMAIN`. Diagnostic messages
+are raw English by convention (an admin/log surface, not player-facing).
+
 The lang-key check (`langKeyKnownLive`) is a MERGED-view check: a miss against the jar's own
 `i18n.RpgStationsLangKeys` falls through to a LIVE `I18nModule.getMessage` query, so a pack's own
 additive `rpgstations.lang` overlay resolves correctly. **Multi-station/extension checks**:

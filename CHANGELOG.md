@@ -69,8 +69,10 @@ to recompile against a later release rather than treat these types as stable.
   extensible condition system (session length, tool durability/power, and similar session-derived
   factors, via a `FactorRegistry` other mods can extend), plus command rewards, so any third party
   integrates with zero code.
-- Adds validation (`StationValidator`, warn-only, never blocks) and a session-summary panel
-  (`ui/StationSummaryHud`) showing cycles and items consumed/produced, plus whatever extra rows a
+- Adds validation (`StationValidator`, warn-only, never blocks), reporting in ziggfreed-common's
+  shared finding vocabulary (`com.ziggfreed.common.validation.{Finding, Severity, ValidationReport}`)
+  so a validation hook another mod registers speaks the same record this engine does, and a
+  session-summary panel (`ui/StationSummaryHud`) showing cycles and items consumed/produced, plus whatever extra rows a
   listening mod adds via a registered `SummaryEnricher`.
 - Adds the `api` extension-surface artifact (still unfrozen at 0.1.0; the freeze lands at 1.0.0): native Hytale events for
   observe-only moments (session started/cycle completed/session completed/tool broke) and typed

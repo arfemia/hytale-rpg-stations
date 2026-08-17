@@ -42,6 +42,9 @@ import com.ziggfreed.common.loot.reward.RewardSpec;
 import com.ziggfreed.common.loot.stamp.RollPoolConfig;
 import com.ziggfreed.common.loot.stamp.StampSpec;
 import com.ziggfreed.common.loot.stamp.StatRollEntry;
+import com.ziggfreed.common.validation.Finding;
+import com.ziggfreed.common.validation.Severity;
+import com.ziggfreed.common.validation.ValidationReport;
 import com.ziggfreed.rpgstations.api.FindingSink;
 import com.ziggfreed.rpgstations.api.ValidationHook;
 import com.ziggfreed.rpgstations.api.ValidationScope;
@@ -67,13 +70,10 @@ import com.ziggfreed.rpgstations.i18n.RpgStationsLangKeys;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
 import com.ziggfreed.rpgstations.loot.StationRewardKinds;
 import com.ziggfreed.rpgstations.util.Log;
-import com.ziggfreed.rpgstations.validation.Finding;
-import com.ziggfreed.rpgstations.validation.Report;
-import com.ziggfreed.rpgstations.validation.Severity;
 
 /**
- * Read-only content diagnostic for station assets (design section 4.1), over the local
- * {@code validation/} mini-core and {@code util.Log}.
+ * Read-only content diagnostic for station assets (design section 4.1), over the shared library's
+ * {@code validation/} core and {@code util.Log}.
  *
  * <p><b>What it does NOT check, by construction.</b> A {@code Contribution}'s {@code Param}
  * semantics are the channel owner's business, and are validated by the owning mod - through a
@@ -301,8 +301,8 @@ public final class StationValidator {
     /**
      * The {@code api.FindingSink} adapter: appends a hook's advisory findings to the pass's own
      * list. The reporting mod owns its {@code code} vocabulary, so the code is recorded verbatim
-     * and the finding's DOMAIN names the hook's class instead of {@code "station"} - a server owner
-     * reading the log can tell at a glance which mod is talking. Blank codes/messages are dropped
+     * and the finding's DOMAIN names the hook's class instead of {@code "station"}, so anything
+     * grouping findings by domain can tell which mod is talking. Blank codes/messages are dropped
      * rather than logged as empty lines.
      */
     private record HookFindingSink(@Nonnull List<Finding> out, @Nonnull ValidationHook hook) implements FindingSink {
@@ -322,7 +322,7 @@ public final class StationValidator {
             if (code.isBlank() || message.isBlank()) {
                 return;
             }
-            out.add(new Finding(severity, hookDomain(), code, message, subjectId));
+            out.add(new Finding(severity, code, message, subjectId == null ? "" : subjectId, hookDomain()));
         }
 
         @Nonnull
@@ -1942,7 +1942,7 @@ public final class StationValidator {
         // JSON gets identical findings at a station, in a chest, and at a quest turn-in. Do not
         // re-derive any of it here; a second copy is how two engines end up disagreeing about the
         // same file.
-        for (Finding shared : adopt(LootableValidator.auditRoll(roll, id, null), label)) {
+        for (Finding shared : atBlock(LootableValidator.auditRoll(roll, id, null), label)) {
             out.add(shared);
         }
         // What stays here is what only a STATION knows: which factor ids this engine can answer,
@@ -1970,23 +1970,16 @@ public final class StationValidator {
     }
 
     /**
-     * Re-files a shared-vocabulary finding as one of this engine's own, prefixing {@code label} so
-     * the message still points at the exact authored block. The shared validator speaks in terms of
-     * a table and a roll index; a station author is looking at
+     * The shared loot validator's findings, each re-filed under this engine's domain with
+     * {@code label} prefixed onto the message so it still points at the exact authored block. The
+     * shared validator speaks in terms of a table and a roll index; a station author is looking at
      * {@code Station[sawmill].Actions[work].Bonus.Rolls[0]}.
      */
     @Nonnull
-    private static List<Finding> adopt(
-            @Nonnull List<com.ziggfreed.common.validation.Finding> shared, // FQN-OK: this mod's Finding and ziggfreed-common's meet in this method by definition
-            @Nonnull String label) {
+    private static List<Finding> atBlock(@Nonnull List<Finding> shared, @Nonnull String label) {
         List<Finding> out = new ArrayList<>(shared.size());
-        for (com.ziggfreed.common.validation.Finding f : shared) { // FQN-OK: this mod's Finding and ziggfreed-common's meet in this method by definition
-            Severity severity = switch (f.severity()) {
-                case ERROR -> Severity.ERROR;
-                case INFO -> Severity.INFO;
-                default -> Severity.WARNING;
-            };
-            out.add(new Finding(severity, DOMAIN, f.code(), label + ": " + f.message(), f.sourceId()));
+        for (Finding f : shared) {
+            out.add(new Finding(f.severity(), f.code(), label + ": " + f.message(), f.sourceId(), DOMAIN));
         }
         return out;
     }
@@ -3421,13 +3414,30 @@ public final class StationValidator {
 
     // ==================== Reporting (thin delegators over the shared core) ====================
 
+    /** The label every station report is filed under, in chat and in the log. */
+    private static final String LABEL = "Station validation";
+
     @Nonnull
     public static String summarize(@Nonnull List<Finding> findings) {
-        return Report.summarize("Station validation", findings);
+        return ValidationReport.summarize(LABEL, findings);
     }
 
     public static int problemCount(@Nonnull List<Finding> findings) {
-        return Report.problemCount(findings);
+        return ValidationReport.problemCount(findings);
+    }
+
+    /**
+     * The headline first, then every finding on its own line. An error is worth a WARN line in a
+     * server log; a warning about a mod that may not be installed is not, so the shared core's own
+     * error-versus-note split routes the two sinks.
+     */
+    private static void logReport(@Nonnull List<Finding> findings) {
+        if (ValidationReport.problemCount(findings) > 0) {
+            Log.warn(summarize(findings));
+        } else {
+            Log.info(summarize(findings));
+        }
+        ValidationReport.logAll(LABEL, findings, Log::warn, Log::info);
     }
 
     /**
@@ -3450,7 +3460,7 @@ public final class StationValidator {
      * {@code PlayerReadyEvent}.
      */
     public static void runAndLog() {
-        Report.logTo(DOMAIN, "Station validation", validate());
+        logReport(validate());
     }
 
     /**
@@ -3459,6 +3469,6 @@ public final class StationValidator {
      * see {@link #validateStructural}'s javadoc.
      */
     public static void runStructuralAndLog() {
-        Report.logTo(DOMAIN, "Station validation", validateStructural());
+        logReport(validateStructural());
     }
 }

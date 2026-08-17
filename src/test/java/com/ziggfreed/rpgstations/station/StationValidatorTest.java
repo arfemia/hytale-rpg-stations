@@ -31,8 +31,8 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.LootFixtures;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
-import com.ziggfreed.rpgstations.validation.Finding;
-import com.ziggfreed.rpgstations.validation.Severity;
+import com.ziggfreed.common.validation.Finding;
+import com.ziggfreed.common.validation.Severity;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

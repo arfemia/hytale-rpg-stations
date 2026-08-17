@@ -14,11 +14,11 @@ import com.hypixel.hytale.server.core.command.system.arguments.types.ArgTypes;
 import com.hypixel.hytale.server.core.command.system.basecommands.CommandBase;
 import com.hypixel.hytale.server.core.permissions.provider.HytalePermissionsProvider;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
+import com.ziggfreed.common.validation.Finding;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.station.StationCameraPreset;
 import com.ziggfreed.rpgstations.station.StationCameraPrefs;
 import com.ziggfreed.rpgstations.station.StationValidator;
-import com.ziggfreed.rpgstations.validation.Finding;
 
 /**
  * {@code /rpgstations <camera|validate> [action]} - the admin maintenance/tuning command group

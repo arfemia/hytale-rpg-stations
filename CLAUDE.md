@@ -249,7 +249,6 @@ src/main/java/com/ziggfreed/rpgstations/
   interaction/                see interaction/CLAUDE.md - StationUseInteraction (the rpg_station_use RootInteraction handler)
   ui/                         see ui/CLAUDE.md - StationSummaryHud (extends common's KeyedCustomHud)
   i18n/                       see i18n/CLAUDE.md - RpgMsg (the rpgstations. prefix wrapper over common Msg) + RpgStationsLangKeys
-  validation/                 see validation/CLAUDE.md - Finding/Severity/Report (the mini content-audit core; StationValidator itself lives in station/)
   util/                       Log (this mod's OWN guarded logging facade over RpgStationsPlugin.LOGGER - never another
                                mod's) + Permissions (OP-when-permissions-off else "rpgstations.admin") + ItemGrantUtil
                                (this mod's policy wrapper over ziggfreed-common's InventoryGrant, adding only
