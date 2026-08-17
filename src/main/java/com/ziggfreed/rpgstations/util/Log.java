@@ -3,77 +3,55 @@ package com.ziggfreed.rpgstations.util;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.ziggfreed.common.util.GuardedLogger;
 import com.ziggfreed.rpgstations.RpgStationsPlugin;
 
 /**
  * RPG Stations' own logging facade over {@link RpgStationsPlugin#LOGGER} - this mod's single
  * logging seam, never another mod's.
  *
- * <p>The raw flogger {@code LOGGER} throws when no Hytale log manager is installed (a
- * unit-test JVM): the resulting {@link Error} escapes {@code catch (Exception)} blocks
- * and crashes the test. Every method here swallows any logging failure so a parse /
- * validate / hot per-tick path stays unit-reachable; the guard is zero-cost when
- * nothing throws.
+ * <p>A thin static wrapper over one shared {@link GuardedLogger} instance (no prefix). See
+ * {@link GuardedLogger} for the guard itself: the raw flogger {@code LOGGER} throws when no Hytale
+ * log manager is installed (a unit-test JVM), and the resulting {@link Error} escapes
+ * {@code catch (Exception)} blocks and crashes the test; routing every call through one guarded
+ * instance is what keeps a parse / validate / hot per-tick path unit-reachable.
  */
 public final class Log {
+
+    private static final GuardedLogger DELEGATE = new GuardedLogger(() -> RpgStationsPlugin.LOGGER, "");
 
     private Log() {
     }
 
     public static void info(@Nonnull String message) {
-        try {
-            RpgStationsPlugin.LOGGER.atInfo().log(message);
-        } catch (Throwable ignored) {
-            // no log manager (unit JVM) - swallow so the caller stays test-reachable
-        }
+        DELEGATE.info(message);
     }
 
     public static void info(@Nonnull String message, @Nullable Throwable cause) {
-        try {
-            RpgStationsPlugin.LOGGER.atInfo().withCause(cause).log(message);
-        } catch (Throwable ignored) {
-        }
+        DELEGATE.info(message, cause);
     }
 
     public static void warn(@Nonnull String message) {
-        try {
-            RpgStationsPlugin.LOGGER.atWarning().log(message);
-        } catch (Throwable ignored) {
-        }
+        DELEGATE.warn(message);
     }
 
     public static void warn(@Nonnull String message, @Nullable Throwable cause) {
-        try {
-            RpgStationsPlugin.LOGGER.atWarning().withCause(cause).log(message);
-        } catch (Throwable ignored) {
-        }
+        DELEGATE.warn(message, cause);
     }
 
     public static void severe(@Nonnull String message) {
-        try {
-            RpgStationsPlugin.LOGGER.atSevere().log(message);
-        } catch (Throwable ignored) {
-        }
+        DELEGATE.severe(message);
     }
 
     public static void severe(@Nonnull String message, @Nullable Throwable cause) {
-        try {
-            RpgStationsPlugin.LOGGER.atSevere().withCause(cause).log(message);
-        } catch (Throwable ignored) {
-        }
+        DELEGATE.severe(message, cause);
     }
 
     public static void fine(@Nonnull String message) {
-        try {
-            RpgStationsPlugin.LOGGER.atFine().log(message);
-        } catch (Throwable ignored) {
-        }
+        DELEGATE.fine(message);
     }
 
     public static void fine(@Nonnull String message, @Nullable Throwable cause) {
-        try {
-            RpgStationsPlugin.LOGGER.atFine().withCause(cause).log(message);
-        } catch (Throwable ignored) {
-        }
+        DELEGATE.fine(message, cause);
     }
 }

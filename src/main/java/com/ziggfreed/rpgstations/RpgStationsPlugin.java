@@ -28,7 +28,6 @@ import com.hypixel.hytale.server.core.universe.world.events.RemoveWorldEvent;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.asset.AssetStoreRegistrar;
 import com.ziggfreed.common.cast.WorldEvictors;
-import com.ziggfreed.common.entity.performer.PerformerIdentityComponent;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
@@ -114,11 +113,6 @@ public class RpgStationsPlugin extends JavaPlugin {
     protected void setup() {
         RpgStationsApi.set(RpgStationsApiImpl.getInstance());
         FactorRegistryImpl.getInstance().registerBuiltins();
-        // Performer identity component (seam wave decision 48/55): a library ECS component has no
-        // owning plugin, so THIS consumer registers it once at setup() - without it, a performer
-        // still spawns/despawns but the orphan-reconcile sweep finds nothing (TYPE stays null,
-        // every attach/query guards on it). Enables PerformerReconciler for persistent performers.
-        PerformerIdentityComponent.register(getEntityStoreRegistry());
         registerStationAssetStore();
         registerActionAssetStore();
         registerExtensionAssetStore();

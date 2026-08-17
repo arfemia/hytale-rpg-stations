@@ -1031,9 +1031,10 @@ captured across frames). `s.puppetRef` is RE-POINTED at `performer.ref()` every 
 deferred spawn lands) so the direct-puppetRef readers (the `storeFor` store fallback, custody
 retrieval) never go stale. The `Walk` phase itself drives the performer seam
 (`s.performer.walkTo`/`WalkHandle`, F2 part b - `StationService#resolveWalkTarget` supplies the anchor
-target, the backend re-solves the path), not the raw ref. Identity/reconcile: `RpgStationsPlugin` registers
-`PerformerIdentityComponent` at setup + a once-per-world `PerformerReconciler.sweep(bootDespawnAll)`
-at first ready (`StationService.reconcilePerformersAtBoot`); `toggle` fires a deferred `engageStale`
+target, the backend re-solves the path), not the raw ref. Identity/reconcile: ZiggfreedCommon's own
+wiring root registers `PerformerIdentityComponent` at ITS setup (not this mod's); `RpgStationsPlugin`
+runs a once-per-world `PerformerReconciler.sweep(bootDespawnAll)` at first ready
+(`StationService.reconcilePerformersAtBoot`); `toggle` fires a deferred `engageStale`
 sweep (`reconcileStalePerformersAtEngage`, via `world.execute` so the native sweep runs outside the
 processing lock). **Legacy mechanics carry over below.** **Spawn + hide, at engage**
 (`spawnAndHide`, called from `toggle` AFTER the mount-attach block): resolves `Puppet.Offset` (the
