@@ -113,7 +113,7 @@ import com.ziggfreed.rpgstations.loot.StationLootEngine;
 import com.ziggfreed.rpgstations.pages.PickerCategories;
 import com.ziggfreed.rpgstations.pages.RpgStationPickerPage;
 import com.ziggfreed.rpgstations.ui.StationSummaryHud;
-import com.ziggfreed.rpgstations.util.InventoryAccess;
+import com.ziggfreed.common.inventory.PlayerAccess;
 import com.ziggfreed.rpgstations.util.ItemDropUtil;
 import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
@@ -984,7 +984,7 @@ public final class StationService {
             Player heartbeatPlayer = store.getComponent(s.ref, Player.getComponentType());
             boolean matches = heartbeatPlayer != null && heldToolMatches(heartbeatPlayer, s.toolReq);
             ItemStack heldStack = heartbeatPlayer != null
-                    ? InventoryAccess.activeHotbarItemOf(heartbeatPlayer) : null;
+                    ? PlayerAccess.activeHotbarItem(heartbeatPlayer) : null;
             boolean broken = heldStack != null && heldStack.isBroken();
             StopReason toolStop = toolGateStopReason(matches, broken);
             if (toolStop != null) {
@@ -1878,7 +1878,7 @@ public final class StationService {
         if (gatherType == null || gatherType.isBlank()) {
             return 0.0;
         }
-        ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+        ItemStack held = PlayerAccess.activeHotbarItem(player);
         Item item = held != null ? held.getItem() : null;
         ItemTool itemTool = item != null ? item.getTool() : null;
         ItemToolSpec[] specs = itemTool != null ? itemTool.getSpecs() : null;
@@ -1902,7 +1902,7 @@ public final class StationService {
      */
     private static double resolveHeldToolQuality(@Nonnull Player player) {
         try {
-            ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+            ItemStack held = PlayerAccess.activeHotbarItem(player);
             Item item = held != null ? held.getItem() : null;
             if (item == null) {
                 return 0.0;
@@ -1922,7 +1922,7 @@ public final class StationService {
      */
     private static double resolveHeldToolItemLevel(@Nonnull Player player) {
         try {
-            ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+            ItemStack held = PlayerAccess.activeHotbarItem(player);
             Item item = held != null ? held.getItem() : null;
             return item == null ? 0.0 : Math.max(0.0, item.getItemLevel());
         } catch (Throwable t) {
@@ -1933,7 +1933,7 @@ public final class StationService {
 
     /** The active hotbar item's durability percent [0,100]; 100 when no item held or it tracks no durability. */
     private static double resolveHeldToolDurabilityPercent(@Nonnull Player player) {
-        ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+        ItemStack held = PlayerAccess.activeHotbarItem(player);
         if (held == null || held.isEmpty() || held.getMaxDurability() <= 0) {
             return 100.0;
         }
@@ -2592,7 +2592,7 @@ public final class StationService {
     @Nonnull
     private static Map<String, Double> resolveHeldToolPowers(@Nonnull Player player) {
         try {
-            ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+            ItemStack held = PlayerAccess.activeHotbarItem(player);
             Item item = held != null ? held.getItem() : null;
             ItemTool itemTool = item != null ? item.getTool() : null;
             return HeldItemUtil.toolPowersOf(itemTool != null ? itemTool.getSpecs() : null);
@@ -3587,7 +3587,7 @@ public final class StationService {
                 }
             }
         }
-        ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+        ItemStack held = PlayerAccess.activeHotbarItem(player);
         String heldItemId = held != null ? held.getItemId() : null;
         return heldItemId != null && !heldItemId.isBlank() ? heldItemId : null;
     }
@@ -3636,7 +3636,7 @@ public final class StationService {
     private void onPickerSelect(@Nonnull Ref<EntityStore> ref, @Nonnull Store<EntityStore> store,
             @Nonnull UUID playerUuid, @Nonnull String blockKey, @Nonnull String categoryId) {
         pendingByPlayer.put(playerUuid, new PendingSelection(blockKey, categoryId));
-        PlayerRef pr = InventoryAccess.playerRefOf(store.getComponent(ref, Player.getComponentType()));
+        PlayerRef pr = PlayerAccess.playerRef(store, ref);
         if (pr != null) {
             toast(pr, RpgMsg.tr("ui.station.picker.selected"));
         }
@@ -3688,7 +3688,7 @@ public final class StationService {
         }
         boolean sawInputWithoutRoom = false;
         try {
-            var combined = InventoryAccess.combinedBackpackStorageHotbarOf(player);
+            var combined = PlayerAccess.combinedBackpackStorageHotbar(player);
             for (StationAsset.Conversion c : conversions) {
                 if (!runnableShape(c)) {
                     continue;
@@ -4965,7 +4965,7 @@ public final class StationService {
         }
         try {
             Player player = store.getComponent(ref, Player.getComponentType());
-            ItemStack held = player != null ? InventoryAccess.activeHotbarItemOf(player) : null;
+            ItemStack held = player != null ? PlayerAccess.activeHotbarItem(player) : null;
             Item item = held != null ? held.getItem() : null;
             String itemAnimationsId = item != null ? item.getPlayerAnimationsId() : null;
             if (itemAnimationsId == null || itemAnimationsId.isBlank()) {
@@ -5238,7 +5238,7 @@ public final class StationService {
      */
     @Nullable
     private static String selectActionForHeld(@Nonnull StationAsset asset, @Nonnull Player player) {
-        ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+        ItemStack held = PlayerAccess.activeHotbarItem(player);
         String heldItemId = held != null ? held.getItemId() : null;
         return ActionResolver.selectActionByFamily(asset, heldItemId, liveResourceTypeIdsOf(heldItemId),
                 liveRawTagsOf(heldItemId), liveFunctionOf(heldItemId));
@@ -5570,7 +5570,7 @@ public final class StationService {
             if (!ItemUtils.canDecreaseItemStackDurability(ref, store)) {
                 return;
             }
-            ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+            ItemStack held = PlayerAccess.activeHotbarItem(player);
             if (held == null || held.isEmpty() || held.isUnbreakable() || held.isBroken()) {
                 return;
             }
@@ -5602,7 +5602,7 @@ public final class StationService {
         if (!hasTags && !hasGather && !hasIds) {
             return true;
         }
-        ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+        ItemStack held = PlayerAccess.activeHotbarItem(player);
         Item item = held != null ? held.getItem() : null;
         String heldId = item != null ? item.getId() : null;
         if (item == null || heldId == null) {

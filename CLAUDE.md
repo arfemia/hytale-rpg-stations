@@ -34,7 +34,9 @@ display entity's `CommandBuffer` tick-safety fix, a restart-orphan action-select
 `NetworkId` fix + graceful degradation, PLUS the NEW press-F custody RETRIEVAL feature -
 `rpg_station_retrieve`, in-game CONFIRMED working), R7 (the station-icon `BlockType#getItem()`
 state-variant fix), the repo-wide deprecation sweep (33 call sites replaced with their
-javadoc-named non-deprecated equivalents, a new `util.InventoryAccess` DRYing every one), and the
+javadoc-named non-deprecated equivalents, all reading through `ziggfreed-common`'s
+`inventory.PlayerAccess`, the one shared primitive this mod and the MMO both call for that
+accessor shape), and the
 FULL PUPPET PRESENTATION BUILD (round-4: "mount the player, hide their player model, spawn a
 skinned puppet performing the work" - `StationAsset.Puppet`, `station.StationPuppetController`,
 `Hide.Route:"Scale"` in-game-CROWNED, primitives lifted to `ziggfreed-common`'s

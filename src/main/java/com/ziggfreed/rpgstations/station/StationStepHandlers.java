@@ -15,8 +15,10 @@ import org.joml.Vector3d;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.entity.entities.Player;
+import com.hypixel.hytale.server.core.inventory.InventoryComponent;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.inventory.ResourceQuantity;
+import com.hypixel.hytale.server.core.inventory.container.ItemContainer;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransaction;
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
@@ -45,7 +47,7 @@ import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.CommandRewardExecutor;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
 import com.ziggfreed.rpgstations.station.ExtensionCatalog;
-import com.ziggfreed.rpgstations.util.InventoryAccess;
+import com.ziggfreed.common.inventory.PlayerAccess;
 import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -414,7 +416,7 @@ final class StationStepHandlers {
                     "Consume.From '" + consume.effectiveFrom() + "' is not implemented");
         }
         try {
-            var combined = InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player);
+            var combined = PlayerAccess.combinedBackpackStorageHotbar(ctx.player);
             boolean repeating = ctx.action.getWork() != null && ctx.action.getWork().effectiveLooping();
             // The exact-item entries are checked as ONE batch (two entries naming the same item must
             // not each pass against the same stack); resource-family entries have no batch API, so
@@ -445,19 +447,19 @@ final class StationStepHandlers {
                 int quantity = item.effectiveQuantity();
                 if (isResourceRoute(item)) {
                     ResourceQuantity resource = new ResourceQuantity(ref, quantity);
-                    ResourceTransaction tx = InventoryAccess.storageOf(ctx.player).canRemoveResource(resource)
-                            ? InventoryAccess.storageOf(ctx.player).removeResource(resource)
-                            : InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeResource(resource);
+                    ResourceTransaction tx = storageContainer(ctx.player).canRemoveResource(resource)
+                            ? storageContainer(ctx.player).removeResource(resource)
+                            : PlayerAccess.combinedBackpackStorageHotbar(ctx.player).removeResource(resource);
                     StationService.tallyResourceConsumption(ctx.session, tx, ref);
                     // Iteration refund ledger (design 2.5/M1): record the REAL drained ids so a
                     // mid-iteration stop refunds them - unless a Produce.To:Custody clears the ledger.
                     StationService.recordIterationConsumedResource(ctx.session, tx, ref);
                 } else {
                     ItemStack input = new ItemStack(ref, quantity);
-                    if (InventoryAccess.storageOf(ctx.player).canRemoveItemStack(input)) {
-                        InventoryAccess.storageOf(ctx.player).removeItemStack(input);
+                    if (storageContainer(ctx.player).canRemoveItemStack(input)) {
+                        storageContainer(ctx.player).removeItemStack(input);
                     } else {
-                        InventoryAccess.combinedBackpackStorageHotbarOf(ctx.player).removeItemStack(input);
+                        PlayerAccess.combinedBackpackStorageHotbar(ctx.player).removeItemStack(input);
                     }
                     ctx.session.consumedItems.merge(ref, quantity, Integer::sum);
                     StationService.recordIterationConsumedItem(ctx.session, ref, quantity);
@@ -487,6 +489,18 @@ final class StationStepHandlers {
     /** PURE: does this ingredient take the native resource-type FAMILY route rather than an exact item id? */
     private static boolean isResourceRoute(@Nullable Ingredient item) {
         return item != null && item.getResourceTypeId() != null && !item.getResourceTypeId().isBlank();
+    }
+
+    /**
+     * The player's Storage section as its raw item CONTAINER: the one unwrap of the shared
+     * {@code PlayerAccess.storage} read, so the reagent probe and drain paths below never repeat
+     * it. {@code null} whenever the player's ref cannot be resolved or the section is absent, which
+     * is exactly what a caller dereferencing the container has always seen.
+     */
+    @Nullable
+    private static ItemContainer storageContainer(@Nonnull Player player) {
+        InventoryComponent.Storage storage = PlayerAccess.storage(player);
+        return storage != null ? storage.getInventory() : null;
     }
 
     /**
@@ -964,12 +978,12 @@ final class StationStepHandlers {
                 int quantity) {
             if (isResource) {
                 ResourceQuantity resource = new ResourceQuantity(ref, quantity);
-                return InventoryAccess.storageOf(player).canRemoveResource(resource)
-                        || InventoryAccess.combinedBackpackStorageHotbarOf(player).canRemoveResource(resource);
+                return storageContainer(player).canRemoveResource(resource)
+                        || PlayerAccess.combinedBackpackStorageHotbar(player).canRemoveResource(resource);
             }
             ItemStack want = new ItemStack(ref, quantity);
-            return InventoryAccess.storageOf(player).canRemoveItemStack(want)
-                    || InventoryAccess.combinedBackpackStorageHotbarOf(player).canRemoveItemStack(want);
+            return storageContainer(player).canRemoveItemStack(want)
+                    || PlayerAccess.combinedBackpackStorageHotbar(player).canRemoveItemStack(want);
         }
 
         /** Storage-first-then-combined removal; returns the REAL drained stack(s) for the caller's restore-on-failure ledger. */
@@ -978,16 +992,16 @@ final class StationStepHandlers {
                 @Nonnull String ref, int quantity) {
             if (isResource) {
                 ResourceQuantity resource = new ResourceQuantity(ref, quantity);
-                ResourceTransaction tx = InventoryAccess.storageOf(player).canRemoveResource(resource)
-                        ? InventoryAccess.storageOf(player).removeResource(resource)
-                        : InventoryAccess.combinedBackpackStorageHotbarOf(player).removeResource(resource);
+                ResourceTransaction tx = storageContainer(player).canRemoveResource(resource)
+                        ? storageContainer(player).removeResource(resource)
+                        : PlayerAccess.combinedBackpackStorageHotbar(player).removeResource(resource);
                 return drainedStacksOf(tx);
             }
             ItemStack want = new ItemStack(ref, quantity);
-            if (InventoryAccess.storageOf(player).canRemoveItemStack(want)) {
-                InventoryAccess.storageOf(player).removeItemStack(want);
+            if (storageContainer(player).canRemoveItemStack(want)) {
+                storageContainer(player).removeItemStack(want);
             } else {
-                InventoryAccess.combinedBackpackStorageHotbarOf(player).removeItemStack(want);
+                PlayerAccess.combinedBackpackStorageHotbar(player).removeItemStack(want);
             }
             return List.of(want);
         }

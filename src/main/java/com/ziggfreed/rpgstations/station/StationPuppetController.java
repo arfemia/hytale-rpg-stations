@@ -31,7 +31,7 @@ import com.ziggfreed.common.entity.performer.StationPerformer;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.common.codec.Vec3;
-import com.ziggfreed.rpgstations.util.InventoryAccess;
+import com.ziggfreed.common.inventory.PlayerAccess;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -621,7 +621,7 @@ final class StationPuppetController {
             return null;
         }
         try {
-            ItemStack held = InventoryAccess.activeHotbarItemOf(player);
+            ItemStack held = PlayerAccess.activeHotbarItem(player);
             return held != null ? held.getItemId() : null;
         } catch (Throwable t) {
             return null;

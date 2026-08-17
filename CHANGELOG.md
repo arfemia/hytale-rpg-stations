@@ -169,9 +169,15 @@ smoke passes still batched/pending as of this entry.
   #getCombined(..., BACKPACK_STORAGE_HOTBAR)`, the `PlayerRef` component fetch), never a
   guessed/wider alternative (`InventoryComponent#getItemInHand` was deliberately NOT substituted
   for `getActiveHotbarItem()` - it also folds in the `Tool` component, a different semantic).
-  New `util.InventoryAccess` (DRY: the shared ref/store null-guard + component fetch every one of
-  those call sites duplicated) replaces `LootEngine`'s own private `storageContainerOf` and backs
-  every other site. Zero `@SuppressWarnings("deprecation")` anywhere; `ziggfreed-common`'s
+  The player-accessor sites (`storage`/`hotbar`/`activeHotbarItem`/`combinedBackpackStorageHotbar`/
+  `playerRef`) read through `ziggfreed-common`'s `inventory.PlayerAccess` (the shared ref/store
+  guard + component fetch, so the replacement for a deprecated accessor has ONE shared home across
+  this mod and its siblings rather than a copy per mod), which also backs the shared
+  `InventoryGrant` delivery path behind `util/ItemGrantUtil`; the sweep's other replacements (the
+  component fetches named above at sites that never went through the deleted accessor class) stay
+  inline where they were. The one unwrap to the raw
+  Storage container stays a single private helper (`station/StationStepHandlers#storageContainer`),
+  so the reagent probe and drain paths never repeat it. Zero `@SuppressWarnings("deprecation")` anywhere; `ziggfreed-common`'s
   arc-touched files (`cast/CastKernel`/`StepSemantics`, `i18n/Msg`, `ui/hud/KeyedCustomHud`,
   `ui/rows/SummaryRow*`) were audited via a `-Xlint:deprecation` compile and carried zero
   deprecated calls to begin with.

@@ -1254,6 +1254,10 @@ the load-bearing lessons that still apply going forward:
 
 Deprecation discipline: this package (plus `StationStepHandlers`/`StationHoldController`/
 `interaction.StationUseInteraction`) is swept clean of deprecated API calls
-(`util.InventoryAccess` DRYs the non-deprecated replacements) - keep it that way per the root
-CLAUDE.md's never-call-a-deprecated-API edict; the shared source's deprecation javadoc always
-names the current replacement.
+(`ziggfreed-common`'s `inventory.PlayerAccess` DRYs the non-deprecated replacements, the one
+shared primitive this mod and the MMO both call) - keep it that way per the root CLAUDE.md's
+never-call-a-deprecated-API edict; the shared source's deprecation javadoc always names the
+current replacement. `PlayerAccess.storage` answers with the `InventoryComponent.Storage`
+COMPONENT, not its container, so `StationStepHandlers#storageContainer(Player)` is the one private
+unwrap the reagent probe and drain paths read through: add a site there, never a fresh
+`.getInventory()` chain.
