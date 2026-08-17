@@ -23,7 +23,7 @@ overlays only (`StationSummaryHud`, no player interaction).
   **Caller contract (binding, NOT enforced inside the page - decision 50):** open ONLY when 2+
   categories are available; NEVER auto-open (sneak+F only, per the round-3 selector-entity
   press-F pattern the ledger documents as the fallback if a sneak read misbehaves in-game).
-  - **Route the engine calls**: `RpgStationPickerPage.open(ref, store, playerRef, categories,
+  - **Route the engine calls**: `RpgStationPickerPage.open(ref, store, categories,
     showLocked, callback)` - a static, try-guarded, never-throws helper (mirrors
     `StationSummaryHud.tryShow`'s fail-soft shape) that resolves the live `Player` and opens the
     page; `false` on any missing/invalid state, never a throw into the caller's interaction

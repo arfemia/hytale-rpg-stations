@@ -120,7 +120,7 @@ public final class StationUseInteraction extends SimpleInstantInteraction {
             boolean sneaking = readSneaking(commandBuffer, ctx.getEntity());
 
             String id = stationId != null ? stationId.toLowerCase() : "";
-            StationService.getInstance().toggle(store, ref, playerRef, player, commandBuffer, id,
+            StationService.getInstance().toggle(store, ref, player, commandBuffer, id,
                     targetBlock.x, targetBlock.y, targetBlock.z, sneaking);
 
             ctx.getState().state = InteractionState.Finished;

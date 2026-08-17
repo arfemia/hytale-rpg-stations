@@ -95,7 +95,7 @@ public final class StationRetrieveInteraction extends SimpleInstantInteraction {
                 return;
             }
 
-            StationService.getInstance().retrieveCustody(store, ref, playerRef, commandBuffer, targetEntity);
+            StationService.getInstance().retrieveCustody(store, ref, commandBuffer, targetEntity);
 
             ctx.getState().state = InteractionState.Finished;
 

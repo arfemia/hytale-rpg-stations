@@ -24,6 +24,7 @@ import com.hypixel.hytale.server.core.ui.builder.UIEventBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
+import com.ziggfreed.common.inventory.PlayerAccess;
 import com.ziggfreed.common.ui.ZigRichButton;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.pages.PickerCategories.Category;
@@ -92,11 +93,12 @@ public final class RpgStationPickerPage extends InteractiveCustomUIPage<RpgStati
      * opening anything on any missing/invalid state.
      */
     public static boolean open(@Nonnull Ref<EntityStore> ref, @Nonnull Store<EntityStore> store,
-            @Nonnull PlayerRef playerRef, @Nonnull List<Category> categories, boolean showLocked,
+            @Nonnull List<Category> categories, boolean showLocked,
             @Nonnull PickerCallback callback) {
         try {
+            PlayerRef playerRef = PlayerAccess.playerRef(store, ref);
             Player player = (Player) store.getComponent(ref, Player.getComponentType());
-            if (player == null) {
+            if (playerRef == null || player == null) {
                 return false;
             }
             player.getPageManager().openCustomPage(ref, store,

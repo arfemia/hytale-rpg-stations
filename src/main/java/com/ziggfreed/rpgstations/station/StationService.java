@@ -366,9 +366,12 @@ public final class StationService {
      * and engage. Never throws.
      */
     public void toggle(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
-                       @Nonnull PlayerRef playerRef, @Nonnull Player player,
-                       @Nonnull CommandBuffer<EntityStore> commandBuffer,
+                       @Nonnull Player player, @Nonnull CommandBuffer<EntityStore> commandBuffer,
                        @Nonnull String stationId, int blockX, int blockY, int blockZ, boolean sneaking) {
+        PlayerRef playerRef = PlayerAccess.playerRef(store, ref);
+        if (playerRef == null) {
+            return;
+        }
         UUID playerUuid = playerRef.getUuid();
         if (playerUuid == null) {
             return;
@@ -447,7 +450,7 @@ public final class StationService {
         // custody, never starts work). Only fires on sneak, and only when the station derives 2+
         // output categories; otherwise (plain F, or a single-category station) it returns false and
         // the engage below runs unchanged. `preClaim` feeds decision 66's placed-material preview.
-        if (sneaking && routeSneakSelection(store, ref, playerRef, player, playerUuid, asset, action,
+        if (sneaking && routeSneakSelection(store, ref, player, playerUuid, asset, action,
                 preClaim, blockX, blockY, blockZ)) {
             return;
         }
@@ -3543,12 +3546,16 @@ public final class StationService {
      * be null/foreign) and feeds decision 66's placed-material preview bias below.
      */
     private boolean routeSneakSelection(@Nonnull Store<EntityStore> store,
-            @Nonnull Ref<EntityStore> ref, @Nonnull PlayerRef playerRef, @Nonnull Player player,
+            @Nonnull Ref<EntityStore> ref, @Nonnull Player player,
             @Nonnull UUID playerUuid, @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action,
             @Nullable StationCustodyClaim claim, int blockX, int blockY, int blockZ) {
         StationAsset.Conversion[] conversions = allConversionsFor(asset, action);
         List<String> categories = distinctConversionCategories(conversions);
         if (decideRoute(true, categories.size()) != Route.PICKER) {
+            return false;
+        }
+        PlayerRef playerRef = PlayerAccess.playerRef(store, ref);
+        if (playerRef == null) {
             return false;
         }
         String blockKey = playerRef.getWorldUuid() + ":" + blockX + ":" + blockY + ":" + blockZ;
@@ -3563,7 +3570,7 @@ public final class StationService {
             // fall through to the plain engage rather than opening an empty picker.
             return false;
         }
-        return RpgStationPickerPage.open(ref, store, playerRef, tabs, showLocked,
+        return RpgStationPickerPage.open(ref, store, tabs, showLocked,
                 (selRef, selStore, categoryId) -> onPickerSelect(selRef, selStore, playerUuid, blockKey, categoryId));
     }
 
@@ -4846,9 +4853,12 @@ public final class StationService {
      * state, and removes the claim. Never throws.
      */
     public void retrieveCustody(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
-            @Nonnull PlayerRef playerRef, @Nonnull CommandBuffer<EntityStore> commandBuffer,
-            @Nonnull Ref<EntityStore> targetEntity) {
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull Ref<EntityStore> targetEntity) {
         try {
+            PlayerRef playerRef = PlayerAccess.playerRef(store, ref);
+            if (playerRef == null) {
+                return;
+            }
             UUID playerUuid = playerRef.getUuid();
             UUID worldUuid = playerRef.getWorldUuid();
             if (playerUuid == null || worldUuid == null) {

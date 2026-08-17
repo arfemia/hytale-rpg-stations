@@ -38,6 +38,7 @@ import com.hypixel.hytale.server.npc.NPCPlugin;
 import com.hypixel.hytale.server.npc.entities.NPCEntity;
 import com.hypixel.hytale.server.npc.role.Role;
 import com.hypixel.hytale.server.npc.util.InventoryHelper;
+import com.ziggfreed.common.inventory.PlayerAccess;
 import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -147,7 +148,7 @@ public final class NpcPerformerSpike {
      * front of {@code player}, cloning the player's own skin onto it.
      */
     public void start(@Nonnull PlayerRef player, boolean noSerialize) {
-        onWorld(player, (world, playerRef, store) -> doStart(player, playerRef, store, noSerialize));
+        onWorld(player, (world, playerRef, store) -> doStart(playerRef, store, noSerialize));
     }
 
     /**
@@ -155,7 +156,7 @@ public final class NpcPerformerSpike {
      * invisible marker ~8 blocks ahead of {@code player}.
      */
     public void walk(@Nonnull PlayerRef player) {
-        onWorld(player, (world, playerRef, store) -> doWalk(player, playerRef, store));
+        onWorld(player, (world, playerRef, store) -> doWalk(playerRef, store));
     }
 
     /** {@code /rpgstations npcspike stop} - despawn the active performer NPC + its marker. */
@@ -182,8 +183,12 @@ public final class NpcPerformerSpike {
 
     // ==================== operations (world thread) ====================
 
-    private void doStart(@Nonnull PlayerRef player, @Nonnull Ref<EntityStore> playerRef,
+    private void doStart(@Nonnull Ref<EntityStore> playerRef,
             @Nonnull Store<EntityStore> store, boolean noSerialize) {
+        PlayerRef player = PlayerAccess.playerRef(store, playerRef);
+        if (player == null) {
+            return;
+        }
         // A fresh start tears down any prior spawn for this player first.
         despawnFor(player.getUuid(), store);
 
@@ -266,8 +271,12 @@ public final class NpcPerformerSpike {
         Log.info("[npcspike] spawned performer for " + player.getUuid() + " (noSerialize=" + noSerialize + ")");
     }
 
-    private void doWalk(@Nonnull PlayerRef player, @Nonnull Ref<EntityStore> playerRef,
+    private void doWalk(@Nonnull Ref<EntityStore> playerRef,
             @Nonnull Store<EntityStore> store) {
+        PlayerRef player = PlayerAccess.playerRef(store, playerRef);
+        if (player == null) {
+            return;
+        }
         Spawned spawned = byPlayer.get(player.getUuid());
         if (spawned == null || spawned.npcRef == null || !spawned.npcRef.isValid() || spawned.npc == null) {
             player.sendMessage(RpgMsg.tr("command.npcspike.walk_no_npc").color(Color.YELLOW));
