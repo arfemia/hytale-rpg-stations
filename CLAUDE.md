@@ -302,8 +302,8 @@ reward they never received.
   resources and fails ITS build on the catchable phrasings.
 - All display text via localization keys through common `i18n.Msg`, wrapped prefix-free by
   `i18n.RpgMsg` (`rpgstations.<key>` against `rpgstations.lang`); no em-dashes anywhere (code,
-  comments, lang, docs). No `EnglishDefaults.java` generator in 1.0.0 - the small `.lang` key
-  count is authored directly per locale; `i18n.LangFileIntegrityTest` (leg 7A) fails the build on
+  comments, lang, docs). Nothing generates the `.lang` files - they are authored directly per
+  locale, the same way the MMO Skill Tree authors its own; `i18n.LangFileIntegrityTest` (leg 7A) fails the build on
   a placeholder mismatch, an em-dash, or a duplicate key, scoped to whatever locale dirs exist
   (en-US only today; a locale fan-out needs no test change).
 - Orthogonal knobs, not modes; a union `Type`/`Surface`/`Trigger` discriminator between genuinely
