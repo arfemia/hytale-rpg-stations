@@ -1,5 +1,6 @@
 package com.ziggfreed.rpgstations.interaction;
 
+import java.util.Locale;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -119,7 +120,7 @@ public final class StationUseInteraction extends SimpleInstantInteraction {
             // it misbehaves.
             boolean sneaking = readSneaking(commandBuffer, ctx.getEntity());
 
-            String id = stationId != null ? stationId.toLowerCase() : "";
+            String id = stationId != null ? stationId.toLowerCase(Locale.ROOT) : "";
             StationService.getInstance().toggle(store, ref, player, commandBuffer, id,
                     targetBlock.x, targetBlock.y, targetBlock.z, sneaking);
 

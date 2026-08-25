@@ -709,6 +709,9 @@ as shipped, not a change to something previously released.
   implementation overrides with the direct catalog size - the cheap presence-check/count path for a
   consumer that only wants to know whether stations are installed, without materializing a full
   `StationView` per station.
+- Locale-hardened id handling: `StationUseInteraction`'s station-id fold passes `Locale.ROOT`, so a
+  station id can no longer corrupt on a JVM whose default locale case-folds differently (the Turkish
+  dotless-i class).
 
 ### The shipped Sawmill: its tool curve, its finds, and how you get the bench
 
