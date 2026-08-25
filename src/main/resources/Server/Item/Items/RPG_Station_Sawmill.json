@@ -40,9 +40,7 @@
       }
     ],
     "DrawType": "Model",
-    "Flags": {
-      "IsUsable": true
-    },
+    "Flags": {},
     "Gathering": {
       "Soft": {
         "IsWeaponBreakable": false

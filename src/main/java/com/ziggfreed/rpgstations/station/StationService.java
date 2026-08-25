@@ -23,7 +23,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.joml.Vector3d;
-import org.joml.Vector3i;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.component.CommandBuffer;
@@ -61,7 +60,8 @@ import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.ParticleUtil;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.accessor.BlockAccessor;
+import com.hypixel.hytale.server.core.universe.world.chunk.BlockOperations;
+import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.core.util.NotificationUtil;
 import com.ziggfreed.common.camera.CameraShakeService;
@@ -5100,7 +5100,12 @@ public final class StationService {
             if (bt == null || bt.getData() == null || bt.getBlockForState(stateName) == null) {
                 return false;
             }
-            world.setBlockInteractionState(new Vector3i(x, y, z), bt, stateName);
+            ChunkStore chunkStore = world.getChunkStore();
+            Ref<ChunkStore> sectionRef = chunkStore.getChunkSectionReferenceAtBlock(x, y, z);
+            if (sectionRef == null || !sectionRef.isValid()) {
+                return false;
+            }
+            BlockOperations.setBlockInteractionState(chunkStore, sectionRef, x, y, z, bt, stateName, false);
             return true;
         } catch (Throwable t) {
             Log.fine("STATION block state flip to '" + stateName + "' failed: " + t.getMessage());
@@ -5392,16 +5397,16 @@ public final class StationService {
      * block authors no state family at all. {@code world.getBlockType(x,y,z)} already returns the
      * block's CURRENT state variant (confirmed: {@code IChunkAccessorSync#getBlockType} reads the
      * live block id off the chunk, the same accessor {@link #flipCustodyState} writes through);
-     * {@link BlockAccessor#getCurrentInteractionState} is the source-verified reverse lookup
-     * ({@code blockType.getStateForBlock(blockType)}) from that live variant back to its state
+     * {@link BlockType#getCurrentInteractionState} is the source-verified reverse lookup
+     * ({@code getStateForBlock(this)}) from that live variant back to its state
      * NAME - the exact inverse of {@code BlockType#getBlockForState} (name -> variant), which
-     * {@code flipCustodyState}/{@code setBlockInteractionState} already use to WRITE a state.
+     * {@code flipCustodyState}/{@code BlockOperations#setBlockInteractionState} already use to WRITE a state.
      */
     @Nullable
     private static String currentBlockStateName(@Nonnull World world, int x, int y, int z) {
         try {
             BlockType bt = world.getBlockType(x, y, z);
-            return bt != null ? BlockAccessor.getCurrentInteractionState(bt) : null;
+            return bt != null ? bt.getCurrentInteractionState() : null;
         } catch (Throwable t) {
             return null;
         }

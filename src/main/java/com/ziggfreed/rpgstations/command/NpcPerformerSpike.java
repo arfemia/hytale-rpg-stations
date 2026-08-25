@@ -73,10 +73,11 @@ import com.ziggfreed.rpgstations.util.Log;
  *       {@code preAddToWorld} (this variant tests the untested NonSerialized-on-NPC gap).</li>
  *   <li><b>walk</b> - spawn a bare invisible marker entity (TransformComponent + NetworkId, no
  *       ModelComponent so it renders nothing) ~8 blocks ahead of the caller's facing, mark it into
- *       the Role's {@code MoveTarget} slot via {@link Role#setMarkedTarget(String, Ref)} (the only
- *       walk-to-a-point route - the {@code Target} sensor / {@code Seek} BodyMotion in the role
- *       asset path toward whatever is marked), and RE-ANCHOR the leash to the destination (or
- *       background leash logic fights the Seek - the recon's leash gotcha).</li>
+ *       the Role's {@code MoveTarget} slot via {@link Role#setMarkedTarget(Ref,
+ *       com.hypixel.hytale.component.ComponentAccessor, String, Ref)} (the only walk-to-a-point
+ *       route - the {@code Target} sensor / {@code Seek} BodyMotion in the role asset path toward
+ *       whatever is marked), and RE-ANCHOR the leash to the destination (or background leash logic
+ *       fights the Seek - the recon's leash gotcha).</li>
  *   <li><b>stop</b> - despawn the NPC + the marker ({@code store.removeEntity}, REMOVE reason).</li>
  *   <li><b>prop</b> - attempts the bare-Holder puppet's OWN prop technique ({@code
  *       InventoryComponent.Hotbar}) retargeted at the NPC ref, but via the NPC-NATIVE write
@@ -312,7 +313,7 @@ public final class NpcPerformerSpike {
         spawned.markerRef = markerRef;
 
         try {
-            role.setMarkedTarget(MOVE_TARGET_SLOT, markerRef);
+            role.setMarkedTarget(spawned.npcRef, store, MOVE_TARGET_SLOT, markerRef);
             // Re-anchor the leash to the destination (the recon leash gotcha).
             spawned.npc.setLeashPoint(new Vector3d(markerPos));
         } catch (Throwable t) {

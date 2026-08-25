@@ -4,8 +4,11 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.hypixel.hytale.component.CommandBuffer;
+import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.RotationTuple;
 import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.chunk.section.BlockSection;
+import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.rpgstations.util.Log;
@@ -37,17 +40,29 @@ final class StationBlockFacing {
 
     /**
      * Impure: the placed block's own facing yaw at {@code (blockX, blockY, blockZ)}, in radians.
-     * Reads the non-deprecated {@code World#getBlockRotationIndex} (a placed block's rotation is a
-     * discrete {@link RotationTuple} of 0/90/180/270 yaw/pitch/roll enums) and returns just the
-     * yaw's radians. Try-guarded to {@code 0.0}; a {@code null} {@code world} is {@code 0.0} too.
-     * WORLD-THREAD ONLY (matching the {@code getBlockRotationIndex} chunk-read contract).
+     * Reads the block's rotation off its live {@link BlockSection} component (a placed block's
+     * rotation is a discrete {@link RotationTuple} of 0/90/180/270 yaw/pitch/roll enums) via the
+     * chunk-section lookup ({@link World#getChunkStore()} -&gt;
+     * {@code getChunkSectionReferenceAtBlock} -&gt; {@code BlockSection#getRotationIndex}) and
+     * returns just the yaw's radians. Try-guarded to {@code 0.0}; a {@code null} {@code world}, an
+     * unloaded section, or any throw is {@code 0.0} too. WORLD-THREAD ONLY (matching the
+     * chunk-section-read contract).
      */
     static double yawRadians(@Nullable World world, int blockX, int blockY, int blockZ) {
         if (world == null) {
             return 0.0;
         }
         try {
-            int index = world.getBlockRotationIndex(blockX, blockY, blockZ);
+            ChunkStore chunkStore = world.getChunkStore();
+            Ref<ChunkStore> sectionRef = chunkStore.getChunkSectionReferenceAtBlock(blockX, blockY, blockZ);
+            if (sectionRef == null || !sectionRef.isValid()) {
+                return 0.0;
+            }
+            BlockSection section = chunkStore.getStore().getComponent(sectionRef, BlockSection.getComponentType());
+            if (section == null) {
+                return 0.0;
+            }
+            int index = section.getRotationIndex(blockX, blockY, blockZ);
             return RotationTuple.get(index).yaw().getRadians();
         } catch (Throwable t) {
             Log.fine("STATION could not read block facing at " + blockX + "," + blockY + "," + blockZ

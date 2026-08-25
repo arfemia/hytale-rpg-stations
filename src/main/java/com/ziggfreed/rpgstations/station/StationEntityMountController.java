@@ -6,6 +6,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.joml.Vector3d;
+import org.joml.Vector3f;
 
 import com.hypixel.hytale.builtin.mounts.MountedComponent;
 import com.hypixel.hytale.component.AddReason;
@@ -49,15 +50,13 @@ import com.ziggfreed.rpgstations.util.Log;
  * STANDING by construction - the strongest source-backed inference, but genuinely
  * in-game-unverifiable from server source alone (the maintainer's phase-2 smoke item).
  *
- * <p><b>CRITIQUE FIX (m7) - the attachment offset is a {@code Rotation3f}, NOT a
- * {@code Vector3f}.</b> {@code MountedComponent}'s entity-mount constructor takes a
- * {@code Rotation3f attachmentOffset} parameter that the engine actually uses as a plain
- * spatial XYZ offset for entity mounts (a native mislabeling, confirmed in the mount mine and
- * mirrored by {@code MountInteraction}'s own codec, which decodes an authored {@code Vector3f}
- * straight into a {@code Rotation3f} field). {@link #resolveAttachmentOffset} does the
- * conversion explicitly, kept primitive-typed (no {@code Rotation3f} touch) so it stays
- * unit-testable without a running Hytale server; {@link #attach} is the one place that actually
- * constructs the {@code Rotation3f}.
+ * <p><b>The attachment offset is a {@code Vector3f}, an honest spatial XYZ offset.</b>
+ * {@code MountedComponent}'s entity-mount constructor takes a {@code Vector3f attachmentOffset}
+ * parameter (the engine's own former {@code Rotation3f}-typed mislabeling of this same plain
+ * spatial offset has since been corrected upstream). {@link #resolveAttachmentOffset} does the
+ * authored-{@code X}/{@code Y}/{@code Z}-to-float-triple conversion, kept primitive-typed (no
+ * {@code Vector3f} touch) so it stays unit-testable without a running Hytale server;
+ * {@link #attach} is the one place that actually constructs the {@code Vector3f}.
  *
  * <p><b>The steering/drift risk (documented, not solved here):</b> the native entity-mount
  * controller ({@code MountController.Minecart}) has NO auto-dismount and applies WASD input
@@ -205,9 +204,7 @@ final class StationEntityMountController {
                     offset != null ? offset.getX() : null,
                     offset != null ? offset.getY() : null,
                     offset != null ? offset.getZ() : null);
-            // CRITIQUE FIX (m7): the constructor parameter is a Rotation3f, not a Vector3f - see
-            // this class's header javadoc for why.
-            Rotation3f attachmentOffset = new Rotation3f(xyz[0], xyz[1], xyz[2]);
+            Vector3f attachmentOffset = new Vector3f(xyz[0], xyz[1], xyz[2]);
             commandBuffer.addComponent(playerRef, MountedComponent.getComponentType(),
                     new MountedComponent(anchorRef, attachmentOffset, MountController.Minecart));
             return true;
@@ -220,7 +217,7 @@ final class StationEntityMountController {
     /**
      * Pure conversion from the authored {@code Hold.Mount.Entity.Offset} {@code X}/{@code Y}/
      * {@code Z} (nullable, default 0 each) to the float triple {@link #attach} feeds the
-     * {@code Rotation3f} constructor. Kept primitive-typed (no {@code Rotation3f} or
+     * {@code Vector3f} constructor. Kept primitive-typed (no {@code Vector3f} or
      * {@code Vec3} touch) so it is unit-testable without a running Hytale server.
      */
     @Nonnull
