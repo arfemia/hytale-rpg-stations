@@ -220,7 +220,10 @@ reflection: bump it by exactly one integer per addition batch that lands under t
 per individual method - a coordinated wave of additions is one bump), never on its own.
 `apiVersion()` itself is exempt from "default-bodied only" since it shipped before the freeze; it
 will never change again once RpgStations reaches 1.0.0. Current value is **3**: the `stationCount()`
-default-bodied addition bumped it from 2.
+default-bodied addition bumped it from 2. **The api ARTIFACT's semver tracks this integer:
+`apiVersion()` N ships as artifact `0.N.0`** (`gradle.properties` `api_version`, currently
+`0.3.0`), so the number a consumer branches on and the number on the jar they compile against can
+never disagree; a bump of one is a bump of the other, in the same change.
 
 `RpgStationsApi.isAvailable()`/`find()` (added the same round) are convenience, not a way around
 this policy - see their own javadoc for what they do and do not solve.
