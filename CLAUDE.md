@@ -97,8 +97,10 @@ overrides of a station-level default (station-level group inheritance was delete
 
 **The action-first restructure (pre-release) landed on top of scope-2: station-level group
 inheritance is DELETED.** `StationAsset` keeps only `Identity`/`Block`/`Requires`/`Flairs`/
-`Actions[]`; every other group (`Work`/`Recipe`/`Tool`/`Hold`/`Camera`/`Animation`/`Custody`) lives
-EXCLUSIVELY on `ActionDef`, with no station-level fallback left to inherit from - two actions that
+`Actions[]`; every other group lives EXCLUSIVELY on `ActionDef` - `Work`/`Recipe`/`Tool`/`Custody`/
+`Bonus`/`ContributionScale`/`Anchors`/`Steps`/`Moments` as direct keys, and the four presentation
+groups `Hold`/`Camera`/`Animation`/`Puppet` under its one nested `Worker` group, with no
+station-level fallback left to inherit from - two actions that
 used to share a station-level default now share by REFERENCE (`Ref` to the same standalone
 `ActionAsset`, or native `Parent` between `ActionAsset`s), never by implicit fallback.
 `StationAsset.Recipes[]` (the tried-in-order recipe LIST, `station.RecipeSelection`) is GONE -
@@ -226,15 +228,15 @@ api/                                                   the extension-surface (fr
                                                         rpg-stations-api-<version>.jar for a consumer's compileOnly link
   src/main/java/com/ziggfreed/rpgstations/api/         see api/CLAUDE.md
 src/main/resources/
-  manifest.json                                        Group Ziggfreed, IncludesAssetPack:true, ServerVersion Update 5
+  manifest.json                                        Group Ziggfreed, IncludesAssetPack:true, ServerVersion >=0.6.0-pre.13 <0.7.0 (Update 6)
   Server/RpgStations/{Stations,Actions,Flairs,Extensions,Settings}/
                                                         the five Pattern A asset stores this mod registers
   Server/ZiggfreedCommon/Lootables/                      the Sawmill's loot tables (the SHARED library's store)
   Server/Item/{Items,RootInteractions}/                 the jar's OWN default Sawmill block + its RootInteraction
-  Server/Drops/, Server/Emote/                           the standalone Sawmill's native-namespace drop tables + work emote
+  Server/Drops/                                         the standalone Sawmill's native-namespace drop tables
   Server/Entity/Effects/RPG/                             RPG_Station_Hold.json (the effect-mode movement-lock effect)
   Server/Languages/<bcp47>/                             rpgstations.lang (all 9 locales) + native items.lang/avatarCustomization.lang
-  Common/UI/Custom/Pages/RpgStationSummary.ui           the session-summary panel
+  Common/UI/Custom/Pages/                               RpgStationSummary.ui (the session-summary panel) + RpgStationPicker.ui/RpgStationPickerTab.ui (the sneak+F recipe picker)
 src/main/java/com/ziggfreed/rpgstations/
   RpgStationsPlugin.java     JavaPlugin entry: injects the api singleton, registers the built-in
                              rpgstations: factors, this mod's own asset stores + their catalog folds,
@@ -246,7 +248,8 @@ src/main/java/com/ziggfreed/rpgstations/
   loot/                      see loot/CLAUDE.md - StationLootEngine/StationRewardKinds/OutputItemResolver/CommandRewardExecutor
                               (the loot MODEL + evaluator + Lootable/RollPool stores are ziggfreed-common's)
   command/                    see command/CLAUDE.md - RpgStationsCommand (/rpgstations camera|validate, admin-gated)
-  interaction/                see interaction/CLAUDE.md - StationUseInteraction (the rpg_station_use RootInteraction handler)
+  interaction/                see interaction/CLAUDE.md - StationUseInteraction (the rpg_station_use RootInteraction handler) + StationRetrieveInteraction (rpg_station_retrieve, the press-F custody retrieval handler)
+  pages/                      see pages/CLAUDE.md - RpgStationPickerPage (the sneak+F recipe picker) + PickerCategories
   ui/                         see ui/CLAUDE.md - StationSummaryHud (extends common's KeyedCustomHud)
   i18n/                       see i18n/CLAUDE.md - RpgMsg (the rpgstations. prefix wrapper over common Msg) + RpgStationsLangKeys
   util/                       Log (this mod's OWN guarded logging facade over RpgStationsPlugin.LOGGER - never another
@@ -305,7 +308,7 @@ reward they never received.
   comments, lang, docs). Nothing generates the `.lang` files - they are authored directly per
   locale, the same way the MMO Skill Tree authors its own; `i18n.LangFileIntegrityTest` (leg 7A) fails the build on
   a placeholder mismatch, an em-dash, or a duplicate key, scoped to whatever locale dirs exist
-  (en-US only today; a locale fan-out needs no test change).
+  (all 9 locales today; a further locale fan-out needs no test change).
 - Orthogonal knobs, not modes; a union `Type`/`Surface`/`Trigger` discriminator between genuinely
   different code paths is not a mode.
 - DRY: shared codecs (the `Conditions` gate leaf, `Roll`, `Presentation`) are ONE type reused
@@ -386,14 +389,18 @@ the block item id. See `interaction/CLAUDE.md` for the `rpg_station_use` interac
 Package `com.ziggfreed.rpgstations.api` (+ `.api.event`), the freeze-at-1.0.0 (so NOT yet frozen) contract
 between this engine and any mod that wants to hook it. Split by shape, per the native-events rule:
 **observe-only moments are native Hytale events** (`StationSessionStartedEvent`/
-`StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`, POJOs
+`StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`/
+`StationEnhanceCompletedEvent`, POJOs
 `implements IEvent<Void>`, dispatched `HytaleServer.get().getEventBus().dispatchFor(...)` +
 `hasListener()` on the world thread, fired from `station.StationEvents`); **request/response
 points are typed registries** on the static `RpgStationsApi` holder (`FactorRegistry` - the one
 extensible numeric vocabulary conditional lootables/`Requires` gates evaluate over, this mod's
 stable surface over `ziggfreed-common`'s shared factor core;
 `FlairUnlockRegistry` - union of every registered per-player unlock provider;
-`SummaryEnricherRegistry` - extra ledger rows + a themeable decorate hook on the summary panel).
+`SummaryEnricherRegistry` - extra ledger rows + a themeable decorate hook on the summary panel;
+`ValidationHookRegistry` - a foreign vocabulary's owner registers its own content checks, run
+inside this engine's own full validate pass, advisory and never blocking; `ContributionChannelRegistry`
+- the declaration-only channel set, see the READ/WRITE table above).
 See `api/CLAUDE.md` for the full type-by-type reference and `api/impl/CLAUDE.md` for the concrete
 implementation this mod installs at `setup()`.
 
@@ -476,8 +483,8 @@ fix layers on cleanly.
   `SpawnMinecartInteraction`'s own list minus the cart/model leaves) and attach
   `MountedComponent(anchorRef, attachmentOffset, MountController.Minecart)` to the player directly
   (no interaction chain). CRITIQUE FIX (m7): `Hold.Mount.Entity.Offset {X,Y,Z}` converts explicitly
-  to the constructor's `Rotation3f attachmentOffset` parameter (a native mislabeling - it is really
-  a spatial offset). Every entity mount applies the SAME hold effect effect-mode uses plus
+  to the constructor's `Vector3f attachmentOffset` parameter (an honest spatial XYZ offset; the
+  engine formerly declared this same offset as a `Rotation3f`). Every entity mount applies the SAME hold effect effect-mode uses plus
   a per-heartbeat anchor snap-back to defeat the native WASD-steers-the-anchor behavior;
   `DismountOnMove` (default true) runs the same origin-delta walk-off check effect-mode uses (the
   entity-mount controller has no native auto-dismount). (A `Steerable` escape hatch that skipped

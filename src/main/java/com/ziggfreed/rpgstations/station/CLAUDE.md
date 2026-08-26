@@ -78,14 +78,17 @@ the WHOLE set executes:
   when in doubt split, since merging later is free and unpicking a shipped id is not. The shipped
   consumer is the MMO stations pack, whose own `SawmillTrophy` replaces the flat chase below with a
   luck-scaled 1-in-3000 one and costs one small file to do it.
-  **`SawmillFinds` (`Lootables/SawmillFinds.json`) is the session-loyalty ladder**: Conditions
-  `rpgstations:cycle_count >= 10` AND `hytale:tool_quality >= 2`, `Chance` 15 percent, a
-  `cycle_count` `Ladder` whose 10/25/50 floors grant the jar's own
-  `Drops/RPG_Station_Sawmill_T{1,2,3}` tables (the upper two floors carry their own celebration
-  `Presentation`, kept honest by the smart-cue rule since each table authors its own empty weight).
+  **`SawmillFinds` (`Lootables/SawmillFinds.json`) is the tool-driven find roll**: one Condition,
+  `hytale:tool_quality >= 2`, a `Chance` of `Base` 0 summed from the three tool factors
+  (quality x16.2, item level x0.162, power x1.62) and clamped at 90, and a `Ladder` over
+  `cycle_count` plus `tool_quality` (weight 5) whose 5/25/50 floors grant the jar's own
+  `Drops/RPG_Station_Sawmill_T{1,2,3}` tables (the upper two floors name the `rare_find` cue, kept
+  honest by the smart-cue rule since each table authors its own empty weight). The tool decides how
+  often; the session decides how deep.
   **`SawmillMasterworkFinds` (`Lootables/SawmillMasterworkFinds.json`) is the T4 find tier** - gated
-  on the TROPHY's own axes (`tool_quality >= 5`, `tool_item_level >= 50`, `tool_power >= 0.55`, each
-  exactly one notch above `SawmillTrophy`'s own gate and unreachable by any forgeable vanilla tool),
+  on the TROPHY's own axes (`tool_quality >= 5`, `tool_item_level >= 50`, `tool_power >= 0.55` - quality and power each one
+  notch above `SawmillTrophy`'s own gate, item level held at the trophy's 50, and the set is
+  unreachable by any forgeable vanilla tool),
   no cycle GATE since the trophy already proved that loyalty - the cycle count drives the CHANCE
   instead (15 percent rising 0.5 a cycle, `Clamp.Max` 75, so the cap lands at cycle 120 and a
   ten-minute session only just reaches it). Deliberate contrast with `SawmillFinds`, where the TOOL
@@ -97,7 +100,8 @@ the WHOLE set executes:
   `tool_power >= 0.5`) plus `cycle_count >= 5`, a visible `Chance.Base` of `0.04` (1 in 2500)
   with NO factors - deliberately the plainest possible curve, since a luck-scaled one reads channels
   this mod knows nothing about - granting inline through its own top-level `Grants.Commands`
-  (`give {player} RPG_Tool_Hatchet_Sawmiller`) with its own top-level `Presentation`. It is the
+  (`give {player} RPG_Tool_Hatchet_Sawmiller`) under its own top-level `Cue: "cue:trophy"`, the open
+  cue-namespace moment id the action's `Moments` map then dresses. It is the
   shipped exemplar of the roll-level cue, and a command grant always counts as produced so the
   fanfare can never fire dry. `RPG_Tool_Hatchet_Sawmiller` itself is a drop-only Legendary
   masterwork Mithril copy (500 durability, Woods power `0.55`, explicit `Tags.Family: Hatchet`),
@@ -606,7 +610,7 @@ Two more consequences worth knowing:
 `applyGrantResult` walks `GrantResult.getCues()` and emits each CUE ID at the block through
 `emitMoment` with a null base, so the action's own `Moments` entry for that id (and every applicable
 flair) supplies the presentation. That list is deliberately pre-filtered by the shared loot engine:
-BOTH cue altitudes ride it (a `Roll`'s own top-level `Presentation` when the roll hit, and a reached
+BOTH cue altitudes ride it (a `Roll`'s own top-level `Cue` when the roll hit, and a reached
 `Ladder.Floor`'s, roll cue first when one roll carries both), and each was admitted only if it is a
 PURE cue (no `Grants` group authored beside it) or its own paired grants group actually PRODUCED
 something. This package therefore needs no new plumbing and must not grow its own second filter: the
@@ -684,8 +688,8 @@ what those three first-party sources establish.**
   standing work mount (spawns a minimal anchor entity at the block center, attaches
   `MountedComponent` directly to the player, no interaction chain). Never populates the client's
   `MountedUpdate.Block`, so the player renders standing. `Hold.Mount.Entity.Offset` (the shared `Vec3`)
-  converts to the constructor's `Rotation3f attachmentOffset` parameter (a native mislabeling -
-  it is really a spatial offset, not a rotation). Every entity mount applies the SAME hold effect
+  converts to the constructor's `Vector3f attachmentOffset` parameter (an honest spatial XYZ
+  offset; the engine's former `Rotation3f`-typed mislabeling of it was corrected upstream). Every entity mount applies the SAME hold effect
   effect-mode uses plus a per-heartbeat `snapBack` (defeating the native WASD-steers-the-anchor
   behavior); `DismountOnMove` (default true) runs the same origin-delta walk-off check
   effect-mode uses. Anchor lifecycle: session-scoped,
@@ -828,8 +832,9 @@ UNCONDITIONAL, resolving its store off `s.ref.getStore()` (not the possibly-null
 parameter) so `stopAll`'s shutdown sweep is covered too - returns to the owner's inventory
 (room-checked, hotbar-first via `util.ItemGrantUtil`) or drops at the block once.
 [`StationCustodyBreakSystem`](StationCustodyBreakSystem.java) covers the no-active-session case
-(input placed, block broken before a session starts). Block-state flip (`flipCustodyState`,
-`world.setBlockInteractionState`) is HINT-ONLY and self-heals: a Loaded state surviving a restart
+(input placed, block broken before a session starts). Block-state flip (`flipCustodyState` over the
+extracted `setBlockState`, which writes through `BlockOperations.setBlockInteractionState`) is
+HINT-ONLY and self-heals: a Loaded state surviving a restart
 with no live claim behind it resets to Empty on the next interaction. **Precedence rule (gate
 m5)**: a block busy with its OWN session OR a non-empty `custodyByBlock` claim REFUSES an
 incoming anchor claim; restart self-heal consults `custodyByBlock`, not just the session map -
@@ -928,8 +933,9 @@ pre-existing restart-orphan story for Loaded, self-healed by `toggle`'s not-load
 `AmbientSoundEventId` (LOOPING+MONO validated, "a looping ambient sound event that emits from this
 block when placed") and per-state `Particles`; both start and STOP automatically with the
 `setBlockInteractionState` flip, which matters because nothing in the protocol can stop a playing
-sound or particle system. The jar's `RPG_Station_CookingFire` block's `Lit` state copies vanilla
-`Furniture_Crude_Brazier` verbatim for this. Corollary for step `Presentation.Sound`: only ever
+sound or particle system. The held-back `RPG_Station_CookingFire` block (`unreleased/Server/Item/Items/`) copies vanilla
+`Furniture_Crude_Brazier` verbatim on its `Lit` state for this - the worked example to restore
+from, since the 0.1.0 jar ships the Sawmill alone. Corollary for step `Presentation.Sound`: only ever
 author a ONE-SHOT SoundEvent there - a looping id fired as a one-shot never ends.
 
 ## The placed-input PLACED-AS-ENTITY visual (unchanged)
@@ -946,7 +952,8 @@ lifecycle. Both the ref AND the spawned entity's own `NetworkId` live ON the cla
 `#returnCustody`/`#onCustodyBlockBroken` fires first.
 `Offset`/`Rotation` are FACING-RELATIVE to the placed block's own yaw (via the shared
 [`StationBlockFacing`](StationBlockFacing.java)`.yawRadians`, which reads
-`World#getBlockRotationIndex` try-guarded to yaw 0 on any failure, plus its `rotateOffset` core -
+the block's live `BlockSection#getRotationIndex` (via `World#getChunkStore()` ->
+`getChunkSectionReferenceAtBlock`), try-guarded to yaw 0 on any failure, plus its `rotateOffset` core -
 the SAME one-reader helper the puppet engine composes against since the round-3 smoke) - see
 `../asset/CLAUDE.md`'s `Custody.Display` bullet for the full authoring convention. Press-F RETRIEVAL
 ([`StationCustodyRetrieval`](StationCustodyRetrieval.java)) resolves the clicked display entity's
@@ -1047,8 +1054,9 @@ block's FRONT, `+X` = its right, `Offset.Y` vertical, block yaw folded additivel
 `Yaw` - the `Custody.Display` precedent applied to the puppet, because world-space `Offset`
 meant which SIDE of the sawmill the worker stood on depended on how that block happened to be
 placed. The block-yaw read and its trig are the ONE shared helper
-[`StationBlockFacing`](StationBlockFacing.java) (`yawRadians` over `World#getBlockRotationIndex`,
-try-guarded to yaw 0; `rotateOffset` the pure horizontal-rotation core), which
+[`StationBlockFacing`](StationBlockFacing.java) (`yawRadians` over the block's live
+`BlockSection#getRotationIndex`, reached through `World#getChunkStore()`, try-guarded to yaw 0;
+`rotateOffset` the pure horizontal-rotation core), which
 `StationCustodyDisplay` now calls too - one reader, never a copy-pasted trig block. The
 per-consumer composition is the PURE, unit-tested `resolveWorldOffset`/`resolveYawRadians`
 (`StationPuppetControllerTest`), IDENTITY at yaw 0 so every in-game-tuned value is byte-identical
@@ -1114,7 +1122,7 @@ mod's own concern; this engine stores no per-player fact). The open STRING momen
 and per step `Roll` phase (both routes are the SAME `loot.StationLootEngine` call - one roll engine,
 whether the source is a station's implicit cycle or an authored step's `Roll` phase) - including the
 SMART-CUE rule, which decides over there which `MOMENT_RARE_FIND` cues this package is ever handed
-(see the `emitMoment` section above: a `Roll` carries its own top-level `Presentation` beside the
+(see the `emitMoment` section above: a `Roll` carries its own top-level `Cue` beside the
 per-floor one, and a cue paired with grants rides only once those grants produced something).
 
 ## Engine settings + Validation (unchanged mechanism; new checks)
@@ -1170,7 +1178,7 @@ outside `(0, 100]`, catching the fraction-vs-percent authoring slip),
 `LADDER_DUPLICATE_FLOOR_MIN` (two floors of ONE ladder sharing a `Min`, in EITHER ladder consumer
 through one shared check - only the LAST authored one can ever be reached, so the earlier duplicate
 silently never grants), `CAMERA_RECIPE_WITHOUT_CAMERA` (a
-`Camera.Recipe` under `Camera.Enabled: false`), `LOOT_BLANK_DROPLIST`,
+`Camera.Recipe` under `Camera.Enabled: false`), `LOOT_BLANK_TABLE`,
 `CUSTODY_SINGLE_FAMILY_REDUNDANT` (`SingleFamily: true` where the effective `MaxQuantity <= 1`
 already enforces exclusivity), and `CONSUME_DUPLICATE_ITEM_REF` (one Consume's `Items` array
 authoring the same item/family ref in two entries - the engine sums them, one combined entry says
@@ -1244,7 +1252,7 @@ the load-bearing lessons that still apply going forward:
   `StationService#blockItemIdAt` falls back to `getId()` only when the block has no containing
   Item at all.
 - **The same rule binds the BLOCK-GONE check: compare by ITEM id, never by raw block id.**
-  `setBlockInteractionState` does not annotate a block, it REPLACES it - `BlockAccessor
+  `setBlockInteractionState` does not annotate a block, it REPLACES it - `BlockOperations
   #setBlockInteractionState` resolves `blockType.getBlockForState(state)` and calls `setBlock(...,
   BlockType.getAssetMap().getIndex(newState.getId()), ...)`, so the int `World#getBlock` returns
   changes on EVERY `Custody.States` flip this engine performs. A raw-int compare against the
