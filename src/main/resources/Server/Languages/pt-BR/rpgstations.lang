@@ -46,7 +46,6 @@ ui.station.custody.topped_up = Você adiciona mais materiais à estação.
 ui.station.retrieve.busy = Você não pode retirar materiais enquanto esta estação está sendo trabalhada.
 ui.station.retrieve.done = Você retira seus materiais colocados.
 ui.station.retrieve.hint = Pressione [{key}] para retirar materiais
-ui.station.bench.hint = Agache + [{key}] para abrir crafting
 ui.station.mount_unavailable = Você não consegue trabalhar aqui agora.
 ui.station.anchor_missing = Nenhum {0} encontrado em {1} blocos.
 ui.station.anchor_unreachable = Não é possível chegar ao {0} próximo.

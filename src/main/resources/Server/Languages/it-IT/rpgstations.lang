@@ -11,7 +11,6 @@ ui.station.custody.topped_up = Aggiungi altri materiali alla stazione.
 ui.station.retrieve.busy = Non puoi riprendere i materiali mentre questa stazione è in uso.
 ui.station.retrieve.done = Riprendi i materiali posizionati.
 ui.station.retrieve.hint = Premi [{key}] per riprendere i materiali
-ui.station.bench.hint = Accovacciati + [{key}] per aprire la ricetta
 ui.station.inventory_full = Il tuo inventario è troppo pieno per lavorare qui.
 ui.station.wrong_tool = Non stai tenendo lo strumento giusto per questo lavoro.
 ui.station.tool_worn = Il tuo strumento è troppo consumato per questo lavoro.

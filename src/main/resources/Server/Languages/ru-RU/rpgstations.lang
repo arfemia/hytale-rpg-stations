@@ -11,7 +11,6 @@ ui.station.custody.topped_up = Вы добавили ещё материалов
 ui.station.retrieve.busy = Вы не можете забрать материалы, пока станция используется.
 ui.station.retrieve.done = Вы забираете свои размещённые материалы.
 ui.station.retrieve.hint = Нажмите [{key}], чтобы забрать материалы
-ui.station.bench.hint = Приседание + [{key}], чтобы открыть крафтинг
 ui.station.inventory_full = Ваш инвентарь слишком заполнен для работы здесь.
 ui.station.wrong_tool = Вы не держите нужный инструмент для этой работы.
 ui.station.tool_worn = Ваш инструмент слишком изношен для этой работы.

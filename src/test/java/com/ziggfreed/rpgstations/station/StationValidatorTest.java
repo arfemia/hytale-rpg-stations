@@ -661,7 +661,7 @@ public class StationValidatorTest {
     void entityGroupUnderABlockSurface_flagged() {
         StationAsset.Hold hold = StationAsset.Hold.of(true, "Fixture_Hold", true,
                 StationAsset.Hold.Mount.of("Block",
-                        StationAsset.Hold.Mount.Entity.of(null, null, null)));
+                        StationAsset.Hold.Mount.Entity.of(null, null)));
         StationAsset a = station("ignoredentity", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withWorker(ActionDef.Worker.of(hold, null, null, null)));
         assertTrue(codes(validate(a)).contains("MOUNT_ENTITY_GROUP_IGNORED"));

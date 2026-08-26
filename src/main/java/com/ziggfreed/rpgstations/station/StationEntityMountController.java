@@ -61,11 +61,11 @@ import com.ziggfreed.rpgstations.util.Log;
  * <p><b>The steering/drift risk (documented, not solved here):</b> the native entity-mount
  * controller ({@code MountController.Minecart}) has NO auto-dismount and applies WASD input
  * DIRECTLY to the anchor entity's own transform ({@code HandleMountInput}, the same asymmetry
- * that exempts entity mounts from the Block-mount 600ms-grace auto-dismount). The default
- * ({@code Steerable} false) mitigation is two-layered: the session applies the SAME hold effect
- * effect-mode uses (via {@code StationHoldController}) to defeat client-sent movement input, AND
- * the heartbeat calls {@link #snapBack} every tick to re-assert the anchor's authored transform
- * against whatever drift slips through. Neither mitigation is proven sufficient against
+ * that exempts entity mounts from the Block-mount 600ms-grace auto-dismount). The mitigation is
+ * two-layered: the session applies the SAME hold effect effect-mode uses (via
+ * {@code StationHoldController}) to defeat client-sent movement input, AND the heartbeat calls
+ * {@link #snapBack} every tick to re-assert the anchor's authored transform against whatever
+ * drift slips through. Neither mitigation is proven sufficient against
  * client-trust {@code SetBody} (mouse-look) drift - the SAME unresolved-risk class the seated
  * {@code bodyOrientation} question already carries for the Block route; an in-game verification
  * item, not solved in code.
@@ -231,8 +231,8 @@ final class StationEntityMountController {
 
     /**
      * Re-assert the anchor's authored spawn transform (block center, zero rotation) - the
-     * per-heartbeat drift mitigation for the default ({@code Steerable} false) case. No-op
-     * (never throws) once the anchor is gone.
+     * per-heartbeat drift mitigation for every entity mount. No-op (never throws) once the
+     * anchor is gone.
      */
     static void snapBack(@Nullable Ref<EntityStore> anchorRef, @Nonnull Store<EntityStore> store,
             int blockX, int blockY, int blockZ) {

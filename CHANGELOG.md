@@ -109,7 +109,7 @@ to recompile against a later release rather than treat these types as stable.
   survives a restart, matching custody's own crash-loses-it lifecycle by construction.
 - Adds the `Hold.Mount` knob family: `Surface: "Block"` (the native seat mount, the default arm on
   an authored group) or `Surface: "Entity"` (a standing work mount for a
-  station that wants its worker on their feet, with a steerable/dismount-on-move knob pair).
+  station that wants its worker on their feet, with a dismount-on-move knob).
 - Adds the open flair/moment vocabulary: a moment is an open string id (the well-known
   cycle/swing/impact/rare_find/completion constants plus a per-step `step:<actionId>:<stepId>` id
   any step's own `Presentation` resolves against), and a standalone `FlairAsset` Pattern A type lets

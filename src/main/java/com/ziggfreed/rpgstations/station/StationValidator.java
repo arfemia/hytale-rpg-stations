@@ -2810,9 +2810,9 @@ public final class StationValidator {
 
     /**
      * The Mount knob family (design section 9.2, phase 2 leg D): an unrecognized
-     * {@code Surface} value, an {@code Entity} group authored under a Block surface (ignored at
-     * runtime), and the untested {@code Steerable true} combo - all warn-only, per the maintainer
-     * ruling ("validator warns on odd combos, never blocks").
+     * {@code Surface} value, and an {@code Entity} group authored under a Block surface (ignored
+     * at runtime) - all warn-only, per the maintainer ruling ("validator warns on odd combos,
+     * never blocks").
      */
     private static void checkMount(@Nullable StationAsset.Hold hold, @Nonnull String id, @Nonnull String label,
                                    @Nonnull List<Finding> out) {
@@ -2836,10 +2836,6 @@ public final class StationValidator {
             out.add(Finding.warning(DOMAIN, "MOUNT_ENTITY_GROUP_IGNORED",
                     label + " authors Hold.Mount.Entity with Surface \"Block\" (or omitted) - the Entity"
                             + " group is only read when Surface is \"Entity\"", id));
-        } else if (entity.effectiveSteerable()) {
-            out.add(Finding.warning(DOMAIN, "MOUNT_STEERABLE_UNTESTED",
-                    label + " authors Hold.Mount.Entity.Steerable true - reserved for a future"
-                            + " vehicle-like station, not yet verified in-game", id));
         }
     }
 

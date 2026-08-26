@@ -52,10 +52,8 @@ import javax.annotation.Nonnull;
  * "nothing this station can work with" toast), the wave-3 {@code ui.station.stop.complete}/
  * {@code .capped}/{@code .inputs_exhausted}/{@code .anchor_lost}/{@code .path_blocked} stop-reason
  * keys, {@code ui.station.anchor_missing}/{@code .anchor_busy} (the multi-station anchor-claim
- * denial toasts), the shipped fish-exemplar content keys ({@code station.cuttingboard.name}/
- * {@code .desc}, {@code station.cookingfire.name}/{@code .desc}, {@code action.prepfish.label}),
- * and adds {@code ui.station.bench.hint} (the decision-51a native SNEAK+F bench-window advertise
- * hint, the {@code retrieve.hint} sibling).
+ * denial toasts), and the shipped fish-exemplar content keys ({@code station.cuttingboard.name}/
+ * {@code .desc}, {@code station.cookingfire.name}/{@code .desc}, {@code action.prepfish.label}).
  * The scope-3 standing-mount verify PREP adds {@code station.mountspike.name}/{@code .desc} (the
  * throwaway {@code MountSpike.json} dev station, {@code Hold.Mount.Surface: "Entity"}); remove
  * alongside the station/item/interaction files once the maintainer's in-game smoke is done.
@@ -109,7 +107,6 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.anchor_missing",
             "rpgstations.ui.station.anchor_unreachable",
             "rpgstations.ui.station.anchor_busy",
-            "rpgstations.ui.station.bench.hint",
             "rpgstations.ui.station.summary.title",
             "rpgstations.ui.station.summary.cycles",
             "rpgstations.ui.station.summary.item_consumed",

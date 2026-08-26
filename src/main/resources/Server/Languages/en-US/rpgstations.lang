@@ -11,7 +11,6 @@ ui.station.custody.topped_up = You add more materials to the station.
 ui.station.retrieve.busy = You cannot take materials back while this station is being worked.
 ui.station.retrieve.done = You take your placed materials back.
 ui.station.retrieve.hint = Press [{key}] to retrieve materials
-ui.station.bench.hint = Sneak + [{key}] to open crafting
 ui.station.inventory_full = Your inventory is too full to work here.
 ui.station.wrong_tool = You are not holding the right tool for this work.
 ui.station.tool_worn = Your tool is too worn for this work.

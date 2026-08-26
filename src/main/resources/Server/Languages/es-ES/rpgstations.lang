@@ -11,7 +11,6 @@ ui.station.custody.topped_up = Agregaste más materiales a la estación.
 ui.station.retrieve.busy = No puedes recuperar materiales mientras esta estación está en uso.
 ui.station.retrieve.done = Recuperas tus materiales colocados.
 ui.station.retrieve.hint = Pulsa [{key}] para recuperar materiales
-ui.station.bench.hint = Agacharse + [{key}] para abrir la artesanía
 ui.station.inventory_full = Tu inventario está demasiado lleno para trabajar aquí.
 ui.station.wrong_tool = No estás sosteniendo la herramienta correcta para este trabajo.
 ui.station.tool_worn = Tu herramienta está demasiado desgastada para este trabajo.

@@ -11,7 +11,6 @@ ui.station.custody.topped_up = Du fügst weitere Materialien zu der Station hinz
 ui.station.retrieve.busy = Du kannst keine Materialien zurücknehmen, während diese Station bearbeitet wird.
 ui.station.retrieve.done = Du nimmst deine platzierten Materialien zurück.
 ui.station.retrieve.hint = Drücke [{key}], um Materialien zurückzunehmen
-ui.station.bench.hint = Schleichen + [{key}], um das Handwerk zu öffnen
 ui.station.inventory_full = Dein Inventar ist zu voll zum Arbeiten hier.
 ui.station.wrong_tool = Du hältst nicht das richtige Werkzeug für diese Arbeit.
 ui.station.tool_worn = Dein Werkzeug ist zu abgenutzt für diese Arbeit.

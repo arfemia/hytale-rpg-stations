@@ -16,7 +16,6 @@ ui.station.custody.topped_up = További anyagokat adtál az állomáshoz.
 ui.station.retrieve.busy = Nem veheted vissza az anyagokat, amíg ezen az állomáson dolgoznak.
 ui.station.retrieve.done = Visszaveszed a lerakott anyagaidat.
 ui.station.retrieve.hint = Nyomd meg: [{key}] az anyagok visszavételéhez
-ui.station.bench.hint = Surranás + [{key}] az edzőpulthoz
 ui.station.mount_unavailable = Nem tudsz felülni az állomásra most.
 ui.station.rare_find = Valami extra dolgot találtál!
 ui.station.lucky = Szerencséd volt!

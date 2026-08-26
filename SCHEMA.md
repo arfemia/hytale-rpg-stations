@@ -284,7 +284,6 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Offset` | [Vec3](#field-actionasset-worker-hold-mount-entity-offset) | `null` | The mount attachment offset from the anchor entity, in blocks (X right, Y up, Z forward). |
 | `DismountOnMove` | `boolean` | `null` | Whether a heartbeat walk-off check dismounts the player (no native auto-dismount for this route). Reader-defaults to true; false = hard-lock until crouch/re-press. |
-| `Steerable` | `boolean` | `null` | Whether the anchor may be WASD-steered by the mounted player. Reader-defaults to false (a per-heartbeat snap-back defeats native steering); true is validator-flagged as untested. |
 | `VisibleAnchorItemId` | `string` | `null` | Diagnostic/authoring aid: an item id the invisible anchor renders as a dropped-item-style prop, so its position is visible in-game. Null = no visual (the shipped default). |
 
 <a id="field-actionasset-worker-hold-mount-entity-offset"></a>
@@ -515,7 +514,6 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Offset` | [Vec3](#field-actiondef-worker-hold-mount-entity-offset) | `null` | The mount attachment offset from the anchor entity, in blocks (X right, Y up, Z forward). |
 | `DismountOnMove` | `boolean` | `null` | Whether a heartbeat walk-off check dismounts the player (no native auto-dismount for this route). Reader-defaults to true; false = hard-lock until crouch/re-press. |
-| `Steerable` | `boolean` | `null` | Whether the anchor may be WASD-steered by the mounted player. Reader-defaults to false (a per-heartbeat snap-back defeats native steering); true is validator-flagged as untested. |
 | `VisibleAnchorItemId` | `string` | `null` | Diagnostic/authoring aid: an item id the invisible anchor renders as a dropped-item-style prop, so its position is visible in-game. Null = no visual (the shipped default). |
 
 <a id="field-actiondef-worker-hold-mount-entity-offset"></a>

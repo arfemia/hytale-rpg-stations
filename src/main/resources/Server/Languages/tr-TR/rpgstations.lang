@@ -11,7 +11,6 @@ ui.station.custody.topped_up = İstasyona daha fazla malzeme ekliyorsunuz.
 ui.station.retrieve.busy = Bu istasyon kullanılırken malzemeleri geri alamazsınız.
 ui.station.retrieve.done = Yerleştirdiğiniz malzemeleri geri alıyorsunuz.
 ui.station.retrieve.hint = Malzemeleri geri almak için [{key}] tuşuna basın
-ui.station.bench.hint = El sanatını açmak için eğil + [{key}] tuşuna basın
 ui.station.inventory_full = Envanteriniz çalışmak için çok dolu.
 ui.station.wrong_tool = Bu iş için uygun aracı tutmuyor.
 ui.station.tool_worn = Aracınız bu iş için fazla yıpranmış.

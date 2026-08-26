@@ -109,12 +109,6 @@ final class StationSession {
     /** The entity-mount anchor's ref ({@link #entityMountMode} only); null otherwise. */
     @Nullable Ref<EntityStore> mountAnchorRef;
     /**
-     * {@code Hold.Mount.Entity.Steerable}, resolved at engage ({@link #entityMountMode} only;
-     * default false). {@code true} skips the hold-effect lock + heartbeat snap-back (reserved
-     * for a future vehicle-like station).
-     */
-    boolean entitySteerable;
-    /**
      * {@code Hold.Mount.Entity.DismountOnMove}, resolved at engage ({@link #entityMountMode}
      * only; default true). {@code true} = the heartbeat runs the SAME origin-delta walk-off
      * check effect-mode uses; {@code false} = hard-lock until crouch/re-press.

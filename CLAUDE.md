@@ -477,15 +477,17 @@ fix layers on cleanly.
   `MountedComponent(anchorRef, attachmentOffset, MountController.Minecart)` to the player directly
   (no interaction chain). CRITIQUE FIX (m7): `Hold.Mount.Entity.Offset {X,Y,Z}` converts explicitly
   to the constructor's `Rotation3f attachmentOffset` parameter (a native mislabeling - it is really
-  a spatial offset). `Steerable` (default false) applies the SAME hold effect effect-mode uses plus
+  a spatial offset). Every entity mount applies the SAME hold effect effect-mode uses plus
   a per-heartbeat anchor snap-back to defeat the native WASD-steers-the-anchor behavior;
   `DismountOnMove` (default true) runs the same origin-delta walk-off check effect-mode uses (the
-  entity-mount controller has no native auto-dismount). Because this path never populates the
+  entity-mount controller has no native auto-dismount). (A `Steerable` escape hatch that skipped
+  both mitigations was dropped in the Update 6 cycle - nothing shipped authored it and the combo
+  was never verifiable in-game.) Because this path never populates the
   client's `MountedUpdate.Block` field, the mount mine infers the player renders STANDING by
   construction - in-game-unverifiable from server source alone, the FIRST phase-2 smoke item.
   `StationValidator` gained `MOUNT_FACE_BLOCK_CONFLICT` (generalized from the old
-  `SEAT_FACE_BLOCK_CONFLICT`), `UNKNOWN_MOUNT_SURFACE`, `MOUNT_ENTITY_GROUP_IGNORED`, and
-  `MOUNT_STEERABLE_UNTESTED` (all warn-only, per the maintainer ruling). See `station/CLAUDE.md`'s
+  `SEAT_FACE_BLOCK_CONFLICT`), `UNKNOWN_MOUNT_SURFACE`, and `MOUNT_ENTITY_GROUP_IGNORED`
+  (all warn-only, per the maintainer ruling). See `station/CLAUDE.md`'s
   Mount bullet for the full file-by-file detail.
 - **Leg E (LANDED, this mod + a consumer bridge + the pack)**: the anvil arc - the
   `Stamp` step un-reserved (`asset.StationStep.Stamp{Reagents,Durability,Stats}`, nested

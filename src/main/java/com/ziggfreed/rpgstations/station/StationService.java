@@ -708,12 +708,10 @@ public final class StationService {
         }
 
         StationAsset.Hold.Mount.Entity entityGroup = s.entityMountMode ? mountGroup.getEntity() : null;
-        s.entitySteerable = entityGroup != null && entityGroup.effectiveSteerable();
         s.entityDismountOnMove = entityGroup == null || entityGroup.effectiveDismountOnMove();
         if (s.entityMountMode) {
-            // Steerable (default false) applies the hold effect + heartbeat snap-back to defeat
-            // the native WASD-steers-the-anchor behavior (design 9.2); Steerable true skips both,
-            // reserved for a future vehicle-like station.
+            // An entity mount always applies the hold effect + heartbeat snap-back to defeat the
+            // native WASD-steers-the-anchor behavior (design 9.2).
             Ref<EntityStore> anchorRef = StationEntityMountController.spawnAnchor(commandBuffer, blockX, blockY, blockZ, entityGroup);
             boolean attached = anchorRef != null
                     && StationEntityMountController.attach(ref, anchorRef, commandBuffer, entityGroup);
@@ -737,7 +735,7 @@ public final class StationService {
         }
         boolean effectivelyMounted = s.seatMode || s.entityMountMode;
         s.movementLock = (!effectivelyMounted && (hold == null || hold.getMovementLock() == null || hold.getMovementLock()))
-                || (s.entityMountMode && !s.entitySteerable);
+                || s.entityMountMode;
 
         // Animation fields (s.emoteId in particular) MUST be assigned before the puppet
         // spawn+hide call below - StationPuppetController#spawnAndHide reads s.emoteId to
@@ -975,7 +973,7 @@ public final class StationService {
                 }
             }
         }
-        if (s.entityMountMode && !s.entitySteerable) {
+        if (s.entityMountMode) {
             StationEntityMountController.snapBack(s.mountAnchorRef, store, s.blockX, s.blockY, s.blockZ);
         }
         MovementStatesComponent ms = store.getComponent(s.ref, MovementStatesComponent.getComponentType());

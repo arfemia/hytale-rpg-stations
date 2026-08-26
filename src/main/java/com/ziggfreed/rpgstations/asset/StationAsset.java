@@ -930,8 +930,8 @@ public final class StationAsset
      * alternate hold strategy trading the packet-camera hunt for the engine's own native mount
      * mechanics. When {@link #mount} is authored, {@link #movementLock}/{@link #effectId} are
      * IGNORED for the BLOCK surface (the mount itself is the lock) but stay meaningful for the
-     * ENTITY surface's default (non-{@code Steerable}) case - see {@link Mount} for the full
-     * per-surface breakdown; {@link #interruptOnDamage} stays live either way.
+     * ENTITY surface - see {@link Mount} for the full per-surface breakdown;
+     * {@link #interruptOnDamage} stays live either way.
      */
     public static final class Hold {
         @Nullable protected Boolean movementLock;
@@ -1083,7 +1083,6 @@ public final class StationAsset
             public static final class Entity {
                 @Nullable protected Vec3 offset;
                 @Nullable protected Boolean dismountOnMove;
-                @Nullable protected Boolean steerable;
                 @Nullable protected String visibleAnchorItemId;
 
                 public static final BuilderCodec<Entity> CODEC = BuilderCodec.builder(Entity.class, Entity::new)
@@ -1094,10 +1093,6 @@ public final class StationAsset
                                 (o, v) -> o.dismountOnMove = v, o -> o.dismountOnMove,
                                 (o, p) -> o.dismountOnMove = p.dismountOnMove)
                         .documentation("Whether a heartbeat walk-off check dismounts the player (no native auto-dismount for this route). Reader-defaults to true; false = hard-lock until crouch/re-press.").add()
-                        .appendInherited(new KeyedCodec<>("Steerable", Codec.BOOLEAN, false),
-                                (o, v) -> o.steerable = v, o -> o.steerable,
-                                (o, p) -> o.steerable = p.steerable)
-                        .documentation("Whether the anchor may be WASD-steered by the mounted player. Reader-defaults to false (a per-heartbeat snap-back defeats native steering); true is validator-flagged as untested.").add()
                         .appendInherited(new KeyedCodec<>("VisibleAnchorItemId", Codec.STRING, false),
                                 (o, v) -> o.visibleAnchorItemId = v, o -> o.visibleAnchorItemId,
                                 (o, p) -> o.visibleAnchorItemId = p.visibleAnchorItemId)
@@ -1105,18 +1100,16 @@ public final class StationAsset
                         .build();
 
                 @Nonnull
-                public static Entity of(@Nullable Vec3 offset, @Nullable Boolean dismountOnMove,
-                        @Nullable Boolean steerable) {
-                    return of(offset, dismountOnMove, steerable, null);
+                public static Entity of(@Nullable Vec3 offset, @Nullable Boolean dismountOnMove) {
+                    return of(offset, dismountOnMove, null);
                 }
 
                 @Nonnull
                 public static Entity of(@Nullable Vec3 offset, @Nullable Boolean dismountOnMove,
-                        @Nullable Boolean steerable, @Nullable String visibleAnchorItemId) {
+                        @Nullable String visibleAnchorItemId) {
                     Entity e = new Entity();
                     e.offset = offset;
                     e.dismountOnMove = dismountOnMove;
-                    e.steerable = steerable;
                     e.visibleAnchorItemId = visibleAnchorItemId;
                     return e;
                 }
@@ -1140,11 +1133,6 @@ public final class StationAsset
                     return dismountOnMove;
                 }
 
-                @Nullable
-                public Boolean getSteerable() {
-                    return steerable;
-                }
-
                 /**
                  * DIAGNOSTIC/authoring aid (decision 62's confirm kit): when set, the invisible
                  * mount anchor entity also renders this item id as a dropped-item-style prop, so
@@ -1166,16 +1154,6 @@ public final class StationAsset
                  */
                 public boolean effectiveDismountOnMove() {
                     return dismountOnMove == null || dismountOnMove;
-                }
-
-                /**
-                 * {@link #steerable}, reader-defaulted to {@code false} when null: the default
-                 * applies the hold effect + a per-heartbeat anchor snap-back to defeat the native
-                 * WASD-steers-the-anchor behavior. {@code true} skips both (reserved for a future
-                 * vehicle-like station; {@code station.StationValidator} flags it as untested).
-                 */
-                public boolean effectiveSteerable() {
-                    return steerable != null && steerable;
                 }
             }
         }

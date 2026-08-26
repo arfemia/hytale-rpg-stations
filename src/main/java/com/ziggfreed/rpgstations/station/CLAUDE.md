@@ -685,9 +685,10 @@ what those three first-party sources establish.**
   `MountedComponent` directly to the player, no interaction chain). Never populates the client's
   `MountedUpdate.Block`, so the player renders standing. `Hold.Mount.Entity.Offset` (the shared `Vec3`)
   converts to the constructor's `Rotation3f attachmentOffset` parameter (a native mislabeling -
-  it is really a spatial offset, not a rotation). `Steerable` (default false) applies the SAME
-  hold effect effect-mode uses plus a per-heartbeat `snapBack`; `DismountOnMove` (default true)
-  runs the same origin-delta walk-off check effect-mode uses. Anchor lifecycle: session-scoped,
+  it is really a spatial offset, not a rotation). Every entity mount applies the SAME hold effect
+  effect-mode uses plus a per-heartbeat `snapBack` (defeating the native WASD-steers-the-anchor
+  behavior); `DismountOnMove` (default true) runs the same origin-delta walk-off check
+  effect-mode uses. Anchor lifecycle: session-scoped,
   despawned in the ONE idempotent `stop()` funnel via `CommandBuffer` (tick-safe from an
   interaction handler or the heartbeat frame drain). **A WORKING Entity mount renders NOTHING by
   design** (decision 62, source-traced: no model on the anchor, no pose packet -
