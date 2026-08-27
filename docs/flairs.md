@@ -3,9 +3,11 @@
 The open flair/moment vocabulary and the standalone FlairAsset.
 
 A **flair** is a cosmetic `Presentation` overlay - a fancier sound, extra particles, a camera shake -
-that applies at a specific moment of a station's work loop, gated behind a player unlocking it
-(through whatever mod registers a `FlairUnlockProvider`; RPG Stations itself never decides who has
-unlocked what). Flairs are purely presentational: they never change what a station produces, only how
+that applies at a specific moment of a station's work loop, gated behind a player unlocking it.
+Out of the box, RPG Stations reads a player's unlocked flair ids from ziggfreed-common's persisted
+per-player flair set (whichever mod or command writes that set decides who has unlocked what), and
+any mod keeping unlocks in its own store can register a `FlairUnlockProvider` beside the built-in
+read - the engine unions every provider's answer. Flairs are purely presentational: they never change what a station produces, only how
 it looks and sounds while doing it.
 
 ## The open moment vocabulary

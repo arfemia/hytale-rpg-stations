@@ -396,7 +396,9 @@ between this engine and any mod that wants to hook it. Split by shape, per the n
 points are typed registries** on the static `RpgStationsApi` holder (`FactorRegistry` - the one
 extensible numeric vocabulary conditional lootables/`Requires` gates evaluate over, this mod's
 stable surface over `ziggfreed-common`'s shared factor core;
-`FlairUnlockRegistry` - union of every registered per-player unlock provider;
+`FlairUnlockRegistry` - union of every registered per-player unlock provider, seeded at setup
+with the built-in `station.ZigFlairUnlockProvider` reading ziggfreed-common's persisted
+unlocked-flair component;
 `SummaryEnricherRegistry` - extra ledger rows + a themeable decorate hook on the summary panel;
 `ValidationHookRegistry` - a foreign vocabulary's owner registers its own content checks, run
 inside this engine's own full validate pass, advisory and never blocking; `ContributionChannelRegistry`

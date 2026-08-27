@@ -125,9 +125,11 @@ is the exact inverse of a permanently-opaque channel.
   AND the channels it aggregates" - the engine cannot know that, and must not pretend to.
 - **[`FlairUnlockRegistry`](FlairUnlockRegistry.java)** / **[`FlairUnlockProvider`](FlairUnlockProvider.java)**
   - `unlockedFlairIds(playerId)` returns a `Set<String>`; the engine's flair overlay resolution
-  consults the UNION across every registered provider. No provider registered = empty set = base
-  presentations only. Persistence is the REGISTERING mod's own concern - RpgStations never stores
-  a per-player fact.
+  consults the UNION across every registered provider. The engine itself registers the built-in
+  `station.ZigFlairUnlockProvider` at setup (a read of ziggfreed-common's persisted unlocked-flair
+  component), so unlocks work with no other mod installed; a mod with its own unlock store
+  registers a provider beside it and the answers union. Persistence stays outside this engine -
+  RpgStations never stores a per-player fact.
 - **The stamper contract is NOT here any more.** How a server encodes "N points of stat X" onto an
   item is a shared question every mod that stamps gear answers the same way, so it lives in
   `ziggfreed-common`'s `loot.stamp` package: register a `Stamper` (a 2-method

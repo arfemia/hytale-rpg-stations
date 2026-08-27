@@ -30,6 +30,7 @@ import com.ziggfreed.common.asset.AssetStoreRegistrar;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
+import com.ziggfreed.rpgstations.api.impl.FlairUnlockRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.AssetEditorDataSets;
@@ -52,6 +53,7 @@ import com.ziggfreed.rpgstations.station.StationFrameSystem;
 import com.ziggfreed.rpgstations.station.StationInterruptDamageSystem;
 import com.ziggfreed.rpgstations.station.StationService;
 import com.ziggfreed.rpgstations.station.StationValidator;
+import com.ziggfreed.rpgstations.station.ZigFlairUnlockProvider;
 import com.ziggfreed.rpgstations.ui.StationSummaryHud;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -72,7 +74,9 @@ import com.ziggfreed.rpgstations.util.Log;
  * its lifecycle events ({@code StationSessionStartedEvent}/{@code StationCycleCompletedEvent}/
  * {@code StationSessionCompletedEvent}/{@code StationToolBrokeEvent}) and consults the
  * {@code FlairUnlockRegistry}/{@code SummaryEnricherRegistry} unions from
- * {@code StationService}/{@code StationFlairs} - see
+ * {@code StationService}/{@code StationFlairs}, seeding the flair union with its own
+ * {@link ZigFlairUnlockProvider} (the shared per-player flair component read) so unlocks work with
+ * no other mod installed - see
  * {@code .claude/research/raw/rpg-stations-unified-design-2026-07-21.md} section 3.
  *
  * <p>It also registers {@link RpgStationsCommand} ({@code /rpgstations camera <preset>|list},
@@ -117,6 +121,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerActionAssetStore();
         registerExtensionAssetStore();
         registerFlairAssetStore();
+        registerFlairUnlockDefault();
         registerSettingsAssetStore();
         registerAssetEditorDataSets();
         registerStationInteraction();
@@ -148,6 +153,21 @@ public class RpgStationsPlugin extends JavaPlugin {
         } catch (Throwable t) {
             Log.warn("RpgStations could not register its Asset Editor dropdown datasets; "
                     + "editor fields fall back to free text.", t);
+        }
+    }
+
+    /**
+     * The built-in flair-unlock read ({@link ZigFlairUnlockProvider}): unlocked flair ids come off
+     * ziggfreed-common's persisted per-player component, so flair overlays resolve with this jar
+     * and the library alone. The registry unions every provider, so another mod's own registration
+     * adds to this answer rather than replacing it.
+     */
+    private void registerFlairUnlockDefault() {
+        try {
+            FlairUnlockRegistryImpl.getInstance().register(new ZigFlairUnlockProvider());
+        } catch (Throwable t) {
+            Log.warn("RpgStations could not register the built-in flair unlock provider; "
+                    + "flair overlays will resolve only through providers other mods register.", t);
         }
     }
 

@@ -906,3 +906,14 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
     a blank `Param`) resolves as UNRESOLVABLE rather than `0`, so a bounds-less presence check on
     it fails closed instead of passing. A `Min`-bounded gate and every summed `Factors` reference
     behave exactly as before.
+
+### Flair unlocks work standalone (2026-08-27)
+
+- **The engine seeds its own flair-unlock read.** Setup registers a built-in `FlairUnlockProvider`
+  (`station.ZigFlairUnlockProvider`) that reads ziggfreed-common's persisted per-player
+  unlocked-flair component (`ZigFlairComponent`), so a station's flair overlays resolve with this
+  jar and the library alone - previously the union was empty until some other mod registered a
+  provider, and an unlocked flair could never show on a server running RPG Stations without one.
+  The registry contract is unchanged: providers still union, persistence stays outside this engine,
+  and a mod keeping unlocks in a genuinely foreign store registers its provider exactly as before
+  (a second provider answering the same ids merges harmlessly).

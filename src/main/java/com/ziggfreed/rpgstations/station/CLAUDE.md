@@ -1110,8 +1110,11 @@ by construction) - not gated on any remembered session.
 ## Loot + flairs, the open vocabulary (unchanged mechanism; `LootRef` terminology)
 
 [`StationFlairs`](StationFlairs.java) resolves the per-player cosmetic overlay for a moment id
-against the UNION of every registered api `FlairUnlockProvider` (persistence is the registering
-mod's own concern; this engine stores no per-player fact). The open STRING moment id vocabulary
+against the UNION of every registered api `FlairUnlockProvider` (persistence stays outside this
+engine; it stores no per-player fact). The plugin seeds that union with its own
+[`ZigFlairUnlockProvider`](ZigFlairUnlockProvider.java), a read of ziggfreed-common's persisted
+`ZigFlairComponent` unlocked-flair set, so unlocks resolve with this jar and the library alone;
+a mod with a genuinely foreign unlock store registers its provider beside it. The open STRING moment id vocabulary
 (`MOMENT_CYCLE`/`MOMENT_SWING`/`MOMENT_IMPACT`/`MOMENT_RARE_FIND`/`MOMENT_COMPLETION`, plus
 `stepMomentId(actionId, stepId)`) is unchanged. The flair map is the merge of TWO sources
 ([`FlairCatalog`](FlairCatalog.java)`.effectiveFlairsFor`): a station's own inline `Flairs`

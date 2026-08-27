@@ -58,7 +58,9 @@ is used.
   `station.StationValidationScope`. Every hook invocation is try-guarded and its findings are
   info/warn only, so a throwing or opinionated hook can never block an asset.
 - **[`FlairUnlockRegistryImpl`](FlairUnlockRegistryImpl.java)** - a `CopyOnWriteArrayList` of
-  registered providers; the union read iterates all of them per resolution.
+  registered providers; the union read iterates all of them per resolution. The plugin registers
+  the built-in `station.ZigFlairUnlockProvider` (the shared flair-component read) at setup, so the
+  union is never empty on a running server.
 - **[`SummaryEnricherRegistryImpl`](SummaryEnricherRegistryImpl.java)** - same shape, registration
   order preserved (drives the "prepended before the engine's own rows, registration order" rule).
 - **[`StationViewImpl`](StationViewImpl.java)** - the read-only per-station projection built from

@@ -84,8 +84,10 @@ and formula numbers, and reports info/warn findings. Advisory only, try-guarded,
 ### Flair-unlock registry
 
 Answers "which flair ids has this player unlocked". The engine consults the union across every
-registered provider; persistence is the registering mod's own concern, since RPG Stations stores no
-per-player fact. See [Flairs](flairs.md).
+registered provider, and registers one itself: a built-in read of ziggfreed-common's persisted
+per-player flair set, so unlocks work with no other mod installed. Persistence stays outside this
+engine (RPG Stations stores no per-player fact); a mod keeping unlocks in its own store registers
+its own provider beside the built-in one. See [Flairs](flairs.md).
 
 ### Enhance-stamper registry
 
