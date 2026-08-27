@@ -319,7 +319,10 @@ resolution section for the engine half.
     - **`$` keys are LEGAL** (backed by `InheritMapCodec`) inside every MOMENT/FLAIR map: an
       action's `Moments` (`ActionDef` and `ActionAsset` alike), `StationAsset.Flairs`, a station's
       inline `Flairs[].Moments`, and `FlairAsset.Moments`. Inline and standalone flair content is
-      ONE shape, so the two `Moments` maps behave identically.
+      ONE shape, so the two `Moments` maps behave identically. Prefer the engine's reserved
+      spellings (`$Comment` above all): `InheritMapCodec`'s exported schema declares only those
+      ten to the in-game Asset Editor, so an exotic `$`-key (a `$Notes`, a suffixed
+      `$Comment_Foo`) still decodes server-side but is undeclared to the editor's property pane.
     - **`$` keys are ILLEGAL** (backed by the engine `MapCodec`) inside `Anchors` (`ActionDef`,
       `ActionAsset`, `ExtensionAsset`), `StationStep.Stamp.Stats.Caps.PerStat`, and every `Tags`
       leaf (`Tool.Tags`, `ActionInput.Tags`, and so `Custody.Input.Tags`), which share

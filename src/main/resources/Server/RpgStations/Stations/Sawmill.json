@@ -10,7 +10,7 @@
   },
   "Actions": [
     {
-      "$Comment": "Id 'Mill' is technically optional (an id-less entry answers to its array position), but authoring it is load-bearing: the id is what an ExtensionAsset targets (the sibling pack's contribution extension aims at exactly {Station 'Sawmill', Action 'Mill'}), what a custody claim records across a relog, and what stays stable when actions are reordered - a positional id changes the moment an action is inserted above it, which is the exact implicit-order fragility this schema exists to avoid. Author an Id on every action you expect anyone to extend.",
+      "$Comment": "Id 'Mill' is technically optional (an id-less entry answers to its array position), but authoring it is load-bearing: the id is what an ExtensionAsset targets (the sibling pack's contribution extension aims at exactly {Station 'Sawmill', Action 'Mill'}), what a custody claim records across a relog, and what stays stable when actions are reordered - a positional id changes the moment an action is inserted above it, which is the exact implicit-order fragility this schema exists to avoid. Author an Id on every action you expect anyone to extend. Every key under Moments below is a MOMENT ID the engine emits: cycle, swing, impact, completion, a per-step step:<actionId>:<stepId>, or a cue:<name> a loot roll names.",
       "Id": "Mill",
       "Tool": {
         "$Comment": "The ONE gate for this action: a Hatchet family match plus the Woods gather route, checked at engage and re-checked every heartbeat. The per-cycle durability drain rides in the same group because wear is a tool concern.",
@@ -100,7 +100,6 @@
         }
       },
       "Moments": {
-        "$Comment": "Every other key here is a MOMENT ID the engine emits: cycle, swing, impact, completion, or a per-step step:<actionId>:<stepId>. A $-prefixed key like this one is read as editorial and never as a moment id, so a map-wide note is safe to leave right here.",
         "Swing": {
           "$Comment": "Fires with each Animation.Swing tick, and a flair can re-skin or re-time it by this same key (keys are matched case-insensitively). A single Sounds entry can also step out on its own by authoring {\"EventId\": ..., \"DelayMs\": ...} instead of a bare id, which adds to whatever delay the moment already holds - reach for that to stagger two sounds inside one moment, and for a separate moment id when a flair should be able to target the late cue by itself.",
           "Sounds": ["SFX_Tool_T1_Swing"]
