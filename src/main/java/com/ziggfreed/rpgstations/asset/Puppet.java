@@ -7,6 +7,7 @@ import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.ziggfreed.common.asset.EditorSchema;
 import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.common.codec.Vec3;
 
@@ -223,7 +224,8 @@ public final class Puppet {
                 .appendInherited(new KeyedCodec<>("Route", Codec.STRING, false),
                         (o, v) -> o.route = v, o -> o.route, (o, p) -> o.route = p.route)
                 .documentation("How the puppeteer's own body is hidden: 'Scale' (default), 'Effect' (Hide.Effect), or 'None'.")
-                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:hide-route"))).add()
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:hide-route")))
+                .metadata(EditorSchema.defaultValue(HIDE_ROUTE_SCALE)).add()
                 .appendInherited(new KeyedCodec<>("Effect", EffectRef.CODEC, false),
                         (o, v) -> o.effect = v, o -> o.effect, (o, p) -> o.effect = p.effect)
                 .documentation("The native EntityEffect reference the 'Effect' route applies to hide the body (id-ref-only, optional DurationMs).").add()
@@ -298,7 +300,8 @@ public final class Puppet {
                 .appendInherited(new KeyedCodec<>("Source", Codec.STRING, false),
                         (o, v) -> o.source = v, o -> o.source, (o, p) -> o.source = p.source)
                 .documentation("The puppet appearance discriminator: 'PlayerClone' (default), 'Model' (Look.Model), or 'NpcRole' (Look.Role).")
-                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:look-source"))).add()
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:look-source")))
+                .metadata(EditorSchema.defaultValue(LOOK_SOURCE_PLAYER_CLONE)).add()
                 .appendInherited(new KeyedCodec<>("FallbackModelId", Codec.STRING, false),
                         (o, v) -> o.fallbackModelId = v, o -> o.fallbackModelId,
                         (o, p) -> o.fallbackModelId = p.fallbackModelId)
@@ -518,14 +521,16 @@ public final class Puppet {
                 .appendInherited(new KeyedCodec<>("Source", Codec.STRING, false),
                         (o, v) -> o.source = v, o -> o.source, (o, p) -> o.source = p.source)
                 .documentation("The held-prop discriminator: 'MirrorHeld' (default, copies the player's live hotbar item), 'ItemId' (a forced prop), or 'None' (empty hands).")
-                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:prop-source"))).add()
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:prop-source")))
+                .metadata(EditorSchema.defaultValue(PROP_SOURCE_MIRROR_HELD)).add()
                 .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
                         (o, v) -> o.itemId = v, o -> o.itemId, (o, p) -> o.itemId = p.itemId)
                 .documentation("The forced item id the puppet holds when Source is 'ItemId'; ignored by the other arms.").add()
                 .appendInherited(new KeyedCodec<>("Slot", Codec.STRING, false),
                         (o, v) -> o.slot = v, o -> o.slot, (o, p) -> o.slot = p.slot)
                 .documentation("Which hand the prop occupies: 'Hotbar' (main, default) or 'Utility' (off-hand).")
-                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:prop-slot"))).add()
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:prop-slot")))
+                .metadata(EditorSchema.defaultValue(PROP_SLOT_HOTBAR)).add()
                 .build();
 
         @Nonnull

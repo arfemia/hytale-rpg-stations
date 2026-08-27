@@ -13,6 +13,7 @@ import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
 import com.hypixel.hytale.codec.codecs.map.MapCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.ziggfreed.common.asset.EditorSchema;
 import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.common.factor.FactorFormula;
 import com.ziggfreed.common.loot.LootRef;
@@ -335,7 +336,8 @@ public final class StationStep {
                         .appendInherited(new KeyedCodec<>("Result", Codec.STRING, false),
                                 (o, v) -> o.result = v, o -> o.result, (o, p) -> o.result = p.result)
                         .documentation("On a failing Conditions check: 'Skip' (treat as a no-op success and continue) or 'Fail' (default).")
-                        .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:condition-fail-result"))).add()
+                        .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:condition-fail-result")))
+                        .metadata(EditorSchema.defaultValue(RESULT_FAIL)).add()
                         .appendInherited(new KeyedCodec<>("Goto", Codec.STRING, false),
                                 (o, v) -> o.goto_ = v, o -> o.goto_, (o, p) -> o.goto_ = p.goto_)
                         .documentation("An authored step Id to jump to on a success-continuing result; null = classic linear advance.").add()
@@ -574,7 +576,8 @@ public final class StationStep {
                 .appendInherited(new KeyedCodec<>("From", Codec.STRING, false),
                         (o, v) -> o.from = v, o -> o.from, (o, p) -> o.from = p.from)
                 .documentation("The source for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the block's placed-input claim).")
-                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:consume-from"))).add()
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:consume-from")))
+                .metadata(EditorSchema.defaultValue(FROM_INVENTORY)).add()
                 .build();
 
         @Nonnull
@@ -637,7 +640,8 @@ public final class StationStep {
                 .appendInherited(new KeyedCodec<>("To", Codec.STRING, false),
                         (o, v) -> o.to = v, o -> o.to, (o, p) -> o.to = p.to)
                 .documentation("The destination for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the At-anchor's claim).")
-                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:produce-to"))).add()
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:produce-to")))
+                .metadata(EditorSchema.defaultValue(TO_INVENTORY)).add()
                 .build();
 
         @Nonnull

@@ -7,6 +7,8 @@ there is no prior public release to diff against, so every entry is additive by 
 
 ## 0.1.0 (first public release)
 
+- **The Asset Editor shows each knob's real default beside its dropdown.** The station schemas already offer pick lists on the closed discriminators (`Look.Source`, `Hide.Route`, `Prop.Source`/`Slot`, `Mount.Surface`, `Consume.From`/`Produce.To`, `OnConditionFail.Result`); they now also declare each one's unauthored default (PlayerClone, Scale, MirrorHeld, Hotbar, Block, Inventory, Fail), plus the engine master `Enabled` and a work action's `Looping` (both true) and the summary HUD's `Enabled`, so an unauthored field renders its effective value instead of the control's zero-state. `FromCrafting.Types` exports its closed Crafting/Processing pair as a per-entry dropdown. Decode is unchanged.
+
 A standalone, richly self-sufficient diegetic interactive work-station engine: with RPG Stations
 alone installed, a station runs its full work loop (camera/hold/mount, tool gating, recipe
 conversion, conditional-lootable rolls, command rewards) and needs no other mod. An add-on reaches

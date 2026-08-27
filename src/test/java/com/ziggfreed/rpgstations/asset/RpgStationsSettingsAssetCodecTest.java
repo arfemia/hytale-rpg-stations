@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
+import com.hypixel.hytale.codec.schema.SchemaContext;
+import com.hypixel.hytale.codec.schema.config.BooleanSchema;
+import com.hypixel.hytale.codec.schema.config.ObjectSchema;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 import com.ziggfreed.common.ui.hud.HudPosition;
 
@@ -156,5 +159,14 @@ public class RpgStationsSettingsAssetCodecTest {
         assertEquals(200, child.getSummaryHud().getOffsetY(), "own leaf wins");
         assertEquals("top_center", child.getSummaryHud().getPosition(), "sibling leaf inherits");
         assertEquals(6000L, child.getSummaryHud().getTtlMs(), "sibling leaf inherits");
+    }
+
+    @Test
+    void schemaDeclaresTheReaderDefaultOnEnabled() {
+        ObjectSchema schema = RpgStationsSettingsAsset.CODEC.toSchema(new SchemaContext());
+        BooleanSchema enabled = (BooleanSchema) schema.getProperties().get("Enabled");
+        assertEquals(Boolean.TRUE, enabled.getDefault(),
+                "unauthored Enabled means the engine is live, and the exported schema must say so "
+                        + "or the editor renders an unchecked box that lies about the effective value");
     }
 }

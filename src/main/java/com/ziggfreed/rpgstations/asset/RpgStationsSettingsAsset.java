@@ -12,6 +12,7 @@ import com.hypixel.hytale.assetstore.map.DefaultAssetMap;
 import com.hypixel.hytale.assetstore.map.JsonAssetWithMap;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
+import com.ziggfreed.common.asset.EditorSchema;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditorSectionStart;
@@ -60,7 +61,8 @@ public final class RpgStationsSettingsAsset
             .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
                     (a, v) -> a.enabled = v, a -> a.enabled, (a, parent) -> a.enabled = parent.enabled)
             .documentation("The engine master switch; false disables the whole RpgStations engine at the SettingsCatalog check. Reader-defaults to true.")
-            .metadata(new UIEditorSectionStart("Engine")).add()
+            .metadata(new UIEditorSectionStart("Engine"))
+            .metadata(EditorSchema.defaultValue(true)).add()
             .appendInherited(new KeyedCodec<>("SummaryHud", SummaryHud.CODEC, false),
                     (a, v) -> a.summaryHud = v, a -> a.summaryHud, (a, parent) -> a.summaryHud = parent.summaryHud)
             .documentation("The end-of-session summary panel's layout and lifetime.")
@@ -217,6 +219,7 @@ public final class RpgStationsSettingsAsset
         public static final BuilderCodec<SummaryHud> CODEC = BuilderCodec.builder(SummaryHud.class, SummaryHud::new)
                 .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
                         (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled)
+                .metadata(EditorSchema.defaultValue(true))
                 .documentation("Whether the end-of-session summary panel shows at all; defaults to true.").add()
                 .appendInherited(new KeyedCodec<>("Position", Codec.STRING, false),
                         (o, v) -> o.position = v, o -> o.position, (o, p) -> o.position = p.position)

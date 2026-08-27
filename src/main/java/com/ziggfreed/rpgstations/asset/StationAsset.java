@@ -16,6 +16,7 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditorSectionStart;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import com.ziggfreed.common.asset.EditorSchema;
 import com.ziggfreed.common.codec.InheritMapCodec;
 import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.common.codec.TagMatch;
@@ -346,6 +347,7 @@ public final class StationAsset
                 .documentation("Opt-in no-material idle practice mode: authoring this group at all turns it on; absent = off (a NO_INPUTS start is denied).").add()
                 .appendInherited(new KeyedCodec<>("Looping", Codec.BOOLEAN, false),
                         (o, v) -> o.looping = v, o -> o.looping, (o, p) -> o.looping = p.looping)
+                .metadata(EditorSchema.defaultValue(true))
                 .documentation("Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape).").add()
                 .build();
 
@@ -688,6 +690,7 @@ public final class StationAsset
                 .documentation("Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match).").add()
                 .appendInherited(new KeyedCodec<>("Types", new ArrayCodec<>(Codec.STRING, String[]::new), false),
                         (o, v) -> o.types = v, o -> o.types, (o, p) -> o.types = p.types)
+                .metadata(EditorSchema.oneOf(TYPE_CRAFTING, TYPE_PROCESSING))
                 .documentation("The recipe kinds to derive: 'Crafting' and/or 'Processing'; absent = both.").add()
                 .appendInherited(new KeyedCodec<>("NativeTime", NativeTime.CODEC, false),
                         (o, v) -> o.nativeTime = v, o -> o.nativeTime, (o, p) -> o.nativeTime = p.nativeTime)
@@ -1042,7 +1045,8 @@ public final class StationAsset
                     .appendInherited(new KeyedCodec<>("Surface", Codec.STRING, false),
                             (o, v) -> o.surface = v, o -> o.surface, (o, p) -> o.surface = p.surface)
                     .documentation("The mount mechanism union discriminator: 'Block' (native seat mount, default) or 'Entity' (standing work mount). Unrecognized values fall to Block with a validator warn.")
-                    .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:mount-surface"))).add()
+                    .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:mount-surface")))
+                    .metadata(EditorSchema.defaultValue("Block")).add()
                     .appendInherited(new KeyedCodec<>("Entity", Entity.CODEC, false),
                             (o, v) -> o.entity = v, o -> o.entity, (o, p) -> o.entity = p.entity)
                     .documentation("The standing work mount's sub-knobs; read only when Surface is 'Entity' (a validator warns if authored under 'Block').").add()
