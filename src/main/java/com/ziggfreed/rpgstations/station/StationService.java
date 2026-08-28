@@ -2695,7 +2695,7 @@ public final class StationService {
         // refund the in-flight iteration's consumed inputs (mutually exclusive with a custody return
         // per M1 - a Produce.To:Custody already cleared the ledger), then release + return every
         // remote anchor's claim/custody. The primary block's own custody returns just below.
-        refundIterationLedger(s);
+        refundIterationLedger(s, commandBuffer);
         releaseAnchorClaims(s, commandBuffer);
 
         StationAsset stopAsset = StationCatalog.getInstance().getStation(s.stationId);
@@ -3084,7 +3084,9 @@ public final class StationService {
             byBlock.remove(blockKey, playerUuid);
             try {
                 StationCustodyDisplay.despawn(claim.displayRef(), store);
-                giveClaimToOwner(store, null, claim, claim.blockX, claim.blockY, claim.blockZ);
+                // A null commandBuffer is CORRECT here and nowhere else in this class: the sweep
+                // runs through World#execute, off any tick, so the direct-store drop route is legal.
+                giveClaimToOwner(null, store, null, claim, claim.blockX, claim.blockY, claim.blockZ);
                 resetCustodyStateFor(world, claim);
             } catch (Throwable t) {
                 Log.warn("STATION disconnect claim sweep failed at " + blockKey + ": " + t.getMessage());
@@ -4407,7 +4409,8 @@ public final class StationService {
             if (claim != null && claim.ownerId.equals(s.playerUuid)) {
                 custodyByBlock.remove(blockKey, claim);
                 StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
-                giveClaimToOwner(ownerStore, s.ref, claim, claim.blockX, claim.blockY, claim.blockZ);
+                giveClaimToOwner(commandBuffer, ownerStore, s.ref, claim,
+                        claim.blockX, claim.blockY, claim.blockZ);
             }
             // Anchor block-state reset, mirroring the flip returnCustody already does for the
             // PRIMARY block. Previously absent and harmless (a remote anchor was never flipped at
@@ -4433,13 +4436,15 @@ public final class StationService {
 
     /**
      * Refunds the in-flight iteration's consumed inputs (design 2.5/M1, {@code stop()}'s teardown):
-     * grants whatever remains in {@link StationSession#iterationConsumed} back to the owner
-     * (hotbar-first via {@link ItemGrantUtil}, drop-at-block on overflow), then clears it. Empty for
+     * grants whatever remains in {@link StationSession#iterationConsumed} back to the owner through
+     * the shared {@link #handBackToOwner} engine (hotbar-first, drop-at-block on overflow, and the
+     * same tick-safe {@code commandBuffer} contract), then clears it. Empty for
      * every completed-cycle boundary (each {@code Produce.To:Custody} AND each completed program
      * cycle clears the ledger), so an orderly stop between cycles refunds NOTHING - refund and
      * custody-return stay mutually exclusive per iteration.
      */
-    private void refundIterationLedger(@Nonnull StationSession s) {
+    private void refundIterationLedger(@Nonnull StationSession s,
+            @Nullable CommandBuffer<EntityStore> commandBuffer) {
         if (s.iterationConsumed.isEmpty()) {
             return;
         }
@@ -4451,29 +4456,14 @@ public final class StationService {
                 ownerStore = null;
             }
         }
-        Player player = null;
-        if (ownerStore != null && s.ref != null && s.ref.isValid()) {
-            try {
-                player = ownerStore.getComponent(s.ref, Player.getComponentType());
-            } catch (Throwable ignored) {
-                player = null;
-            }
-        }
+        List<ItemStack> refund = new ArrayList<>(s.iterationConsumed.size());
         for (Map.Entry<String, Integer> e : s.iterationConsumed.entrySet()) {
             if (e.getKey() == null || e.getValue() == null || e.getValue() <= 0) {
                 continue;
             }
-            ItemStack stack = new ItemStack(e.getKey(), e.getValue());
-            try {
-                if (player != null) {
-                    ItemGrantUtil.grant(player, stack, null, ownerStore, s.blockX, s.blockY, s.blockZ);
-                } else {
-                    ItemDropUtil.dropAtBlock(null, ownerStore, s.blockX, s.blockY, s.blockZ, List.of(stack));
-                }
-            } catch (Throwable t) {
-                Log.warn("STATION iteration refund failed for '" + e.getKey() + "': " + t.getMessage());
-            }
+            refund.add(new ItemStack(e.getKey(), e.getValue()));
         }
+        handBackToOwner(commandBuffer, ownerStore, s.ref, refund, s.blockX, s.blockY, s.blockZ);
         s.iterationConsumed.clear();
     }
 
@@ -4759,7 +4749,7 @@ public final class StationService {
             }
         }
         StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
-        giveClaimToOwner(ownerStore, s.ref, claim, s.blockX, s.blockY, s.blockZ);
+        giveClaimToOwner(commandBuffer, ownerStore, s.ref, claim, s.blockX, s.blockY, s.blockZ);
         if (custody != null) {
             World world = null;
             if (s.ref != null && s.ref.isValid()) {
@@ -4788,15 +4778,49 @@ public final class StationService {
      * this to fire a native-pickup-mimic notification only for what the player genuinely
      * received (round-5 refinement 2); {@link #returnCustody} discards the return value. No-op
      * (empty result) when {@code claim} is empty. Never throws.
+     *
+     * <p>{@code commandBuffer} is the tick-safe entity accessor the ground-drop fallback needs -
+     * see {@link #handBackToOwner}, which is where the whole hand-back actually happens.
      */
     @Nonnull
-    private static List<ItemStack> giveClaimToOwner(@Nullable Store<EntityStore> ownerStore,
+    private static List<ItemStack> giveClaimToOwner(@Nullable CommandBuffer<EntityStore> commandBuffer,
+            @Nullable Store<EntityStore> ownerStore,
             @Nullable Ref<EntityStore> ownerRef, @Nonnull StationCustodyClaim claim,
             int blockX, int blockY, int blockZ) {
         if (claim.isEmpty()) {
             return List.of();
         }
-        List<ItemStack> stacks = claim.toItemStacks();
+        return handBackToOwner(commandBuffer, ownerStore, ownerRef, claim.toItemStacks(),
+                blockX, blockY, blockZ);
+    }
+
+    /**
+     * THE ONE hand-back engine every "give these stacks back to the station's owner" path in this
+     * class routes through - the custody auto-return ({@link #returnCustody}), the remote-anchor
+     * sweep ({@link #releaseAnchorClaims}), the press-F retrieval ({@link #retrieveCustody}), the
+     * disconnect sweep ({@link #returnClaimsOf}) and the in-flight iteration refund ({@link
+     * #refundIterationLedger}) alike. Per stack: hotbar first, then backpack storage, then dropped
+     * at the block; an unreachable owner sends every stack straight to the ground. Returns the
+     * stacks that actually landed IN INVENTORY (excluding anything dropped), so a caller can
+     * notify for exactly what the player received. Never throws.
+     *
+     * <p><b>Pass the live {@code commandBuffer} whenever the caller holds one.</b> The ground-drop
+     * fallback SPAWNS an entity, and {@code Store#addEntity} asserts (throwing {@code
+     * IllegalStateException("Store is currently processing!")}) when called from inside a
+     * system/interaction tick - the same processing-lock hazard the custody display spawn/despawn
+     * already routes around. A {@code null} buffer therefore loses the overflow silently on every
+     * in-tick path (an inventory-full session stop handed the player nothing and dropped nothing),
+     * so only a genuinely OFF-tick caller - the disconnect sweep, which hops onto the world thread
+     * through {@code World#execute} and holds no buffer at all - may pass {@code null} and let the
+     * direct-store route serve it.
+     */
+    @Nonnull
+    private static List<ItemStack> handBackToOwner(@Nullable CommandBuffer<EntityStore> commandBuffer,
+            @Nullable Store<EntityStore> ownerStore, @Nullable Ref<EntityStore> ownerRef,
+            @Nonnull List<ItemStack> stacks, int blockX, int blockY, int blockZ) {
+        if (stacks.isEmpty()) {
+            return List.of();
+        }
         // Try-guarded (SMOKE-FIX S3 hardening): this is the FIRST point a give-back mutates
         // anything, but the claim was already popped off custodyByBlock by the caller - an
         // unguarded throw here would escape entirely (never reaching the drop-at-block fallback
@@ -4811,19 +4835,19 @@ public final class StationService {
             player = null;
         }
         if (player == null) {
-            dropCustodyAtBlock(ownerStore, blockX, blockY, blockZ, stacks);
+            dropCustodyAtBlock(commandBuffer, ownerStore, blockX, blockY, blockZ, stacks);
             return List.of();
         }
         List<ItemStack> landedInInventory = new ArrayList<>(stacks.size());
         for (ItemStack stack : stacks) {
             try {
-                if (ItemGrantUtil.grant(player, stack, null, ownerStore, blockX, blockY, blockZ)
+                if (ItemGrantUtil.grant(player, stack, commandBuffer, ownerStore, blockX, blockY, blockZ)
                         != InventoryGrant.Landed.FALLBACK) {
                     landedInInventory.add(stack);
                 }
             } catch (Throwable t) {
                 Log.warn("STATION custody give failed for '" + stack.getItemId() + "': " + t.getMessage());
-                dropCustodyAtBlock(ownerStore, blockX, blockY, blockZ, List.of(stack));
+                dropCustodyAtBlock(commandBuffer, ownerStore, blockX, blockY, blockZ, List.of(stack));
             }
         }
         return landedInInventory;
@@ -4895,7 +4919,8 @@ public final class StationService {
                 playCollectAnimation(store, ref);
                 custodyByBlock.remove(blockKey, claim);
                 StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
-                List<ItemStack> landed = giveClaimToOwner(store, ref, claim, claim.blockX, claim.blockY, claim.blockZ);
+                List<ItemStack> landed = giveClaimToOwner(commandBuffer, store, ref, claim,
+                        claim.blockX, claim.blockY, claim.blockZ);
                 StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
                 Custody custody = asset != null
                         ? ActionResolver.resolve(asset, claim.actionId).getCustody() : null;
@@ -5026,7 +5051,7 @@ public final class StationService {
         if (claim != null) {
             StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
             if (!claim.isEmpty()) {
-                dropCustodyAtBlock(store, x, y, z, claim.toItemStacks());
+                dropCustodyAtBlock(commandBuffer, store, x, y, z, claim.toItemStacks());
             }
         }
         // THEN: if this block was a REMOTE anchor of a live session, stop it gracefully - its OTHER
@@ -5058,11 +5083,14 @@ public final class StationService {
     /**
      * Drops {@code stacks} at the block's center via the shared {@link ItemDropUtil} sink
      * (SMOKE-FIX S3 (b) lifted this out to a mod-wide utility so {@code loot.LootEngine}'s luck/
-     * tier grants reuse the SAME world-drop mechanism instead of re-deriving it).
+     * tier grants reuse the SAME world-drop mechanism instead of re-deriving it). Pass the live
+     * {@code commandBuffer} from any in-tick caller - see {@link #handBackToOwner} for why a
+     * {@code null} there loses the drop.
      */
-    private static void dropCustodyAtBlock(@Nullable Store<EntityStore> store, int x, int y, int z,
+    private static void dropCustodyAtBlock(@Nullable CommandBuffer<EntityStore> commandBuffer,
+            @Nullable Store<EntityStore> store, int x, int y, int z,
             @Nonnull List<ItemStack> stacks) {
-        ItemDropUtil.dropAtBlock(null, store, x, y, z, stacks);
+        ItemDropUtil.dropAtBlock(commandBuffer, store, x, y, z, stacks);
     }
 
     /**
