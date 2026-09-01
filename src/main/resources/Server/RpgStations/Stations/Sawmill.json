@@ -30,7 +30,7 @@
         "MaxMoveMeters": 1.5
       },
       "Custody": {
-        "$Comment": "Placed-input custody: hold logs and press F to load up to 100 into the bench, then work from the pile instead of your backpack. States maps the claim lifecycle onto the block's own interaction states; Display renders the placed logs as a prop at the block top, Offset.Y -0.1 embedding them slightly into the bench and Scale 0.46 sizing them against it (both in-game-tuned).",
+        "$Comment": "Placed-input custody: hold logs and press F to load up to 100 into the bench, then work from the pile instead of your backpack. States maps the claim lifecycle onto the block's own interaction states; Display renders the placed logs as a prop at the block top, Offset.Y -0.1 embedding them slightly into the bench. Scale is a fraction of a real block for a block-shaped item like a log, so 1.0 would draw a full-size trunk on the bench top and 0.46 sizes the pile to just under half that; raise it for a bulkier load or lower it for a token one.",
         "MaxQuantity": 100,
         "States": { "Empty": "Default", "Loaded": "Loaded" },
         "Display": {

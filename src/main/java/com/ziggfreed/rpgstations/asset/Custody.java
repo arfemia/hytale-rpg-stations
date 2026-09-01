@@ -278,7 +278,7 @@ public final class Custody {
                 .documentation("Facing-relative shift off the block-top anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical.").add()
                 .appendInherited(new KeyedCodec<>("Scale", Codec.DOUBLE, false),
                         (o, v) -> o.scale = v, o -> o.scale, (o, p) -> o.scale = p.scale)
-                .documentation("Uniform prop scale; defaults to 1.0 when absent or non-positive.").add()
+                .documentation("Uniform prop scale, a fraction of a real block for a block-shaped item; defaults to 1.0 (full block size) when absent or non-positive.").add()
                 .appendInherited(new KeyedCodec<>("Rotation", Rotation.CODEC, false),
                         (o, v) -> o.rotation = v, o -> o.rotation, (o, p) -> o.rotation = p.rotation)
                 .documentation("Facing-relative rotation in degrees; the placed block's own facing is added into Yaw at spawn.").add()
