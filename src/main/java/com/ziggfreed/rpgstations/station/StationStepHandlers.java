@@ -35,6 +35,7 @@ import com.ziggfreed.common.loot.stamp.StampCapEngine;
 import com.ziggfreed.common.loot.stamp.StampInspection;
 import com.ziggfreed.common.loot.stamp.StampPlan;
 import com.ziggfreed.common.loot.stamp.StampSpec;
+import com.ziggfreed.common.loot.stamp.StampIdentity;
 import com.ziggfreed.common.loot.stamp.Stamper;
 import com.ziggfreed.common.loot.stamp.StamperRegistry;
 import com.ziggfreed.common.loot.stamp.StatRoll;
@@ -795,7 +796,8 @@ final class StationStepHandlers {
 
             Mutation mutation;
             try {
-                mutation = applyStampMutation(weaponStack, stamp.getDurability(), plan, stamper);
+                mutation = applyStampMutation(weaponStack, stamp.getDurability(), plan, stamper,
+                        StampIdentity.resolve(stamp.getStats(), poolOf(stamp.getStats())));
             } catch (Throwable t) {
                 restoreReagents(ctx, consumedForRestore);
                 Log.warn("STAMP step '" + step.getId() + "' mutation failed, restored reagents: " + t.getMessage(), t);
@@ -848,6 +850,19 @@ final class StationStepHandlers {
         }
 
         /**
+         * The roll pool a stamp draws from, or null when it names none - the fallback layer for a
+         * rename or a rarity the stamp itself did not state.
+         */
+        @Nullable
+        private static RollPoolAsset poolOf(@Nullable StampSpec spec) {
+            String poolId = spec == null ? null : spec.getPool();
+            if (poolId == null || poolId.isBlank()) {
+                return null;
+            }
+            return RollPoolConfig.getInstance().resolve(poolId);
+        }
+
+        /**
          * PURE: applies {@code Durability.AddMax} then the (already rolled + cap-clamped) {@code plan}
          * entries via {@code stamper}, in that order, returning a {@link Mutation} (the new stack +
          * one {@link EnhanceLine} per stat written + the max-durability delta). Both mutations are
@@ -865,6 +880,18 @@ final class StationStepHandlers {
         static Mutation applyStampMutation(@Nonnull ItemStack weaponStack,
                 @Nullable StationStep.Stamp.Durability durabilityGroup, @Nonnull StampPlan plan,
                 @Nullable Stamper stamper) {
+            return applyStampMutation(weaponStack, durabilityGroup, plan, stamper, null);
+        }
+
+        /**
+         * As above, plus the authored identity a rename and a rarity come from. Separate because
+         * identity is not rolled and not capped: it is what the pool or the stamp SAID this item
+         * should become, and a stamp that authored neither passes null and changes neither.
+         */
+        @Nonnull
+        static Mutation applyStampMutation(@Nonnull ItemStack weaponStack,
+                @Nullable StationStep.Stamp.Durability durabilityGroup, @Nonnull StampPlan plan,
+                @Nullable Stamper stamper, @Nullable StampIdentity identity) {
             ItemStack mutated = weaponStack;
             double durabilityAdded = 0.0;
             if (durabilityGroup != null && durabilityGroup.getAddMax() != null && durabilityGroup.getAddMax() > 0) {
@@ -875,7 +902,7 @@ final class StationStepHandlers {
             }
             List<EnhanceLine> lines = List.of();
             if (!plan.entries().isEmpty() && stamper != null) {
-                mutated = stamper.apply(mutated, plan.entries());
+                mutated = stamper.apply(mutated, plan.entries(), identity);
                 List<EnhanceLine> written = new ArrayList<>(plan.entries().size());
                 for (StatRoll entry : plan.entries()) {
                     written.add(new EnhanceLine(entry.statId(), entry.points(), safeDescribe(stamper, entry)));

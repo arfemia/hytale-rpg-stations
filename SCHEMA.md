@@ -781,7 +781,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Offset` | [Vec3](#field-custody-display-offset) | `null` | Facing-relative shift off the block-top anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical. |
-| `Scale` | `double` | `null` | Uniform prop scale; defaults to 1.0 when absent or non-positive. |
+| `Scale` | `double` | `null` | Uniform prop scale, a fraction of a real block for a block-shaped item; defaults to 1.0 (full block size) when absent or non-positive. |
 | `Rotation` | [Rotation](#field-custody-display-rotation) | `null` | Facing-relative rotation in degrees; the placed block's own facing is added into Yaw at spawn. |
 
 <a id="field-custody-display-offset"></a>
@@ -992,6 +992,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Entries` | array of [StatRollEntry](#type-statrollentry) | `null` | Candidate outcomes written here directly, evaluated alongside any pool's. |
 | `Picks` | [Picks](#field-stampspec-picks) | `null` | How many entries the lottery draws. Omit for none, which leaves only the Always entries - a deliberate default, so a spec with no Picks is fully predictable. |
 | `Unique` | `boolean` | `null` | When true the same stat is never drawn twice in one stamp, so several picks mean several different stats. Omit to let a lucky stat come up twice and stack. |
+| `Name` | `string` | `null` | A full translation key renaming the stamped item, handed the item's own name as an {item} argument (so "Honed {item}" reads correctly on anything). Omit to keep the item's own name - nothing is renamed unless this says so. |
+| `Quality` | `string` | `null` | An ItemQuality asset id giving the stamped item that rarity - the engine's own per-instance channel, so the client colours the name, frame and slot for free. Omit to leave the item's rarity alone. |
 | `Caps` | [Caps](#field-stampspec-caps) | `null` | What holds the result down, measured against what the item already carries. |
 
 <a id="field-stampspec-picks"></a>
@@ -1026,6 +1028,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Tags` | map of array of `string` | `null` | Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.<br><br>For example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.<br><br>Tags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**. |
 | `Name` | `string` | `null` | A human-readable label for editors. The pool's id comes from the filename, so changing this changes nothing at runtime. |
+| `StampName` | `string` | `null` | A full translation key renaming anything stamped from this pool, handed the item's own name as an {item} argument. Omit to keep the item's own name. A stamp may override this with its own Name. |
+| `Quality` | `string` | `null` | An ItemQuality asset id giving anything stamped from this pool that rarity. Omit to leave the item's rarity alone. A stamp may override this with its own Quality. |
 | `Entries` | array of [StatRollEntry](#type-statrollentry) | `null` | The candidate outcomes this pool offers. Authoring this in a file with a Parent REPLACES the parent's entries entirely rather than adding to them. |
 
 <a id="type-lootableasset"></a>
