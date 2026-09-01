@@ -68,12 +68,13 @@ is used.
   `station.FlairCatalog.effectiveFlairsFor` - the SAME inline-`Flairs`-UNION-`FlairAsset` merge
   `StationFlairs` resolves at moment-playback time - rather than a narrower inline-only view.
   `contributions()`/`contributionChannels()`/`contributionParams(channel)` project the EFFECTIVE
-  union of `Work.PerCycleContributions` - the station's own group, every resolved action's own
-  group (a whole-group override can author its own entries), and the Station-/Action-targeted
-  `ExtensionAsset` appends, de-duplicated on the `(Channel, Param, Amount)` triple (an action that
-  merely inherits the station `Work` re-yields the same entries) - the same reads the cycle event
-  forwards from, so a hook validating "which channels does this station post" can never miss a
-  per-action or extension-appended entry. The RAW list is exposed alongside the two derived views
+  union of every resolved action's own `Work.PerCycleContributions` plus the Action-targeted
+  `ExtensionAsset` appends (`ExtensionCatalog#applyToActionContributions`), de-duplicated on the
+  `(Channel, Param, Amount)` triple (two actions authoring an identical entry collapse to one) -
+  the same reads the cycle event forwards from, so a hook validating "which channels does this
+  station post" can never miss a per-action or extension-appended entry. A station holds no
+  contributions of its own; a Station-targeted extension reaches this view only by appending a
+  whole new action (`ActionResolver#effectiveActions`). The RAW list is exposed alongside the two derived views
   precisely because a blank/absent `Param` cannot appear in the derived ones, and only a channel's
   own owner knows whether its `Param` is required.
 

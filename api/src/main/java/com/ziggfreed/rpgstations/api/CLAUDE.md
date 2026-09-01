@@ -39,10 +39,11 @@ argument is what the pre-1.0.0 `Work.Xp`/`XpAsk` shape was retired for). (2) Shi
 `ItemDropList`) and this mod's own ids; for a third-party example use the fictitious `yourmod:`
 namespace. (3) The docs (`docs/`) may keep ONE short "Known integrations" page naming a consumer
 with an outbound link; it may NOT host that mod's reference tables. Enforcement is
-`src/test/.../MmoAgnosticismTest`, which scans `src/main/java`, `api/src/main/java`, and
-`src/main/resources` and fails the build on a hit, with an empty allowlist. `src/test` is
-deliberately out of scope (fixture values are author-owned and ship nothing); prose surfaces
-(`docs/`, `CHANGELOG.md`, `CURSEFORGE.md`, these routers) are reviewed as documentation, which is
+`src/test/.../MmoAgnosticismTest`, which scans `src/main/java`, `api/src/main/java`,
+`src/main/resources` AND the in-repo `docs/` prose source, and fails the build on a hit; its
+allowlist holds exactly one sanctioned line (the `docs/integrations.md` mention of the companion
+mod plus its link). `src/test` is deliberately out of scope (fixture values are author-owned and
+ship nothing); `CHANGELOG.md`, `CURSEFORGE.md` and these routers are skipped by filename, which is
 why an in-repo router like this one may name a consumer by class where it is genuinely the
 reference for an idiom.
 

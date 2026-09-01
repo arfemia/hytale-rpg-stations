@@ -94,7 +94,7 @@ resolution section for the engine half.
   inline `Roll`s authored at the site; both resolve when both are authored. Reused at EVERY site an
   action, step, or extension references loot: `ActionDef.Bonus`, `StationStep.Roll`,
   `ExtensionAsset.Bonus`. A `Lootables` entry accepts an INLINE lootable body as well as an id (the
-  ref-or-inline surface below). See the `ActionDef` bullet for the
+  ref-or-inline surface below). See the `ActionDef` bullet for the `Bonus` group that embeds it.
 - **[`Conditions`](Conditions.java)** - `{Factor, Param?, Min?, Max?}`, the ONE
   GATE leaf both `Requires.Conditions` (station/action start gate) and every `Roll`/`StationStep`
   `Conditions` array evaluate over the api `FactorRegistry`. The TYPE is `ziggfreed-common`'s
@@ -228,8 +228,9 @@ resolution section for the engine half.
     "<actionAssetId>"}` names a standalone [`ActionAsset`](ActionAsset.java) (below) as the BASE;
     any OTHER group authored on the SAME inline entry overlays it group-wise (whole-group replace,
     one level: the `Ref`-base's group, or the inline entry's own when authored). A dangling `Ref`
-    is validator finding `ACTION_REF_UNKNOWN` (engage denies gracefully with
-    `ui.station.action_unavailable`). Native `Parent` BETWEEN `ActionAsset`s is the sibling
+    is validator finding `ACTION_REF_UNKNOWN` (engage resolves the action as if no `Ref` existed
+    and denies gracefully at whichever gate then fails, rather than throwing). Native `Parent`
+    BETWEEN `ActionAsset`s is the sibling
     "author only the delta" reuse route; `Ref` + overlay is the per-station ATTACHMENT route - two
     different reuse axes, not redundant.
   - **`Anchors` - named multi-station anchor declarations:**
@@ -341,8 +342,8 @@ resolution section for the engine half.
   this side), because two hand-mirrored key lists with nothing between them drift - and the drift
   ships as a capability a standalone action silently cannot author. A station attaches it via an
   inline `Actions[]` entry's `Ref` leaf (above). Supports native `Parent` between `ActionAsset`s
-  for delta reuse. See the fish exemplar (`Actions/PrepFish.json`) for the flagship authoring
-  shape.
+  for delta reuse. See the fish exemplar (`unreleased/Server/RpgStations/Actions/PrepFish.json`,
+  held back with the CookingFire/CuttingBoard pair at 0.1.0) for the flagship authoring shape.
 - **[`Custody`](Custody.java)** - session-scoped placed-input custody, opted into per-action:
   `{MaxQuantity?, SingleFamily?, Input?, States?, Display?}`. `MaxQuantity` defaults to **100**.
   `Input` (reusing [`ActionInput`](ActionInput.java)'s ItemId/ResourceTypeId/Tags/Function routes)
@@ -364,7 +365,7 @@ resolution section for the engine half.
   (`{Offset: Vec3, Scale, Rotation: Rotation}`, FACING-RELATIVE to the placed block's own yaw, every
   leaf `appendInherited`; the block yaw folds into `Rotation.Yaw`) opts the placed input into a
   PLACED-AS-ENTITY visual - see `../station/CLAUDE.md`'s dedicated bullet for the full engine-side
-  mechanism. The jar's own `Stations/Sawmill.json` authors `Display {Offset{Y:-0.1}, Scale:0.4}`
+  mechanism. The jar's own `Stations/Sawmill.json` authors `Display {Offset{Y:-0.1}, Scale:0.46}`
   as the shipped standalone default; a pack re-tunes it through an `ExtensionAsset`'s `Custody`
   per-leaf overlay (rule 5 below) rather than a full-file station override.
 - **[`ActionInput`](ActionInput.java)** - the diegetic action-selection matcher: `{ItemId?,
@@ -712,9 +713,9 @@ they land per-leaf and are never a parallel table that can drift from the codec:
   the same edit as a new leaf** - the coverage test is not a reminder you can defer past a build.
 - **`.metadata(...)` for the in-game Asset Editor.** A bare `UIEditorSectionStart("<label>")` opens
   a section at each top-level group (`Identity`/`Block`/`Requires`/`Flairs`/`Actions` on
-  `StationAsset`, plus `Engine`/`Summary HUD` on `RpgStationsSettingsAsset` - `StationAsset` lost
-  its old per-group sections when those groups moved onto `ActionDef`, which carries none of its
-  own); the rest nest inside a `UIEditor` - `UIEditor.Dropdown("<datasetId>")`
+  `StationAsset`, plus `Engine`/`Summary HUD`/`Limits` on `RpgStationsSettingsAsset` -
+  `StationAsset` lost its old per-group sections when those groups moved onto `ActionDef`, which
+  carries none of its own); the rest nest inside a `UIEditor` - `UIEditor.Dropdown("<datasetId>")`
   turns a leaf into a pick list, `UIEditor.LocalizationKeyField("<keyTemplate>")` marks
   `Identity.NameKey`/`DescKey` + `ActionDef.Label` (the template's `{assetId}` fills from the asset
   being edited), `UIEditor.Icon` marks `Identity.Icon`. The dataset VALUES are served by
@@ -752,9 +753,12 @@ they land per-leaf and are never a parallel table that can drift from the codec:
   FIXED sets are the closed union-discriminator vocabularies, each sourced from the SAME constant
   the decoder compares against (`Puppet.HIDE_ROUTE_*`/`LOOK_SOURCE_*`/`SKIN_SOURCE_*`/`PROP_SOURCE_*`/
   `PROP_SLOT_*`, `StationStep.Consume.FROM_*`/`Produce.TO_*`/`OnConditionFail.RESULT_*`,
-  `Roll.TRIGGER_*`, `station.StationCameraPreset#id`) so a renamed arm can never leave a stale
-  dropdown behind. The three sets with no constant behind them (mount surface, camera mode, action
-  input function) name their consumer in a comment beside the literals. **The dataset ids are
+  `loot.StationLootEngine.TRIGGER_*`, `station.StationCameraPreset#id`) so a renamed arm can never
+  leave a stale dropdown behind. Two sets are bare literals and name their consumer in a comment
+  beside them (`rpgstations:mount-surface`, `rpgstations:action-function`); a third,
+  `rpgstations:hud-positions` (backing `RpgStationsSettingsAsset.SummaryHud.Position`), is a
+  literal preset list re-validated entry by entry through the shared `HudPosition.isValidPreset`,
+  so a preset dropped upstream warns instead of being silently offered. **The dataset ids are
   declared in two places and no test cross-checks them** (`BuilderField` exposes no public metadata
   getter, so a codec walk cannot read the declared `Dropdown` ids back): adding a `Dropdown` to a
   leaf without adding its handler here yields a silently EMPTY pick list, not an error. Declare the

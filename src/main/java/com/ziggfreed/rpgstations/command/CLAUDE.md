@@ -22,11 +22,18 @@ Router for `command/`. One admin-gated command group.
     player visible after every stop path incl. damage/death/relog, sawmill + anvil positioning
     good). The PRODUCTION puppet route (`station.StationPuppetController`, legs P3-P5) is
     unaffected - see `station/CLAUDE.md`'s puppet-engine bullet.
+- **[`NpcPerformerSpike.java`](NpcPerformerSpike.java)** is the throwaway NPC-performer spike
+  harness, UNWIRED for 0.1.0 (the Sawmill-only release scope) and referenced by nothing, kept in
+  git deliberately. Its `npcspike` field, dispatch case and method were removed from
+  `RpgStationsCommand`, which still declares a THIRD optional arg `opt`
+  (`rpgstations.command.arg.opt`) that only that path read; the 15 `command.npcspike.*` lang keys
+  stayed shipped in all 9 locales. Scope rationale and the restore steps: this mod's root
+  `CLAUDE.md` and `unreleased/README.md`.
 - Every user-facing string (the command/arg descriptions AND every chat reply) resolves through
   [`i18n.RpgMsg`](../i18n/RpgMsg.java) against the `rpgstations.command.*` keys in
-  `Server/Languages/en-US/rpgstations.lang` (en-US authored; the other 8 locales fall back to
-  English per key until a translation leg fills them - see `i18n.RpgStationsLangKeys`, kept in
-  lockstep). The command/arg DESCRIPTION strings passed to `super(...)`/`withRequiredArg(...)`/
+  `Server/Languages/en-US/rpgstations.lang` (all 9 locales are authored and key-complete for the
+  `rpgstations.command.*` family - see `i18n.RpgStationsLangKeys`, kept in lockstep). The
+  command/arg DESCRIPTION strings passed to `super(...)`/`withRequiredArg(...)`/
   `withOptionalArg(...)` are RAW keys (`"rpgstations.command.desc"`, not routed through `RpgMsg`,
   which would double-prefix) - the engine resolves them directly, mirroring `MobScalingCommand`'s
-  `"scaling.command.desc"` shape.
+  `"mmomobscaling.command.desc"` shape.

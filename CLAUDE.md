@@ -360,12 +360,15 @@ is VERBATIM, inheriting neither. Same record, two documented meanings, no mode.
    outbound link. They may NOT host that mod's reference tables.
 
 **Enforcement is a test, not a habit.** `src/test/java/com/ziggfreed/rpgstations/MmoAgnosticismTest`
-scans `src/main/java`, `api/src/main/java`, and `src/main/resources` (every `.java`, `.json`,
-`.lang`, `.ui`) for a forbidden-token regex and FAILS THE BUILD on any hit. The allowlist is empty
-on purpose: a hit is a real finding, never a candidate for an exception. `src/test` is deliberately
-out of scope (fixture values are author-owned and ship nothing) and prose surfaces (`docs/`,
-`CHANGELOG.md`, `CURSEFORGE.md`, these routers) are reviewed as documentation instead, which is
-also why they may name a consumer where a cross-repo pointer is genuinely useful. **A leak in a
+scans `src/main/java`, `api/src/main/java`, `src/main/resources` AND the in-repo `docs/` prose
+source (every `.java`, `.json`, `.lang`, `.ui`, `.txt`, `.md`, `.mdx`, `.tsx`, `.ts`) for a
+forbidden-token regex and FAILS THE BUILD on any hit. The allowlist holds exactly ONE entry and
+never grows: a line in `docs/integrations.md` may name the companion progression mod and its
+outbound link, nothing else. `src/test` is deliberately out of scope (fixture values are
+author-owned and ship nothing), and three prose surfaces are skipped BY FILENAME wherever they live
+- `CHANGELOG.md`, `CURSEFORGE.md`, and these `CLAUDE.md` routers - because they are the surfaces
+that STATE this rule and this mod's history, so they must be able to quote the retired vocabulary
+while explaining why it is retired. **A leak in a
 convenient comment is how the vocabulary creeps back in, one "for context" sentence at a time** -
 that is the entire reason the test scans comments too.
 

@@ -19,8 +19,11 @@ Router for `ui/`.
   only for a row carrying a `SummaryRow.subText`. A second Label rather than a `\n` because the
   native markup set has no font-size tag. **Every slot must keep declaring `#Sub`** - the renderer
   addresses it on every visible row, and a command against an undeclared selector crashes the
-  client. This mod's own item rows never set a second line; an enricher's may (what a second line
-  says belongs to whichever mod owns that contribution channel's vocabulary).
+  client. This mod's own PRODUCED rows DO use the second line, for the per-cycle yield
+  decomposition (`StationService#yieldBreakdownLine`, null - so the row collapses back to one
+  line - when the yield did not actually change the number); CONSUMED / LUCKY / ENHANCE rows
+  never set one, and an enricher's rows may (what a second line says belongs to whichever mod
+  owns that contribution channel's vocabulary).
 - **What this leg's panel renders**: title + crest (`Identity.Icon`, else the anchor block's own
   item id captured at engage) + the cycles line + a capped item ledger (consumed/produced/lucky
   rows over common's `ui.rows.SummaryRow`/`SummaryRowRenderer`, plus `ENHANCE` rows -
@@ -30,9 +33,18 @@ Router for `ui/`.
   policy (its own icon, its own breakdown), so those rows come from a registered `SummaryEnricher`
   reached through the api `SummaryEnricherRegistry`. A RpgStations-only install therefore shows
   cycles + items and nothing else - by design, not a gap.
-  `SummaryEnricherRegistry.rows(...)` results are PREPENDED before this panel's own item rows.
-- **Auto-hide**: a scheduled-clear-with-generation-token TTL - `KeyedCustomHud`'s own contract, not
-  reimplemented here.
+  Each registered enricher's `SummaryEnricher.rows(...)` results are PREPENDED before this panel's
+  own item rows, in registration order.
+- **`ROOT_SELECTOR` (`#RpgStationSummaryRoot`) is a FROZEN api contract.** An enricher's optional
+  `SummaryEnricher.decorate` writes `UICommandBuilder` theming commands against that exact
+  selector cross-jar, handed to it as `api.SummaryDecorateContext#rootSelector()`, so a `.ui`
+  restructure MUST keep the id; `PANEL_WIDTH_PX` (528) must likewise keep matching that same
+  element's static-fallback `Anchor` Width.
+- **Auto-hide**: this class's OWN scheduled-clear-with-generation-token TTL (the `ToastController`
+  pattern) - every `showSummary` bumps an `AtomicLong generation` and schedules
+  `hideIfCurrent(gen)` on `HytaleServer.SCHEDULED_EXECUTOR`, so a stale hide from an earlier
+  summary is a no-op against a newer one. `KeyedCustomHud` supplies the position / throttle /
+  register-and-lookup base only; it has no TTL.
 - **`RpgStationsSettingsAsset.SummaryHud`** (`Enabled`/`Position`/`OffsetX`/`OffsetY`/`TtlMs`, via
   `station.SettingsCatalog`) governs whether/where this panel shows; a disabled setting leaves this
   mod's own toast path as the only feedback surface. A listening mod that wants a different

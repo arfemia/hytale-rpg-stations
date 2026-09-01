@@ -5,8 +5,8 @@ F on a station block -> camera pulls third-person (or the player mounts the bloc
 puppet spawns and performs the work), the work animation plays per swing, items convert per cycle
 or per an authored step program, loot rolls through `loot/`, and authored contributions forward as
 `StationContribution`s whichever mod owns the named channel interprets. Design authority:
-`../../../../../../.claude/research/raw/rpg-stations-scope2-unified-design-2026-07-23.md`
-(sections 2-3, decisions 33-41 in `../../../../../../.claude/research/rpg-stations-extraction-design.md`),
+`../../../../../../../../../.claude/research/raw/rpg-stations-scope2-unified-design-2026-07-23.md`
+(sections 2-3, decisions 33-41 in `../../../../../../../../../.claude/research/rpg-stations-extraction-design.md`),
 superseding the phase-1/phase-2 design for everything the scope-2 redesign touches.
 
 ## WAVE BOUNDARY (scope-2 wave 3 landed - the multi-station seam EXECUTES)
@@ -52,7 +52,7 @@ the WHOLE set executes:
   time) plus a
   parallel `ContributionScale` ladder describing the identical tool curve for whichever mod adds
   contributions - rather than in a separate baked curve
-  - see `../../../../../../CONTENT_PACKS.md`'s Station authoring section for the authoring guide
+  - see `../../../../../../../../../CONTENT_PACKS.md`'s Station authoring section for the authoring guide
   (brief reference only; do not duplicate it here). That one is the action's OWN roll;
   `Bonus.Lootables` pulls in one roll from each of `SawmillFinds`, `SawmillTrophy` and
   `SawmillMasterworkFinds` (all below), so the live per-cycle pass evaluates four.
@@ -172,17 +172,18 @@ a discriminator.
   section: one `Cycle` moment per completed pass, whichever program shape ran).
 - `StationSession` resume state (`programSuspended`/`programIndex`/`stepDeadlineMs`/
   `activeProgramSteps`) is UNCHANGED this wave - a `Duration` hold suspends/resumes through the
-  exact same fields the old `Wait` type used. The design's `stepIteration`/`walkProgress`
-  additions (per-step iteration count tracking, in-flight walk position) are `[wave 3]` - not
-  added this wave, since `Repeat` resolves once at step entry (no cross-tick iteration state
-  needed yet) and `Walk` does not execute.
+  exact same fields the old `Wait` type used. The design's two further resume fields landed with
+  wave 3 beside them: `stepIteration` (the per-step `Repeat` iteration index, so a REPEATING step
+  that holds a `Duration` resumes at the right iteration instead of re-running the earlier ones -
+  the composite handler is its sole reader/writer) and `walkState` (a `StationWalkState`, non-null
+  ONLY while a `Walk` phase drives the puppet toward an anchor, carrying the solved waypoints +
+  parametric progress across ticks and cleared the instant the walk arrives or its path blocks).
 - **A step combining `Consume` + `Produce` is an ATOMIC transform** (no consumed-without-produced
-  window across one iteration) - the design's transactional-edges rule (2.5/decision 38): a
-  `Produce.To:"Custody"` commit (when wave 3 lands it) clears the CURRENT iteration's consumed
-  ledger; refund and custody-return stay mutually exclusive per iteration. This wave, every
-  shipped program's `Consume`+`Produce` pair lands within one step or is bridged by the session's
-  existing per-cycle commit boundary - never split across a suspend this wave (that split is
-  exactly what `Walk` would enable, `[wave 3]`).
+  window across one iteration) - the design's transactional-edges rule (2.5/decision 38): a step's
+  commit (EITHER committed destination, `To:"Custody"` or `To:"Inventory"`) clears the CURRENT
+  iteration's consumed ledger, so refund and custody-return stay mutually exclusive per iteration.
+  A `Walk` phase can split a `Consume`+`Produce` pair across a suspend, which is exactly why the
+  `iterationConsumed` ledger refunds an in-flight iteration at `stop()`.
 
 ## Action resolution: Id lookup -> Ref overlay -> extension overlays
 
@@ -200,9 +201,10 @@ ONE choke point, in three layered steps:
    inline entry authors `Ref`, the named `ActionCatalog` entry is the BASE and the inline entry's
    OTHER groups overlay it group-wise, ONE level (the inline entry's own group wins when authored,
    else the `Ref` base's, else neither contributes). A dangling `Ref` resolves as if no `Ref`
-   existed (validator finding `ACTION_REF_UNKNOWN`; `toggle()` denies gracefully with
-   `ui.station.action_unavailable` rather than throwing). This core stays catalog-free for unit
-   tests.
+   existed (validator finding `ACTION_REF_UNKNOWN`; the entry is still selected and engage falls
+   through to the ordinary denial for whatever the inline entry authors on its own - a bare `Ref`
+   entry with no other group ends at `ui.station.no_materials` - rather than throwing). This core
+   stays catalog-free for unit tests.
 3. **Extension overlays** - the live 2-arg `resolve(asset, actionId)` wraps step 2 and layers the
    Action-targeted `ExtensionAsset` per-leaf overlays on top (`Puppet`/`Custody`/
    `ContributionScale` - see the ExtensionAsset section below); identity-preserving, so the
@@ -1016,8 +1018,8 @@ summary silent about the stats a ritual just applied reads as a ritual that did 
 the unlabelled path has its own fixtures in `StationEnhanceLedgerRowsTest`, since `EnhanceLine.of`
 (the only factory a Stamp step uses) always leaves the label unset. The stamper contract itself is
 the shared `loot.stamp.Stamper`, installed through the static `StamperRegistry`; an `EnhanceLine`
-carries the stat id and its points with the display label left to a consumer (see
-`../api/CLAUDE.md`). The
+carries the stat id and its points with the display label left to a consumer (see the repo's
+`api/src/main/java/com/ziggfreed/rpgstations/api/CLAUDE.md`). The
 shipped Anvil content lives in its own pack's repo.
 
 ## The puppet presentation engine (unchanged)
@@ -1162,7 +1164,7 @@ empty/absent `Actions[]` leaves the station permanently inert), `ACTION_MISSING_
 nor any of its own groups authored), `AMBIGUOUS_ACTION_INPUT`/`UNREACHABLE_ACTION` (a later
 action's `Select` can never win because an earlier one's already matches every context it would),
 `RECIPE_ENTRY_EMPTY` (an action's own `Recipe` group with neither `Conversions` nor
-`FromCrafting` - it can never run a cycle), `LOOT_OUTPUT_ITEMS_WRONG_TRIGGER` (a
+`FromCrafting` - it can never run a cycle), `LOOT_OUTPUT_ITEMS_WRONG_TRIGGER` (
 an `rpgstations:output_items` reward authored under a `Completion` trigger, which has no cycle output to add
 to), `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` (its sibling for the other way a cycle can have no output:
 the action runs an authored `Steps` program - its OWN, or the one its `Ref` base authors, read
@@ -1199,8 +1201,8 @@ checks), and the whole `RECIPE_SELECTION`/multi-recipe check family from the `Re
 unit-tested.
 
 **Contribution-channel checks**: `MISSING_CONTRIBUTION_CHANNEL` / `NONPOSITIVE_CONTRIBUTION_AMOUNT`
-on a `Work.PerCycleContributions` entry, `LOOT_CONTRIBUTION_WRONG_TRIGGER` (a
-an `rpgstations:contribution` reward on a `Completion` roll, which fires from inside `stop()` with no cycle
+on a `Work.PerCycleContributions` entry, `LOOT_CONTRIBUTION_WRONG_TRIGGER`
+(an `rpgstations:contribution` reward on a `Completion` roll, which fires from inside `stop()` with no cycle
 event left to ride) / `LOOT_CONTRIBUTION_MISSING_CHANNEL` / `LOOT_CONTRIBUTION_NONPOSITIVE_AMOUNT`,
 and `UNKNOWN_CHANNEL` - the exact mirror of `UNKNOWN_FACTOR`: a `Channel` nobody declared through
 `api.ContributionChannelRegistry` warns and echoes the declared set, then forwards anyway.
@@ -1235,7 +1237,7 @@ build or unit-test run cannot establish. See `runAndLog()`'s own javadoc.
 
 Several maintainer-smoke-driven fix rounds landed across phase 1/2 (extraction through the anvil
 arc, the puppet presentation build, and a round-8 facing-relative/step-sync pass). The narrative
-detail lives in git history and `../../../../../../.claude/plans/work-stations-mod-extraction-prompt.md`;
+detail lives in git history and `../../../../../../../../../.claude/plans/work-stations-mod-extraction-prompt.md`;
 the load-bearing lessons that still apply going forward:
 
 - **Every ECS mutation from inside an interaction handler or the heartbeat frame drain must go
