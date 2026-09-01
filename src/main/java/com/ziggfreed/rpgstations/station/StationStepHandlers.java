@@ -539,6 +539,11 @@ final class StationStepHandlers {
             StationCustody.drain(claim, isResource ? null : ref, isResource ? ref : null,
                     item.effectiveQuantity(), StationService::liveResourceTypeIdsOf, drainedOut);
         }
+        // One dirty mark for the whole drain batch: the claim is a view over the block's
+        // chunk-persisted stash, and an unmarked mutation survives only until the section unloads.
+        if (claim != null) {
+            claim.markDirty();
+        }
         for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
             ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
         }
@@ -715,7 +720,7 @@ final class StationStepHandlers {
             }
             Custody custody = ctx.action.getCustody();
             StationCustodyClaim claim = custody != null
-                    ? StationService.getInstance().custodyClaimFor(ctx.session.blockKey) : null;
+                    ? StationService.getInstance().custodyClaimFor(ctx.session, ctx.session.blockKey) : null;
             ItemStack weaponStack = claim != null ? claim.uniqueStack() : null;
             if (weaponStack == null) {
                 return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
@@ -805,6 +810,9 @@ final class StationStepHandlers {
                         "Stamp step '" + step.getId() + "' mutation failed: " + t.getMessage());
             }
             claim.setUniqueStack(mutation.stack());
+            // The enhanced stack now lives in the block's chunk-persisted stash; mark it for the
+            // next chunk save so the mutation survives an unload.
+            claim.markDirty();
 
             StationService.tallyConsumedStacks(ctx.session, consumedForRestore);
 

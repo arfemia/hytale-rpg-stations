@@ -1171,7 +1171,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Name` | `string` | `null` | Ignored - the settings asset id is always the fixed 'settings' id, not this key. Kept as a schema field for editor display only. |
 | `Enabled` | `boolean` | `null` | The engine master switch; false disables the whole RpgStations engine at the SettingsCatalog check. Reader-defaults to true. |
 | `SummaryHud` | [SummaryHud](#field-settingsasset-summaryhud) | `null` | The end-of-session summary panel's layout and lifetime. |
-| `Limits` | [Limits](#field-settingsasset-limits) | `null` | Per-world ceilings a server owner can set on what this engine is allowed to have live at once. Absent, or any leaf left null, means unlimited. |
+| `Limits` | [Limits](#field-settingsasset-limits) | `null` | Ceilings a server owner can set on what this engine is allowed to have live at once (sessions and puppets per world, placed-input stashes per chunk section). Absent, or any leaf left null, means unlimited. |
 
 <a id="field-settingsasset-summaryhud"></a>
 ### SettingsAsset.SummaryHud
@@ -1191,5 +1191,6 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `MaxSessionsPerWorld` | `integer` | `null` | The most work sessions that may run at once in ONE world. A press that would exceed it is denied with a localized toast, and the station is left untouched. Null (the default) means unlimited. |
 | `MaxPuppetsPerWorld` | `integer` | `null` | The most live puppets (an action's Puppet group: the spawned, network-replicated figure that performs the work in the player's place) that may exist at once in ONE world. Past it a session still starts and runs normally, it simply performs in the player's own body instead of spawning a puppet - the same graceful fallback a failed spawn already takes. Null (the default) means unlimited. |
-| `MaxCustodyClaimsPerWorld` | `integer` | `null` | The most stations that may hold placed input at once in ONE world. Placing into a station that already holds a claim always works (it tops the existing one up); only opening a NEW one past the ceiling is denied, with a localized toast. Null (the default) means unlimited. |
+| `MaxStashesPerSection` | `integer` | `null` | The most blocks in ONE chunk section (a 16x16x16 cube) that may hold placed station input at once. Placing into a station that already holds material always works (it tops the existing store up); only a placement that would CREATE a new one past the ceiling is denied, with a localized toast. Null (the default) means unlimited. |
+| `MaxCustodyClaimsPerWorld` | `integer` | `null` | Retired and ignored. Placed input is stored on the block's own chunk section, so the bound is per section: author MaxStashesPerSection instead. A value here logs a warning naming that replacement and changes nothing. |
 

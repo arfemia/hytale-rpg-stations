@@ -206,12 +206,15 @@ and its block's state matter to the visiting program.
 
 ## Lifecycle at the edges
 
-A server restart mid-walk or mid-program loses the session, its claims, its custody, and its puppet
-entirely by construction (nothing here is persisted) - block states self-heal to Empty on the next
-interaction. If a remote anchor block is broken mid-program, the session stops with a dedicated reason,
-every OTHER claimed block's custody auto-returns, and any in-flight iteration's already-consumed
-inputs are refunded. Every exit path (owner disconnect, death, damage, walk-off) releases anchor claims
-and refunds the ledger before the usual custody return.
+A server restart mid-walk or mid-program loses the session, its anchor claims, and its puppet by
+construction (the work loop is never persisted) - but any custody standing at the blocks survives
+with the chunks, so the materials are still there afterwards and a stale block state settles
+against them on the next interaction. If a remote anchor block is broken mid-program, the session
+stops with a dedicated reason, every OTHER claimed block's custody auto-returns, and any in-flight
+iteration's already-consumed inputs are refunded. An exit whose player is still present (death,
+damage, walk-off) releases anchor claims and refunds the ledger before the usual custody return; a
+disconnect stops the session and refunds the in-flight iteration, but leaves placed custody
+standing in the world for the player's return.
 
 ---
 

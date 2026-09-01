@@ -15,8 +15,9 @@ import com.ziggfreed.common.codec.Rotation;
  * empty station + a held matching stack places the WHOLE stack into a per-block claim (a repeat
  * press tops up with further matching held stacks, capped by {@link #maxQuantity}), loaded
  * station + F (owner only) starts the session drawing from that claim instead of the live
- * inventory. The claim itself lives in {@code station.StationCustodyClaim}/memory only (the
- * repo-wide no-per-player-persistence constraint) - this codec is just the AUTHORING knob.
+ * inventory. The claim itself is CHUNK-PERSISTED world state (ziggfreed-common's per-block stash
+ * on the block's own chunk section, read through {@code station.StationCustodyClaim}), so placed
+ * materials survive a logoff and a restart - this codec is just the AUTHORING knob.
  *
  * <p>{@link #input} is the placement-acceptance matcher, reusing {@link ActionInput}'s
  * ItemId/ResourceTypeId/Tags/Function routes (SMOKE-FIX S4: the {@code Function} route now

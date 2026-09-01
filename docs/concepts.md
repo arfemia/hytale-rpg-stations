@@ -18,8 +18,10 @@ each action, not on the station.
 
 A **session** is the transient, in-memory work loop a player starts by pressing `F` on a station
 block. Sessions are never persisted - a server restart or crash loses every in-flight session by
-construction, and every affected state (custody claims, the puppet, display entities, anchor claims)
-self-heals or auto-returns on the next interaction. One entry point (`toggle`) starts or stops a
+construction, and the volatile state around one (the puppet, display entities, anchor claims)
+self-heals on the next interaction. Placed custody is the exception: it lives on the block's own
+chunk and survives restarts (see [Custody & Placed Display](custody-and-placed-display.md)). One
+entry point (`toggle`) starts or stops a
 session; one exit funnel (`stop`) handles every reason a session ends (re-press, crouch, walk off,
 damage, death, disconnect, tool broke, ritual complete, inputs exhausted, an anchor block was broken,
 a path was blocked, or server shutdown) and always fires a completion event, silent stops included.
@@ -50,12 +52,12 @@ hammer strikes. See [Actions & Step Programs](actions-and-steps.md).
 
 ## Custody
 
-**Custody** is a session-scoped, placed-input claim: press `F` while holding a matching stack and it
-loads the whole stack into the block (a repeat press tops it up), then a press by the owner starts
-working from that placed pile instead of the live backpack. Custody is never persisted (a crash
-returns to the owner or drops at the block on the next interaction) and can optionally render as a
-real placed-as-entity prop at the block. See
-[Custody & Placed Display](custody-and-placed-display.md).
+**Custody** is a placed-input claim: press `F` while holding a matching stack and it loads the
+whole stack into the block (a repeat press tops it up), then a press by the owner starts working
+from that placed pile instead of the live backpack. Placed custody is stored on the block's own
+chunk, so it survives a logoff, a restart and a chunk unload - materials stay in the station until
+worked, retrieved, or the block is broken - and can optionally render as a real placed-as-entity
+prop at the block. See [Custody & Placed Display](custody-and-placed-display.md).
 
 ## The puppet
 

@@ -4,12 +4,10 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import com.hypixel.hytale.assetstore.event.LoadedAssetsEvent;
 import com.hypixel.hytale.assetstore.map.DefaultAssetMap;
@@ -208,35 +206,25 @@ public class RpgStationsPlugin extends JavaPlugin {
     }
 
     /**
-     * The two teardown hooks {@link StationService#stopForRef}/{@link StationService#stopFor}
-     * were ALREADY shaped for (see their own javadoc: "Death hook", "Disconnect hook") but never
-     * wired to a live event until now (design section 4.2). Server-shutdown teardown was already
-     * covered by {@link #shutdown()}'s {@code stopAll}.
+     * The two teardown hooks {@link StationService#stopForRef}/{@link StationService#stopFor} are
+     * shaped for (see their own javadoc: "Death hook", "Disconnect hook"). Server-shutdown
+     * teardown is covered by {@link #shutdown()}'s {@code stopAll}.
      *
-     * <p><b>SMOKE-FIX S3 (custody return "not coming back at session stop at all"):</b>
-     * {@code StationService#stop} touches {@code Store} repeatedly (custody's inventory-return /
-     * drop-at-block writes, camera reset, hold release, mount dismount) - and {@code Store}
-     * (hytale-shared-source {@code component/Store.java}) asserts it is only ever touched on its
-     * owning world thread. Every OTHER {@code stop()} entry point already runs on the world
-     * thread (the heartbeat/cycle paths run inside an {@code AbstractWorldFrameSystem} tick,
-     * {@code toggle()} runs inside the {@code rpg_station_use} interaction handler, death runs
-     * inside an {@code EntityStoreRegistry} system) - {@code PlayerDisconnectEvent} does NOT, which
-     * is exactly why every store-touching disconnect cleanup has to world.execute-hop first.
-     * Calling {@code stopFor} directly here
-     * risked an off-thread throw partway through {@code returnCustody} - AFTER it had already
-     * removed the claim from {@code custodyByBlock} but before the items landed in the owner's
-     * inventory or were dropped at the block - silently losing them. Hopping to the player's own
-     * world before calling {@code stopFor} closes that gap; a null/dead world (already torn down)
-     * falls back to the direct call so a shutdown-adjacent disconnect still attempts cleanup.
+     * <p>{@code StationService#stop} touches {@code Store} repeatedly (the in-flight iteration
+     * refund, camera reset, hold release, mount dismount) - and {@code Store} asserts it is only
+     * ever touched on its owning world thread. Every OTHER {@code stop()} entry point already
+     * runs on the world thread (the heartbeat/cycle paths run inside an
+     * {@code AbstractWorldFrameSystem} tick, {@code toggle()} runs inside the
+     * {@code rpg_station_use} interaction handler, death runs inside an
+     * {@code EntityStoreRegistry} system) - {@code PlayerDisconnectEvent} does NOT, which is why
+     * the disconnect cleanup world.execute-hops first; a null/dead world (already torn down)
+     * falls back to the direct call so a shutdown-adjacent disconnect still stops the session.
      *
-     * <p><b>The session-less claim sweep</b> rides the same hop. Placing input starts NO session, so
-     * a player who loads a station and walks away leaves a claim (and its display prop) that none of
-     * the four claim-removal paths can reach - all of them need a session stop, a block break, or a
-     * press. Those claims used to survive the disconnect and every disconnect after it. The sweep
-     * runs AFTER {@code stopFor} in the SAME task, so the session's own custody return happens first
-     * and the sweep only ever sees what it left behind; claims the player left in OTHER worlds
-     * (worked a station, then travelled) each get their own hop, because the despawn and block-state
-     * reset are world-thread work.
+     * <p><b>Standing placed custody deliberately stays in the world on disconnect.</b> The stash
+     * is chunk-persisted, so material a player placed and walked away from is still theirs to
+     * collect at the block when they return - a disconnect sweeps only volatile session state.
+     * That is also why no cross-world sweep exists: there is nothing volatile to reach in a world
+     * the player is not in.
      */
     private void registerTeardownHooks() {
         getEntityStoreRegistry().registerSystem(new StationDeathSystem());
@@ -247,65 +235,23 @@ public class RpgStationsPlugin extends JavaPlugin {
                 return;
             }
             var worldUuid = playerRef.getWorldUuid();
-            // The departure world's own teardown gets its OWN try, so a failure there cannot skip
-            // the cross-world sweep below. World#execute is not merely "throws if the world is
-            // dead": a world stops accepting tasks BEFORE it reports itself dead, so isAlive() can
-            // be true and the submit still throw - and when it did, every claim this player held in
-            // OTHER worlds leaked for the rest of the uptime, because no other removal path can
-            // reach a session-less claim in a world the player is not in.
             try {
                 World world = worldUuid != null ? Universe.get().getWorld(worldUuid) : null;
                 if (world != null && world.isAlive()) {
                     world.execute(() -> {
                         try {
                             StationService.getInstance().stopFor(uuid, StationService.StopReason.DISCONNECTED);
-                            StationService.getInstance().returnClaimsOf(uuid, worldUuid, world);
                         } catch (Throwable t) {
                             Log.warn("Station disconnect teardown failed (world thread): " + t.getMessage());
                         }
                     });
                 } else {
                     StationService.getInstance().stopFor(uuid, StationService.StopReason.DISCONNECTED);
-                    if (worldUuid != null) {
-                        StationService.getInstance().returnClaimsOf(uuid, worldUuid, world);
-                    }
                 }
             } catch (Throwable t) {
                 Log.warn("Station disconnect teardown failed: " + t.getMessage());
             }
-            try {
-                sweepClaimsInOtherWorlds(uuid, worldUuid);
-            } catch (Throwable t) {
-                Log.warn("Station cross-world claim sweep failed: " + t.getMessage());
-            }
         });
-    }
-
-    /**
-     * Hands back the disconnecting player's custody claims standing in every world OTHER than the
-     * one they left from, each on its own world thread ({@link #registerTeardownHooks} covers the
-     * departure world inline). A world that is gone or dead falls back to the direct call, which
-     * still releases the bookkeeping even though it can no longer write to that world.
-     */
-    private static void sweepClaimsInOtherWorlds(@Nonnull UUID playerUuid,
-            @Nullable UUID departureWorldUuid) {
-        for (UUID claimWorldUuid : StationService.getInstance().claimWorldsOf(playerUuid)) {
-            if (claimWorldUuid.equals(departureWorldUuid)) {
-                continue;
-            }
-            World claimWorld = Universe.get().getWorld(claimWorldUuid);
-            if (claimWorld != null && claimWorld.isAlive()) {
-                claimWorld.execute(() -> {
-                    try {
-                        StationService.getInstance().returnClaimsOf(playerUuid, claimWorldUuid, claimWorld);
-                    } catch (Throwable t) {
-                        Log.warn("Station cross-world claim sweep failed: " + t.getMessage());
-                    }
-                });
-            } else {
-                StationService.getInstance().returnClaimsOf(playerUuid, claimWorldUuid, claimWorld);
-            }
-        }
     }
 
     /**
@@ -656,14 +602,18 @@ public class RpgStationsPlugin extends JavaPlugin {
 
     /**
      * Registers the per-world frame drain, the damage-interrupt reader (Inspect group,
-     * read-only), and the placed-input custody block-break auto-return reader (design section
-     * 9.4, phase-2 leg C - {@link StationCustodyBreakSystem}, the no-active-session case
-     * {@code StationService#stop}'s own return path can never reach).
+     * read-only), and the placed-input custody block-break readers (design section
+     * 9.4 - {@link StationCustodyBreakSystem} for a player's own break plus its
+     * {@link StationCustodyBreakSystem.Environment} sibling for the actor-less
+     * {@code EnvironmentBreakBlockEvent} the engine fires INSTEAD for fire/physics/unattributed
+     * explosions, so a destroyed block never leaves a stash behind; both cover the
+     * no-active-session case {@code StationService#stop}'s own return path can never reach).
      */
     private void registerStationSystems() {
         getEntityStoreRegistry().registerSystem(new StationFrameSystem());
         getEntityStoreRegistry().registerSystem(new StationInterruptDamageSystem());
         getEntityStoreRegistry().registerSystem(new StationCustodyBreakSystem());
+        getEntityStoreRegistry().registerSystem(new StationCustodyBreakSystem.Environment());
         // Scope-2 wave 3 (gate m4): the place-event feed for the lazy station-block index the
         // multi-station anchor discovery reads (StationBlockPlaceSystem); the break side (index
         // removal + ANCHOR_LOST) is handled by StationCustodyBreakSystem -> onCustodyBlockBroken.

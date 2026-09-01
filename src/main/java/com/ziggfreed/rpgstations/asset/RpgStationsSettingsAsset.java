@@ -29,7 +29,7 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditorSectionStart;
  * {
  *   "Enabled": true,
  *   "SummaryHud": { "Enabled": true, "Position": "TopCenter", "OffsetY": 120, "TtlMs": 6000 },
- *   "Limits": { "MaxSessionsPerWorld": 60, "MaxPuppetsPerWorld": 40, "MaxCustodyClaimsPerWorld": 400 }
+ *   "Limits": { "MaxSessionsPerWorld": 60, "MaxPuppetsPerWorld": 40, "MaxStashesPerSection": 8 }
  * }
  * }</pre>
  */
@@ -69,7 +69,7 @@ public final class RpgStationsSettingsAsset
             .metadata(new UIEditorSectionStart("Summary HUD")).add()
             .appendInherited(new KeyedCodec<>("Limits", Limits.CODEC, false),
                     (a, v) -> a.limits = v, a -> a.limits, (a, parent) -> a.limits = parent.limits)
-            .documentation("Per-world ceilings a server owner can set on what this engine is allowed to have live at once. Absent, or any leaf left null, means unlimited.")
+            .documentation("Ceilings a server owner can set on what this engine is allowed to have live at once (sessions and puppets per world, placed-input stashes per chunk section). Absent, or any leaf left null, means unlimited.")
             .metadata(new UIEditorSectionStart("Limits")).add()
             .build();
 
@@ -131,23 +131,26 @@ public final class RpgStationsSettingsAsset
     }
 
     /**
-     * Per-world ceilings on what the engine may have live at once - three INDEPENDENT knobs, each
-     * nullable and each meaning "unlimited" when absent, so an owner can cap one thing without
-     * implying anything about the others.
+     * Ceilings on what the engine may have live at once - three INDEPENDENT knobs, each nullable
+     * and each meaning "unlimited" when absent, so an owner can cap one thing without implying
+     * anything about the others.
      *
-     * <p>Each cap is scoped PER WORLD rather than per server on purpose: the cost they protect
-     * against (session ticking, replicated performer entities, tracked prop entities) is paid by the
-     * players and the tick loop of one world, and a busy hub must not be able to starve a quiet one.
+     * <p>The session and puppet caps are scoped PER WORLD: the cost they protect against (session
+     * ticking, replicated performer entities) is paid by the players and the tick loop of one
+     * world, and a busy hub must not be able to starve a quiet one. The stash cap is scoped PER
+     * CHUNK SECTION, because placed input is stored on the block's own chunk section and that is
+     * the bound a per-section store can enforce.
      *
      * <p>They differ in what exceeding them DOES, which is a property of the thing being capped, not
-     * a mode: a session and a placed-input claim are all-or-nothing, so those two deny the
+     * a mode: a session and a placed-input stash are all-or-nothing, so those two deny the
      * interaction with a localized toast; a puppet is pure presentation, so that one silently
      * degrades to the in-body route the engine already falls back to whenever a spawn fails.
      */
     public static final class Limits {
         @Nullable protected Integer maxSessionsPerWorld;
         @Nullable protected Integer maxPuppetsPerWorld;
-        @Nullable protected Integer maxCustodyClaimsPerWorld;
+        @Nullable protected Integer maxStashesPerSection;
+        @Nullable protected Integer retiredMaxCustodyClaimsPerWorld;
 
         public static final BuilderCodec<Limits> CODEC = BuilderCodec.builder(Limits.class, Limits::new)
                 .appendInherited(new KeyedCodec<>("MaxSessionsPerWorld", Codec.INTEGER, false),
@@ -160,20 +163,25 @@ public final class RpgStationsSettingsAsset
                         (o, p) -> o.maxPuppetsPerWorld = p.maxPuppetsPerWorld)
                 .documentation("The most live puppets (an action's Puppet group: the spawned, network-replicated figure that performs the work in the player's place) that may exist at once in ONE world. Past it a session still starts and runs normally, it simply performs in the player's own body instead of spawning a puppet - the same graceful fallback a failed spawn already takes. Null (the default) means unlimited.")
                 .addValidator(CodecWarnValidators.positive("Limits.MaxPuppetsPerWorld should be positive.")).add()
+                .appendInherited(new KeyedCodec<>("MaxStashesPerSection", Codec.INTEGER, false),
+                        (o, v) -> o.maxStashesPerSection = v, o -> o.maxStashesPerSection,
+                        (o, p) -> o.maxStashesPerSection = p.maxStashesPerSection)
+                .documentation("The most blocks in ONE chunk section (a 16x16x16 cube) that may hold placed station input at once. Placing into a station that already holds material always works (it tops the existing store up); only a placement that would CREATE a new one past the ceiling is denied, with a localized toast. Null (the default) means unlimited.")
+                .addValidator(CodecWarnValidators.positive("Limits.MaxStashesPerSection should be positive.")).add()
                 .appendInherited(new KeyedCodec<>("MaxCustodyClaimsPerWorld", Codec.INTEGER, false),
-                        (o, v) -> o.maxCustodyClaimsPerWorld = v, o -> o.maxCustodyClaimsPerWorld,
-                        (o, p) -> o.maxCustodyClaimsPerWorld = p.maxCustodyClaimsPerWorld)
-                .documentation("The most stations that may hold placed input at once in ONE world. Placing into a station that already holds a claim always works (it tops the existing one up); only opening a NEW one past the ceiling is denied, with a localized toast. Null (the default) means unlimited.")
-                .addValidator(CodecWarnValidators.positive("Limits.MaxCustodyClaimsPerWorld should be positive.")).add()
+                        (o, v) -> o.retiredMaxCustodyClaimsPerWorld = v, o -> o.retiredMaxCustodyClaimsPerWorld,
+                        (o, p) -> o.retiredMaxCustodyClaimsPerWorld = p.retiredMaxCustodyClaimsPerWorld)
+                .documentation("Retired and ignored. Placed input is stored on the block's own chunk section, so the bound is per section: author MaxStashesPerSection instead. A value here logs a warning naming that replacement and changes nothing.")
+                .add()
                 .build();
 
         @Nonnull
         public static Limits of(@Nullable Integer maxSessionsPerWorld, @Nullable Integer maxPuppetsPerWorld,
-                @Nullable Integer maxCustodyClaimsPerWorld) {
+                @Nullable Integer maxStashesPerSection) {
             Limits l = new Limits();
             l.maxSessionsPerWorld = maxSessionsPerWorld;
             l.maxPuppetsPerWorld = maxPuppetsPerWorld;
-            l.maxCustodyClaimsPerWorld = maxCustodyClaimsPerWorld;
+            l.maxStashesPerSection = maxStashesPerSection;
             return l;
         }
 
@@ -187,9 +195,19 @@ public final class RpgStationsSettingsAsset
             return maxPuppetsPerWorld;
         }
 
+        /** The per-chunk-section placed-input stash ceiling, or null for unlimited. */
         @Nullable
-        public Integer getMaxCustodyClaimsPerWorld() {
-            return maxCustodyClaimsPerWorld;
+        public Integer getMaxStashesPerSection() {
+            return maxStashesPerSection;
+        }
+
+        /**
+         * The retired {@code MaxCustodyClaimsPerWorld} leaf's authored value, kept decoded ONLY so
+         * the settings fold can warn once naming {@code MaxStashesPerSection}; nothing enforces it.
+         */
+        @Nullable
+        public Integer getRetiredMaxCustodyClaimsPerWorld() {
+            return retiredMaxCustodyClaimsPerWorld;
         }
 
         /**

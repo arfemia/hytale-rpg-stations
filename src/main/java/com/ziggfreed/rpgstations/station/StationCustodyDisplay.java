@@ -10,7 +10,6 @@ import java.util.Map;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Ref;
-import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Rotation3f;
 import com.hypixel.hytale.protocol.InteractionType;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
@@ -42,13 +41,12 @@ import com.ziggfreed.rpgstations.util.Log;
  * press-F retrieve interaction wiring (below) added onto the common primitive's two-phase
  * {@code buildHolder}/{@code spawn} API before the entity commits.
  *
- * <p><b>Never-persisted, by construction (resolves "reconcile orphans on restart"):</b> the
- * common primitive's {@code NonSerialized} marker means a display entity CANNOT survive a server
- * restart (chunk save/reload skips it) - exactly mirroring the custody claim's own "never
- * persisted, crash = loss" lifecycle (design section 9.4), so there is no orphan case to
- * reconcile: a restart loses BOTH the claim and its visual together, and the self-heal that
- * already resets a stale Loaded block state on the next interaction
- * ({@code StationService#toggle}) covers the whole picture.
+ * <p><b>Never-persisted, by construction:</b> the common primitive's {@code NonSerialized} marker
+ * means a display entity CANNOT survive a server restart (chunk save/reload skips it). The custody
+ * CONTENTS it renders, by contrast, ARE chunk-persisted (the block's stash), so after a restart
+ * the stash stands with no visual - {@code StationService#respawnDisplayIfMissing} rebuilds the
+ * prop from the persisted contents on the block's first interaction, and the volatile
+ * {@code displayByBlock} side map records the fresh ref + network id for press-F retrieval.
  *
  * <p><b>Offset/Scale/Rotation math is kept PRIMITIVE-typed</b> ({@link #resolveWorldOffset}/
  * {@link #resolvePosition}/{@link #resolveRotationRadians}/{@link #resolveScale} take/return only
@@ -90,8 +88,8 @@ final class StationCustodyDisplay {
 
     /**
      * A committed display entity: its {@link Ref} plus the {@code NetworkId} value it was built
-     * with. Both are recorded on the owning {@link StationCustodyClaim} so press-F retrieval can
-     * match a clicked prop against its claim with no live component read - see
+     * with. Both are recorded in {@code StationService}'s volatile display side map so press-F
+     * retrieval can match a clicked prop against its block with no live component read - see
      * {@link StationCustodyRetrieval#owns} for why the id alone is not enough (it is per-world).
      */
     record Spawned(@Nonnull Ref<EntityStore> ref, int networkId) {
@@ -146,8 +144,7 @@ final class StationCustodyDisplay {
      * processing lock) needs - a direct {@code store.addEntity} there throws {@code
      * IllegalStateException("Store is currently processing!")} (R4 fix); it queues the add and
      * returns a PENDING {@link Ref} valid after the current tick's commandBuffer flush, which is
-     * fine here since the ref is only read back on a LATER tick
-     * ({@link StationCustodyClaim#displayRef()}).
+     * fine here since the ref is only read back on a LATER tick (out of the display side map).
      */
     @Nullable
     static Spawned spawn(@Nonnull CommandBuffer<EntityStore> commandBuffer, @Nullable ItemStack visualStack,
@@ -196,36 +193,14 @@ final class StationCustodyDisplay {
 
     /**
      * Despawns {@code displayRef} (never throws; no-op when already gone or {@code commandBuffer}
-     * could not be resolved) - called from whichever claim-removal path fires first
-     * ({@code StationService#returnCustody} or {@code #onCustodyBlockBroken}). Delegates straight
-     * to {@link ItemPropEntityService#despawn(Ref, CommandBuffer)} (the SAME tick-safe primitive
-     * {@link #spawn} builds through - R4 fix: takes a {@code commandBuffer} instead of the raw
+     * could not be resolved) - called from whichever display-removal path fires first (a custody
+     * hand-back, a press-F retrieval, or a block break). Delegates straight to
+     * {@link ItemPropEntityService#despawn(Ref, CommandBuffer)} (the SAME tick-safe primitive
+     * {@link #spawn} builds through - takes a {@code commandBuffer} instead of the raw
      * {@code store}, the same processing-lock hazard {@link #spawn} carries).
      */
     static void despawn(@Nullable Ref<EntityStore> displayRef, @Nullable CommandBuffer<EntityStore> commandBuffer) {
         ItemPropEntityService.despawn(displayRef, commandBuffer);
-    }
-
-    /**
-     * Despawns {@code displayRef} through a live {@code Store} instead of a {@code CommandBuffer} -
-     * the route for a claim swept OUTSIDE any tick or interaction handler (the disconnect claim
-     * sweep, which hops onto the owning world's thread via {@code World#execute} and therefore holds
-     * no command buffer at all). Never throws; a no-op on a null store or an already-gone ref.
-     *
-     * <p>Deliberately NOT usable from inside a tick/interaction context: a direct
-     * {@code store.removeEntity} there throws {@code IllegalStateException("Store is currently
-     * processing!")}, which is exactly why the {@code CommandBuffer} overload above exists and stays
-     * the default for every in-engine call site.
-     */
-    static void despawn(@Nullable Ref<EntityStore> displayRef, @Nullable Store<EntityStore> store) {
-        if (displayRef == null || store == null) {
-            return;
-        }
-        try {
-            ItemPropEntityService.despawn(displayRef, store);
-        } catch (Throwable t) {
-            Log.fine("STATION custody display despawn failed: " + t.getMessage());
-        }
     }
 
     /**

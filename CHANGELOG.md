@@ -7,6 +7,25 @@ there is no prior public release to diff against, so every entry is additive by 
 
 ## 0.1.0 (first public release)
 
+- **Placed custody survives restarts, chunk unloads and logoffs.** Materials placed into a station
+  are stored on the block's own chunk (the shared library's per-block stash store) and saved with
+  it, exactly like a chest's contents: leave logs in the sawmill, restart the server, and they are
+  still there to mill; log off and your placed materials wait in the world for your return. A
+  single-item placement keeps its full metadata (durability, enhancement rolls) across a restart
+  too. A session stop while the player is present (re-press, walk-off, damage, death, running out
+  of inputs) still hands materials back to the inventory; disconnecting leaves them placed, and
+  breaking the block still drops them at the block once. Caveats: the floating placed-item display
+  reappears the first time anyone uses the station after a restart (the materials themselves are
+  there the whole time), and the live in-game chunk save/load round trip plus the enhanced-item
+  metadata survival are verified in play rather than by the build's tests.
+- **An explosion or fire destroying a station block drops its placed materials.** Environmental
+  breaks (fire, physics, unattributed explosions) run the same drop-once cleanup a player break
+  does, so a destroyed block never strands stored materials.
+- **Settings: `Limits.MaxStashesPerSection` caps placed-input stores per chunk section** (a
+  16x16x16 cube, the scope a per-chunk store can enforce). Topping up material already placed is
+  never denied; only a placement that would open a new store past the ceiling is. The
+  `Limits.MaxCustodyClaimsPerWorld` spelling is ignored with a boot warning naming the
+  replacement.
 - **The Asset Editor shows each knob's real default beside its dropdown.** The station schemas already offer pick lists on the closed discriminators (`Look.Source`, `Hide.Route`, `Prop.Source`/`Slot`, `Mount.Surface`, `Consume.From`/`Produce.To`, `OnConditionFail.Result`); they now also declare each one's unauthored default (PlayerClone, Scale, MirrorHeld, Hotbar, Block, Inventory, Fail), plus the engine master `Enabled` and a work action's `Looping` (both true) and the summary HUD's `Enabled`, so an unauthored field renders its effective value instead of the control's zero-state. `FromCrafting.Types` exports its closed Crafting/Processing pair as a per-entry dropdown. Decode is unchanged.
 
 A standalone, richly self-sufficient diegetic interactive work-station engine: with RPG Stations

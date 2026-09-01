@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.Nonnull;
 
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
+import com.ziggfreed.rpgstations.util.Log;
 
 /**
  * The RUNTIME AUTHORITY for the ONE {@link RpgStationsSettingsAsset} instance (design section 4.6: a
@@ -38,8 +39,22 @@ public final class SettingsCatalog {
         RpgStationsSettingsAsset settings = layer.get(RpgStationsSettingsAsset.ID);
         if (settings != null) {
             current.set(settings);
+            warnRetiredLeaves(settings);
         } else if (replace) {
             current.set(RpgStationsSettingsAsset.defaults());
+        }
+    }
+
+    /**
+     * One WARN per fold for a retired leaf still authored, naming its replacement (warn only,
+     * never a parse failure - the file keeps loading and every live leaf applies).
+     */
+    private static void warnRetiredLeaves(@Nonnull RpgStationsSettingsAsset settings) {
+        RpgStationsSettingsAsset.Limits limits = settings.getLimits();
+        if (limits != null && limits.getRetiredMaxCustodyClaimsPerWorld() != null) {
+            Log.warn("Settings Limits.MaxCustodyClaimsPerWorld is retired and ignored: placed input"
+                    + " is stored on the block's own chunk section, so the ceiling is per section -"
+                    + " author Limits.MaxStashesPerSection instead.");
         }
     }
 

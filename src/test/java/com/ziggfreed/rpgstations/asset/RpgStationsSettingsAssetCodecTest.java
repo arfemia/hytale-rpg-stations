@@ -74,16 +74,16 @@ public class RpgStationsSettingsAssetCodecTest {
         assertTrue(a.getSummaryHud().isEnabled());
     }
 
-    // ==================== Limits (the per-world owner ceilings) ====================
+    // ==================== Limits (the owner ceilings) ====================
 
     @Test
     void limits_decodeEveryLeaf() throws Exception {
         RpgStationsSettingsAsset a = decodeAsset("{ \"Limits\": { \"MaxSessionsPerWorld\": 7, "
-                + "\"MaxPuppetsPerWorld\": 3, \"MaxCustodyClaimsPerWorld\": 11 } }");
+                + "\"MaxPuppetsPerWorld\": 3, \"MaxStashesPerSection\": 11 } }");
         assertNotNull(a.getLimits());
         assertEquals(7, a.getLimits().getMaxSessionsPerWorld());
         assertEquals(3, a.getLimits().getMaxPuppetsPerWorld());
-        assertEquals(11, a.getLimits().getMaxCustodyClaimsPerWorld());
+        assertEquals(11, a.getLimits().getMaxStashesPerSection());
     }
 
     @Test
@@ -98,7 +98,19 @@ public class RpgStationsSettingsAssetCodecTest {
         assertNotNull(a.getLimits());
         assertEquals(3, a.getLimits().getMaxPuppetsPerWorld());
         assertNull(a.getLimits().getMaxSessionsPerWorld(), "an unset sibling stays unlimited");
-        assertNull(a.getLimits().getMaxCustodyClaimsPerWorld(), "an unset sibling stays unlimited");
+        assertNull(a.getLimits().getMaxStashesPerSection(), "an unset sibling stays unlimited");
+    }
+
+    @Test
+    void limits_retiredMaxCustodyClaimsPerWorld_decodesWithoutFailingAndFillsNothingLive() throws Exception {
+        // The retired leaf is warn-only, never a parse failure: an owner file still authoring it
+        // decodes cleanly, its value lands ONLY in the retired slot the settings fold warns on,
+        // and the live stash ceiling stays untouched.
+        RpgStationsSettingsAsset a = decodeAsset("{ \"Limits\": { \"MaxCustodyClaimsPerWorld\": 400 } }");
+        assertNotNull(a.getLimits());
+        assertEquals(400, a.getLimits().getRetiredMaxCustodyClaimsPerWorld());
+        assertNull(a.getLimits().getMaxStashesPerSection(), "the retired leaf never fills the live one");
+        assertNull(a.getLimits().getMaxSessionsPerWorld());
     }
 
     @Test

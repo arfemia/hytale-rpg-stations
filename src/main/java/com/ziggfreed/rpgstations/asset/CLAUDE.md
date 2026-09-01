@@ -210,7 +210,7 @@ resolution section for the engine half.
   - **What it makes**: `Recipe` - the ONE transform this action performs (below).
   - **How the loop runs**: `Work` (cycle cadence, duration/exit bounds, `PerCycleContributions[]`,
     the `Looping` flag, optional `Idle` practice mode - the SAME group `StationAsset.Work` used to
-    be, now reached only through an action), `Custody` (session-scoped placed-input custody; see
+    be, now reached only through an action), `Custody` (placed-input custody, chunk-persisted; see
     [`Custody`](Custody.java) below).
   - **Where it runs**: `Anchors` (named multi-station anchor declarations), `Steps` (an authored
     [`StationStep`](StationStep.java) program; absent = "build the implicit program from
@@ -344,7 +344,8 @@ resolution section for the engine half.
   inline `Actions[]` entry's `Ref` leaf (above). Supports native `Parent` between `ActionAsset`s
   for delta reuse. See the fish exemplar (`unreleased/Server/RpgStations/Actions/PrepFish.json`,
   held back with the CookingFire/CuttingBoard pair at 0.1.0) for the flagship authoring shape.
-- **[`Custody`](Custody.java)** - session-scoped placed-input custody, opted into per-action:
+- **[`Custody`](Custody.java)** - placed-input custody (chunk-persisted: the placed pile lives on
+  the block's own chunk section and survives restarts), opted into per-action:
   `{MaxQuantity?, SingleFamily?, Input?, States?, Display?}`. `MaxQuantity` defaults to **100**.
   `Input` (reusing [`ActionInput`](ActionInput.java)'s ItemId/ResourceTypeId/Tags/Function routes)
   is the explicit placement-acceptance matcher; absent derives acceptance from the resolved
@@ -673,20 +674,23 @@ resolution section for the engine half.
 - **[`RpgStationsSettingsAsset`](RpgStationsSettingsAsset.java)** - `Server/RpgStations/Settings/
   Settings.json`, a single id (`settings`), jar default + pack-overridable: `{Enabled,
   SummaryHud:{Enabled, Position, OffsetX, OffsetY, TtlMs}, Limits:{MaxSessionsPerWorld,
-  MaxPuppetsPerWorld, MaxCustodyClaimsPerWorld}}`. `Position` is a shared-library
+  MaxPuppetsPerWorld, MaxStashesPerSection}}`. `Position` is a shared-library
   `HudPosition` preset id, authored PascalCase like every other id in this schema (e.g.
   `"TopCenter"`); the legacy SCREAMING_SNAKE spelling (`"TOP_CENTER"`) still resolves since
   matching is case- and underscore-insensitive. `OffsetX` is `OffsetY`'s horizontal sibling.
-  **`Limits`** - three INDEPENDENT per-WORLD ceilings on what the engine may have live at once,
-  each nullable and each meaning "unlimited" when absent, so an owner caps one thing without
-  implying anything about the others. Scoped per world rather than per server on purpose: the cost
-  each caps (session ticking, replicated performer entities, tracked custody claims) is paid by
-  one world's players and tick loop, and a busy hub must never be able to starve a quiet one. What
+  **`Limits`** - three INDEPENDENT ceilings on what the engine may have live at once, each
+  nullable and each meaning "unlimited" when absent, so an owner caps one thing without implying
+  anything about the others. Sessions and puppets are scoped per WORLD (the cost each caps -
+  session ticking, replicated performer entities - is paid by one world's players and tick loop,
+  and a busy hub must never be able to starve a quiet one); placed-input stashes are scoped per
+  CHUNK SECTION (`MaxStashesPerSection` - the bound a per-section store can enforce). What
   exceeding a cap DOES is a property of the thing being capped, never a mode: `MaxSessionsPerWorld`
-  and `MaxCustodyClaimsPerWorld` are all-or-nothing (a new session, or a NEW custody claim - topping
-  up an existing one never counts - is denied with a localized toast); `MaxPuppetsPerWorld` gates
+  and `MaxStashesPerSection` are all-or-nothing (a new session, or a NEW stash - topping up an
+  existing one never counts - is denied with a localized toast); `MaxPuppetsPerWorld` gates
   pure presentation, so a session past it simply performs in the player's own body, the same
-  graceful degrade a failed puppet spawn already takes. The one shared predicate,
+  graceful degrade a failed puppet spawn already takes. The retired `MaxCustodyClaimsPerWorld`
+  leaf still decodes into a warn-only slot (the settings fold names the replacement; never a parse
+  failure) and enforces nothing. The one shared predicate,
   `Limits.atCapacity(max, currentCount)`, treats a non-positive `max` as unlimited too (a ceiling of
   zero would otherwise read as "this feature is off", which is what the engine's own `Enabled`
   switch already means). Deliberately NON-extensible (server-global singleton). Folded into

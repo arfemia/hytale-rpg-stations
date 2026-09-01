@@ -750,14 +750,15 @@ session, so a mob taking damage or dying - the overwhelming majority of either e
 populated world - used to pay a dispatch plus a session lookup for a question whose answer could
 only ever be "no". The prior `Query.any()` on the damage system paid that cost for EVERY entity.
 
-## World-unload teardown + disconnect claim eviction (`RemoveWorldEvent`)
+## World-unload teardown + the disconnect posture (`RemoveWorldEvent`)
 
-**Every one of this engine's block-keyed maps (`custodyByBlock`, `byBlock`, `workingByPlayer`'s
-block-anchored entries) is GLOBAL, keyed by a composite `"<worldUuid>:<x>:<y>:<z>"` string, rather
-than partitioned per world.** Unloading a world used to remove nothing from them: a fleet that
-creates and destroys instance worlds accumulated a stale entry (and pinned a stale `World`/display
-`Ref`) for the whole server uptime, one per station block that had ever been used or loaded into
-in a since-unloaded world.
+**Every one of this engine's VOLATILE block-keyed maps (`displayByBlock`, `byBlock`,
+`workingByPlayer`'s block-anchored entries, `knownStationBlocks`) is GLOBAL, keyed by a composite
+`"<worldUuid>:<x>:<y>:<z>"` string, rather than partitioned per world.** The world-uuid prefix the
+key already carries is the whole per-world sweep; without it a fleet that creates and destroys
+instance worlds would accumulate stale entries (and pinned display `Ref`s) for the whole uptime.
+Placed custody is NOT in any of these maps - it lives on the block's own chunk section (see the
+custody section below) and unloads/reloads with the chunks.
 
 - **[`RpgStationsPlugin`](../RpgStationsPlugin.java)`#registerWorldEviction`** registers a global
   `com.hypixel.hytale.server.core.universe.world.events.RemoveWorldEvent` listener (skipping a
@@ -769,32 +770,25 @@ in a since-unloaded world.
 - **`StationService#onWorldRemoved(world)`** stops every session still queued or tracked for that
   world (`StopReason.WORLD_CHANGED`, idempotent so a session reached via both the world's own
   queue AND the belt-and-braces `byPlayer` scan costs nothing extra), then
-  `forgetBlockKeyedState(key -> key.startsWith(worldPrefix))` releases (never hands back - the
-  world and its entity store are going away, and custody is never persisted) every block-keyed
-  entry whose key names that world, using the world-uuid PREFIX the key already carries as the
-  whole sweep. Never throws.
-- **Disconnect claim eviction** (`RpgStationsPlugin#registerTeardownHooks`'s `PlayerDisconnectEvent`
-  handler): a player who places custody input and disconnects WITHOUT a live session touching that
-  block (place logs, walk away, log off) used to leak both the claim and its display prop entity
-  forever - none of the four existing claim-removal paths (`returnCustody`,
-  `onCustodyBlockBroken`, a retrieve press, the world-unload sweep above) ever fired for that
-  shape, since each needs a session stop, a block break, or a press. `stopFor` (the session-stop
-  half) runs first in the departure world, THEN `StationService#returnClaimsOf(playerUuid,
-  worldUuid, world)` hands back every remaining claim the player owns in that world (inventory-first
-  via `giveClaimToOwner`, dropped at the block when the departing player's inventory cannot be
-  reached), THEN `sweepClaimsInOtherWorlds` hops onto EACH other world the player has a standing
-  claim in (`StationService#claimWorldsOf`, a distinct-world-uuid scan over `custodyByBlock`) on
-  its own world thread and repeats the hand-back there. A world that is gone or dead falls back to
-  the direct (non-hopped) call, which still releases the bookkeeping even though it can no longer
-  write into that world.
+  `forgetBlockKeyedState(key -> key.startsWith(worldPrefix))` drops every VOLATILE block-keyed
+  entry whose key names that world. Eviction never reads, returns or clears a stash: the stashes
+  ride the world's chunks, and a world deleted outright takes them with its chunk files, exactly
+  like chests. Never throws.
+- **Disconnect** (`RpgStationsPlugin#registerTeardownHooks`'s `PlayerDisconnectEvent` handler):
+  `stopFor` runs on the departure world's thread (via `World#execute`; direct fallback for a
+  dead/gone world) and stops the session - refunding its in-flight iteration - but standing PLACED
+  custody stays in the world stash: the player collects it at the block on return ("leave the stew
+  on and log off"). No cross-world claim sweep exists because there is nothing volatile to reach
+  in a world the player is not in; `stop()`'s `custodyReturnsAtStop` is what makes DISCONNECTED /
+  SERVER_STOP / WORLD_CHANGED the three leave-it reasons.
 
 ## Owner ceilings (`Settings.Limits`, `RpgStationsSettingsAsset.Limits`)
 
-Three INDEPENDENT per-WORLD ceilings (see `../asset/CLAUDE.md`'s `RpgStationsSettingsAsset`
-bullet), read live (never cached) so a settings reload takes effect on the next press. The shared
-predicate `RpgStationsSettingsAsset.Limits.atCapacity(max, currentCount)` treats null OR
-non-positive as unlimited, so a server that never authors `Limits` behaves exactly as it did
-before the group existed, and the check costs one null read until an owner sets a number.
+Three INDEPENDENT ceilings (see `../asset/CLAUDE.md`'s `RpgStationsSettingsAsset` bullet), read
+live (never cached) so a settings reload takes effect on the next press. The shared predicate
+`RpgStationsSettingsAsset.Limits.atCapacity(max, currentCount)` treats null OR non-positive as
+unlimited, so a server that never authors `Limits` behaves exactly as it did before the group
+existed, and the check costs one null read until an owner sets a number.
 
 - **`atSessionCap(world)`** (`MaxSessionsPerWorld`) - checked in `toggle()` AFTER the custody
   placement branch (a press that only loads material starts no session, so a busy world must never
@@ -802,45 +796,76 @@ before the group existed, and the check costs one null read until an owner sets 
   the owner allows denies a NEW engage with `ui.station.server_busy`. Counts the world's own
   session queue (`countLiveSessions`), not the global player map, so the answer is per-world by
   construction, and excludes an already-stopped session still awaiting its frame drain.
-- **`atCustodyClaimCap(worldPrefix)`** (`MaxCustodyClaimsPerWorld`) - checked ONLY when a press
-  would actually OPEN a brand-new claim: `claim == null` AND something acceptable was found to
-  place. Both halves matter, so the check sits AT each `placeIntoCustody` call rather than at the
-  top of the branch - hoisting it denied presses that place nothing, which reported "storage full"
-  for what is really a no-materials press and made idle practice unreachable at an empty
-  `Work.Idle` station. Topping up a claim that already stands adds no new bookkeeping and no new
-  display prop, so it is never denied and a player can never be locked out of material they already
-  placed. Denies with `ui.station.storage_full`.
+- **`atStashCap(world, x, y, z)`** (`MaxStashesPerSection`, per CHUNK SECTION - the bound a
+  per-section store can enforce, counted via `BlockStashes.countInSection`) - checked ONLY when a
+  press would actually CREATE a brand-new stash: `claim == null` AND something acceptable was
+  found to place. Both halves matter, so the check sits AT each `placeIntoCustody` call rather
+  than at the top of the branch - hoisting it would deny presses that place nothing, reporting
+  "storage full" for what is really a no-materials press and making idle practice unreachable at
+  an empty `Work.Idle` station. Topping up a stash that already stands adds no new record, so it
+  is never denied and a player can never be locked out of material they already placed. Denies
+  with `ui.station.storage_full`. The retired `MaxCustodyClaimsPerWorld` leaf still decodes into a
+  warn-only slot (`SettingsCatalog#warnRetiredLeaves` names the replacement at fold; never a parse
+  failure) and enforces nothing.
 - **`atPuppetCap(world)`** (`MaxPuppetsPerWorld`) - checked right before `StationPuppetController
   .spawnAndHide`. Past the ceiling the session starts and runs completely normally; it simply
   performs in the player's own body instead of spawning a worker double - the EXACT graceful
   fallback a failed puppet spawn already takes, so no engage is ever denied purely over
   presentation. A world without a busy puppet count pays nothing extra.
 
-## Placed-input custody + block states (unchanged mechanism; phase-based Consume this wave)
+## Placed-input custody + block states (CHUNK-PERSISTED via zc's `BlockStashes`)
 
-[`StationCustodyClaim`](StationCustodyClaim.java) is one block's live claim (owner uuid +
-`itemId -> quantity` tally, insertion-ordered oldest-first, plus an optional `uniqueStack` for a
-`MaxQuantity:1` placement that preserves metadata/durability - never persisted).
-[`StationCustody`](StationCustody.java) is the PURE decision core (`placeableQuantity`,
-`available`/`drain`, `matchesInput`/`matchesAnyConversionInput`, `acceptsFamily`). `toggle` gates a
-`Custody`-governing action behind ONE state-dependent F: not-loaded + a matching held stack
-places/tops-up (`placeIntoCustody`); loaded + non-owner denies `ui.station.occupied`; otherwise
-falls through to the classic engage flow, sourcing viability from the claim
+**Custody is chunk-persisted state, resolved live per touch.** The authority is ziggfreed-common's
+`BlockStashes` store (registry id `ZigBlockStash`, registered by the zc plugin at setup): one
+`BlockStash` per block on the block's own chunk section, saved and loaded with the chunk, holding
+ONE pile under the reserved `StationCustodyClaim.MAIN_PILE` id (`"main"`) - pile `Owner` = the
+placer uuid, `Items` = the insertion-ordered tally (oldest-first drain order), `Unique` = the
+metadata-preserving stack (the anvil's placed weapon, riding the engine's own item codec so it
+survives restarts), and the stash `Tag` = `rpgstations:<stationId>/<actionId>` (how a claim
+remembers its committed action across a restart, and how this mod's stashes are told apart from
+another consumer's - a foreign tag is never adopted or clobbered).
+[`StationCustodyClaim`](StationCustodyClaim.java) is a THIN VIEW over that pile, materialized
+fresh by `StationService#custodyClaimAt` per touch (NO authoritative write-through cache - the
+`PlacedBlockLedger` posture; an unloaded section answers "no claim"); `ensureClaimAt` mints +
+stamps a new stash, `removeStashAt` deletes one. **Whoever mutates, marks**: every in-place
+mutation batch (a placement's adds, a Consume drain, the Stamp unique-stack write-back) ends with
+exactly one `claim.markDirty()` (zc's `Handle` dirty contract - nothing else flags the section
+for a save); `ensure`/`remove` mark themselves. The display prop's ref + NetworkId are VOLATILE
+(`displayByBlock`, a `blockKey -> DisplayHandle` side map with the reverse networkId walk press-F
+retrieval uses) - a NetworkId is per-world and not boot-stable, so it never rides the stash;
+`respawnDisplayIfMissing` rebuilds the prop from the persisted contents on the block's first
+interaction after a restart (the interim self-heal; a hydrate-on-section-load reconciler is not
+built yet, so until then the prop waits for that first touch).
+
+[`StationCustody`](StationCustody.java) stays the PURE decision core (`placeableQuantity`,
+`available`/`drain`, `matchesInput`/`matchesAnyConversionInput`, `acceptsFamily`) - zero engine
+touch, operating on the claim view (whose detached test constructor wraps a real `StashPile`).
+`toggle` gates a `Custody`-governing action behind ONE state-dependent F: not-loaded + a matching
+held stack places/tops-up (`placeIntoCustody`); loaded + non-owner denies `ui.station.occupied`;
+otherwise falls through to the classic engage flow, sourcing viability from the claim
 (`firstRunnableConversionFromCustody`). The implicit program's `Consume` phase reads
 `From:"Custody"` whenever the resolved action authors `Custody` (`StationStepHandlers`'s Consume
 phase, family-matched over an injected `itemId -> resourceTypeId[]` resolver, same pattern as
-`StationToolScaling`). **Auto-return on every exit path**: `stop()`'s `returnCustody` call is
-UNCONDITIONAL, resolving its store off `s.ref.getStore()` (not the possibly-null `store`
-parameter) so `stopAll`'s shutdown sweep is covered too - returns to the owner's inventory
-(room-checked, hotbar-first via `util.ItemGrantUtil`) or drops at the block once.
-[`StationCustodyBreakSystem`](StationCustodyBreakSystem.java) covers the no-active-session case
-(input placed, block broken before a session starts). Block-state flip (`flipCustodyState` over the
-extracted `setBlockState`, which writes through `BlockOperations.setBlockInteractionState`) is
-HINT-ONLY and self-heals: a Loaded state surviving a restart
-with no live claim behind it resets to Empty on the next interaction. **Precedence rule (gate
-m5)**: a block busy with its OWN session OR a non-empty `custodyByBlock` claim REFUSES an
-incoming anchor claim; restart self-heal consults `custodyByBlock`, not just the session map -
-load-bearing for multi-station claiming, already true for the single-station case.
+`StationToolScaling`).
+
+**Hand-back vs leave-it at stop** (`custodyReturnsAtStop`, pure + test-pinned): every stop whose
+player is still present hands custody back through `returnCustody` (room-checked, hotbar-first
+via `util.ItemGrantUtil`, else dropped at the block once); DISCONNECTED / SERVER_STOP /
+WORLD_CHANGED leave the stash standing in the world - it is persisted, the player collects at the
+block later - and those are exactly the paths that can run off the world thread, so they must not
+touch chunk state anyway. `releaseAnchorClaims` threads the same flag for remote-anchor custody.
+[`StationCustodyBreakSystem`](StationCustodyBreakSystem.java) covers the no-active-session break
+(input placed, block broken before a session starts) AND, via its nested `Environment` sibling
+(`WorldEventSystem` over `EnvironmentBreakBlockEvent` - the engine fires it INSTEAD of
+`BreakBlockEvent` for fire/physics/unattributed explosions), the actor-less break: both funnel
+into `onCustodyBlockBroken` (remove stash + drop once + despawn display, no player attribution on
+the environment route). Block-state flip (`flipCustodyState` over the extracted `setBlockState`,
+reading + writing through zc's `BlockOps`) is HINT-ONLY and self-heals AGAINST THE STASH: a
+Loaded state whose stash is truly empty resets to Empty on the next interaction, while a
+NON-EMPTY surviving stash makes the Loaded look CORRECT after a restart (the inversion
+persistence buys). **Precedence rule (gate m5)**: a block busy with its OWN session OR a
+non-empty custody claim REFUSES an incoming anchor claim - and because the claim read is the live
+stash resolve, a foreign claim placed before a restart still refuses it.
 
 **`Custody.SingleFamily`** (schema-review wave) locks a NON-EMPTY claim to the first-placed item's
 resource family, so a station holds 50 oak or 50 pine but never 100 mixed. The pure core is
@@ -926,10 +951,11 @@ two package-private seams on `StationService`:
 stands there): a program can hand an anchor its Loaded look and harvest it empty several steps
 later, which without this would strand a "has input" hint over nothing.
 
-The raw write is the extracted `setBlockState` (one guard set, returns whether the write landed);
-`flipCustodyState` is now a thin Empty/Loaded wrapper over it. A disconnect/shutdown stop has no
-world to write through, so the block can be left wearing its Working look - EXACTLY the
-pre-existing restart-orphan story for Loaded, self-healed by `toggle`'s not-loaded reset.
+The raw write is the extracted `setBlockState` (one guard set over zc's `BlockOps`, returns
+whether the write landed); `flipCustodyState` is now a thin Empty/Loaded wrapper over it. A
+disconnect/shutdown stop has no world to write through, so the block can be left wearing its
+Working look until the next interaction, where `toggle`'s self-heal settles it against the
+persisted stash (non-empty keeps Loaded correct, empty resets to Empty).
 
 **Crackle + embers are NATIVE, zero engine work.** `BlockType` carries a per-state
 `AmbientSoundEventId` (LOOPING+MONO validated, "a looping ambient sound event that emits from this
@@ -940,18 +966,20 @@ sound or particle system. The held-back `RPG_Station_CookingFire` block (`unrele
 from, since the 0.1.0 jar ships the Sawmill alone. Corollary for step `Presentation.Sound`: only ever
 author a ONE-SHOT SoundEvent there - a looping id fired as a one-shot never ends.
 
-## The placed-input PLACED-AS-ENTITY visual (unchanged)
+## The placed-input PLACED-AS-ENTITY visual
 
 [`StationCustodyDisplay`](StationCustodyDisplay.java) spawns a static, network-replicated,
 pickup-immune, physics-free prop entity rendering the claim's placed item at the station's
 block-top anchor, gated on `asset.Custody.Display`. Block-shaped items (the sawmill's placed
 logs) spawn a real `BlockEntity`; everything else (the anvil's placed weapon) spawns a bare
 `ItemComponent` prop. Both routes `ensureComponent(EntityStore.REGISTRY
-.getNonSerializedComponentType())` - never survives a restart, matching the custody claim's own
-lifecycle. Both the ref AND the spawned entity's own `NetworkId` live ON the claim
-(`StationCustodyClaim#displayRef`/`#displayNetworkId`, captured together at spawn via
-`#setDisplay`); spawned once at first placement, despawned at whichever of
-`#returnCustody`/`#onCustodyBlockBroken` fires first.
+.getNonSerializedComponentType())` - the PROP never survives a restart, and the persisted stash
+does, which is why `StationService#respawnDisplayIfMissing` rebuilds it from the stored contents
+on the block's first interaction. Both the ref AND the spawned entity's own `NetworkId` live in
+`StationService`'s VOLATILE `displayByBlock` side map (a `DisplayHandle` record, captured together
+at spawn via `spawnDisplayIfAbsent` - a NetworkId is per-world and not boot-stable, so neither may
+ride the stash); spawned once at first placement, despawned at whichever removal path fires first
+(hand-back, retrieval, block break).
 `Offset`/`Rotation` are FACING-RELATIVE to the placed block's own yaw (via the shared
 [`StationBlockFacing`](StationBlockFacing.java)`.yawRadians`, which reads
 the block's live `BlockSection#getRotationIndex` (via `World#getChunkStore()` ->
@@ -973,7 +1001,7 @@ entity in each loaded world, and an unscoped match could resolve a claim in a DI
 hand over its contents. `owns(blockKey, worldPrefix, claimDisplayNetworkId, targetNetworkId)`
 requires BOTH the network id match AND `blockKey.startsWith(worldPrefix)` (the presser's own
 `"<worldUuid>:"`, the exact prefix `StationAnchors#blockKey` already encodes).
-`StationCustodyClaim` now CACHES its own display entity's `displayNetworkId()` at spawn time, so
+The `displayByBlock` side map records each prop's `NetworkId` at spawn time, so
 this walk reads NO live components at all (it used to fetch `NetworkId` off every claim's display
 entity, across EVERY world, on every single press). **A successful `RETRIEVE`
 plays the presser's own COLLECT gesture** (`StationService#playCollectAnimation`, round-3 smoke):
@@ -1256,20 +1284,19 @@ the load-bearing lessons that still apply going forward:
   through the containment chain regardless of which state the block is currently in.
   `StationService#blockItemIdAt` falls back to `getId()` only when the block has no containing
   Item at all.
-- **The same rule binds the BLOCK-GONE check: compare by ITEM id, never by raw block id.**
-  `setBlockInteractionState` does not annotate a block, it REPLACES it - `BlockOperations
-  #setBlockInteractionState` resolves `blockType.getBlockForState(state)` and calls `setBlock(...,
-  BlockType.getAssetMap().getIndex(newState.getId()), ...)`, so the int `World#getBlock` returns
-  changes on EVERY `Custody.States` flip this engine performs. A raw-int compare against the
-  engage-time snapshot therefore reads the engine's own `Empty`/`Loaded`/`Working` flip as "the
-  station is gone" (the round-2 smoke regression: the cooking fire's own session died at its first
-  1s heartbeat the moment engage lit it). The heartbeat now runs the pure
-  `StationAnchors#blockGone(startBlockItemId, currentBlockItemId, startBlockId, currentBlockId)`:
-  item-id compare (case-insensitive, null current = gone) when the session captured one at engage
-  (`StationSession#startBlockItemId`, resolved ONCE and shared with the summary crest), raw-int
-  fallback only for a block with no containing Item. This covers the latent twin by construction -
-  a `StationStepHandlers` working-step flip at `At: "self"` writes the SAME primary block through
-  the SAME check.
+- **The same rule binds the BLOCK-GONE check: compare by ITEM id, never by the raw block-type
+  id.** The state flip does not annotate a block, it REPLACES it with the generated state-variant
+  BlockType, so the block-type id read back changes on EVERY `Custody.States` flip this engine
+  performs. A type-id compare against the engage-time snapshot therefore reads the engine's own
+  `Empty`/`Loaded`/`Working` flip as "the station is gone" (the round-2 smoke regression: the
+  cooking fire's own session died at its first 1s heartbeat the moment engage lit it). The
+  heartbeat runs the pure `StationAnchors#blockGone(startBlockItemId, currentBlockItemId,
+  startBlockTypeId, currentBlockTypeId)`: item-id compare (case-insensitive, null current = gone)
+  when the session captured one at engage (`StationSession#startBlockItemId`, resolved ONCE and
+  shared with the summary crest), block-type-id fallback (`StationSession#startBlockTypeId`, read
+  through zc's `BlockOps.blockItemIdAt`) only for a block with no containing Item. This covers the
+  latent twin by construction - a `StationStepHandlers` working-step flip at `At: "self"` writes
+  the SAME primary block through the SAME check.
 - **A restart-orphaned `Loaded` block state with no live claim behind it must recover, not
   dead-end.** `ActionResolver#selectActionForBlockState(asset, currentStateName)` is the THIRD
   action-selection fallback (after the live claim and the held item) - it matches the block's

@@ -1,6 +1,6 @@
 # Settings
 
-The RpgStationsSettingsAsset server-wide Enabled flag, Summary HUD, and per-world Limits.
+The RpgStationsSettingsAsset server-wide Enabled flag, Summary HUD, and owner Limits.
 
 RPG Stations has no separate config-file layer - even its server-wide toggles are an ordinary content
 asset, `Server/RpgStations/Settings/Settings.json`. There is exactly one fixed id (`settings`)
@@ -14,7 +14,7 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
 {
   "Enabled": true,
   "SummaryHud": { "Enabled": true, "Position": "TopCenter", "OffsetY": 72, "TtlMs": 6000 },
-  "Limits": { "MaxSessionsPerWorld": 60, "MaxPuppetsPerWorld": 40, "MaxCustodyClaimsPerWorld": 400 }
+  "Limits": { "MaxSessionsPerWorld": 60, "MaxPuppetsPerWorld": 40, "MaxStashesPerSection": 8 }
 }
 ```
 
@@ -27,7 +27,7 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
 | `SummaryHud.TtlMs` | none | How long the summary panel stays on screen before it auto-dismisses, in milliseconds. |
 | `Limits.MaxSessionsPerWorld` | unlimited | The most work sessions that may run at once in ONE world; a press past it is denied with a localized toast, the station left untouched. |
 | `Limits.MaxPuppetsPerWorld` | unlimited | The most live puppets that may exist at once in ONE world; past it a session still starts and runs, it just performs in the player's own body instead of spawning a puppet - the same fallback a failed spawn already takes. |
-| `Limits.MaxCustodyClaimsPerWorld` | unlimited | The most stations that may hold placed input at once in ONE world; topping up an EXISTING claim always works, only opening a NEW one past the ceiling is denied. |
+| `Limits.MaxStashesPerSection` | unlimited | The most blocks in ONE chunk section (a 16x16x16 cube) that may hold placed station input at once; topping up material already placed always works, only a placement that would open a NEW store past the ceiling is denied. The retired `MaxCustodyClaimsPerWorld` spelling is ignored with a boot warning naming this leaf. |
 
 The three top-level knobs (`Enabled`, `SummaryHud`, `Limits`) are independent and composable -
 disabling the summary HUD does not disable the engine, and vice versa. Every leaf is nullable, so a

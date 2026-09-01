@@ -69,7 +69,9 @@ press on the primary block.
 
 Load materials directly into a station by pressing `F` while holding them - the whole stack loads
 in, a repeat press tops it up. Loaded materials can render as a real placed prop at the block (logs
-stacked on the sawmill bench), retrievable with a press of `F` straight off the display.
+stacked on the sawmill bench), retrievable with a press of `F` straight off the display. What you
+place stays placed like a chest's contents: it survives logging off and server restarts, waiting
+in the station until you work it, take it back, or the block is broken.
 
 ### The puppet
 

@@ -12,16 +12,18 @@ import java.util.function.Function;
 
 import org.junit.jupiter.api.Test;
 
+import com.ziggfreed.common.world.stash.BlockStash;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
- * Pure tests for {@link StationCustody} + {@link StationCustodyClaim} (design section 9.4,
- * phase-2 leg C): placement-quantity math, the family-matched drain/peek engine, the placement
- * matchers, and the auto-return branch decision - the "custody return-path coverage" gate this
- * leg's brief requires, exercised without a live server (mirroring {@code StationToolScaling}'s
- * injected-resolver pattern for the one live lookup, {@code Item.getResourceTypes}).
+ * Pure tests for {@link StationCustody} + {@link StationCustodyClaim}: placement-quantity math,
+ * the family-matched drain/peek engine, the placement matchers, and the stash-view plumbing (the
+ * claim is a view over the block's chunk-persisted {@code StashPile}; the detached test
+ * constructor wraps a fresh pile, so every decision core runs against the REAL storage type),
+ * exercised without a live server (mirroring {@code StationToolScaling}'s injected-resolver
+ * pattern for the one live lookup, {@code Item.getResourceTypes}).
  */
 class StationCustodyTest {
 
@@ -155,26 +157,73 @@ class StationCustodyTest {
         assertTrue(claim.isEmpty());
     }
 
+    // The display prop's ref/network id deliberately live in StationService's volatile side map,
+    // never on the claim (a NetworkId is per-world and not boot-stable, so it must not ride the
+    // persisted stash); the retrieval matching rule over that map is StationCustodyRetrievalTest's.
+
+    // ==================== the stash Tag (station/action identity, restart-stable) ====================
+
     @Test
-    void claim_display_defaultsNull_thenSettable() {
-        // design section 9, phase 2 leg G: the PLACED-AS-ENTITY visual's ref lives on the claim
-        // itself, null until StationCustodyDisplay#spawn succeeds (never constructed here - a
-        // live Ref<EntityStore> needs a running server; this only exercises the plain getter/setter).
-        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
-        assertNull(claim.displayRef());
-        assertNull(claim.displayNetworkId());
-        claim.setDisplay(null, null);
-        assertNull(claim.displayRef());
-        assertNull(claim.displayNetworkId());
+    void tag_roundTripsStationAndActionIds() {
+        String tag = StationCustodyClaim.encodeTag("sawmill", "work");
+        assertEquals("sawmill", StationCustodyClaim.stationIdOfTag(tag));
+        assertEquals("work", StationCustodyClaim.actionIdOfTag(tag));
     }
 
     @Test
-    void claim_displayNetworkId_isRecordedForTheRetrievalMatch() {
-        // The id is captured at spawn beside the ref so press-F retrieval never reads a live
-        // NetworkId component back off the prop; the ref half stays null here (it needs a server).
-        StationCustodyClaim claim = new StationCustodyClaim(OWNER, "sawmill", "work", 0, 64, 0);
-        claim.setDisplay(null, 4321);
-        assertEquals(4321, claim.displayNetworkId());
+    void tag_foreignOrMalformedDecodesToNull() {
+        // Another consumer's tag, a bare prefix, and a prefix with no action segment all read as
+        // "not this mod's stash" - the claim resolver answers null for them rather than adopting.
+        assertNull(StationCustodyClaim.stationIdOfTag("someothermod:whatever"));
+        assertNull(StationCustodyClaim.stationIdOfTag(null));
+        assertNull(StationCustodyClaim.stationIdOfTag(StationCustodyClaim.TAG_PREFIX));
+        assertNull(StationCustodyClaim.stationIdOfTag(StationCustodyClaim.TAG_PREFIX + "sawmill"));
+        assertNull(StationCustodyClaim.actionIdOfTag(StationCustodyClaim.TAG_PREFIX + "sawmill/"));
+    }
+
+    @Test
+    void claimView_readsBackWhatAStashRecords() {
+        // The view a fresh resolve materializes over a persisted stash: tag -> station/action,
+        // main-pile owner -> ownerId, the pile's tally live underneath.
+        BlockStash stash = new BlockStash();
+        StationCustodyClaim.stampNewStash(stash, OWNER, "sawmill", "work");
+        stash.pile(StationCustodyClaim.MAIN_PILE).itemsMutable().put("Wood_Oak_Log", 5);
+
+        StationCustodyClaim claim = StationCustodyClaim.of(stash, 1, 64, 2, () -> { });
+
+        assertEquals(OWNER, claim.ownerId);
+        assertEquals("sawmill", claim.stationId);
+        assertEquals("work", claim.actionId);
+        assertEquals(5, claim.totalQuantity());
+        assertEquals(1, claim.blockX);
+        assertEquals(64, claim.blockY);
+        assertEquals(2, claim.blockZ);
+    }
+
+    @Test
+    void claimView_refusesAForeignStashAndAnUnreadableOne() {
+        BlockStash foreign = new BlockStash();
+        foreign.setTag("someothermod:whatever");
+        assertNull(StationCustodyClaim.of(foreign, 0, 0, 0, () -> { }), "another consumer's stash is never adopted");
+
+        BlockStash ownerless = new BlockStash();
+        ownerless.setTag(StationCustodyClaim.encodeTag("sawmill", "work"));
+        ownerless.ensurePile(StationCustodyClaim.MAIN_PILE).itemsMutable().put("Wood_Oak_Log", 1);
+        assertNull(StationCustodyClaim.of(ownerless, 0, 0, 0, () -> { }),
+                "a pile with no parseable owner reads as no claim");
+
+        assertNull(StationCustodyClaim.of(null, 0, 0, 0, () -> { }));
+    }
+
+    @Test
+    void claim_markDirty_runsTheBoundMarkerOnce() {
+        BlockStash stash = new BlockStash();
+        StationCustodyClaim.stampNewStash(stash, OWNER, "sawmill", "work");
+        int[] marks = {0};
+        StationCustodyClaim claim = StationCustodyClaim.of(stash, 0, 64, 0, () -> marks[0]++);
+        claim.add("Wood_Oak_Log", 3);
+        claim.markDirty();
+        assertEquals(1, marks[0], "one mutation batch, one dirty mark");
     }
 
     // ==================== matchesInput / matchesAnyConversionInput ====================

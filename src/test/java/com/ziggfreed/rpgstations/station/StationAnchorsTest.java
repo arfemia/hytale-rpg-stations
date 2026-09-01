@@ -133,19 +133,6 @@ class StationAnchorsTest {
     }
 
     @Test
-    void worldUuidOf_readsBackWhatBlockKeyWroteIn() {
-        assertEquals("world-uuid-1234",
-                StationAnchors.worldUuidOf(StationAnchors.blockKey("world-uuid-1234", 10, 64, -7)));
-    }
-
-    @Test
-    void worldUuidOf_malformedIsNull() {
-        assertNull(StationAnchors.worldUuidOf(null));
-        assertNull(StationAnchors.worldUuidOf("nocolonhere"));
-        assertNull(StationAnchors.worldUuidOf(":1:2:3"));
-    }
-
-    @Test
     void horizontalDistSq_ignoresY() {
         assertEquals(0L, StationAnchors.horizontalDistSq(5, 5, 5, 5));
         assertEquals(25L, StationAnchors.horizontalDistSq(0, 0, 3, 4));
@@ -155,34 +142,40 @@ class StationAnchorsTest {
 
     @Test
     void blockGone_stateFlipKeepsTheSameItemId() {
-        // The regression this rule exists for: setBlockInteractionState REPLACES the block with its
-        // generated state variant, so the raw id changes on every Empty/Loaded/Working flip while the
+        // The regression this rule exists for: the state flip REPLACES the block with its generated
+        // state variant, so the block-TYPE id changes on every Empty/Loaded/Working flip while the
         // containing Item id stays put. The session must survive that.
-        assertFalse(StationAnchors.blockGone("RPG_Station_CookingFire", "RPG_Station_CookingFire", 1001, 1002));
+        assertFalse(StationAnchors.blockGone("RPG_Station_CookingFire", "RPG_Station_CookingFire",
+                "RPG_Station_CookingFire", "*RPG_Station_CookingFire_Loaded"));
     }
 
     @Test
     void blockGone_itemIdMatchIsCaseInsensitive() {
-        assertFalse(StationAnchors.blockGone("RPG_Station_Sawmill", "rpg_station_sawmill", 7, 7));
+        assertFalse(StationAnchors.blockGone("RPG_Station_Sawmill", "rpg_station_sawmill",
+                "RPG_Station_Sawmill", "RPG_Station_Sawmill"));
     }
 
     @Test
     void blockGone_brokenBlockHasNoItemId() {
-        assertTrue(StationAnchors.blockGone("RPG_Station_CookingFire", null, 1001, 0));
+        assertTrue(StationAnchors.blockGone("RPG_Station_CookingFire", null,
+                "RPG_Station_CookingFire", "Empty"));
     }
 
     @Test
     void blockGone_replacedWithADifferentBlock() {
-        assertTrue(StationAnchors.blockGone("RPG_Station_CookingFire", "RPG_Station_Sawmill", 1001, 2002));
+        assertTrue(StationAnchors.blockGone("RPG_Station_CookingFire", "RPG_Station_Sawmill",
+                "RPG_Station_CookingFire", "RPG_Station_Sawmill"));
     }
 
     @Test
-    void blockGone_fallsBackToRawIdWhenTheBlockHasNoItem() {
-        // No containing Item at engage: the raw-int compare is all we have (pre-fix behavior).
-        assertFalse(StationAnchors.blockGone(null, null, 42, 42));
-        assertTrue(StationAnchors.blockGone(null, null, 42, 43));
-        assertFalse(StationAnchors.blockGone(null, "SomethingElse", 42, 42),
+    void blockGone_fallsBackToTypeIdWhenTheBlockHasNoItem() {
+        // No containing Item at engage: the block-TYPE id compare is all we have.
+        assertFalse(StationAnchors.blockGone(null, null, "Native_Thing", "Native_Thing"));
+        assertTrue(StationAnchors.blockGone(null, null, "Native_Thing", "Other_Thing"));
+        assertFalse(StationAnchors.blockGone(null, "SomethingElse", "Native_Thing", "Native_Thing"),
                 "a null start item id ignores the item side entirely");
+        assertFalse(StationAnchors.blockGone(null, null, null, null),
+                "two unreadable reads compare equal, exactly like two identical ids");
     }
 
     // ==================== deriveBlockItemIndex (AV wave: cold-server discovery seeding) ====================

@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -15,8 +16,8 @@ import javax.annotation.Nullable;
  * decisions 28/41 + gate m4/m5): anchor discovery bounds, claim precedence, and block-key parsing,
  * all unit-testable with no live server (mirroring {@link StationStepDecisions}'s role for the step
  * engine). The LIVE glue (the {@code knownStationBlocks} index scan, the bounded ring scan over
- * {@code world.getBlock}, the atomic {@code custodyByBlock}/{@code byBlock} claim) lives in
- * {@link StationService}; this class owns only the math + rules it can verify in a unit JVM.
+ * the live block ids, the atomic {@code byBlock} occupancy claim, the stash-backed custody read)
+ * lives in {@link StationService}; this class owns only the math + rules it can verify in a unit JVM.
  */
 final class StationAnchors {
 
@@ -103,30 +104,29 @@ final class StationAnchors {
 
     /**
      * The block-gone rule for a running session's PRIMARY block (AV-wave fix): compare by the
-     * block's ITEM id whenever the session captured one at engage, and fall back to the raw engine
-     * block id only for a block that resolves to no containing Item at all.
+     * block's ITEM id whenever the session captured one at engage, and fall back to the registered
+     * block-TYPE id only for a block that resolves to no containing Item at all.
      *
-     * <p>Why: {@code World#setBlockInteractionState} does not annotate a block in place, it REPLACES
-     * it - {@code BlockAccessor#setBlockInteractionState} resolves {@code blockType.getBlockForState
-     * (state)} and calls {@code setBlock(..., BlockType.getAssetMap().getIndex(newState.getId()),
-     * ...)}, and a state variant is a DISTINCT generated {@code BlockType} key. So every custody
-     * state flip this engine performs ({@code Empty}/{@code Loaded}/{@code Working}) changes the raw
-     * int {@code World#getBlock} returns, and a raw-int compare against the engage-time snapshot
-     * reads the engine's OWN flip as "the station is gone". Every state variant of one block shares
-     * the same containing Item ({@code BlockType#getItem()} walks the container-key chain, the R7
-     * lesson), so the item-id compare is stable across a flip while a real break (no item-backed
-     * block left) or a replace (a different item id) still ends the session.
+     * <p>Why: the engine's state flip does not annotate a block in place, it REPLACES it - the
+     * interaction-state write resolves {@code blockType.getBlockForState(state)} and sets the
+     * block to that variant, and a state variant is a DISTINCT generated {@code BlockType} key.
+     * So every custody state flip this engine performs ({@code Empty}/{@code Loaded}/
+     * {@code Working}) changes the block-TYPE id read back, and a type-id compare against the
+     * engage-time snapshot reads the engine's OWN flip as "the station is gone". Every state
+     * variant of one block shares the same containing Item ({@code BlockType#getItem()} walks the
+     * container-key chain), so the item-id compare is stable across a flip while a real break (no
+     * item-backed block left) or a replace (a different item id) still ends the session.
      *
      * @param startBlockItemId the item id captured at engage, or {@code null} when the block had none
      * @param currentBlockItemId the item id read live this heartbeat
-     * @param startBlockId the raw engine block id captured at engage (fallback comparand)
-     * @param currentBlockId the raw engine block id read live this heartbeat (fallback comparand)
+     * @param startBlockTypeId the registered block-type id captured at engage (fallback comparand)
+     * @param currentBlockTypeId the registered block-type id read live this heartbeat (fallback comparand)
      * @return {@code true} when the session must stop with {@code STATION_GONE}
      */
     static boolean blockGone(@Nullable String startBlockItemId, @Nullable String currentBlockItemId,
-            int startBlockId, int currentBlockId) {
+            @Nullable String startBlockTypeId, @Nullable String currentBlockTypeId) {
         if (startBlockItemId == null) {
-            return currentBlockId != startBlockId;
+            return !Objects.equals(startBlockTypeId, currentBlockTypeId);
         }
         return currentBlockItemId == null || !startBlockItemId.equalsIgnoreCase(currentBlockItemId);
     }
@@ -190,26 +190,12 @@ final class StationAnchors {
     /**
      * The world-scoping PREFIX of every block key belonging to {@code worldUuid} (the uuid plus its
      * trailing separator). The one place that spelling is built, so a per-world sweep of any
-     * block-keyed map - custody claims, occupancy, the discovered-block index - and the
+     * block-keyed map - display handles, occupancy, the discovered-block index - and the
      * world-scoped custody-retrieval match all agree on it by construction.
      */
     @Nonnull
     static String worldPrefix(@Nonnull String worldUuid) {
         return worldUuid + ":";
-    }
-
-    /**
-     * The world-uuid text a {@code "<worldUuid>:<x>:<y>:<z>"} key starts with (everything before the
-     * FIRST colon - the uuid's own canonical form contains none). {@code null} on a malformed or
-     * prefix-less key; never throws.
-     */
-    @Nullable
-    static String worldUuidOf(@Nullable String blockKey) {
-        if (blockKey == null) {
-            return null;
-        }
-        int sep = blockKey.indexOf(':');
-        return sep > 0 ? blockKey.substring(0, sep) : null;
     }
 
     /**

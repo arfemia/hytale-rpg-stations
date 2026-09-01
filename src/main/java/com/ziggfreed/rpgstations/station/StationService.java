@@ -6,11 +6,9 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -60,7 +58,6 @@ import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.ParticleUtil;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.BlockOperations;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.core.util.NotificationUtil;
@@ -88,6 +85,9 @@ import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.sound.Sound3D;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.common.util.NumberFormatter;
+import com.ziggfreed.common.world.BlockOps;
+import com.ziggfreed.common.world.stash.BlockStash;
+import com.ziggfreed.common.world.stash.BlockStashes;
 import com.ziggfreed.rpgstations.api.EnhanceLine;
 import com.ziggfreed.rpgstations.api.FactorContext;
 import com.ziggfreed.rpgstations.api.StationContribution;
@@ -269,20 +269,28 @@ public final class StationService {
     private final ConcurrentHashMap<String, UUID> byBlock = new ConcurrentHashMap<>();
 
     /**
-     * Live placed-input custody claims (design section 9.4, phase-2 leg C), keyed by the SAME
-     * {@code "<worldUuid>:<x>:<y>:<z>"} block key {@link #byBlock} uses - one per-block claim,
-     * never persisted (session-scoped by ruling; a restart/crash loses it, self-healed at the
-     * block-state layer on the next interaction - see {@link #toggle}).
+     * The VOLATILE display-prop identity per custody block, keyed by the SAME
+     * {@code "<worldUuid>:<x>:<y>:<z>"} block key {@link #byBlock} uses: the live prop entity's
+     * {@code Ref} plus the {@code NetworkId} it was built with (per-world and never boot-stable,
+     * which is exactly why neither may ride the persisted stash). The custody CONTENTS themselves
+     * are chunk-persisted (ziggfreed-common's {@code BlockStashes} store) and resolved live per
+     * touch ({@link #custodyClaimAt}) - this map carries only the presentation half, dropped on
+     * unload/shutdown and respawned from the stash on the block's first touch after a restart
+     * ({@link #respawnDisplayIfMissing}).
      */
-    private final ConcurrentHashMap<String, StationCustodyClaim> custodyByBlock = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, DisplayHandle> displayByBlock = new ConcurrentHashMap<>();
+
+    /** One live display prop: the entity ref plus the per-world network id press-F retrieval matches on. */
+    private record DisplayHandle(@Nonnull Ref<EntityStore> ref, @Nullable Integer networkId) {
+    }
 
     /**
      * The live "this block is ACTIVELY BEING WORKED" block-state flip, one per player (a player runs
      * at most one session, and a session works at most one block at a time - a program's steps are
      * strictly sequential, so a second concurrent working block is unrepresentable by construction).
      * Written ONLY by {@link #enterWorkingState}/{@link #exitWorkingState}, never persisted -
-     * a restart drops it, self-healed by the same next-interaction reset the Loaded state already
-     * relies on. Empty for every station whose resolved {@code Custody.States.Working} is
+     * a restart drops it, and the block's state settles against its persisted stash on the next
+     * interaction. Empty for every station whose resolved {@code Custody.States.Working} is
      * unauthored, which is every pre-knob station.
      */
     private final ConcurrentHashMap<UUID, WorkingFlip> workingByPlayer = new ConcurrentHashMap<>();
@@ -416,17 +424,25 @@ public final class StationService {
         // 2) Action selection - BEFORE Requires, so the RIGHT action's own gate is the one checked.
         // A loaded claim already owned by this player commits to ITS OWN action (re-pressing F with
         // a different item held must never switch a ritual already in progress mid-flight);
-        // otherwise the station's ordered Actions list is walked front to back.
-        StationCustodyClaim preClaim = custodyByBlock.get(blockKey);
+        // otherwise the station's ordered Actions list is walked front to back. The claim is read
+        // LIVE off the block's chunk-persisted stash, so a claim placed before a restart still
+        // commits to its own action here.
+        StationCustodyClaim preClaim = custodyClaimAt(world, blockX, blockY, blockZ);
+        if (preClaim != null && !preClaim.isEmpty()) {
+            // First touch after a restart: the stash survived but its display prop (volatile by
+            // construction) did not - respawn it so the player SEES their placed materials. Runs
+            // ahead of the ownership deny below on purpose: the prop is world truth, not
+            // owner-private, so anyone's press re-materializes it.
+            respawnDisplayIfMissing(preClaim, blockKey, commandBuffer);
+        }
         String selectedActionId = (preClaim != null && preClaim.ownerId.equals(playerUuid) && !preClaim.isEmpty())
                 ? preClaim.actionId
                 : selectActionForHeld(asset, player);
         if (selectedActionId == null) {
-            // R5 fix (restart-orphan recovery, design 9.4's self-heal extended): neither the live
-            // claim (memory-only, lost across a restart) nor the held item matched - before
-            // denying, recover the action from the block's OWN persisted interaction-state name
-            // (survives a restart) so a Loaded block orphaned by a crash/restart is not a
-            // permanent dead end for a player holding the right tool but nothing matching held.
+            // Neither the claim nor the held item matched - before denying, recover the action
+            // from the block's OWN persisted interaction-state name, so a Loaded block whose
+            // stash is empty is not a permanent dead end for a player holding the right tool but
+            // nothing matching held.
             selectedActionId = ActionResolver.selectActionForBlockState(asset,
                     currentBlockStateName(world, blockX, blockY, blockZ));
         }
@@ -467,8 +483,10 @@ public final class StationService {
             }
             boolean loadedBefore = claim != null && claim.totalQuantity() > 0;
             if (!loadedBefore) {
-                // Restart-reconcile self-heal (design 9.4): a Loaded block-state surviving a
-                // restart with no live claim behind it resets to Empty here, idempotently.
+                // Self-heal: a Loaded block-state with a TRULY EMPTY stash behind it resets to
+                // Empty here, idempotently. A non-empty stash never reaches this branch - custody
+                // is chunk-persisted, so after a restart the surviving stash is what makes the
+                // block's Loaded look CORRECT rather than stale.
                 flipCustodyState(world, blockX, blockY, blockZ, custody, false);
             }
             boolean roomLeft = claim == null || claim.totalQuantity() < custody.effectiveMaxQuantity();
@@ -478,19 +496,19 @@ public final class StationService {
                 ItemStack heldForPlacement = hotbarComp != null ? hotbarComp.getActiveItem() : null;
                 int moved = 0;
                 if (custodyAccepts(custody, asset, action, heldForPlacement, claim)) {
-                    // Owner ceiling on how many stations may hold placed input at once in this
-                    // world (Settings.Limits.MaxCustodyClaimsPerWorld). Checked HERE, at the
-                    // placement itself, rather than at the top of the branch: only a press that
-                    // actually OPENS a claim counts against the ceiling, so a press with nothing
-                    // acceptable to place keeps its own honest denial and an idle-capable station
-                    // still falls through to practice. Topping up a claim that already stands adds
-                    // no bookkeeping and no prop entity, so it is never denied and a player is
-                    // never locked out of material they already placed.
-                    if (claim == null && atCustodyClaimCap(worldPrefix)) {
+                    // Owner ceiling on stashes per chunk section (Settings.Limits
+                    // .MaxStashesPerSection - the bound a per-section store can enforce). Checked
+                    // HERE, at the placement itself, rather than at the top of the branch: only a
+                    // press that would actually CREATE a stash counts against the ceiling, so a
+                    // press with nothing acceptable to place keeps its own honest denial and an
+                    // idle-capable station still falls through to practice. Topping up a stash
+                    // that already stands adds no new record, so it is never denied and a player
+                    // is never locked out of material they already placed.
+                    if (claim == null && atStashCap(world, blockX, blockY, blockZ)) {
                         toast(playerRef, RpgMsg.tr("ui.station.storage_full"));
                         return;
                     }
-                    moved = placeIntoCustody(store, ref, commandBuffer, blockKey, playerUuid, asset.getId(),
+                    moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
                             action.getActionId(), hotbarComp.getInventory(), hotbarComp.getActiveSlot(),
                             heldForPlacement, custody, blockX, blockY, blockZ);
                 }
@@ -503,11 +521,11 @@ public final class StationService {
                             hotbarComp.getActiveSlot(), claim);
                     if (found != null) {
                         // Same ceiling, same reason, at the backpack-sourced placement site.
-                        if (claim == null && atCustodyClaimCap(worldPrefix)) {
+                        if (claim == null && atStashCap(world, blockX, blockY, blockZ)) {
                             toast(playerRef, RpgMsg.tr("ui.station.storage_full"));
                             return;
                         }
-                        moved = placeIntoCustody(store, ref, commandBuffer, blockKey, playerUuid, asset.getId(),
+                        moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
                                 action.getActionId(), found.container(), found.slot(), found.stack(), custody,
                                 blockX, blockY, blockZ);
                     }
@@ -656,7 +674,7 @@ public final class StationService {
         if (claimedAnchorBlocks != null) {
             s.anchorBlocks.putAll(claimedAnchorBlocks);
         }
-        s.startBlockId = blockIdAt(world, blockX, blockY, blockZ);
+        s.startBlockTypeId = blockTypeIdAt(world, blockX, blockY, blockZ);
         // The block-gone comparand (see StationAnchors#blockGone): the block's ITEM id, resolved
         // ONCE here and reused for the summary crest below - the raw id above is only the fallback
         // for a block with no containing Item at all.
@@ -942,12 +960,12 @@ public final class StationService {
             stop(s, StopReason.WORLD_CHANGED, null, null);
             return false;
         }
-        // Block-gone by ITEM id, not by raw block id: this engine flips the primary block's own
-        // interaction state mid-session (Custody.States Empty/Loaded/Working), and a state flip
-        // REPLACES the block with its generated state variant, so a raw-int compare would read the
-        // engine's own flip as "the station is gone". See StationAnchors#blockGone.
+        // Block-gone by ITEM id, not by raw block-type id: this engine flips the primary block's
+        // own interaction state mid-session (Custody.States Empty/Loaded/Working), and a state flip
+        // REPLACES the block with its generated state variant, so a raw type-id compare would read
+        // the engine's own flip as "the station is gone". See StationAnchors#blockGone.
         if (StationAnchors.blockGone(s.startBlockItemId, blockItemIdAt(world, s.blockX, s.blockY, s.blockZ),
-                s.startBlockId, blockIdAt(world, s.blockX, s.blockY, s.blockZ))) {
+                s.startBlockTypeId, blockTypeIdAt(world, s.blockX, s.blockY, s.blockZ))) {
             stop(s, StopReason.STATION_GONE, store, commandBuffer);
             return false;
         }
@@ -1040,8 +1058,8 @@ public final class StationService {
         // materials run out mid-session and the session's chosen output category still narrows the
         // recipe's derived conversions.
         ConversionCheck check = selectConversion(asset, action, player,
-                custody != null ? custodyByBlock.get(s.blockKey) : null, custody != null,
-                s.chosenOutputCategory);
+                custody != null ? custodyClaimAt(sessionWorld(s), s.blockX, s.blockY, s.blockZ) : null,
+                custody != null, s.chosenOutputCategory);
         if (check.state == ConversionState.RUNNABLE) {
             if (s.idleMode) {
                 s.idleMode = false;
@@ -2686,22 +2704,28 @@ public final class StationService {
             dropPendingMoments(s);
         }
 
-        // Placed-input custody auto-return (design 9.4): EVERY exit path, silent included - the
-        // design's own binding list (re-press, walk-off, damage, death, disconnect, tool-changed,
-        // out-of-inputs, inventory-full, session-cap, feature-disabled, step-failed, server-stop)
-        // funnels through this ONE call, unconditionally, before any of the notification logic
-        // below runs.
-        // Multi-station teardown (scope-2 wave 3, design 2.6), BEFORE the primary custody return:
-        // refund the in-flight iteration's consumed inputs (mutually exclusive with a custody return
-        // per M1 - a Produce.To:Custody already cleared the ledger), then release + return every
-        // remote anchor's claim/custody. The primary block's own custody returns just below.
+        // Placed-input custody hand-back: every exit path whose player is still PRESENT in the
+        // world (re-press, walk-off, damage, death, tool-changed, out-of-inputs, inventory-full,
+        // session-cap, feature-disabled, step-failed) funnels through this ONE call before any of
+        // the notification logic below runs. A DISCONNECT, a SERVER STOP and a WORLD CHANGE leave
+        // standing placed custody IN the world stash instead (custodyReturnsAtStop) - the stash is
+        // chunk-persisted, so the player collects it on return ("leave the stew on and log off");
+        // the in-flight iteration's refund still runs on every path.
+        // Multi-station teardown, BEFORE the primary custody return: refund the in-flight
+        // iteration's consumed inputs (mutually exclusive with a custody return per M1 - a
+        // Produce.To:Custody already cleared the ledger), then release every remote anchor's
+        // occupancy claim (returning its custody only on the hand-back reasons). The primary
+        // block's own custody returns just below.
+        boolean returnsCustody = custodyReturnsAtStop(reason);
         refundIterationLedger(s, commandBuffer);
-        releaseAnchorClaims(s, commandBuffer);
+        releaseAnchorClaims(s, commandBuffer, returnsCustody);
 
-        StationAsset stopAsset = StationCatalog.getInstance().getStation(s.stationId);
-        Custody stopCustody = stopAsset != null && s.actionId != null
-                ? ActionResolver.resolve(stopAsset, s.actionId).getCustody() : null;
-        returnCustody(s, stopCustody, commandBuffer);
+        if (returnsCustody) {
+            StationAsset stopAsset = StationCatalog.getInstance().getStation(s.stationId);
+            Custody stopCustody = stopAsset != null && s.actionId != null
+                    ? ActionResolver.resolve(stopAsset, s.actionId).getCustody() : null;
+            returnCustody(s, stopCustody, commandBuffer);
+        }
 
         // Actively-working block state (Custody.States.Working): work has stopped by definition, so
         // darken whatever block this session left burning/running. Unconditional and idempotent,
@@ -2709,9 +2733,11 @@ public final class StationService {
         // EVERY stop reason (RITUAL_COMPLETE, INPUTS_EXHAUSTED, ANCHOR_LOST, PATH_BLOCKED,
         // STEP_FAILED, TOOL_CHANGED, damage, death, disconnect, shutdown, ...) with no per-reason
         // hook, because a failing step program reaches here through dispatchProgram's Failed branch.
-        // Deliberately AFTER releaseAnchorClaims + returnCustody: both have already handed the
-        // claims back, so the Loaded-vs-Empty read below sees the post-return truth and a remote
-        // anchor darkens all the way to Empty instead of stranding a Loaded look over nothing.
+        // Deliberately AFTER releaseAnchorClaims + returnCustody: on a hand-back stop both have
+        // already handed the claims back, so the Loaded-vs-Empty read below sees the post-return
+        // truth and a remote anchor darkens all the way to Empty instead of stranding a Loaded
+        // look over nothing; on a leave-it stop the standing stash keeps the block Loaded, which
+        // is the honest look for materials still in the world.
         exitWorkingState(s);
 
         // Puppet reveal + despawn (round-4 design, doc section 4.4): the SAME unconditional-on-
@@ -2794,6 +2820,19 @@ public final class StationService {
                 reason.name(), silent, s.cyclesDone, System.currentTimeMillis() - s.startedAtMs);
         Log.fine("STATION session ended (" + reason + ") for " + s.playerUuid
                 + " at " + s.stationId + " after " + s.cyclesDone + " cycle(s)");
+    }
+
+    /**
+     * PURE: does a stop for this reason hand standing placed custody back to the player? A
+     * DISCONNECT, a SERVER STOP and a WORLD CHANGE leave the stash in the world instead - custody
+     * is chunk-persisted, so material a player walked away from is still theirs to collect at the
+     * block later, and those three paths are exactly the ones that can run without the owning
+     * world's thread (so they must not touch chunk state either way). Every other reason's player
+     * is still present in the world, and the hand-back keeps its long-standing behavior.
+     */
+    static boolean custodyReturnsAtStop(@Nonnull StopReason reason) {
+        return reason != StopReason.DISCONNECTED && reason != StopReason.SERVER_STOP
+                && reason != StopReason.WORLD_CHANGED;
     }
 
     // ==================== External exit hooks ====================
@@ -2879,25 +2918,24 @@ public final class StationService {
     }
 
     /**
-     * Server shutdown: best-effort teardown of every live session, then a drain of every claim no
-     * session was behind.
+     * Server shutdown: best-effort teardown of every live session, then a drop of every volatile
+     * block-keyed entry no session was behind (occupancy, the display side map, the discovered
+     * -block index, pending picker choices).
      *
-     * <p>A claim is minted by placing input and walking away - no session required - so the session
-     * sweep above can only ever reach a subset of them. The rest used to sit in the block-keyed maps
-     * until the process exited, holding their entity refs with them. Draining is a pure release
-     * here, not a hand-back: placed input is explicitly never persisted (a restart or crash loses an
-     * in-flight claim, the documented contract this whole feature is built on), and the display
-     * props are {@code NonSerialized} so they cannot outlive the process either. Touching a dying
-     * world's entity store from the shutdown thread would risk a throw for something no player can
-     * observe.
+     * <p>Placed custody itself is NOT touched here: the stash lives on the block's chunk section
+     * and is saved with it, so material a player left in a station is exactly what they find after
+     * the restart. The display props are {@code NonSerialized}, so they cannot outlive the process
+     * and are respawned from the stash on the block's first touch of the next boot. Touching a
+     * dying world's entity store from the shutdown thread would risk a throw for something no
+     * player can observe.
      */
     public void stopAll(@Nonnull StopReason reason) {
         for (StationSession s : new ArrayList<>(byPlayer.values())) {
             stop(s, reason, null, null);
         }
-        int drained = forgetBlockKeyedState(key -> true);
-        if (drained > 0) {
-            Log.fine("STATION shutdown drained " + drained + " session-less custody claim(s)");
+        int dropped = forgetBlockKeyedState(key -> true);
+        if (dropped > 0) {
+            Log.fine("STATION shutdown dropped " + dropped + " volatile display handle(s)");
         }
     }
 
@@ -2927,11 +2965,15 @@ public final class StationService {
                 () -> countLiveSessions(world, s -> s.puppetActive));
     }
 
-    /** True when the world behind {@code worldPrefix} already holds as many claims as the owner allows. */
-    private boolean atCustodyClaimCap(@Nonnull String worldPrefix) {
+    /**
+     * True when the chunk section holding {@code (x,y,z)} already carries as many stashes as the
+     * owner allows ({@code Limits.MaxStashesPerSection}). Enforced only where a NEW stash would be
+     * created - topping up an existing one never counts.
+     */
+    private boolean atStashCap(@Nonnull World world, int x, int y, int z) {
         RpgStationsSettingsAsset.Limits l = limits();
-        return l != null && RpgStationsSettingsAsset.Limits.atCapacity(l.getMaxCustodyClaimsPerWorld(),
-                () -> countClaimsInWorld(worldPrefix));
+        return l != null && RpgStationsSettingsAsset.Limits.atCapacity(l.getMaxStashesPerSection(),
+                () -> countStashesInSection(world, x, y, z));
     }
 
     /**
@@ -2954,34 +2996,41 @@ public final class StationService {
         return live;
     }
 
-    /** How many custody claims stand in the world behind {@code worldPrefix}. */
-    private int countClaimsInWorld(@Nonnull String worldPrefix) {
-        int claims = 0;
-        for (String key : custodyByBlock.keySet()) {
-            if (key.startsWith(worldPrefix)) {
-                claims++;
+    /** How many blocks in the chunk section holding {@code (x,y,z)} carry a stash (0 when the section is unloaded). */
+    private static int countStashesInSection(@Nonnull World world, int x, int y, int z) {
+        try {
+            ChunkStore chunkStore = world.getChunkStore();
+            Ref<ChunkStore> sectionRef = chunkStore.getChunkSectionReferenceAtBlock(x, y, z);
+            if (sectionRef == null || !sectionRef.isValid()) {
+                return 0;
             }
+            return BlockStashes.countInSection(chunkStore.getStore(), sectionRef);
+        } catch (Throwable t) {
+            Log.fine("STATION stash count failed at (" + x + ", " + y + ", " + z + "): " + t.getMessage());
+            return 0;
         }
-        return claims;
     }
 
     // ==================== World unload / disconnect eviction ====================
 
     /**
      * World-unload teardown, driven by {@code RpgStationsPlugin}'s own {@code RemoveWorldEvent}
-     * listener: stop every session still running in {@code world}, then forget every block-keyed
-     * entry that named it.
+     * listener: stop every session still running in {@code world}, then forget every VOLATILE
+     * block-keyed entry that named it (occupancy, display handles, the discovered-block index,
+     * pending picker choices).
      *
      * <p>Every one of this engine's block-keyed maps is GLOBAL and keyed by a composite
-     * {@code "<worldUuid>:<x>:<y>:<z>"} string rather than partitioned per world, so nothing about
-     * unloading a world removed their entries: a fleet that creates and destroys instance worlds
-     * accumulated them for the whole uptime, and each surviving claim pinned its display entity ref.
-     * The world-uuid prefix the key already carries is the whole sweep.
+     * {@code "<worldUuid>:<x>:<y>:<z>"} string rather than partitioned per world, so the world-uuid
+     * prefix the key already carries is the whole sweep; without it a fleet that creates and
+     * destroys instance worlds would accumulate entries (and pinned display entity refs) for the
+     * whole uptime.
+     *
+     * <p>Eviction drops ONLY volatile state. It never reads, returns or clears a stash: placed
+     * custody lives on the world's own chunks, unloads with them, and comes back with them - and a
+     * world DELETED outright takes its stashes with its chunk files, exactly like chests.
      *
      * <p>Runs BEFORE the shared {@code WorldEvictors} fan-out at the call site, deliberately: that
-     * fan-out drops the per-world session queue this method reads. Claims are released rather than
-     * handed back - the world and its entity store are going away, and custody is never persisted.
-     * Never throws.
+     * fan-out drops the per-world session queue this method reads. Never throws.
      */
     public void onWorldRemoved(@Nonnull World world) {
         try {
@@ -3014,7 +3063,7 @@ public final class StationService {
             }
             int forgotten = forgetBlockKeyedState(key -> key.startsWith(prefix));
             if (forgotten > 0) {
-                Log.fine("STATION world unload released " + forgotten + " custody claim(s) in world "
+                Log.fine("STATION world unload dropped " + forgotten + " volatile display handle(s) in world "
                         + world.getName());
             }
         } catch (Throwable t) {
@@ -3023,97 +3072,11 @@ public final class StationService {
     }
 
     /**
-     * The distinct world uuids that currently hold at least one custody claim owned by
-     * {@code playerUuid} - what a disconnect handler needs in order to hop onto the right world
-     * thread for each one. Empty (never null) when the player has no claims anywhere.
-     */
-    @Nonnull
-    public Set<UUID> claimWorldsOf(@Nonnull UUID playerUuid) {
-        Set<UUID> worlds = new LinkedHashSet<>();
-        for (Map.Entry<String, StationCustodyClaim> e : custodyByBlock.entrySet()) {
-            if (!e.getValue().ownerId.equals(playerUuid)) {
-                continue;
-            }
-            String worldUuid = StationAnchors.worldUuidOf(e.getKey());
-            if (worldUuid == null) {
-                continue;
-            }
-            try {
-                worlds.add(UUID.fromString(worldUuid));
-            } catch (IllegalArgumentException ignored) {
-                // A malformed key can never be resolved to a world; the shutdown drain reclaims it.
-            }
-        }
-        return worlds;
-    }
-
-    /**
-     * Hands back every custody claim {@code playerUuid} left standing in {@code worldUuid} - the
-     * disconnect sweep for placed input with NO session behind it (place logs, walk away, log off:
-     * the four existing claim-removal paths all need a session stop, a block break, or a press, so
-     * none of them ever fired for that shape and both the claim and its display prop leaked for the
-     * whole server uptime).
-     *
-     * <p><b>World thread only</b> - the caller hops via {@code World#execute} first, which is what
-     * makes the display despawn and the block-state reset safe here. It holds no command buffer at
-     * that point, so the despawn takes the live-{@code Store} route. Items drop at the block rather
-     * than going to the owner's inventory: the owner is leaving, and a disconnecting player's
-     * inventory is not a reachable destination. Never throws.
-     */
-    public void returnClaimsOf(@Nonnull UUID playerUuid, @Nonnull UUID worldUuid, @Nullable World world) {
-        String prefix = StationAnchors.worldPrefix(worldUuid.toString());
-        Store<EntityStore> store = null;
-        if (world != null) {
-            try {
-                store = world.getEntityStore().getStore();
-            } catch (Throwable t) {
-                Log.fine("STATION disconnect claim sweep could not resolve a store: " + t.getMessage());
-            }
-        }
-        for (Map.Entry<String, StationCustodyClaim> e : custodyByBlock.entrySet()) {
-            String blockKey = e.getKey();
-            StationCustodyClaim claim = e.getValue();
-            if (!blockKey.startsWith(prefix) || !claim.ownerId.equals(playerUuid)) {
-                continue;
-            }
-            // Whoever wins this removal owns the hand-back, exactly as returnCustody /
-            // onCustodyBlockBroken already arbitrate between themselves.
-            if (!custodyByBlock.remove(blockKey, claim)) {
-                continue;
-            }
-            byBlock.remove(blockKey, playerUuid);
-            try {
-                StationCustodyDisplay.despawn(claim.displayRef(), store);
-                // A null commandBuffer is CORRECT here and nowhere else in this class: the sweep
-                // runs through World#execute, off any tick, so the direct-store drop route is legal.
-                giveClaimToOwner(null, store, null, claim, claim.blockX, claim.blockY, claim.blockZ);
-                resetCustodyStateFor(world, claim);
-            } catch (Throwable t) {
-                Log.warn("STATION disconnect claim sweep failed at " + blockKey + ": " + t.getMessage());
-            }
-        }
-    }
-
-    /**
-     * Resets {@code claim}'s block to its Empty custody state, resolving the same {@code Custody}
-     * group the claim's own station/action authored (the {@link #retrieveCustody} flip, reused).
-     * A no-op when the world is unreachable or that action authors no {@code States}.
-     */
-    private static void resetCustodyStateFor(@Nullable World world, @Nonnull StationCustodyClaim claim) {
-        if (world == null) {
-            return;
-        }
-        StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
-        Custody custody = asset != null ? ActionResolver.resolve(asset, claim.actionId).getCustody() : null;
-        if (custody != null) {
-            flipCustodyState(world, claim.blockX, claim.blockY, claim.blockZ, custody, false);
-        }
-    }
-
-    /**
-     * Drops every entry whose block key {@code keyMatches} - the claim map, the occupancy map, the
-     * discovered-block index, and any pending picker choice made at such a block - and returns how
-     * many CLAIMS went with it (the count worth logging; the rest are pure index entries).
+     * Drops every VOLATILE entry whose block key {@code keyMatches} - the display side map, the
+     * occupancy map, the discovered-block index, and any pending picker choice made at such a
+     * block - and returns how many DISPLAY HANDLES went with it (the count worth logging; the rest
+     * are pure index entries). Placed custody itself is untouched: it lives on the chunks, not in
+     * these maps.
      *
      * <p>{@code stationBlockItemToId} is deliberately NOT swept: it maps a block ITEM id to a station
      * id, is derived from the loaded assets, and is the same in every world, so a world unload has
@@ -3123,16 +3086,16 @@ public final class StationService {
      * teardown paths where the owning world is already going away.
      */
     private int forgetBlockKeyedState(@Nonnull Predicate<String> keyMatches) {
-        int claims = 0;
-        for (String key : new ArrayList<>(custodyByBlock.keySet())) {
-            if (keyMatches.test(key) && custodyByBlock.remove(key) != null) {
-                claims++;
+        int handles = 0;
+        for (String key : new ArrayList<>(displayByBlock.keySet())) {
+            if (keyMatches.test(key) && displayByBlock.remove(key) != null) {
+                handles++;
             }
         }
         byBlock.keySet().removeIf(keyMatches);
         knownStationBlocks.keySet().removeIf(keyMatches);
         pendingByPlayer.values().removeIf(p -> keyMatches.test(p.blockKey()));
-        return claims;
+        return handles;
     }
 
     /** {@code world}'s own uuid as the text a block key carries, or {@code null} when unreadable. */
@@ -3839,12 +3802,190 @@ public final class StationService {
                 sawInputWithoutRoom ? ConversionState.NO_ROOM : ConversionState.NO_INPUTS);
     }
 
-    // ==================== Placed-input custody (design section 9.4) ====================
+    // ==================== Placed-input custody (chunk-persisted stash) ====================
 
-    /** Package-private accessor for {@code StationStepHandlers}' {@code Consume From:"Custody"} route. */
+    /**
+     * The block's live custody claim, read as a fresh view over its chunk-persisted stash
+     * (ziggfreed-common's {@code BlockStashes} store). Resolved PER TOUCH - there is no
+     * authoritative in-memory claim map, so what this answers is always what the chunk holds,
+     * across restarts included. {@code null} when the section is not loaded, no stash stands
+     * there, or the stash is not this mod's. WORLD-THREAD ONLY, like every chunk read.
+     */
     @Nullable
-    StationCustodyClaim custodyClaimFor(@Nullable String blockKey) {
-        return blockKey != null ? custodyByBlock.get(blockKey) : null;
+    private static StationCustodyClaim custodyClaimAt(@Nullable World world, int x, int y, int z) {
+        if (world == null) {
+            return null;
+        }
+        try {
+            ChunkStore chunkStore = world.getChunkStore();
+            Ref<ChunkStore> sectionRef = chunkStore.getChunkSectionReferenceAtBlock(x, y, z);
+            if (sectionRef == null || !sectionRef.isValid()) {
+                return null;
+            }
+            Store<ChunkStore> accessor = chunkStore.getStore();
+            BlockStash stash = BlockStashes.stashAt(accessor, sectionRef, x, y, z);
+            return StationCustodyClaim.of(stash, x, y, z,
+                    () -> BlockStashes.markDirty(accessor, sectionRef));
+        } catch (Throwable t) {
+            Log.fine("STATION custody read failed at (" + x + ", " + y + ", " + z + "): " + t.getMessage());
+            return null;
+        }
+    }
+
+    /** {@link #custodyClaimAt(World, int, int, int)} keyed by a {@code "<worldUuid>:<x>:<y>:<z>"} block key. */
+    @Nullable
+    private static StationCustodyClaim custodyClaimAt(@Nullable World world, @Nullable String blockKey) {
+        if (blockKey == null) {
+            return null;
+        }
+        int[] coords = StationAnchors.parseCoords(blockKey);
+        return coords != null ? custodyClaimAt(world, coords[0], coords[1], coords[2]) : null;
+    }
+
+    /**
+     * The block's claim, CREATED when absent: mints the stash on the block's own chunk section,
+     * stamps this mod's tag plus the owner (whole-stash and {@code main}-pile alike, so the record
+     * survives a save), and hands back the view. {@code null} when the section is not loaded, the
+     * stash store is unregistered, or a stash belonging to ANOTHER consumer already stands at the
+     * block (never adopted, never clobbered).
+     */
+    @Nullable
+    private static StationCustodyClaim ensureClaimAt(@Nullable World world, @Nonnull UUID ownerId,
+            @Nonnull String stationId, @Nonnull String actionId, int x, int y, int z) {
+        if (world == null) {
+            return null;
+        }
+        try {
+            ChunkStore chunkStore = world.getChunkStore();
+            Ref<ChunkStore> sectionRef = chunkStore.getChunkSectionReferenceAtBlock(x, y, z);
+            if (sectionRef == null || !sectionRef.isValid()) {
+                return null;
+            }
+            Store<ChunkStore> accessor = chunkStore.getStore();
+            BlockStash stash = BlockStashes.ensureStashAt(accessor, sectionRef, x, y, z);
+            if (stash == null) {
+                return null;
+            }
+            String tag = stash.getTag();
+            if (tag == null) {
+                StationCustodyClaim.stampNewStash(stash, ownerId, stationId, actionId);
+                BlockStashes.markDirty(accessor, sectionRef);
+            } else if (StationCustodyClaim.stationIdOfTag(tag) == null) {
+                Log.warn("STATION block (" + x + ", " + y + ", " + z + ") already carries another"
+                        + " consumer's stash ('" + tag + "') - refusing to store placed input there");
+                return null;
+            }
+            return StationCustodyClaim.of(stash, x, y, z,
+                    () -> BlockStashes.markDirty(accessor, sectionRef));
+        } catch (Throwable t) {
+            Log.warn("STATION custody create failed at (" + x + ", " + y + ", " + z + "): " + t.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Removes the block's stash outright (the section marks itself dirty). What becomes of the
+     * contents is the caller's business, settled before this call - every remover hands back or
+     * drops the items first.
+     */
+    private static boolean removeStashAt(@Nonnull World world, int x, int y, int z) {
+        try {
+            ChunkStore chunkStore = world.getChunkStore();
+            Ref<ChunkStore> sectionRef = chunkStore.getChunkSectionReferenceAtBlock(x, y, z);
+            if (sectionRef == null || !sectionRef.isValid()) {
+                return false;
+            }
+            return BlockStashes.removeStashAt(chunkStore.getStore(), sectionRef, x, y, z);
+        } catch (Throwable t) {
+            Log.fine("STATION custody remove failed at (" + x + ", " + y + ", " + z + "): " + t.getMessage());
+            return false;
+        }
+    }
+
+    /** Package-private accessor for {@code StationStepHandlers}' {@code Consume From:"Custody"}/Stamp routes. */
+    @Nullable
+    StationCustodyClaim custodyClaimFor(@Nonnull StationSession s, @Nullable String blockKey) {
+        return custodyClaimAt(sessionWorld(s), blockKey);
+    }
+
+    /**
+     * Drops the block's volatile display handle and despawns its prop (a no-op when none stands).
+     * A {@code null} commandBuffer (a shutdown-adjacent path) leaves the entity behind; it is
+     * {@code NonSerialized}, so it cannot survive a restart regardless.
+     */
+    private void despawnDisplay(@Nullable String blockKey, @Nullable CommandBuffer<EntityStore> commandBuffer) {
+        if (blockKey == null) {
+            return;
+        }
+        DisplayHandle handle = displayByBlock.remove(blockKey);
+        if (handle != null) {
+            StationCustodyDisplay.despawn(handle.ref(), commandBuffer);
+        }
+    }
+
+    /**
+     * Spawns the placed-input display prop for {@code blockKey} when {@code displayGroup} is
+     * authored and no live prop stands there yet, recording the handle (ref + network id) in the
+     * volatile side map press-F retrieval matches against. The visual is the claim's
+     * metadata-bearing {@link StationCustodyClaim#uniqueStack()} when set, else a one-quantity
+     * stack of {@code visualItemId}.
+     */
+    private void spawnDisplayIfAbsent(@Nonnull String blockKey, @Nullable Custody.Display displayGroup,
+            @Nonnull StationCustodyClaim claim, @Nullable String visualItemId,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, int x, int y, int z) {
+        if (displayGroup == null || visualItemId == null || visualItemId.isBlank()
+                || displayByBlock.containsKey(blockKey)) {
+            return;
+        }
+        ItemStack visualStack = claim.uniqueStack() != null ? claim.uniqueStack()
+                : new ItemStack(visualItemId, 1);
+        StationCustodyDisplay.Spawned spawned = StationCustodyDisplay.spawn(commandBuffer, visualStack,
+                displayGroup, x, y, z);
+        if (spawned != null) {
+            // Both halves land together: the ref AND the network id the prop was built with, so
+            // press-F retrieval never has to read a live NetworkId component back off the entity.
+            displayByBlock.put(blockKey, new DisplayHandle(spawned.ref(), spawned.networkId()));
+        }
+    }
+
+    /**
+     * The first-touch display self-heal: a stash that survived a restart (or a chunk reload) has
+     * its volatile prop respawned from the persisted contents the first time anyone touches the
+     * station. The display knobs come from the CLAIM's own station/action (not the presser's
+     * selection), so the prop always renders the vocabulary of whoever loaded the block. The full
+     * hydrate-on-section-load reconciler is deliberately not here - until it exists, the prop
+     * reappears at the first interaction rather than at chunk load, and that caveat is documented
+     * player-facing.
+     */
+    private void respawnDisplayIfMissing(@Nonnull StationCustodyClaim claim, @Nonnull String blockKey,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        if (displayByBlock.containsKey(blockKey)) {
+            return;
+        }
+        try {
+            StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
+            Custody custody = asset != null
+                    ? ActionResolver.resolve(asset, claim.actionId).getCustody() : null;
+            Custody.Display displayGroup = custody != null ? custody.getDisplay() : null;
+            if (displayGroup == null) {
+                return;
+            }
+            spawnDisplayIfAbsent(blockKey, displayGroup, claim, oldestPlacedItemId(claim),
+                    commandBuffer, claim.blockX, claim.blockY, claim.blockZ);
+        } catch (Throwable t) {
+            Log.fine("STATION display respawn failed at " + blockKey + ": " + t.getMessage());
+        }
+    }
+
+    /** The claim's oldest-placed item id (its tally is insertion-ordered), or {@code null} when empty. */
+    @Nullable
+    private static String oldestPlacedItemId(@Nonnull StationCustodyClaim claim) {
+        for (String itemId : claim.items().keySet()) {
+            if (itemId != null && !itemId.isBlank()) {
+                return itemId;
+            }
+        }
+        return null;
     }
 
     /**
@@ -4036,7 +4177,7 @@ public final class StationService {
      * Discovers the NEAREST placed block resolving to station {@code wantStationId} within
      * {@code radius} horizontal blocks of the primary block, SAME world (design 2.2): the lazy
      * index first (a cheap {@link #knownStationBlocks} scan), then ONE bounded ring scan
-     * ({@link StationAnchors#ringOffsets}) over {@code world.getBlock} as a last resort. Returns the
+     * ({@link StationAnchors#ringOffsets}) over the live block ids as a last resort. Returns the
      * discovered blockKey (also re-indexing a ring-scan hit for next time), or {@code null} when no
      * matching block is reachable within the bound.
      */
@@ -4162,8 +4303,10 @@ public final class StationService {
                         anchorStationNameMsg(anchor.getStation()), radius));
             }
             // m5 precedence: refuse a block busy with its own session OR a non-empty custody claim.
+            // The claim is read off the block's persisted stash, so a FOREIGN claim placed before a
+            // restart still refuses the incoming anchor claim.
             boolean busy = byBlock.containsKey(blockKey) && !playerUuid.equals(byBlock.get(blockKey));
-            StationCustodyClaim custodyClaim = custodyByBlock.get(blockKey);
+            StationCustodyClaim custodyClaim = custodyClaimAt(world, blockKey);
             boolean custodyBusy = custodyClaim != null && !custodyClaim.isEmpty()
                     && !playerUuid.equals(custodyClaim.ownerId);
             if (!StationAnchors.claimAllowed(busy, custodyBusy)) {
@@ -4255,7 +4398,7 @@ public final class StationService {
     /** The live custody claim at a step's {@code At} anchor (or the primary block for {@code "self"}/absent). */
     @Nullable
     StationCustodyClaim custodyClaimForAnchor(@Nonnull StationSession s, @Nullable String anchorId) {
-        return custodyClaimFor(anchorBlockKeyFor(s, anchorId));
+        return custodyClaimFor(s, anchorBlockKeyFor(s, anchorId));
     }
 
     /**
@@ -4275,28 +4418,22 @@ public final class StationService {
         if (coords == null) {
             return false;
         }
-        StationCustodyClaim claim = custodyByBlock.get(blockKey);
+        World world = sessionWorld(s);
+        StationCustodyClaim claim = custodyClaimAt(world, coords[0], coords[1], coords[2]);
         if (claim == null) {
-            claim = new StationCustodyClaim(s.playerUuid, s.stationId, s.actionId,
+            claim = ensureClaimAt(world, s.playerUuid, s.stationId, s.actionId,
                     coords[0], coords[1], coords[2]);
-            custodyByBlock.put(blockKey, claim);
-        }
-        claim.add(itemId, quantity);
-        // Display spawn: the anchor station's own Custody.Display when it authors one, else the
-        // running action's (design 2.2). Only when the claim has no live display yet.
-        if (claim.displayRef() == null) {
-            Custody displayCustody = anchorCustody(s, anchorId, c -> c.getDisplay() != null, true);
-            Custody.Display displayGroup = displayCustody != null ? displayCustody.getDisplay() : null;
-            if (displayGroup != null) {
-                ItemStack visualStack = claim.uniqueStack() != null ? claim.uniqueStack() : new ItemStack(itemId, 1);
-                StationCustodyDisplay.Spawned spawned = StationCustodyDisplay.spawn(commandBuffer, visualStack,
-                        displayGroup, coords[0], coords[1], coords[2]);
-                // Ref AND network id together, so press-F retrieval can match this prop with no
-                // live component read (see StationCustodyClaim#displayNetworkId).
-                claim.setDisplay(spawned != null ? spawned.ref() : null,
-                        spawned != null ? spawned.networkId() : null);
+            if (claim == null) {
+                return false;
             }
         }
+        claim.add(itemId, quantity);
+        claim.markDirty();
+        // Display spawn: the anchor station's own Custody.Display when it authors one, else the
+        // running action's (design 2.2). Only when the block has no live display yet.
+        Custody displayCustody = anchorCustody(s, anchorId, c -> c.getDisplay() != null, true);
+        spawnDisplayIfAbsent(blockKey, displayCustody != null ? displayCustody.getDisplay() : null,
+                claim, itemId, commandBuffer, coords[0], coords[1], coords[2]);
         return true;
     }
 
@@ -4381,12 +4518,16 @@ public final class StationService {
 
     /**
      * Releases every ANCHOR block this session claimed (design 2.6, {@code stop()}'s teardown):
-     * clears the {@link #byBlock} occupancy for each non-{@code self} anchor, returns any custody
-     * standing at that anchor to the owner (else drops it at the block), and resets that anchor's
-     * own {@code Custody.States} block state back to Empty. Skips {@code self} (the primary block's
-     * own claim + custody are handled by the existing {@code stop()} paths).
+     * clears the {@link #byBlock} occupancy for each non-{@code self} anchor and, on a hand-back
+     * stop ({@code returnsCustody} - see {@link #custodyReturnsAtStop}), returns any custody
+     * standing at that anchor to the owner (else drops it at the block) and resets that anchor's
+     * own {@code Custody.States} block state back to Empty. A leave-it stop releases only the
+     * occupancy: the anchor's stash stays in the world with its Loaded look, honest for materials
+     * still standing there. Skips {@code self} (the primary block's own claim + custody are
+     * handled by the existing {@code stop()} paths).
      */
-    private void releaseAnchorClaims(@Nonnull StationSession s, @Nullable CommandBuffer<EntityStore> commandBuffer) {
+    private void releaseAnchorClaims(@Nonnull StationSession s, @Nullable CommandBuffer<EntityStore> commandBuffer,
+            boolean returnsCustody) {
         if (s.anchorBlocks.isEmpty()) {
             return;
         }
@@ -4398,6 +4539,7 @@ public final class StationService {
                 ownerStore = null;
             }
         }
+        World world = sessionWorld(s);
         for (Map.Entry<String, String> e : s.anchorBlocks.entrySet()) {
             String anchorId = e.getKey();
             String blockKey = e.getValue();
@@ -4405,32 +4547,34 @@ public final class StationService {
                 continue;
             }
             byBlock.remove(blockKey, s.playerUuid);
-            StationCustodyClaim claim = custodyByBlock.get(blockKey);
+            if (!returnsCustody || world == null) {
+                continue;
+            }
+            int[] coords = anchorCoords(s, anchorId, blockKey);
+            if (coords == null) {
+                continue;
+            }
+            StationCustodyClaim claim = custodyClaimAt(world, coords[0], coords[1], coords[2]);
             if (claim != null && claim.ownerId.equals(s.playerUuid)) {
-                custodyByBlock.remove(blockKey, claim);
-                StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
+                removeStashAt(world, coords[0], coords[1], coords[2]);
+                despawnDisplay(blockKey, commandBuffer);
                 giveClaimToOwner(commandBuffer, ownerStore, s.ref, claim,
                         claim.blockX, claim.blockY, claim.blockZ);
             }
             // Anchor block-state reset, mirroring the flip returnCustody already does for the
-            // PRIMARY block. Previously absent and harmless (a remote anchor was never flipped at
-            // all); load-bearing now that Custody.States.Working exists, because a program can hand
-            // an anchor its Loaded look and then harvest it empty several steps later, stranding a
-            // "has input" hint over nothing. Deliberately NOT gated on this session having owned a
-            // claim here, but skipped when a FOREIGN claim still stands (never reset someone else's
-            // Loaded look) and when the anchor authors no States at all.
-            if (custodyByBlock.get(blockKey) != null) {
+            // PRIMARY block: a program can hand an anchor its Loaded look and then harvest it
+            // empty several steps later, stranding a "has input" hint over nothing. Deliberately
+            // NOT gated on this session having owned a claim here, but skipped when a FOREIGN
+            // claim still stands (never reset someone else's Loaded look) and when the anchor
+            // authors no States at all.
+            if (custodyClaimAt(world, coords[0], coords[1], coords[2]) != null) {
                 continue;
             }
             Custody anchorStates = anchorCustody(s, anchorId, c -> c.getStates() != null, false);
             if (anchorStates == null) {
                 continue;
             }
-            int[] coords = anchorCoords(s, anchorId, blockKey);
-            World world = sessionWorld(s);
-            if (coords != null && world != null) {
-                flipCustodyState(world, coords[0], coords[1], coords[2], anchorStates, false);
-            }
+            flipCustodyState(world, coords[0], coords[1], coords[2], anchorStates, false);
         }
     }
 
@@ -4621,59 +4765,63 @@ public final class StationService {
 
     /**
      * Moves up to {@code custody.effectiveMaxQuantity() - currentTotal} of {@code matchedStack}'s
-     * source slot into the block's claim (creating it, owned by {@code playerUuid}, on first
-     * placement), removing exactly that amount from {@code sourceContainer}'s {@code sourceSlot}.
-     * Returns the amount actually moved
-     * (0 = nothing eligible / no room / the slot removal failed).
+     * source slot into the block's claim (minting its chunk-persisted stash, owned by
+     * {@code playerUuid}, on first placement), removing exactly that amount from
+     * {@code sourceContainer}'s {@code sourceSlot}. Returns the amount actually moved
+     * (0 = nothing eligible / no room / the stash could not be minted / the slot removal failed).
+     * Ends with ONE {@code markDirty}, so the tally (and any unique stack) is flagged for the
+     * chunk save the moment it lands.
      *
-     * <p><b>Metadata-preserving single-item placement</b> (a genuine fix, not in the original
-     * leg-C design): when {@code custody.effectiveMaxQuantity() == 1} (the anvil's Enhance
-     * action - one specific weapon, not a fungible resource pile), the REAL removed
-     * {@link ItemStack} (durability/prior-enhancement metadata intact, via the removal
-     * transaction's {@code getOutput()}) is stashed on the claim ({@link StationCustodyClaim#setUniqueStack})
-     * alongside the count bookkeeping every custody claim already keeps - {@code toItemStacks()}
-     * then returns THAT stack on auto-return instead of synthesizing a bare fresh one, and the
-     * Stamp step reads/mutates it directly. The bulk fungible-resource case (the sawmill's logs,
-     * any {@code MaxQuantity > 1} station) is completely unaffected - only the count map matters
-     * there, exactly as before.
+     * <p><b>Metadata-preserving single-item placement</b>: when
+     * {@code custody.effectiveMaxQuantity() == 1} (the anvil's Enhance action - one specific
+     * weapon, not a fungible resource pile), the REAL removed {@link ItemStack}
+     * (durability/prior-enhancement metadata intact, via the removal transaction's
+     * {@code getOutput()}) is stashed on the claim ({@link StationCustodyClaim#setUniqueStack})
+     * alongside the count bookkeeping every custody claim keeps - {@code toItemStacks()} then
+     * returns THAT stack on hand-back instead of synthesizing a bare fresh one, the Stamp step
+     * reads/mutates it directly, and it persists with the stash through the engine's own item
+     * codec. The bulk fungible-resource case (the sawmill's logs, any {@code MaxQuantity > 1}
+     * station) is unaffected - only the count map matters there.
      *
-     * <p><b>Display spawn (design section 9, phase 2 leg G)</b>: when {@code custody} authors a
-     * {@link Custody.Display} group AND the claim has no live display entity yet
-     * ({@link StationCustodyClaim#displayRef()} null - true on first placement, and a harmless
-     * no-op guard on every top-up after that), spawns the PLACED-AS-ENTITY visual via
-     * {@link StationCustodyDisplay#spawn} at {@code (blockX, blockY, blockZ)}, representing
-     * {@link StationCustodyClaim#uniqueStack()} when set (the metadata-preserving single-item
-     * case) else a fresh one-quantity stack of the just-placed {@code itemId} (the bulk case - the
-     * visual represents PRESENCE, not the exact tally). A failed spawn is logged and swallowed
-     * (never blocks the placement itself, which already succeeded).
+     * <p><b>Display spawn</b>: {@link #spawnDisplayIfAbsent} - the placed-as-entity visual plus
+     * its volatile handle, spawned only when {@code custody} authors a {@code Display} group and
+     * no live prop stands at the block yet (true on first placement, a no-op guard on every
+     * top-up). A failed spawn never blocks the placement, which already succeeded.
      *
-     * <p><b>R3 fix</b>: takes an explicit {@code sourceContainer}/{@code sourceSlot}/
-     * {@code matchedStack} instead of deriving the active hotbar slot internally, so BOTH the
-     * held-item placement AND the {@link #findFirstCustodyMatchInInventory} fallback go through
-     * the IDENTICAL whole-stack + top-up + cap math, metadata-preserving single-item path, and
-     * display-spawn logic - one engine, two candidate sources.
-     *
-     * <p><b>R4 fix</b>: takes {@code commandBuffer} and forwards it to {@link
-     * StationCustodyDisplay#spawn} instead of {@code store} - {@code store.addEntity} throws
+     * <p>Takes an explicit {@code sourceContainer}/{@code sourceSlot}/{@code matchedStack} so
+     * BOTH the held-item placement AND the {@link #findFirstCustodyMatchInInventory} fallback go
+     * through the IDENTICAL whole-stack + top-up + cap math, metadata-preserving single-item
+     * path, and display-spawn logic - one engine, two candidate sources. {@code commandBuffer}
+     * (never {@code store}) feeds the display spawn: {@code store.addEntity} throws
      * {@code IllegalStateException} when called from an interaction handler (this call site runs
-     * inside {@code toggle()}, itself inside the store's processing lock), the swallowed root
-     * cause of the display never appearing.
+     * inside {@code toggle()}, itself inside the store's processing lock).
      */
     private int placeIntoCustody(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
-            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull String blockKey, @Nonnull UUID playerUuid,
-            @Nonnull String stationId, @Nonnull String actionId, @Nonnull ItemContainer sourceContainer,
-            short sourceSlot, @Nonnull ItemStack matchedStack, @Nonnull Custody custody,
-            int blockX, int blockY, int blockZ) {
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull World world, @Nonnull String blockKey,
+            @Nonnull UUID playerUuid, @Nonnull String stationId, @Nonnull String actionId,
+            @Nonnull ItemContainer sourceContainer, short sourceSlot, @Nonnull ItemStack matchedStack,
+            @Nonnull Custody custody, int blockX, int blockY, int blockZ) {
         String itemId = matchedStack.getItemId();
         if (itemId == null || itemId.isBlank()) {
             return 0;
         }
-        StationCustodyClaim claim = custodyByBlock.get(blockKey);
+        StationCustodyClaim claim = custodyClaimAt(world, blockX, blockY, blockZ);
         int currentTotal = claim != null ? claim.totalQuantity() : 0;
         int moveCount = StationCustody.placeableQuantity(currentTotal, matchedStack.getQuantity(),
                 custody.effectiveMaxQuantity());
         if (moveCount <= 0) {
             return 0;
+        }
+        // The stash is minted BEFORE anything leaves the inventory, so a section that cannot hold
+        // one (unloaded, unregistered store, another consumer's stash) denies with the player's
+        // items untouched; a mint whose removal then fails is taken back out again below.
+        boolean created = false;
+        if (claim == null) {
+            claim = ensureClaimAt(world, playerUuid, stationId, actionId, blockX, blockY, blockZ);
+            if (claim == null) {
+                return 0;
+            }
+            created = true;
         }
         ItemStack movedStack;
         try {
@@ -4681,63 +4829,54 @@ public final class StationService {
             movedStack = transaction != null ? transaction.getOutput() : null;
         } catch (Throwable t) {
             Log.warn("STATION custody placement removal failed: " + t.getMessage());
+            if (created) {
+                removeStashAt(world, blockX, blockY, blockZ);
+            }
             return 0;
-        }
-        if (claim == null) {
-            claim = new StationCustodyClaim(playerUuid, stationId, actionId, blockX, blockY, blockZ);
-            custodyByBlock.put(blockKey, claim);
         }
         claim.add(itemId, moveCount);
         if (custody.effectiveMaxQuantity() == 1 && movedStack != null) {
             claim.setUniqueStack(movedStack);
         }
-        Custody.Display displayGroup = custody.getDisplay();
-        if (displayGroup != null && claim.displayRef() == null) {
-            ItemStack visualStack = claim.uniqueStack() != null ? claim.uniqueStack() : new ItemStack(itemId, 1);
-            StationCustodyDisplay.Spawned spawned = StationCustodyDisplay.spawn(commandBuffer, visualStack,
-                    displayGroup, blockX, blockY, blockZ);
-            // Both halves land together: the ref AND the network id the prop was built with, so
-            // press-F retrieval never has to read a live NetworkId component back off the entity.
-            claim.setDisplay(spawned != null ? spawned.ref() : null,
-                    spawned != null ? spawned.networkId() : null);
-        }
+        claim.markDirty();
+        spawnDisplayIfAbsent(blockKey, custody.getDisplay(), claim, itemId, commandBuffer,
+                blockX, blockY, blockZ);
         return moveCount;
     }
 
     /**
-     * Every custody auto-return path (design section 9.4: "unconsumed input auto-returns on
-     * EVERY exit path") funnels here from {@link #stop}: removes the block's claim (if any owned
-     * by THIS session's player), returns its items to the owner hotbar-first then backpack
-     * storage (round-5, via {@link ItemGrantUtil}), else drops them at the block once, then flips
-     * the block back to its Empty custody state.
+     * The primary block's custody hand-back, from {@link #stop} on every reason whose player is
+     * still present ({@link #custodyReturnsAtStop}): removes the block's stash (if a claim owned
+     * by THIS session's player stands there), returns its items to the owner hotbar-first then
+     * backpack storage (via {@link ItemGrantUtil}), else drops them at the block once, then flips
+     * the block back to its Empty custody state. A session whose world can no longer be resolved
+     * leaves the stash standing instead - it is chunk-persisted, so nothing is lost by leaving it.
      *
      * <p>{@code s.ref.getStore()} (not the {@code store} parameter {@link #stop} may have been
-     * handed as {@code null}, e.g. on {@code stopAll}'s shutdown sweep) is the store source here -
-     * a valid ref always knows its own owning store, so this covers the shutdown case too as long
-     * as the ref has not actually been removed yet. This is also one of the two ONLY sites that
-     * remove a claim from {@link #custodyByBlock} (the other is {@link #onCustodyBlockBroken}),
-     * so it is one of the two despawn points for {@link StationCustodyClaim#displayRef()}
-     * (design section 9, phase 2 leg G) - the display entity's lifecycle mirrors the claim's own.
-     *
-     * <p><b>R4 companion fix</b>: {@code commandBuffer} (nullable, forwarded from {@link #stop})
-     * is what the display despawn now uses instead of a resolved {@code Store} - see {@link
-     * StationCustodyDisplay#despawn}'s own javadoc for why. A {@code null} commandBuffer (the
-     * damage/death/disconnect/shutdown hooks) leaves the display entity behind; it is {@code
-     * NonSerialized} so it cannot survive a restart regardless.
+     * handed as {@code null}) is the store source for the give-back - a valid ref always knows its
+     * own owning store. {@code commandBuffer} (nullable, forwarded from {@link #stop}) is what the
+     * display despawn uses; a {@code null} commandBuffer (the damage/death hooks' degenerate
+     * cases) leaves the display entity behind, and it is {@code NonSerialized} so it cannot
+     * survive a restart regardless.
      */
     private void returnCustody(@Nonnull StationSession s, @Nullable Custody custody,
             @Nullable CommandBuffer<EntityStore> commandBuffer) {
         if (s.blockKey == null) {
             return;
         }
-        StationCustodyClaim claim = custodyByBlock.remove(s.blockKey);
+        World world = sessionWorld(s);
+        if (world == null) {
+            // No world to read the chunk through: the placed input stays in the world stash,
+            // collected at the block on the next interaction.
+            return;
+        }
+        StationCustodyClaim claim = custodyClaimAt(world, s.blockX, s.blockY, s.blockZ);
         if (claim == null) {
             return;
         }
         if (!claim.ownerId.equals(s.playerUuid)) {
             // Not this session's claim to touch (should not happen - custody ownership gates
             // session start - but never silently swallow another player's placed items).
-            custodyByBlock.putIfAbsent(s.blockKey, claim);
             return;
         }
         Store<EntityStore> ownerStore = null;
@@ -4748,20 +4887,11 @@ public final class StationService {
                 ownerStore = null;
             }
         }
-        StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
+        removeStashAt(world, s.blockX, s.blockY, s.blockZ);
+        despawnDisplay(s.blockKey, commandBuffer);
         giveClaimToOwner(commandBuffer, ownerStore, s.ref, claim, s.blockX, s.blockY, s.blockZ);
         if (custody != null) {
-            World world = null;
-            if (s.ref != null && s.ref.isValid()) {
-                try {
-                    world = WorldEvictors.worldOf(s.ref);
-                } catch (Throwable ignored) {
-                    world = null;
-                }
-            }
-            if (world != null) {
-                flipCustodyState(world, s.blockX, s.blockY, s.blockZ, custody, false);
-            }
+            flipCustodyState(world, s.blockX, s.blockY, s.blockZ, custody, false);
         }
     }
 
@@ -4772,8 +4902,8 @@ public final class StationService {
      * check: a claim holding several distinct item ids can now land some in the hotbar, some in
      * the backpack, and only the genuine overflow on the ground, instead of dropping the WHOLE
      * claim the moment one combined-batch room check failed). Extracted (DRY) so both
-     * {@link #returnCustody} (every session-stop exit) and {@link #retrieveCustody} (the press-F
-     * retrieval feature) share ONE give-back engine. Returns the stacks that actually landed IN
+     * {@link #returnCustody} (the hand-back session-stop exits) and {@link #retrieveCustody} (the
+     * press-F retrieval feature) share ONE give-back engine. Returns the stacks that actually landed IN
      * INVENTORY (hotbar or backpack, excluding anything dropped) - {@link #retrieveCustody} uses
      * this to fire a native-pickup-mimic notification only for what the player genuinely
      * received (round-5 refinement 2); {@link #returnCustody} discards the return value. No-op
@@ -4796,23 +4926,20 @@ public final class StationService {
 
     /**
      * THE ONE hand-back engine every "give these stacks back to the station's owner" path in this
-     * class routes through - the custody auto-return ({@link #returnCustody}), the remote-anchor
-     * sweep ({@link #releaseAnchorClaims}), the press-F retrieval ({@link #retrieveCustody}), the
-     * disconnect sweep ({@link #returnClaimsOf}) and the in-flight iteration refund ({@link
-     * #refundIterationLedger}) alike. Per stack: hotbar first, then backpack storage, then dropped
-     * at the block; an unreachable owner sends every stack straight to the ground. Returns the
-     * stacks that actually landed IN INVENTORY (excluding anything dropped), so a caller can
-     * notify for exactly what the player received. Never throws.
+     * class routes through - the custody hand-back ({@link #returnCustody}), the remote-anchor
+     * sweep ({@link #releaseAnchorClaims}), the press-F retrieval ({@link #retrieveCustody}) and
+     * the in-flight iteration refund ({@link #refundIterationLedger}) alike. Per stack: hotbar
+     * first, then backpack storage, then dropped at the block; an unreachable owner sends every
+     * stack straight to the ground. Returns the stacks that actually landed IN INVENTORY
+     * (excluding anything dropped), so a caller can notify for exactly what the player received.
+     * Never throws.
      *
      * <p><b>Pass the live {@code commandBuffer} whenever the caller holds one.</b> The ground-drop
      * fallback SPAWNS an entity, and {@code Store#addEntity} asserts (throwing {@code
      * IllegalStateException("Store is currently processing!")}) when called from inside a
      * system/interaction tick - the same processing-lock hazard the custody display spawn/despawn
      * already routes around. A {@code null} buffer therefore loses the overflow silently on every
-     * in-tick path (an inventory-full session stop handed the player nothing and dropped nothing),
-     * so only a genuinely OFF-tick caller - the disconnect sweep, which hops onto the world thread
-     * through {@code World#execute} and holds no buffer at all - may pass {@code null} and let the
-     * direct-store route serve it.
+     * in-tick path (an inventory-full session stop handed the player nothing and dropped nothing).
      */
     @Nonnull
     private static List<ItemStack> handBackToOwner(@Nullable CommandBuffer<EntityStore> commandBuffer,
@@ -4821,8 +4948,7 @@ public final class StationService {
         if (stacks.isEmpty()) {
             return List.of();
         }
-        // Try-guarded (SMOKE-FIX S3 hardening): this is the FIRST point a give-back mutates
-        // anything, but the claim was already popped off custodyByBlock by the caller - an
+        // Try-guarded: the caller has already removed the block's stash by this point - an
         // unguarded throw here would escape entirely (never reaching the drop-at-block fallback
         // below), silently losing the items. Degrading to "no player found" routes every stack
         // through the SAME drop-at-block fallback every other unreachable-owner case already uses.
@@ -4892,21 +5018,27 @@ public final class StationService {
             }
             // WORLD-SCOPED match (see StationCustodyRetrieval#owns): a network id comes from a
             // per-world counter that starts at 1 in every world, so an unscoped comparison can
-            // resolve a claim in a DIFFERENT world and hand over its contents. The block key already
-            // encodes the world uuid, so the presser's own prefix is the whole guard - and because
-            // each claim carries the id its prop was built with, this walk reads no components at
-            // all (it used to fetch NetworkId off every claim's entity, across every world, per
-            // press).
+            // resolve a prop in a DIFFERENT world and hand over its block's contents. The block key
+            // already encodes the world uuid, so the presser's own prefix is the whole guard - and
+            // because the display side map carries the id each prop was built with, this walk reads
+            // no components at all.
             String worldPrefix = StationAnchors.worldPrefix(worldUuid.toString());
             int targetId = targetNetworkId.getId();
             String blockKey = null;
-            for (Map.Entry<String, StationCustodyClaim> e : custodyByBlock.entrySet()) {
-                if (StationCustodyRetrieval.owns(e.getKey(), worldPrefix, e.getValue().displayNetworkId(), targetId)) {
+            for (Map.Entry<String, DisplayHandle> e : displayByBlock.entrySet()) {
+                if (StationCustodyRetrieval.owns(e.getKey(), worldPrefix, e.getValue().networkId(), targetId)) {
                     blockKey = e.getKey();
                     break;
                 }
             }
-            StationCustodyClaim claim = blockKey != null ? custodyByBlock.get(blockKey) : null;
+            World world;
+            try {
+                world = WorldEvictors.worldOf(ref);
+            } catch (Throwable t) {
+                Log.fine("STATION retrieve could not resolve a world: " + t.getMessage());
+                return;
+            }
+            StationCustodyClaim claim = custodyClaimAt(world, blockKey);
             boolean hasActiveSession = blockKey != null && sessionWorkingAt(blockKey);
             boolean isOwner = claim != null && claim.ownerId.equals(playerUuid);
             boolean claimNonEmpty = claim != null && !claim.isEmpty();
@@ -4917,8 +5049,8 @@ public final class StationService {
                 // fired BEFORE the give-back so the animation set still reflects what they were
                 // holding when they reached for it, not whatever the retrieved stack just became.
                 playCollectAnimation(store, ref);
-                custodyByBlock.remove(blockKey, claim);
-                StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
+                removeStashAt(world, claim.blockX, claim.blockY, claim.blockZ);
+                despawnDisplay(blockKey, commandBuffer);
                 List<ItemStack> landed = giveClaimToOwner(commandBuffer, store, ref, claim,
                         claim.blockX, claim.blockY, claim.blockZ);
                 StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
@@ -4926,7 +5058,6 @@ public final class StationService {
                         ? ActionResolver.resolve(asset, claim.actionId).getCustody() : null;
                 if (custody != null) {
                     try {
-                        World world = WorldEvictors.worldOf(ref);
                         flipCustodyState(world, claim.blockX, claim.blockY, claim.blockZ, custody, false);
                     } catch (Throwable t) {
                         Log.fine("STATION retrieve block-state flip failed: " + t.getMessage());
@@ -5025,35 +5156,42 @@ public final class StationService {
     }
 
     /**
-     * The "block broken" custody auto-return path ({@link StationCustodyBreakSystem}, no session
-     * required - a player can place input then walk away before ever pressing F again). Drops
-     * everything at the block once; no-ops when nothing is claimed there (including the common
-     * case where a session's own {@link #stop} already handled it via its heartbeat's block-gone
-     * check on the same or a following tick - no double drop, {@link ConcurrentHashMap#remove}
-     * is the idempotency gate).
+     * The "block broken" custody path ({@link StationCustodyBreakSystem}, covering the player
+     * break AND the environment break - explosions and physics fire
+     * {@code EnvironmentBreakBlockEvent} INSTEAD of {@code BreakBlockEvent}, and a stash must
+     * never be left under a destroyed block either way; no session required - a player can place
+     * input then walk away before ever pressing F again). Drops everything at the block ONCE,
+     * removes the block's stash, and despawns its display; no-ops when no stash of ours stands
+     * there (including the common case where a session's own {@link #stop} already handed it back
+     * via its heartbeat's block-gone check on the same or a following tick - the stash removal is
+     * the idempotency gate, whichever path removes it first owns the hand-back).
      *
-     * <p>The display-entity despawn (design section 9, phase 2 leg G) happens BEFORE the
-     * {@code isEmpty()} early-return, deliberately - a claim can legitimately hold a live
-     * {@link StationCustodyClaim#displayRef()} with ZERO items left (a Consume step drained it to
-     * empty mid-session, but the session had not yet stopped when the block broke), and this is
-     * one of the two ONLY sites that remove a claim from {@link #custodyByBlock} (the other is
-     * {@link #returnCustody}) - whichever of the two wins the removal race is the ONLY one that
-     * ever sees this claim again, so it MUST be the one to despawn its display or the entity leaks.
+     * <p>The display despawn runs even for an EMPTY claim, deliberately - a block can carry a live
+     * display prop with ZERO items left (a Consume step drained it to empty mid-session, but the
+     * session had not yet stopped when the block broke), and this is the last path that will ever
+     * see that block's handle, so it must be the one to despawn the prop or the entity leaks.
      */
     void onCustodyBlockBroken(@Nonnull Store<EntityStore> store, @Nonnull CommandBuffer<EntityStore> commandBuffer,
             @Nonnull String blockKey, int x, int y, int z) {
         // The broken block is no longer a discoverable station block (scope-2 wave 3, gate m4).
         knownStationBlocks.remove(blockKey);
         // FIRST: drop the broken block's OWN custody at the block (design 2.6's "broken block's
-        // custody drops at that block"), removing the claim so a following ANCHOR_LOST stop's
+        // custody drops at that block"), removing the stash so a following ANCHOR_LOST stop's
         // anchor sweep does not also try to return it to inventory (mutually exclusive by removal).
-        StationCustodyClaim claim = custodyByBlock.remove(blockKey);
-        if (claim != null) {
-            StationCustodyDisplay.despawn(claim.displayRef(), commandBuffer);
+        World world = null;
+        try {
+            world = WorldEvictors.worldOf(store);
+        } catch (Throwable t) {
+            Log.fine("STATION break handler could not resolve a world: " + t.getMessage());
+        }
+        StationCustodyClaim claim = custodyClaimAt(world, x, y, z);
+        if (claim != null && world != null) {
+            removeStashAt(world, x, y, z);
             if (!claim.isEmpty()) {
                 dropCustodyAtBlock(commandBuffer, store, x, y, z, claim.toItemStacks());
             }
         }
+        despawnDisplay(blockKey, commandBuffer);
         // THEN: if this block was a REMOTE anchor of a live session, stop it gracefully - its OTHER
         // anchors auto-return + its in-flight iteration refunds through the one stop() funnel.
         stopSessionOwningAnchor(blockKey, store, commandBuffer);
@@ -5110,29 +5248,27 @@ public final class StationService {
     }
 
     /**
-     * The ONE raw block-interaction-state write in this engine (extracted from
+     * The ONE block-interaction-state write in this engine (extracted from
      * {@link #flipCustodyState} so the Working flip below shares the exact same guards rather than
      * re-deriving them): a null/blank name, a block that is gone, or a name the block's own
      * {@code State.Definitions} never authored all no-op (a state variant is a DISTINCT generated
      * BlockType key - an unauthored name has nothing to resolve to). Returns {@code true} only when
-     * the write actually went through, so a caller can decide whether to REMEMBER the flip.
+     * the write actually went through, so a caller can decide whether to REMEMBER the flip. The
+     * current-block read and the write both go through ziggfreed-common's {@code BlockOps}, the
+     * library's one raw-block-IO seam.
      */
     private static boolean setBlockState(@Nonnull World world, int x, int y, int z, @Nullable String stateName) {
         if (stateName == null || stateName.isBlank()) {
             return false;
         }
         try {
-            BlockType bt = world.getBlockType(x, y, z);
+            ChunkStore chunkStore = world.getChunkStore();
+            String blockTypeId = BlockOps.blockItemIdAt(chunkStore, x, y, z);
+            BlockType bt = blockTypeId != null ? BlockType.getAssetMap().getAsset(blockTypeId) : null;
             if (bt == null || bt.getData() == null || bt.getBlockForState(stateName) == null) {
                 return false;
             }
-            ChunkStore chunkStore = world.getChunkStore();
-            Ref<ChunkStore> sectionRef = chunkStore.getChunkSectionReferenceAtBlock(x, y, z);
-            if (sectionRef == null || !sectionRef.isValid()) {
-                return false;
-            }
-            BlockOperations.setBlockInteractionState(chunkStore, sectionRef, x, y, z, bt, stateName, false);
-            return true;
+            return BlockOps.setInteractionState(chunkStore, x, y, z, stateName, false);
         } catch (Throwable t) {
             Log.fine("STATION block state flip to '" + stateName + "' failed: " + t.getMessage());
             return false;
@@ -5207,14 +5343,14 @@ public final class StationService {
             return;
         }
         // A gone entity (disconnect/shutdown) has no world to write through: the flip is dropped
-        // here and the block is left wearing its Working look until the next interaction, which is
-        // EXACTLY the pre-existing restart-orphan story for the Loaded state - toggle()'s
-        // not-loaded self-heal resets it idempotently (custody is never persisted by construction).
+        // here and the block is left wearing its Working look until the next interaction, where
+        // toggle()'s self-heal settles it against the block's persisted stash (a non-empty stash
+        // keeps Loaded correct, an empty one resets to Empty).
         World world = sessionWorld(s);
         if (world == null) {
             return;
         }
-        StationCustodyClaim claim = custodyByBlock.get(flip.blockKey());
+        StationCustodyClaim claim = custodyClaimAt(world, flip.x(), flip.y(), flip.z());
         flipCustodyState(world, flip.x(), flip.y(), flip.z(), custody, claim != null && claim.totalQuantity() > 0);
     }
 
@@ -5370,47 +5506,40 @@ public final class StationService {
 
     // ==================== Helpers ====================
 
-    /** The engine block id at (x,y,z), or Integer.MIN_VALUE when unreadable (chunk unloaded). */
-    private static int blockIdAt(@Nonnull World world, int x, int y, int z) {
-        try {
-            return world.getBlock(x, y, z);
-        } catch (Throwable t) {
-            return Integer.MIN_VALUE;
-        }
+    /**
+     * The registered block-TYPE id at (x,y,z) (state-variant DISTINCT - a flip to {@code Loaded}
+     * reads back as a different id), or {@code null} when unreadable (chunk unloaded). Read
+     * through ziggfreed-common's {@code BlockOps}, the library's one raw-block-IO seam; air reads
+     * as the engine's own {@code "Empty"} key, which is an answer, not a failure. The block-gone
+     * check's FALLBACK comparand for a block with no containing Item.
+     */
+    @Nullable
+    private static String blockTypeIdAt(@Nonnull World world, int x, int y, int z) {
+        return BlockOps.blockItemIdAt(world.getChunkStore(), x, y, z);
     }
 
     /**
-     * The station's own ITEM id for the block at (x,y,z) - the fallback summary-crest icon when
-     * a station authors no {@code Identity.Icon}. Captured at ENGAGE only.
+     * The station's own ITEM id for the block at (x,y,z) - the fallback summary-crest icon when a
+     * station authors no {@code Identity.Icon}, and the block-gone check's PRIMARY comparand.
+     * Captured at ENGAGE only.
      *
-     * <p><b>R7 fix</b>: resolves through {@link BlockType#getItem()} (the block's containing Item
-     * asset), NOT the raw {@link BlockType#getId()}. A custody-governed station (design 9.4) ONLY
-     * engages after its materials are placed, which has already flipped the block to its
-     * {@code Loaded}/{@code BarsPlaced}/{@code WeaponPlaced} state via
-     * {@code setBlockInteractionState} - a state variant is a DISTINCT, generated-key
-     * {@code BlockType} asset ({@code StateData#generateBlockKey}: {@code GENERATED_ID_PREFIX +
-     * parentKey + "_" + stateName}, {@code GENERATED_ID_PREFIX = "*"}), so at engage the OLD
-     * {@code blockType.getId()} returned e.g. {@code "*RPG_Station_Sawmill_Loaded"} - not a real
-     * item id, so the crest's {@code new ItemStack(id, 1)} resolved the UNKNOWN placeholder
-     * instead of the station's own icon. {@code getItem()} instead walks the asset's
-     * container-key chain (confirmed against the shared source: a state variant decodes via
-     * {@code ContainedAssetCodec.Mode.INJECT_PARENT}, so its {@code Data.containerData} is the
-     * PARENT block's own {@code Data} - itself linked to the owning {@code Item} via the native
-     * {@code Item.BlockType} field's {@code INHERIT_ID_AND_PARENT} containment, and
-     * {@code Data#getContainerKey} recurses up that chain) and resolves the SAME base item id
-     * regardless of which state variant is live. Falls back to the raw {@code blockType.getId()}
-     * only when the block has no containing Item at all (a non-item-backed native block, the
-     * pre-fix behavior for that edge case).
+     * <p>Resolves through the block's containing Item asset ({@code BlockOps.itemOf}), NOT the raw
+     * block-type id: a custody-governed station only engages after its materials are placed, which
+     * has already flipped the block to a state variant, and a state variant is a DISTINCT
+     * generated-key {@code BlockType} whose own id (e.g. {@code "*RPG_Station_Sawmill_Loaded"}) is
+     * not a real item id. Every state variant of one block shares the SAME containing Item, so this
+     * read is stable across the engine's own flips. Falls back to the raw block-type id only for a
+     * block with no containing Item at all; air answers {@code null}.
      */
     @Nullable
     private static String blockItemIdAt(@Nonnull World world, int x, int y, int z) {
         try {
-            var blockType = world.getBlockType(x, y, z);
-            if (blockType == null) {
+            String blockTypeId = BlockOps.blockItemIdAt(world.getChunkStore(), x, y, z);
+            if (blockTypeId == null) {
                 return null;
             }
-            Item item = blockType.getItem();
-            String id = item != null ? item.getId() : blockType.getId();
+            Item item = BlockOps.itemOf(blockTypeId);
+            String id = item != null ? item.getId() : blockTypeId;
             return id != null && !id.isBlank() && !"Empty".equals(id) ? id : null;
         } catch (Throwable t) {
             return null;
@@ -5418,20 +5547,18 @@ public final class StationService {
     }
 
     /**
-     * R5 fix: the block's CURRENTLY PERSISTED interaction-state name at (x,y,z) (e.g. custody's
-     * own {@code "BarsPlaced"}/{@code "WeaponPlaced"}), or {@code null} when unreadable or the
-     * block authors no state family at all. {@code world.getBlockType(x,y,z)} already returns the
-     * block's CURRENT state variant (confirmed: {@code IChunkAccessorSync#getBlockType} reads the
-     * live block id off the chunk, the same accessor {@link #flipCustodyState} writes through);
-     * {@link BlockType#getCurrentInteractionState} is the source-verified reverse lookup
-     * ({@code getStateForBlock(this)}) from that live variant back to its state
-     * NAME - the exact inverse of {@code BlockType#getBlockForState} (name -> variant), which
-     * {@code flipCustodyState}/{@code BlockOperations#setBlockInteractionState} already use to WRITE a state.
+     * The block's CURRENTLY PERSISTED interaction-state name at (x,y,z) (e.g. custody's own
+     * {@code "BarsPlaced"}/{@code "WeaponPlaced"}), or {@code null} when unreadable or the block
+     * authors no state family at all. The live block id already names the CURRENT state variant,
+     * and {@link BlockType#getCurrentInteractionState} is the reverse lookup from that variant
+     * back to its state NAME - the exact inverse of {@code BlockType#getBlockForState}
+     * (name to variant), which {@link #setBlockState} uses to WRITE a state.
      */
     @Nullable
     private static String currentBlockStateName(@Nonnull World world, int x, int y, int z) {
         try {
-            BlockType bt = world.getBlockType(x, y, z);
+            String blockTypeId = BlockOps.blockItemIdAt(world.getChunkStore(), x, y, z);
+            BlockType bt = blockTypeId != null ? BlockType.getAssetMap().getAsset(blockTypeId) : null;
             return bt != null ? bt.getCurrentInteractionState() : null;
         } catch (Throwable t) {
             return null;

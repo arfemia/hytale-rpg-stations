@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
@@ -120,5 +121,88 @@ class StationRefundLedgerTest {
     @Test
     void shortInputStopReason_nonRepeatingIsOutOfInputs() {
         assertEquals(StationService.StopReason.OUT_OF_INPUTS, StationService.shortInputStopReason(false));
+    }
+
+    // ==================== stash-backed custody x the refund ledger ====================
+
+    @Test
+    void interruptedIteration_overStashBackedCustody_refundLedgerHoldsTheRealDrainedIds() {
+        // The Consume From:Custody phase drains the block's chunk-persisted stash (via the claim
+        // view) and records the REAL drained ids into the session's refund ledger. An interrupt
+        // BEFORE any produce commits must find those ids still in the ledger - that is the refund
+        // source - while the stash keeps only what was not drained.
+        StationSession s = session();
+        StationCustodyClaim claim = new StationCustodyClaim(
+                UUID.randomUUID(), "cuttingboard", "prepfish", 0, 64, 0);
+        claim.add("Food_Fish_Raw", 2);
+        claim.add("Ingredient_Salt", 1);
+
+        Map<String, Integer> drainedOut = new LinkedHashMap<>();
+        StationCustody.drain(claim, "Food_Fish_Raw", null, 1, id -> new String[0], drainedOut);
+        StationService.recordIterationConsumedMap(s, drainedOut);
+
+        assertEquals(Map.of("Food_Fish_Raw", 1), s.iterationConsumed,
+                "the interrupt refund source is exactly what the stash gave up");
+        assertEquals(2, claim.totalQuantity(), "the stash keeps the undrained remainder");
+    }
+
+    @Test
+    void custodyReturnAndRefund_stayMutuallyExclusive_overStashBackedCustody() {
+        // The D38 rule with the stash in the loop: consume FROM the stash, produce the transformed
+        // item back INTO it, and the committed produce clears the whole iteration's ledger - a
+        // later stop hands back the stash's contents (the produced item) and refunds NOTHING, so
+        // the player can never receive both the input and the output of one transform.
+        StationSession s = session();
+        StationCustodyClaim claim = new StationCustodyClaim(
+                UUID.randomUUID(), "cookingfire", "cook", 0, 64, 0);
+        claim.add("Food_Fish_Raw", 1);
+
+        Map<String, Integer> drainedOut = new LinkedHashMap<>();
+        StationCustody.drain(claim, "Food_Fish_Raw", null, 1, id -> new String[0], drainedOut);
+        StationService.recordIterationConsumedMap(s, drainedOut);
+        assertTrue(s.iterationConsumed.containsKey("Food_Fish_Raw"));
+
+        // Produce.To:Custody - the transformed output lands in the SAME stash, ledger clears.
+        claim.add("Food_Fish_Cooked", 1);
+        StationService.clearIterationLedgerOnCommittedProduce(s);
+
+        assertTrue(s.iterationConsumed.isEmpty(),
+                "refund and custody-return are mutually exclusive per iteration");
+        assertEquals(Map.of("Food_Fish_Cooked", 1), claim.items(),
+                "the stash holds the produced item the custody return will hand back");
+    }
+
+    // ==================== which stops hand custody back (persistence rule) ====================
+
+    @Test
+    void custodyReturnsAtStop_leaveItReasons_keepTheStashInTheWorld() {
+        // A disconnect, a server stop and a world change leave placed custody standing in the
+        // chunk-persisted stash - the player collects it at the block later. These are also the
+        // stop paths that can run without the owning world's thread, so they must not touch
+        // chunk state either way.
+        assertFalse(StationService.custodyReturnsAtStop(StationService.StopReason.DISCONNECTED));
+        assertFalse(StationService.custodyReturnsAtStop(StationService.StopReason.SERVER_STOP));
+        assertFalse(StationService.custodyReturnsAtStop(StationService.StopReason.WORLD_CHANGED));
+    }
+
+    @Test
+    void custodyReturnsAtStop_presentPlayerReasons_handTheMaterialsBack() {
+        // Every reason whose player is still present keeps the long-standing hand-back.
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.PLAYER_EXIT));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.MOVED));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.DAMAGED));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.DIED));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.STATION_GONE));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.OUT_OF_INPUTS));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.INPUTS_EXHAUSTED));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.INVENTORY_FULL));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.SESSION_CAP));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.FEATURE_DISABLED));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.TOOL_CHANGED));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.TOOL_BROKEN));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.STEP_FAILED));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.RITUAL_COMPLETE));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.ANCHOR_LOST));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.PATH_BLOCKED));
     }
 }
