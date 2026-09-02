@@ -1,6 +1,6 @@
 # RPG Stations
 
-**Diegetic work stations - place, press F, watch your character work.**
+**Hands-on work stations - place the bench, press F, and watch your character work.**
 
 RPG Stations adds interactive work stations to your Hytale server. No menus, no instant
 conversions - materials go in, your character (or a stand-in performer) visibly does the work over
@@ -14,17 +14,16 @@ held-tool gate, a tool-scaling yield curve, and a session summary when you stop.
 
 The bench pays for the time it takes, and it pays by the tool you bring: a starter hatchet mills one
 plank per log, a copper two, the best forgeable hatchets four, and the sawmill's own trophy hatchet
-five. Mid-ladder tools land on fractional yields (two planks and often a third), so every upgrade is
-felt instead of only the big jumps. Staying at the bench pays too: past ten cycles a decent hatchet
-starts shaking offcuts loose from the milled logs - plant fibre, tree bark, tree sap and sticks -
-and the finds get richer the longer one session runs, with life essence joining from the second
-tier and concentrated essence at the deepest. And a few cycles into any session worked with mithril-grade steel, every cycle carries a
-1-in-2500 shot at the **Sawmiller's Hatchet** - a legendary masterwork that drops nowhere else, cannot
-be forged at any bench, and is the only tool in the game that reaches the top rung of the sawmill's
-own curve.
+five. Mid-ladder tools land on fractional yields: two planks, and often a third. Staying at the
+bench pays too: past ten cycles a decent hatchet starts shaking offcuts loose from the milled logs -
+plant fibre, tree bark, tree sap and sticks - and the finds get richer the longer one session runs,
+with life essence joining from the second tier and concentrated essence at the deepest. And a few
+cycles into any session worked with mithril-grade steel, every cycle carries a 1-in-2500 shot at the
+**Sawmiller's Hatchet**. It drops nowhere else, no bench can forge it, and it is the only tool that
+reaches the top rung of the sawmill's own curve.
 
-Every number in all of that is an ordinary content leaf, so a server can retune what better tools are
-worth, change what the finds hand over, or key the whole thing off something else entirely.
+Every number in all of that is plain JSON, so a server can retune what better tools are worth,
+change what the finds hand over, or key the whole thing off something else entirely.
 
 The engine underneath is the full thing, not a Sawmill special case: it also supports multiblock
 builds (arrange ordinary blocks in the world and the shape becomes a station), named placement
@@ -35,12 +34,20 @@ loot, and enhancement stamping are live and authorable the same way. Every one o
 from ordinary content assets, so a pack (or your own server-side assets) can add stations this
 release does not ship. Later releases will grow the shipped default set.
 
-Full documentation, including a page-by-page authoring guide and the complete schema reference for
-every content type, ships alongside this mod's release.
+Full documentation (a page-by-page authoring guide and a complete schema reference for every
+content type) lives in the mod's [GitHub repository](https://github.com/arfemia/hytale-rpg-stations).
+
+[![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/5NFdZsUxHZ) [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/ziggfreed)
+
+---
+
+[![Host your own Hytale server with Kinetic Hosting](https://i.imgur.com/UHn3FzW.png)](https://billing.kinetichosting.com/aff.php?aff=1262)
+
+---
 
 ## Required dependency: ZiggfreedCommon
 
-RPG Stations has exactly **one hard dependency**: **ZiggfreedCommon `>=2.0.0`**. Install it first -
+RPG Stations has exactly **one hard dependency**: **ZiggfreedCommon `>=2.0.1`**. Install it first -
 the server loads it before RPG Stations. That is the whole list - **no other mod is required**. RPG
 Stations is a complete, standalone reward loop (conditional loot, command rewards, enhancement) on
 its own. See [Integrations](#integrations) below for how an add-on hooks it.
@@ -49,18 +56,18 @@ its own. See [Integrations](#integrations) below for how an add-on hooks it.
 
 ### The work loop
 
-Place a station block, press `F`, and your character starts working - a real-time cycle cadence,
-a held-tool gate, a swing animation with its own impact cue, and a session summary when you stop.
-Every station is authored as an ordinary content asset, not a hardcoded Java class - a server owner
-gets the exact same authoring surface RPG Stations' own default content ships through.
+Place a station block, press `F`, and your character starts working: real-time cycles, a held-tool
+gate, a swing animation with its own impact cue, and a session summary when you stop. Every station
+is an ordinary content asset, so a server owner gets the same authoring surface the mod's own
+default content ships through.
 
 ### Multi-action stations
 
-One station block can offer several distinct jobs, picked diegetically by what you're holding and by
-what stands at the block - no dropdown, no menu. Each job carries its own requirements and the
-press picks the first job whose requirements actually hold. The Sawmill uses
-the lighter form: sneak and press `F` to pick which cut you want from the log you're holding
-(planks, decorative, or ornate) if you do not want the default.
+One station block can offer several distinct jobs, picked by what you're holding and what stands at
+the block. No dropdown. Each job carries its own requirements, and the press picks the first job
+whose requirements actually hold. The Sawmill uses the lighter form: sneak and press `F` to pick
+which cut you want from the log you're holding (planks, decorative, or ornate) if you do not want
+the default.
 
 ### Step programs and multi-station walks
 
@@ -88,19 +95,17 @@ exactly where the animation calls for them.
 
 Every station can roll bonus rewards on top of its normal output: extra copies of the result, a
 chance-gated drop table, a floor ladder that scales with any stat your server tracks (tool power,
-session length, whatever another installed mod writes) - composed from a small, weighted vocabulary
-shared across every loot site in the mod. Extra copies of the result can be fractional, so a
-mid-ladder tier can be worth "two and often a third" without rounding onto a neighbouring
-rung. Every find can carry its own sound-and-particle celebration, and a celebration never fires over
-an empty hand: a cue authored beside a reward only plays once that reward actually handed something
-over, so a drop table that rolled nothing stays silent, never announcing a jackpot it did not pay.
+session length, whatever another installed mod writes) - all built from the same small set of
+weighted rolls every loot site in the mod uses. Extra copies of the result can be fractional, so a
+mid-ladder tier can be worth "two and often a third" without rounding onto a neighbouring rung.
+Every find can carry its own sound-and-particle celebration, and a cue only plays once its reward
+actually handed something over, so a drop table that rolled nothing stays silent.
 
-Drop tables compose too, using Hytale's own drop-list vocabulary. The
-sawmill's four find tiers each combine a shared offcut list - referenced by id, so retuning what
-milling yields is one edit that moves every tier at once - with their own life-essence roll, and a
-richer tier simply pulls that shared list more times. Each of the mod's loot tables holds a single
-roll on purpose, so a pack can replace exactly the one it wants to retune without inheriting the
-rest.
+Drop tables compose too, using Hytale's own drop-list format. The sawmill's four find tiers each
+combine a shared offcut list (referenced by id, so retuning what milling yields is one edit that
+moves every tier at once) with their own life-essence roll, and a richer tier pulls that shared
+list more times. Each of the mod's loot tables holds a single roll on purpose, so a pack can
+replace exactly the one it wants to retune without inheriting the rest.
 
 ### Enhancement stamping
 
@@ -134,10 +139,9 @@ category, previewing whatever material is currently placed in the block.
 
 ## For Server Owners
 
-RPG Stations content is **asset types, not config files** - every station, action, lootable table,
-roll pool, flair, extension, and the engine's own settings is an ordinary Hytale content asset a
-pack (or a server owner's own override layer) ships, folded `defaults < pack < owner` exactly like
-every other asset the engine loads.
+Everything here is a Hytale content asset: every station, action, lootable table, roll pool, flair,
+extension, and the engine's own settings is a file a pack (or a server owner's own override layer)
+ships, folded `defaults < pack < owner` exactly like every other asset the engine loads.
 
 | Folder | What it holds |
 |---|---|
@@ -170,7 +174,7 @@ session-summary HUD tuning, layered like any other asset - there is no separate 
 
 ## Installation
 
-1. Install **ZiggfreedCommon** (`>=2.0.0`) - drop it into your server's `Mods/` folder.
+1. Install **ZiggfreedCommon** (`>=2.0.1`) - drop it into your server's `Mods/` folder.
 2. Drop the **RPG Stations** jar into the same `Mods/` folder.
 3. Optionally add a content pack that ships station catalog content.
 4. Restart the server. Confirm the boot log shows each loaded station id and no asset validation
@@ -178,8 +182,8 @@ session-summary HUD tuning, layered like any other asset - there is no separate 
 
 **Getting the Sawmill in-game.** On a bare install players craft the bench themselves at a **tier 2
 Workbench**: one crude hatchet (the tool becomes part of the bench), any one log, and any four
-planks. The tier gate puts it behind the first workbench upgrade, so the sawmill arrives as an earned
-base improvement, not a day-one freebie. Admins can `/give` the block directly
+planks. The tier gate puts it behind the first workbench upgrade, so the sawmill is something a
+base earns. Admins can `/give` the block directly
 (`RPG_Station_Sawmill`). A content pack that ships its own block under the same id replaces the
 jar's, so a pack that authors no recipe on its copy removes that craftability and owns acquisition
 its own way - a shop, a quest, whatever that pack's economy wants.
@@ -209,7 +213,8 @@ See `CHANGELOG.md` in this mod's repository for the full version history.
 
 ## Links & Support
 
-Report issues or ask questions through this mod's CurseForge page or its author's support channel.
+- [Source, docs and issues on GitHub](https://github.com/arfemia/hytale-rpg-stations)
+- Questions or suggestions? Join the [Discord](https://discord.gg/5NFdZsUxHZ) or leave a comment.
 
 ---
 
