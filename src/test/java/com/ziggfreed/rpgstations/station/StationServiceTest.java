@@ -719,4 +719,28 @@ public class StationServiceTest {
                 new Contribution[]{Contribution.of("yourmod:test", "ALPHA", 8.0)}, true, 0.25, 2.5)
                 .get(0).amount(), 1e-9);
     }
+
+    // ==================== Per-socket produce counts (the cycle event's socketCounts) ====================
+
+    @Test
+    void drainCycleSocketCounts_emptyBuffer_reportsAnEmptyMap() {
+        StationSession s = new StationSession();
+        Map<String, Integer> counts = StationService.drainCycleSocketCounts(s);
+        assertTrue(counts.isEmpty(),
+                "a cycle whose committed produce landed nothing in custody reports an empty map, never null");
+    }
+
+    @Test
+    void drainCycleSocketCounts_forwardsPerSocketSums_thenClears() {
+        StationSession s = new StationSession();
+        s.pendingCycleSocketCounts.merge("rack", 2, Integer::sum);
+        s.pendingCycleSocketCounts.merge("main", 3, Integer::sum);
+        s.pendingCycleSocketCounts.merge("rack", 1, Integer::sum);
+
+        Map<String, Integer> counts = StationService.drainCycleSocketCounts(s);
+        assertEquals(Map.of("rack", 3, "main", 3), counts,
+                "one entry per receiving socket id, quantities summed across the cycle's produce items");
+        assertTrue(StationService.drainCycleSocketCounts(s).isEmpty(),
+                "the buffer clears with the drain, so each cycle's counts are forwarded exactly once");
+    }
 }

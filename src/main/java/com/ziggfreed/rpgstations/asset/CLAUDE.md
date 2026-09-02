@@ -767,7 +767,8 @@ resolution section for the engine half.
 - **[`RpgStationsSettingsAsset`](RpgStationsSettingsAsset.java)** - `Server/RpgStations/Settings/
   Settings.json`, a single id (`settings`), jar default + pack-overridable: `{Enabled,
   SummaryHud:{Enabled, Position, OffsetX, OffsetY, TtlMs}, Limits:{MaxSessionsPerWorld,
-  MaxPuppetsPerWorld, MaxStashesPerSection, UnattendedIntervalMs}}`. `Position` is a shared-library
+  MaxPuppetsPerWorld, MaxStashesPerSection, UnattendedIntervalMs,
+  MaxUnattendedGatherCycles}}`. `Position` is a shared-library
   `HudPosition` preset id, authored PascalCase like every other id in this schema (e.g.
   `"TopCenter"`); the legacy SCREAMING_SNAKE spelling (`"TOP_CENTER"`) still resolves since
   matching is case- and underscore-insensitive. `OffsetX` is `OffsetY`'s horizontal sibling.
@@ -783,7 +784,11 @@ resolution section for the engine half.
   pure presentation, so a session past it simply performs in the player's own body, the same
   graceful degrade a failed puppet spawn already takes. `UnattendedIntervalMs` is the one NON-ceiling leaf in the group: the
   per-world pace of the unattended pass (reader default 1000ms; a non-positive value reads as the
-  default), a pure pace knob rather than a cap. The retired `MaxCustodyClaimsPerWorld`
+  default), a pure pace knob rather than a cap. `MaxUnattendedGatherCycles` is the one PAYOUT
+  ceiling: how many accrued unattended cycles ONE gather pays, applied as the min of caps against
+  each action's own `Work.Unattended.MaxCycles` (`Limits.clampGatherCycles` - it can only tighten
+  what an action authors, never raise it; null or non-positive means each action's own knob alone
+  applies). The retired `MaxCustodyClaimsPerWorld`
   leaf still decodes into a warn-only slot (the settings fold names the replacement; never a parse
   failure) and enforces nothing. The one shared predicate,
   `Limits.atCapacity(max, currentCount)`, treats a non-positive `max` as unlimited too (a ceiling of

@@ -88,7 +88,9 @@ worker:
   They are completion-shaped posts with no cycle event to ride at a gather - only per-cycle
   contributions and per-cycle rolls accrue.
 - **The ceiling**: one gather pays at most `MaxCycles` cycles (the same knob that caps a settle
-  burst). Accrual beyond it is forfeited with the gather, so a pile never carries stale debt
+  burst), clamped further by the server owner's [Settings](settings.md)
+  `Limits.MaxUnattendedGatherCycles` when authored - the effective ceiling is the smaller of the
+  two. Accrual beyond it is forfeited with the gather, so a pile never carries stale debt
   forward.
 
 Breaking the station block drops the placed materials as always and forfeits the accrual with the

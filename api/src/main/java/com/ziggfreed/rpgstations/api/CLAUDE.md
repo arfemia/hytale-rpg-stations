@@ -195,7 +195,11 @@ is the exact inverse of a permanently-opaque channel.
   so a listener that wants a number the engine did not already apply composes it from the
   `hytale:tool_*` FACTORS directly. **A listener MUST filter both by `StationContribution#channel()`**:
   both lists carry every channel the action authored, so consuming an entry you did not declare is
-  reading another mod's vocabulary.
+  reading another mod's vocabulary. **`socketCounts()`** (apiVersion 7) reports per-socket-id
+  counts of the items the cycle's COMMITTED `Produce` landed in placed custody - keyed by the
+  receiving socket id, the degenerate socket-less pile under `"main"`; a cycle whose produce went
+  to the worker's inventory (or produced nothing, e.g. idle) reports an EMPTY immutable map,
+  never null.
 - **`event/`** - the eight `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
   `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`/
   `StationEnhanceCompletedEvent`/`StationUnattendedGatheredEvent`/`StationOutputProducedEvent`/
@@ -255,7 +259,10 @@ exists specifically so a consumer can detect which additive members are present 
 reflection: bump it by exactly one integer per addition batch that lands under this policy (not
 per individual method - a coordinated wave of additions is one bump), never on its own.
 `apiVersion()` itself is exempt from "default-bodied only" since it shipped before the freeze; it
-will never change again once RpgStations reaches 1.0.0. Current value is **6**: one coordinated
+will never change again once RpgStations reaches 1.0.0. Current value is **7**: the
+`StationCycleCompletedEvent.socketCounts()` additive getter (per-socket-id counts of the items a
+cycle's committed Produce landed in placed custody; the degenerate pile reports under `"main"`, a
+pure inventory-route cycle reports an empty map, never null) - from 6, one coordinated
 bump for the multi-placement wave's api batch - the `StationOutputProducedEvent` +
 `StationStructureChangedEvent` event classes plus the `patterns()` default-bodied view (with its
 `PatternView` type) - from 5, which the `FactorContext.socketFilled(String)` additive accessor
@@ -264,7 +271,7 @@ the engine-computed plain-data readings behind the `rpgstations:socket_filled` b
 reached from 4, itself the `StationUnattendedGatheredEvent` event class's bump (from the
 `stationCount()` default-bodied addition's 3). **The api ARTIFACT's semver tracks this integer:
 `apiVersion()` N ships as artifact `0.N.0`** (`gradle.properties` `api_version`, currently
-`0.6.0`), so the number a consumer branches on and the number on the jar they compile against can
+`0.7.0`), so the number a consumer branches on and the number on the jar they compile against can
 never disagree; a bump of one is a bump of the other, in the same change.
 
 `RpgStationsApi.isAvailable()`/`find()` (added the same round) are convenience, not a way around

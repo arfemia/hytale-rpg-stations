@@ -665,6 +665,10 @@ final class StationStepHandlers {
                                         + step.getAt() + "'");
                     }
                     ctx.session.producedItems.merge(item.getItemId(), item.effectiveQuantity(), Integer::sum);
+                    // The cycle-completed event's socketCounts: how many items this cycle's
+                    // committed produce landed in each custody pile (the inventory route below
+                    // deliberately adds nothing - it lands no item in custody).
+                    ctx.session.pendingCycleSocketCounts.merge(socketId, item.effectiveQuantity(), Integer::sum);
                     committed.add(new ItemStack(item.getItemId(), item.effectiveQuantity()));
                 }
                 StationService.clearIterationLedgerOnCommittedProduce(ctx.session);

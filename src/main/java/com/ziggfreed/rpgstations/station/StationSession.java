@@ -445,6 +445,16 @@ final class StationSession {
     final List<StationContribution> pendingOneShotContributions = new ArrayList<>();
 
     /**
+     * Per-socket-id counts of the items the CURRENT cycle's committed {@code Produce To:"Custody"}
+     * phases landed in placed custody, buffered here between the produce phase and the
+     * cycle-completed event that forwards them on {@code StationCycleCompletedEvent.socketCounts}.
+     * Drained (and cleared) by {@code StationService#onCycleCompleted}, so a suspended program
+     * accumulates across its iterations and delivers everything with the completing cycle; a pure
+     * inventory-route cycle leaves it empty. Session-scoped, never persisted.
+     */
+    final Map<String, Integer> pendingCycleSocketCounts = new LinkedHashMap<>();
+
+    /**
      * The item id of the CURRENT cycle's primary output, set by the real-convert path just before
      * the program dispatches and read by a {@code Roll.Grants.OutputItems} grant (which adds extra
      * items of that same output). {@code null} for an authored Steps program, whose "primary

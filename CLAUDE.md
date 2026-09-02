@@ -125,7 +125,9 @@ GitHub repo already ships - see `docs/SchemaDocWriter.java`. **Perf hardening la
 `MaxStashesPerSection`, three independent nullable ceilings, unlimited by default - the stash one
 is per chunk section since the custody persistence wave, which also retired the disconnect
 claim-eviction sweep: placed custody now stays put on disconnect, see the custody-persistence
-paragraph below); a `RemoveWorldEvent` listener (`RpgStationsPlugin#registerWorldEviction` ->
+paragraph below; the group has since grown `UnattendedIntervalMs`, the unattended pass's pace
+knob, and `MaxUnattendedGatherCycles`, the min-of-caps gather payout ceiling - see
+`asset/CLAUDE.md`'s `RpgStationsSettingsAsset` bullet for the full group); a `RemoveWorldEvent` listener (`RpgStationsPlugin#registerWorldEviction` ->
 `StationService#onWorldRemoved`) that EVICTS this engine's volatile global block-keyed maps by
 world-uuid prefix on world unload (they never partitioned per world, so an instance-world fleet
 leaked a stale entry per station block for the whole uptime);

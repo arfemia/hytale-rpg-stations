@@ -154,6 +154,7 @@ there is no prior public release to diff against, so every entry is additive by 
   multiblock structure's own activation mark never counts against it. The
   `Limits.MaxCustodyClaimsPerWorld` spelling is ignored with a boot warning naming the
   replacement.
+- **Settings: `Limits.MaxUnattendedGatherCycles` caps what one unattended gather pays out.** The effective ceiling is the smaller of it and each action's own `Work.Unattended.MaxCycles`, so a server owner tightens every gather at once without raising any action's ceiling; absent means each action's own knob alone applies.
 - **Two new api events and a structure view for consumer mods (apiVersion 6, artifact 0.6.0).**
   `StationOutputProducedEvent` fires once per committed produce phase of an attended session -
   whether the batch landed in placed custody (the receiving socket named) or in the worker's
@@ -166,6 +167,7 @@ there is no prior public release to diff against, so every entry is additive by 
   every folded structure pattern - anchor-relative cells with per-cell matcher summaries,
   activation/revert blocks, rotation flags - so a mod can lint its own content against the shapes
   this engine recognizes without live world handles.
+- **The cycle event reports where committed produce landed (apiVersion 7, artifact 0.7.0).** `StationCycleCompletedEvent.socketCounts()` carries per-socket-id counts of the items a cycle's committed produce landed in placed custody - a socket-less custody's one implicit pile reports under `main`, and a cycle whose produce went to the worker's inventory reports an empty map, never null.
 - **The Asset Editor shows each knob's real default beside its dropdown.** The station schemas already offer pick lists on the closed discriminators (`Look.Source`, `Hide.Route`, `Prop.Source`/`Slot`, `Mount.Surface`, `Consume.From`/`Produce.To`, `OnConditionFail.Result`); they now also declare each one's unauthored default (PlayerClone, Scale, MirrorHeld, Hotbar, Block, Inventory, Fail), plus the engine master `Enabled` and a work action's `Looping` (both true) and the summary HUD's `Enabled`, so an unauthored field renders its effective value instead of the control's zero-state. `FromCrafting.Types` exports its closed Crafting/Processing pair as a per-entry dropdown. Decode is unchanged.
 - **The content audit covers the socket, structure and cooking surface, warn-or-info throughout
   (content always loads).** Sockets: an Item socket rendering no display prop (advisory - placement still works,
@@ -179,6 +181,7 @@ there is no prior public release to diff against, so every entry is additive by 
   in its own file comment), and a Stamp ritual beside sockets that never fill the pile Stamp reads
   from. A third-party validation hook can lint structure patterns too, through the api's
   read-only pattern view, live during the full pass.
+- **The audit flags a socket cap above the custody-level cap** (`SOCKET_MAX_EXCEEDS_CUSTODY_MAX`, warning): the effective capacity is the smaller of the two, so `/rpgstations validate` surfaces the same authoring the decode-time warning reports at load.
 - **Editor sections for the new schemas, and a station-block pick list.** The Asset Editor puts
   the new groups under their own sections (a structure pattern's
   Identity/Structure/Requirements/Moments, custody's Sharing and Sockets, a recipe row's Doneness,

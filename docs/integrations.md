@@ -42,7 +42,7 @@ answer:
 | Event | Fires when |
 |---|---|
 | `StationSessionStartedEvent` | A player engages a station and a work session begins. |
-| `StationCycleCompletedEvent` | One work cycle finishes; carries the station's declared contributions (per-cycle and one-shot) plus the resolved `ContributionScale` multiplier (display-only - the per-cycle amounts arrive already scaled). |
+| `StationCycleCompletedEvent` | One work cycle finishes; carries the station's declared contributions (per-cycle and one-shot), the resolved `ContributionScale` multiplier (display-only - the per-cycle amounts arrive already scaled), and `socketCounts()` - per-socket-id counts of the items the cycle's committed produce landed in placed custody (a socket-less pile reports under `main`; an inventory-route cycle reports an empty map). |
 | `StationSessionCompletedEvent` | The session stops (for any reason); fires after summary enrichers run. |
 | `StationEnhanceCompletedEvent` | An enhancement Stamp commits; carries before/after item copies and the enhancement report. |
 | `StationToolBrokeEvent` | A tool the session was using breaks. |

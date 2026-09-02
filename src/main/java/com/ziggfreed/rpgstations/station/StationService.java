@@ -1677,7 +1677,25 @@ public final class StationService {
                 ? List.of() : List.copyOf(s.pendingOneShotContributions);
         s.pendingOneShotContributions.clear();
         StationEvents.fireCycleCompleted(store, commandBuffer, s.playerRef, s.playerUuid, s.sessionId,
-                s.stationId, action.getActionId(), cycleIndex, idle, perCycle, oneShot, contributionScale);
+                s.stationId, action.getActionId(), cycleIndex, idle, perCycle, oneShot, contributionScale,
+                drainCycleSocketCounts(s));
+    }
+
+    /**
+     * Drains the session's buffered per-socket produce counts for the completing cycle into the
+     * immutable map {@code StationCycleCompletedEvent.socketCounts()} carries - empty, never null,
+     * for a cycle whose committed produce landed nothing in custody (the pure inventory route, or
+     * an idle cycle). Mirrors the one-shot contribution drain beside it: cleared here so each
+     * cycle's counts are forwarded exactly once.
+     */
+    @Nonnull
+    static Map<String, Integer> drainCycleSocketCounts(@Nonnull StationSession s) {
+        if (s.pendingCycleSocketCounts.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Integer> counts = Map.copyOf(s.pendingCycleSocketCounts);
+        s.pendingCycleSocketCounts.clear();
+        return counts;
     }
 
     /**
@@ -6853,8 +6871,10 @@ public final class StationService {
      *       cycles - forwarded on the event, never interpreted here.</li>
      *   <li><b>Rolls</b>: the action's effective {@code Bonus}, replayed ONE PASS PER GRANTED
      *       CYCLE against one gatherer snapshot - "as if attended", per-cycle chance independence
-     *       and per-cycle pool draws included (the ceiling keeps this at most
-     *       {@code MaxCycles} passes, so no batched Repeat approximation is needed). Items,
+     *       and per-cycle pool draws included (the ceiling - the SMALLER of the action's
+     *       {@code Work.Unattended.MaxCycles} and the owner's Settings
+     *       {@code Limits.MaxUnattendedGatherCycles} when authored - keeps this at most
+     *       that many passes, so no batched Repeat approximation is needed). Items,
      *       droplists, commands and effects land on the gatherer; earned cues play sessionless at
      *       the block; {@code OutputItems} pays extra units of the accrued conversion's own
      *       primary output.</li>
@@ -6886,6 +6906,12 @@ public final class StationService {
             StationAsset.Work.Unattended unattended = work != null ? work.getUnattended() : null;
             int maxCycles = unattended != null ? unattended.effectiveMaxCycles()
                     : StationAsset.Work.Unattended.DEFAULT_MAX_CYCLES;
+            // The owner ceiling (Settings Limits.MaxUnattendedGatherCycles): min of caps with the
+            // action's own knob, read live like every other limit so a reload applies at once.
+            RpgStationsSettingsAsset.Limits ownerLimits = limits();
+            if (ownerLimits != null) {
+                maxCycles = ownerLimits.clampGatherCycles(maxCycles);
+            }
             Map<String, Integer> accrued = claim.drainAccruedCycles(socketIds);
             if (accrued.isEmpty()) {
                 return;

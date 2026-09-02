@@ -114,6 +114,26 @@ public class RpgStationsSettingsAssetCodecTest {
     }
 
     @Test
+    void limits_maxUnattendedGatherCycles_decodesAndClampsAsMinOfCaps() throws Exception {
+        RpgStationsSettingsAsset a = decodeAsset("{ \"Limits\": { \"MaxUnattendedGatherCycles\": 5 } }");
+        assertNotNull(a.getLimits());
+        assertEquals(5, a.getLimits().getMaxUnattendedGatherCycles());
+        assertEquals(5, a.getLimits().clampGatherCycles(24), "the owner ceiling clamps the action knob");
+        assertEquals(3, a.getLimits().clampGatherCycles(3),
+                "min of caps: an action already tighter than the owner ceiling keeps its own knob");
+        assertNull(a.getLimits().getMaxSessionsPerWorld(), "an unset sibling stays unlimited");
+    }
+
+    @Test
+    void limits_maxUnattendedGatherCycles_nullOrNonPositiveLeavesTheActionKnobAlone() throws Exception {
+        RpgStationsSettingsAsset bare = decodeAsset("{ \"Limits\": { \"MaxPuppetsPerWorld\": 3 } }");
+        assertNull(bare.getLimits().getMaxUnattendedGatherCycles());
+        assertEquals(24, bare.getLimits().clampGatherCycles(24), "null means no owner ceiling");
+        assertEquals(24, RpgStationsSettingsAsset.Limits.of(null, null, null, null, 0).clampGatherCycles(24),
+                "a non-positive owner value reads as unset, the one spelling every limit shares");
+    }
+
+    @Test
     void limits_retiredMaxCustodyClaimsPerWorld_decodesWithoutFailingAndFillsNothingLive() throws Exception {
         // The retired leaf is warn-only, never a parse failure: an owner file still authoring it
         // decodes cleanly, its value lands ONLY in the retired slot the settings fold warns on,

@@ -29,7 +29,7 @@ public final class RpgStationsApiImpl implements RpgStationsApi {
     private static final RpgStationsApiImpl INSTANCE = new RpgStationsApiImpl();
 
     /** Bumped additively per {@code api/CLAUDE.md}'s growth policy; never on a signature change. */
-    private static final int API_VERSION = 6;
+    private static final int API_VERSION = 7;
 
     private RpgStationsApiImpl() {
     }

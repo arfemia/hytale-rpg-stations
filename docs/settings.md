@@ -15,7 +15,7 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
   "Enabled": true,
   "SummaryHud": { "Enabled": true, "Position": "TopCenter", "OffsetY": 72, "TtlMs": 6000 },
   "Limits": { "MaxSessionsPerWorld": 60, "MaxPuppetsPerWorld": 40, "MaxStashesPerSection": 8,
-              "UnattendedIntervalMs": 1000 }
+              "UnattendedIntervalMs": 1000, "MaxUnattendedGatherCycles": 12 }
 }
 ```
 
@@ -30,6 +30,7 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
 | `Limits.MaxPuppetsPerWorld` | unlimited | The most live puppets that may exist at once in ONE world; past it a session still starts and runs, it just performs in the player's own body instead of spawning a puppet - the same fallback a failed spawn already takes. |
 | `Limits.MaxStashesPerSection` | unlimited | The most blocks in ONE chunk section (a 32x32x32 cube) that may hold placed station input at once; topping up material already placed always works, only a placement that would open a NEW store past the ceiling is denied, and a [multiblock structure's](structures-and-sockets.md) own activation mark never counts against it. The retired `MaxCustodyClaimsPerWorld` spelling is ignored with a boot warning naming this leaf. |
 | `Limits.UnattendedIntervalMs` | `1000` | How often ONE world's [unattended pass](unattended-work.md) runs, in milliseconds - the pass that settles custody-loaded stations whose action authors `Work.Unattended`, and that rebuilds missing placed-item displays after a chunk loads. Raising it makes unattended stations settle in coarser bursts; the math is the same either way. |
+| `Limits.MaxUnattendedGatherCycles` | unlimited | A server-wide ceiling on how many accrued [unattended](unattended-work.md) cycles ONE gather pays out. The effective ceiling is the SMALLER of it and each action's own `Work.Unattended.MaxCycles`, so it can only tighten what an action authors, never raise it; absent means each action's own knob alone applies. |
 
 The three top-level knobs (`Enabled`, `SummaryHud`, `Limits`) are independent and composable -
 disabling the summary HUD does not disable the engine, and vice versa. Every leaf is nullable, so a

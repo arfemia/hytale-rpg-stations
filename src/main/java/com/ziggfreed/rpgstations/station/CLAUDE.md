@@ -836,7 +836,10 @@ custody section below) and unloads/reloads with the chunks.
 
 Three INDEPENDENT ceilings plus the unattended pass's pace knob (`UnattendedIntervalMs`, reader
 default 1000ms, read live in `tickUnattended` - see the unattended section above; see
-`../asset/CLAUDE.md`'s `RpgStationsSettingsAsset` bullet), read
+`../asset/CLAUDE.md`'s `RpgStationsSettingsAsset` bullet) plus the gather payout ceiling
+(`MaxUnattendedGatherCycles`, applied in `grantAccruedAtGather` as the min of caps against each
+action's own `Work.Unattended.MaxCycles` via `Limits.clampGatherCycles` - see the gather-payout
+bullet above), read
 live (never cached) so a settings reload takes effect on the next press. The shared predicate
 `RpgStationsSettingsAsset.Limits.atCapacity(max, currentCount)` treats null OR non-positive as
 unlimited, so a server that never authors `Limits` behaves exactly as it did before the group
@@ -1263,7 +1266,9 @@ settling its recipe conversions while nobody is engaged. Three classes, three al
   block).
 - **The gather payout** (`grantAccruedAtGather`, called at press-F retrieval, `returnCustody`'s
   hand-back and `releaseAnchorClaims`' both branches, BEFORE the piles leave the stash): drains
-  the accrual keys (`drainAccruedCycles` - doneness keys untouched), caps at `MaxCycles`, builds
+  the accrual keys (`drainAccruedCycles` - doneness keys untouched), caps at `MaxCycles` clamped
+  further by the owner's `Limits.MaxUnattendedGatherCycles` when authored (min of caps,
+  `Limits.clampGatherCycles`), builds
   ONE gatherer factor snapshot (`buildGatherFactorContext` - decision 90: factors resolve against
   the GATHERING player; the pile owner does NOT gate, `Share.Reclaim` already did), forwards
   `Work.PerCycleContributions` at the idle rate x the gatherer-resolved `ContributionScale` x the
@@ -1510,7 +1515,9 @@ additive `rpgstations.lang` overlay resolves correctly. **Unattended checks (dec
 group), plus the `DONENESS_WITHOUT_PRODUCE_SOCKET` exemption (an unattended settle lands produce
 in custody itself, so that warn is suppressed for an unattended-enabled action).
 **Socket + pattern checks (the wave's closing sweep)**: `SOCKET_NO_DISPLAY` (INFO) /
-`SOCKET_BLOCK_SHARE_INERT` in `checkCustody`; `SOCKET_MATCH_UNMATCHED` in the injectable
+`SOCKET_BLOCK_SHARE_INERT` / `SOCKET_MAX_EXCEEDS_CUSTODY_MAX` (a socket cap above the
+custody-level cap - the effective capacity is the smaller of the two; the audit sibling of
+Custody's decode-time warn, which stays) in `checkCustody`; `SOCKET_MATCH_UNMATCHED` in the injectable
 `checkCustodyInputsResolve` core behind the live pass (an ANY-OF match is flagged only when EVERY
 authored route resolves nothing); `CONSUME_SOCKET_UNKNOWN` / `PRODUCE_SOCKET_UNKNOWN` /
 `INGREDIENT_SOCKET_ON_INVENTORY_ROUTE` in `checkSocketAddresses` (a `Ref` entry with no own

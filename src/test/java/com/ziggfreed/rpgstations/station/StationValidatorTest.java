@@ -1412,6 +1412,29 @@ public class StationValidatorTest {
         assertFalse(codes(validate(a)).contains("SOCKET_BLOCK_SHARE_INERT"));
     }
 
+    @Test
+    void socketCapAboveTheCustodyCap_flagged() {
+        // The audit sibling of Custody's decode-time warn: the socketedCustody fixture authors a
+        // custody-level MaxQuantity of 10, so a socket cap of 25 can never raise the effective
+        // capacity past it - the effective cap is the smaller of the two.
+        StationAsset a = station("overcappot", ActionDef.of("Stew")
+                .withRecipe(trunkRecipe())
+                .withCustody(socketedCustody(Map.of("meat",
+                        Custody.Socket.of(Custody.Socket.ItemRoute.of(null, 1), null,
+                                25, null, null, Custody.Display.of(null, null, null), null, null)))));
+        assertTrue(codes(validate(a)).contains("SOCKET_MAX_EXCEEDS_CUSTODY_MAX"));
+    }
+
+    @Test
+    void socketCapWithinTheCustodyCap_notFlagged() {
+        StationAsset a = station("cappedpot", ActionDef.of("Stew")
+                .withRecipe(trunkRecipe())
+                .withCustody(socketedCustody(Map.of("meat",
+                        Custody.Socket.of(Custody.Socket.ItemRoute.of(null, 1), null,
+                                5, null, null, Custody.Display.of(null, null, null), null, null)))));
+        assertFalse(codes(validate(a)).contains("SOCKET_MAX_EXCEEDS_CUSTODY_MAX"));
+    }
+
     /** The socketed fixture the address checks below share: one item socket 'pot', one Block socket 'fire'. */
     private static Custody addressableCustody() {
         return socketedCustody(Map.of(

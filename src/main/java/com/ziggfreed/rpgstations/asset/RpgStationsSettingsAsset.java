@@ -69,7 +69,7 @@ public final class RpgStationsSettingsAsset
             .metadata(new UIEditorSectionStart("Summary HUD")).add()
             .appendInherited(new KeyedCodec<>("Limits", Limits.CODEC, false),
                     (a, v) -> a.limits = v, a -> a.limits, (a, parent) -> a.limits = parent.limits)
-            .documentation("Ceilings a server owner can set on what this engine is allowed to have live at once (sessions and puppets per world, placed-input stashes per chunk section), plus the unattended pass's per-world visit interval. Absent, or any ceiling leaf left null, means unlimited; the interval defaults to 1000ms.")
+            .documentation("Ceilings a server owner can set on what this engine is allowed to have live at once (sessions and puppets per world, placed-input stashes per chunk section), plus the unattended pass's per-world visit interval and a ceiling on how many accrued unattended cycles one gather pays. Absent, or any ceiling leaf left null, means unlimited; the interval defaults to 1000ms.")
             .metadata(new UIEditorSectionStart("Limits")).add()
             .build();
 
@@ -147,6 +147,11 @@ public final class RpgStationsSettingsAsset
      * a mode: a session and a placed-input stash are all-or-nothing, so those two deny the
      * interaction with a localized toast; a puppet is pure presentation, so that one silently
      * degrades to the in-body route the engine already falls back to whenever a spawn fails.
+     *
+     * <p>{@link #maxUnattendedGatherCycles} is the one PAYOUT ceiling in the group: a server-owner
+     * cap on how many accrued unattended cycles ONE gather pays, applied as the min of caps
+     * against each action's own {@code Work.Unattended.MaxCycles} ({@link #clampGatherCycles}), so
+     * it can only tighten what an action authors, never raise it.
      */
     public static final class Limits {
 
@@ -157,6 +162,7 @@ public final class RpgStationsSettingsAsset
         @Nullable protected Integer maxPuppetsPerWorld;
         @Nullable protected Integer maxStashesPerSection;
         @Nullable protected Long unattendedIntervalMs;
+        @Nullable protected Integer maxUnattendedGatherCycles;
         @Nullable protected Integer retiredMaxCustodyClaimsPerWorld;
 
         public static final BuilderCodec<Limits> CODEC = BuilderCodec.builder(Limits.class, Limits::new)
@@ -180,6 +186,11 @@ public final class RpgStationsSettingsAsset
                         (o, p) -> o.unattendedIntervalMs = p.unattendedIntervalMs)
                 .documentation("How often, in milliseconds, ONE world's unattended pass runs (visiting placed-input stations whose action authors Work.Unattended and settling any cycles world game time has earned them). Null (the default) means 1000. Raising it makes unattended stations settle in coarser bursts; the math is the same either way.")
                 .addValidator(CodecWarnValidators.positive("Limits.UnattendedIntervalMs should be positive.")).add()
+                .appendInherited(new KeyedCodec<>("MaxUnattendedGatherCycles", Codec.INTEGER, false),
+                        (o, v) -> o.maxUnattendedGatherCycles = v, o -> o.maxUnattendedGatherCycles,
+                        (o, p) -> o.maxUnattendedGatherCycles = p.maxUnattendedGatherCycles)
+                .documentation("A server-owner ceiling on how many accrued unattended cycles ONE gather pays out. The effective ceiling is the SMALLER of this and the action's own Work.Unattended.MaxCycles, so it can only tighten what an action authors, never raise it. Null (the default) means no owner ceiling: each action's own knob alone applies.")
+                .addValidator(CodecWarnValidators.positive("Limits.MaxUnattendedGatherCycles should be positive.")).add()
                 .appendInherited(new KeyedCodec<>("MaxCustodyClaimsPerWorld", Codec.INTEGER, false),
                         (o, v) -> o.retiredMaxCustodyClaimsPerWorld = v, o -> o.retiredMaxCustodyClaimsPerWorld,
                         (o, p) -> o.retiredMaxCustodyClaimsPerWorld = p.retiredMaxCustodyClaimsPerWorld)
@@ -196,11 +207,19 @@ public final class RpgStationsSettingsAsset
         @Nonnull
         public static Limits of(@Nullable Integer maxSessionsPerWorld, @Nullable Integer maxPuppetsPerWorld,
                 @Nullable Integer maxStashesPerSection, @Nullable Long unattendedIntervalMs) {
+            return of(maxSessionsPerWorld, maxPuppetsPerWorld, maxStashesPerSection, unattendedIntervalMs, null);
+        }
+
+        @Nonnull
+        public static Limits of(@Nullable Integer maxSessionsPerWorld, @Nullable Integer maxPuppetsPerWorld,
+                @Nullable Integer maxStashesPerSection, @Nullable Long unattendedIntervalMs,
+                @Nullable Integer maxUnattendedGatherCycles) {
             Limits l = new Limits();
             l.maxSessionsPerWorld = maxSessionsPerWorld;
             l.maxPuppetsPerWorld = maxPuppetsPerWorld;
             l.maxStashesPerSection = maxStashesPerSection;
             l.unattendedIntervalMs = unattendedIntervalMs;
+            l.maxUnattendedGatherCycles = maxUnattendedGatherCycles;
             return l;
         }
 
@@ -230,6 +249,24 @@ public final class RpgStationsSettingsAsset
         public long effectiveUnattendedIntervalMs() {
             return unattendedIntervalMs != null && unattendedIntervalMs > 0
                     ? unattendedIntervalMs : DEFAULT_UNATTENDED_INTERVAL_MS;
+        }
+
+        /** The owner ceiling on how many accrued unattended cycles ONE gather pays, or null when none is set. */
+        @Nullable
+        public Integer getMaxUnattendedGatherCycles() {
+            return maxUnattendedGatherCycles;
+        }
+
+        /**
+         * PURE, the min-of-caps gather ceiling: {@code actionMax} (the action's own {@code
+         * Work.Unattended.MaxCycles}, already reader-defaulted) clamped by
+         * {@link #maxUnattendedGatherCycles} when authored. A null or non-positive owner value
+         * leaves {@code actionMax} alone - "no owner ceiling" has the same one spelling
+         * {@link #atCapacity} gives the other limits.
+         */
+        public int clampGatherCycles(int actionMax) {
+            return maxUnattendedGatherCycles != null && maxUnattendedGatherCycles > 0
+                    ? Math.min(actionMax, maxUnattendedGatherCycles) : actionMax;
         }
 
         /**

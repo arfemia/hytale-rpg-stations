@@ -153,7 +153,9 @@ import com.ziggfreed.rpgstations.util.Log;
  * resolution check carried per socket), {@code CONSUME_SOCKET_UNKNOWN}/{@code
  * PRODUCE_SOCKET_UNKNOWN} (a recipe row or step phase addressing a socket the action's Custody
  * never declares), {@code INGREDIENT_SOCKET_ON_INVENTORY_ROUTE} (a socket address on an
- * inventory-routed phase, the decode warn promoted to a coded finding), and {@code
+ * inventory-routed phase, the decode warn promoted to a coded finding), {@code
+ * SOCKET_MAX_EXCEEDS_CUSTODY_MAX} (a socket cap above the custody-level cap - the effective
+ * capacity is the smaller of the two; the audit sibling of Custody's decode-time warn), and {@code
  * STAMP_WITHOUT_MAIN_PILE} (INFO - Stamp reads the {@code main} pile's unique stack, so sockets
  * that exclude {@code main} leave it nothing to enhance). Patterns ({@link #validatePatterns}):
  * {@code PATTERN_ACTIVATE_BLOCK_UNKNOWN}/{@code PATTERN_REVERT_UNRESOLVABLE} (unknown item ids),
@@ -1846,6 +1848,16 @@ public final class StationValidator {
                                     + " never custody), so those leaves are inert; keep only"
                                     + " At/Match/Required/Label on it", id));
                 }
+            }
+            // The audit sibling of Custody's decode-time warn for the same authoring: a socket cap
+            // above the custody cap never raises capacity (the effective cap is the smaller of the
+            // two), so /validate surfaces it beside the other socket findings.
+            if (socket.getMaxQuantity() != null && custody.getMaxQuantity() != null
+                    && socket.getMaxQuantity() > custody.getMaxQuantity()) {
+                out.add(Finding.warning(DOMAIN, "SOCKET_MAX_EXCEEDS_CUSTODY_MAX",
+                        sLabel + ".MaxQuantity (" + socket.getMaxQuantity()
+                                + ") exceeds the custody-level MaxQuantity (" + custody.getMaxQuantity()
+                                + ") - the effective capacity is the smaller of the two", id));
             }
         }
     }

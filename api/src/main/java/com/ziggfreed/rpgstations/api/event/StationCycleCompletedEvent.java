@@ -1,6 +1,7 @@
 package com.ziggfreed.rpgstations.api.event;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import javax.annotation.Nonnull;
@@ -41,7 +42,7 @@ import com.ziggfreed.rpgstations.api.StationContribution;
  *
  * <p><b>Plain data</b> ({@link #playerId()}, {@link #sessionId()}, {@link #stationId()},
  * {@link #actionId()}, {@link #cycleIndex()}, {@link #idle()}, {@link #contributions()},
- * {@link #oneShotContributions()}) is always safe to retain. <b>Live
+ * {@link #oneShotContributions()}, {@link #socketCounts()}) is always safe to retain. <b>Live
  * world-thread context</b> ({@link #store()}, {@link #commandBuffer()}, {@link #playerRef()}) is
  * valid ONLY synchronously during dispatch; a listener that defers work must capture the plain
  * fields and re-resolve.
@@ -60,12 +61,14 @@ public final class StationCycleCompletedEvent implements IEvent<Void> {
     @Nonnull private final List<StationContribution> contributions;
     @Nonnull private final List<StationContribution> oneShotContributions;
     private final double contributionScale;
+    @Nonnull private final Map<String, Integer> socketCounts;
 
     public StationCycleCompletedEvent(@Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull PlayerRef playerRef,
             @Nonnull UUID playerId, @Nonnull UUID sessionId, @Nonnull String stationId, @Nonnull String actionId,
             int cycleIndex, boolean idle, @Nonnull List<StationContribution> contributions,
-            @Nonnull List<StationContribution> oneShotContributions, double contributionScale) {
+            @Nonnull List<StationContribution> oneShotContributions, double contributionScale,
+            @Nonnull Map<String, Integer> socketCounts) {
         this.store = store;
         this.commandBuffer = commandBuffer;
         this.playerRef = playerRef;
@@ -78,6 +81,7 @@ public final class StationCycleCompletedEvent implements IEvent<Void> {
         this.contributions = List.copyOf(contributions);
         this.oneShotContributions = List.copyOf(oneShotContributions);
         this.contributionScale = contributionScale;
+        this.socketCounts = Map.copyOf(socketCounts);
     }
 
     @Nonnull
@@ -159,5 +163,17 @@ public final class StationCycleCompletedEvent implements IEvent<Void> {
      */
     public double contributionScale() {
         return contributionScale;
+    }
+
+    /**
+     * Per-socket-id counts of the items this cycle's COMMITTED {@code Produce} landed in placed
+     * custody, keyed by the receiving socket id (a socket-less custody's one implicit pile
+     * reports under {@code "main"}). A cycle whose produce went to the worker's inventory - or
+     * that produced nothing - reports an EMPTY map, never null. Plain data (an immutable copy),
+     * always safe to retain.
+     */
+    @Nonnull
+    public Map<String, Integer> socketCounts() {
+        return socketCounts;
     }
 }

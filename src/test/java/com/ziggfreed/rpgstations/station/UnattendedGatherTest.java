@@ -15,6 +15,7 @@ import com.ziggfreed.common.factor.FactorFormula;
 import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.ContributionScale;
+import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
@@ -158,5 +159,41 @@ class UnattendedGatherTest {
         accrued.put(StationUnattended.accrualKey(0), 100);
         assertEquals(24, StationUnattended.gatherPlan(accrued,
                 StationAsset.Work.Unattended.of(null, null, null).effectiveMaxCycles()).grantCycles());
+    }
+
+    // ==================== the owner ceiling (Settings Limits.MaxUnattendedGatherCycles) ====================
+
+    @Test
+    void gatherCeiling_ownerCeilingClampsWhatOneGatherPays() {
+        // The owner ceiling composes as min of caps over the action's own knob, and the clamped
+        // value is exactly what the gather plan budgets.
+        RpgStationsSettingsAsset.Limits limits =
+                RpgStationsSettingsAsset.Limits.of(null, null, null, null, 5);
+        int ceiling = limits.clampGatherCycles(
+                StationAsset.Work.Unattended.of(null, null, null).effectiveMaxCycles());
+        assertEquals(5, ceiling, "the owner ceiling tightens the action's 24");
+
+        Map<String, Integer> accrued = new LinkedHashMap<>();
+        accrued.put(StationUnattended.accrualKey(0), 100);
+        assertEquals(5, StationUnattended.gatherPlan(accrued, ceiling).grantCycles());
+    }
+
+    @Test
+    void gatherCeiling_noOwnerCeiling_theActionKnobAloneApplies() {
+        RpgStationsSettingsAsset.Limits limits =
+                RpgStationsSettingsAsset.Limits.of(null, null, null, null, null);
+        assertEquals(24, limits.clampGatherCycles(24), "null = no owner ceiling");
+    }
+
+    @Test
+    void gatherCeiling_minOfCapsWhenBothAuthored() {
+        // Whichever cap is smaller wins, in both directions: the owner ceiling can only tighten
+        // an action's knob, never raise it.
+        RpgStationsSettingsAsset.Limits looseOwner =
+                RpgStationsSettingsAsset.Limits.of(null, null, null, null, 50);
+        assertEquals(24, looseOwner.clampGatherCycles(24), "a looser owner ceiling changes nothing");
+        RpgStationsSettingsAsset.Limits tightOwner =
+                RpgStationsSettingsAsset.Limits.of(null, null, null, null, 8);
+        assertEquals(8, tightOwner.clampGatherCycles(24), "a tighter owner ceiling wins");
     }
 }
