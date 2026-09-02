@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -275,5 +276,46 @@ class StationRefundLedgerTest {
         assertEquals(2, claim.totalQuantity("meat"), "the drained items return to their own pile");
         assertEquals(owner, claim.pileOwner("meat"),
                 "the refund never re-owns the pile - the worker gets nothing of the owner's");
+    }
+
+    @Test
+    void sessionStopDuringAnOpenDonenessWindow_neitherRefundsNorDuplicatesTheBatch() {
+        // The D38 window case: consume ingredients, produce the batch To:Custody (which opens a
+        // doneness ready window on the output pile), then stop mid-window. Three halves, one rule:
+        // (1) the committed produce cleared BOTH refund-ledger halves, so nothing re-grants the
+        // consumed inputs; (2) the hand-back sweep EXEMPTS the windowed pile, so the produced
+        // batch is not handed back either - it belongs to the pile, the window keeps running (it
+        // is world state now); (3) the window record itself is untouched by the stop.
+        UUID worker = UUID.randomUUID();
+        StationSession s = session();
+        s.playerUuid = worker;
+        StationCustodyClaim claim = new StationCustodyClaim(worker, "cookingpit", "stew", 0, 64, 0);
+
+        // Consume phase (from custody) -> the ledger tracks the drained ingredients.
+        claim.addTo("ingredients", worker, "Food_Meat_Raw", 2);
+        Map<String, Integer> drainedOut = new LinkedHashMap<>();
+        StationCustody.drainFromPile(claim.items("ingredients"), "Food_Meat_Raw", null, 2,
+                id -> new String[0], drainedOut);
+        StationService.recordIterationConsumedCustody(s, "w:0:64:0", "ingredients", drainedOut);
+        assertFalse(s.iterationConsumedCustody.isEmpty());
+
+        // Produce phase To:Custody -> the batch lands in the output pile, the ledger clears, and
+        // the window opens (the producePhase order).
+        claim.addTo("output", worker, "Food_Stew", 1);
+        StationService.clearIterationLedgerOnCommittedProduce(s);
+        claim.noteDonenessBatch("output", 42_000L);
+
+        // Stop mid-window: (1) no refund source remains...
+        assertTrue(s.iterationConsumed.isEmpty());
+        assertTrue(s.iterationConsumedCustody.isEmpty(),
+                "the produced batch replaced the consumed inputs - a stop refunds nothing");
+        // ...(2) the hand-back sweep leaves the windowed pile standing (no duplicate grant; the
+        // drained-empty ingredients pile record still hands back as always)...
+        assertEquals(List.of("ingredients"), StationService.pilesToHandBack(claim, worker),
+                "the windowed output pile is exempt from the present-player hand-back");
+        // ...(3) and the window itself keeps running, untouched by session teardown.
+        assertEquals(42_000L, claim.donenessWindowStart());
+        assertEquals("output", claim.donenessWindowSocketId());
+        assertEquals(1, claim.totalQuantity("output"), "the batch stays in the pile, exactly once");
     }
 }

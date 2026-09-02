@@ -8,6 +8,7 @@ import com.hypixel.hytale.assetstore.codec.AssetBuilderCodec;
 import com.hypixel.hytale.assetstore.map.DefaultAssetMap;
 import com.hypixel.hytale.assetstore.map.JsonAssetWithMap;
 import com.hypixel.hytale.codec.Codec;
+import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
@@ -513,6 +514,7 @@ public final class StationAsset
         @Nullable protected Conversion[] conversions;
         @Nullable protected FromCrafting fromCrafting;
         @Nullable protected Yield yield;
+        @Nullable protected Doneness doneness;
 
         public static final BuilderCodec<Recipe> CODEC = BuilderCodec.builder(Recipe.class, Recipe::new)
                 .appendInherited(new KeyedCodec<>("Conversions",
@@ -527,6 +529,9 @@ public final class StationAsset
                 .appendInherited(new KeyedCodec<>("Yield", Yield.CODEC, false),
                         (o, v) -> o.yield = v, o -> o.yield, (o, p) -> o.yield = p.yield)
                 .documentation("Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived); null = each conversion's own authored quantity, unchanged.").add()
+                .appendInherited(new KeyedCodec<>("Doneness", Doneness.CODEC, false),
+                        (o, v) -> o.doneness = v, o -> o.doneness, (o, p) -> o.doneness = p.doneness)
+                .documentation("The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window.").add()
                 .build();
 
         @Nonnull
@@ -542,10 +547,18 @@ public final class StationAsset
         @Nonnull
         public static Recipe of(@Nullable Conversion[] conversions, @Nullable FromCrafting fromCrafting,
                 @Nullable Yield yield) {
+            return of(conversions, fromCrafting, yield, null);
+        }
+
+        /** As above, plus the recipe-level {@link Doneness} default. */
+        @Nonnull
+        public static Recipe of(@Nullable Conversion[] conversions, @Nullable FromCrafting fromCrafting,
+                @Nullable Yield yield, @Nullable Doneness doneness) {
             Recipe r = new Recipe();
             r.conversions = conversions;
             r.fromCrafting = fromCrafting;
             r.yield = yield;
+            r.doneness = doneness;
             return r;
         }
 
@@ -563,6 +576,12 @@ public final class StationAsset
         @Nullable
         public Yield getYield() {
             return yield;
+        }
+
+        /** The recipe-level {@link Doneness} default (per-leaf, conversion wins); null = no default window. */
+        @Nullable
+        public Doneness getDoneness() {
+            return doneness;
         }
 
         /** True when this recipe can actually produce something (authored conversions or a derive rule). */
@@ -650,6 +669,100 @@ public final class StationAsset
         @Nullable
         public Integer getMax() {
             return max;
+        }
+    }
+
+    /**
+     * The optional READY WINDOW on produced output: after a cycle lands its output in a custody
+     * pile, the batch sits collectable for {@link #readyMs} of WORLD GAME TIME, then degrades once
+     * to the {@link #overdone} items if nobody gathered it. ONE unambiguous window - no stages, no
+     * second timer. Authorable at TWO altitudes with PER-LEAF precedence: on a {@link Conversion}
+     * (that row's own window) and on the {@link Recipe} (the default every row without its own
+     * leaf inherits, {@code FromCrafting}-derived rows included) - the conversion-level leaf wins,
+     * mirroring the per-cycle time precedence chain. Resolve through {@link #resolve}.
+     *
+     * <p><b>The clock is world GAME time, never wall clock</b>: game time stands still while the
+     * server is down, so an outage cooks and burns nothing - a batch mid-window at shutdown is
+     * exactly as done at the next boot as it was at the stop.
+     *
+     * <p>Both leaves are independent: {@link #readyMs} with no {@link #overdone} is legal and
+     * purely presentational (the Ready look and moment, nothing ever degrades); {@link #overdone}
+     * with no reachable {@code ReadyMs} never opens a window (the validator warns). An
+     * {@code Overdone} entry follows the OUTPUT route rules: exact {@code ItemId} only - an entry
+     * authoring no route, a {@code ResourceTypeId}, or {@code Tags} is warned about and ignored.
+     */
+    public static final class Doneness {
+        @Nullable protected Long readyMs;
+        @Nullable protected Ingredient[] overdone;
+
+        public static final BuilderCodec<Doneness> CODEC = BuilderCodec.builder(Doneness.class, Doneness::new)
+                .appendInherited(new KeyedCodec<>("ReadyMs", Codec.LONG, false),
+                        (o, v) -> o.readyMs = v, o -> o.readyMs, (o, p) -> o.readyMs = p.readyMs)
+                .documentation("How long, in world GAME-TIME milliseconds, a produced batch sits Ready in its custody pile before degrading. Game time stands still while the server is down, so an outage never burns anything. Omit for no window (output waits indefinitely).")
+                .addValidator(CodecWarnValidators.positive("Doneness.ReadyMs should be positive; a non-positive value opens no window.")).add()
+                .appendInherited(new KeyedCodec<>("Overdone",
+                                new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
+                        (o, v) -> o.overdone = v, o -> o.overdone, (o, p) -> o.overdone = p.overdone)
+                .documentation("What the windowed pile collapses to once the window expires: exact-ItemId entries, each Quantity scaled by the number of batches produced into the window. Omit to make the window purely presentational (the Ready look and moment, nothing degrades).").add()
+                .afterDecode((Doneness doneness, ExtraInfo extraInfo) -> {
+                    if (doneness.overdone == null) {
+                        return;
+                    }
+                    for (Ingredient entry : doneness.overdone) {
+                        if (entry != null && !entry.hasItemRoute()) {
+                            extraInfo.getValidationResults().warn(
+                                    "Doneness.Overdone entries must author an exact ItemId (an output route);"
+                                            + " a route-less, ResourceTypeId, or Tags entry is ignored.");
+                        }
+                    }
+                })
+                .build();
+
+        /** Java-side factory; sets the same fields the codec fills. */
+        @Nonnull
+        public static Doneness of(@Nullable Long readyMs, @Nullable Ingredient[] overdone) {
+            Doneness d = new Doneness();
+            d.readyMs = readyMs;
+            d.overdone = overdone;
+            return d;
+        }
+
+        /**
+         * The PER-LEAF fold of the two authoring altitudes: the conversion-level leaf where
+         * authored, else the recipe-level default (so a derived row, or an authored row with no
+         * {@code Doneness} group at all, inherits {@code Recipe.Doneness} whole, and a row
+         * authoring only one leaf still inherits the other). {@code null} when neither altitude
+         * authors the group.
+         */
+        @Nullable
+        public static Doneness resolve(@Nullable Doneness conversionLevel, @Nullable Doneness recipeLevel) {
+            if (conversionLevel == null) {
+                return recipeLevel;
+            }
+            if (recipeLevel == null) {
+                return conversionLevel;
+            }
+            Doneness d = new Doneness();
+            d.readyMs = conversionLevel.readyMs != null ? conversionLevel.readyMs : recipeLevel.readyMs;
+            d.overdone = conversionLevel.overdone != null ? conversionLevel.overdone : recipeLevel.overdone;
+            return d;
+        }
+
+        /** The window length in game-time ms, or null for no window. */
+        @Nullable
+        public Long getReadyMs() {
+            return readyMs;
+        }
+
+        /** The authored degrade result (exact-ItemId entries; invalid entries are ignored at settle), or null. */
+        @Nullable
+        public Ingredient[] getOverdone() {
+            return overdone;
+        }
+
+        /** True when a positive {@link #readyMs} is authored - the window can actually open. */
+        public boolean hasReadyWindow() {
+            return readyMs != null && readyMs > 0;
         }
     }
 
@@ -839,6 +952,7 @@ public final class StationAsset
         @Nullable protected String category;
         @Nullable protected Integer tier;
         @Nullable protected Boolean isExactSet;
+        @Nullable protected Doneness doneness;
         /** Engine-side mark (never authored/encoded): true on a {@code FromCrafting}-derived row. */
         transient boolean derived;
 
@@ -861,6 +975,9 @@ public final class StationAsset
                 .appendInherited(new KeyedCodec<>("IsExactSet", Codec.BOOLEAN, false),
                         (o, v) -> o.isExactSet = v, o -> o.isExactSet, (o, p) -> o.isExactSet = p.isExactSet)
                 .documentation("When true, the row matches only while the pile(s) its inputs draw from hold nothing beyond those inputs (per drawn socket; other sockets never block). Defaults to false. Author exact-set rows before looser rows at the same tier.").add()
+                .appendInherited(new KeyedCodec<>("Doneness", Doneness.CODEC, false),
+                        (o, v) -> o.doneness = v, o -> o.doneness, (o, p) -> o.doneness = p.doneness)
+                .documentation("This row's own ready window; each leaf falls back to the Recipe-level Doneness default. Null = the recipe default whole.").add()
                 .build();
 
         /** Convenience for the classic one-in/one-out conversion. */
@@ -985,27 +1102,50 @@ public final class StationAsset
             return Boolean.TRUE.equals(isExactSet);
         }
 
+        /**
+         * This row's own ready window (per leaf; each unauthored leaf falls back to the
+         * recipe-level default - fold through {@link Doneness#resolve}), or null for the recipe
+         * default whole.
+         */
+        @Nullable
+        public Doneness getDoneness() {
+            return doneness;
+        }
+
         /** True on a {@code FromCrafting}-derived row (engine mark, never authored). */
         public boolean isDerived() {
             return derived;
         }
 
-        /** Copy-with: the same row carrying an explicit {@link #tier}; the derived mark is carried over. */
+        /** Copy-with: the same row carrying an explicit {@link #tier}; every other leaf and the derived mark are carried over. */
         @Nonnull
         public Conversion withTier(@Nullable Integer tier) {
             Conversion c = of(input, output, durationMs, category);
             c.tier = tier;
             c.isExactSet = isExactSet;
+            c.doneness = doneness;
             c.derived = derived;
             return c;
         }
 
-        /** Copy-with: the same row carrying an explicit {@link #isExactSet}; the derived mark is carried over. */
+        /** Copy-with: the same row carrying an explicit {@link #isExactSet}; every other leaf and the derived mark are carried over. */
         @Nonnull
         public Conversion withExactSet(@Nullable Boolean isExactSet) {
             Conversion c = of(input, output, durationMs, category);
             c.tier = tier;
             c.isExactSet = isExactSet;
+            c.doneness = doneness;
+            c.derived = derived;
+            return c;
+        }
+
+        /** Copy-with: the same row carrying an explicit {@link #doneness}; every other leaf and the derived mark are carried over. */
+        @Nonnull
+        public Conversion withDoneness(@Nullable Doneness doneness) {
+            Conversion c = of(input, output, durationMs, category);
+            c.tier = tier;
+            c.isExactSet = isExactSet;
+            c.doneness = doneness;
             c.derived = derived;
             return c;
         }

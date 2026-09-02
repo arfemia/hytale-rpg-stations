@@ -280,7 +280,7 @@ public final class Custody {
 
     /**
      * The block-state names custody flips between; nullable leaves each mean "no flip for that
-     * side". Three INDEPENDENT, individually-nullable knobs, never a mode: a station may author any
+     * side". Five INDEPENDENT, individually-nullable knobs, never a mode: a station may author any
      * subset (an {@code Empty}-only pair is legal, a {@code Working}-only station is legal), and an
      * unauthored leaf simply skips that flip.
      *
@@ -298,6 +298,19 @@ public final class Custody {
      * defaulting to "a step that both Consumes and Produces is a convert". Omitting {@code Working}
      * is byte-identical to the pre-knob behavior - no extra flip ever happens.
      *
+     * <p><b>{@link #ready} / {@link #overdone} (the doneness pair):</b> the looks of a produced
+     * batch waiting in a custody pile under an open {@code Doneness} ready window ({@code Ready}),
+     * and of a pile whose window expired and collapsed to its {@code Overdone} items
+     * ({@code Overdone}). {@code Ready} shows once output lands with a window open and between
+     * work (the {@code Working} look wins while a work step actually runs); {@code Overdone}
+     * shows from the expiry settle until the pile is gathered or reloaded. Both are inert on a
+     * station whose recipe authors no {@code Doneness}.
+     *
+     * <p><b>The state SET is closed by code - overlay is not extension.</b> These five leaves are
+     * every state the engine will ever flip to; an extension or pack may re-skin the NAME each
+     * leaf resolves to (point {@code Loaded} at its own block-state variant), but can never add a
+     * sixth state, because no collection exists here to append to.
+     *
      * <p>Every named state must exist in the block's own {@code BlockType.State.Definitions} (a
      * state variant is a generated {@code BlockType} asset); a name the block never authored is a
      * silent no-op, retried on the next flip.
@@ -306,6 +319,8 @@ public final class Custody {
         @Nullable protected String empty;
         @Nullable protected String loaded;
         @Nullable protected String working;
+        @Nullable protected String ready;
+        @Nullable protected String overdone;
 
         public static final BuilderCodec<States> CODEC = BuilderCodec.builder(States.class, States::new)
                 .appendInherited(new KeyedCodec<>("Empty", Codec.STRING, false),
@@ -317,6 +332,12 @@ public final class Custody {
                 .appendInherited(new KeyedCodec<>("Working", Codec.STRING, false),
                         (o, v) -> o.working = v, o -> o.working, (o, p) -> o.working = p.working)
                 .documentation("The block State.Definitions name shown ONLY while a work step is actively executing at this block; reverts to Loaded/Empty on step exit and every session stop. Omit for no working flip.").add()
+                .appendInherited(new KeyedCodec<>("Ready", Codec.STRING, false),
+                        (o, v) -> o.ready = v, o -> o.ready, (o, p) -> o.ready = p.ready)
+                .documentation("The block State.Definitions name shown while a produced batch waits in custody under an open Doneness ready window (the Working look wins while work actually runs). Omit for no ready flip.").add()
+                .appendInherited(new KeyedCodec<>("Overdone", Codec.STRING, false),
+                        (o, v) -> o.overdone = v, o -> o.overdone, (o, p) -> o.overdone = p.overdone)
+                .documentation("The block State.Definitions name shown after a ready window expired and the pile collapsed to its Overdone items, until that pile is gathered or reloaded. Omit for no overdone flip.").add()
                 .build();
 
         /**
@@ -328,13 +349,22 @@ public final class Custody {
             return of(empty, loaded, null);
         }
 
-        /** Java-side factory; sets the same fields the codec fills. */
+        /** Three-leaf factory (no doneness pair); kept for callers pre-dating the ready window. */
         @Nonnull
         public static States of(@Nullable String empty, @Nullable String loaded, @Nullable String working) {
+            return of(empty, loaded, working, null, null);
+        }
+
+        /** Java-side factory; sets the same fields the codec fills. */
+        @Nonnull
+        public static States of(@Nullable String empty, @Nullable String loaded, @Nullable String working,
+                @Nullable String ready, @Nullable String overdone) {
             States s = new States();
             s.empty = empty;
             s.loaded = loaded;
             s.working = working;
+            s.ready = ready;
+            s.overdone = overdone;
             return s;
         }
 
@@ -351,6 +381,18 @@ public final class Custody {
         @Nullable
         public String getWorking() {
             return working;
+        }
+
+        /** The waiting-Ready look under an open doneness window, or null for no ready flip. */
+        @Nullable
+        public String getReady() {
+            return ready;
+        }
+
+        /** The collapsed-Overdone look after a window expired, or null for no overdone flip. */
+        @Nullable
+        public String getOverdone() {
+            return overdone;
         }
     }
 

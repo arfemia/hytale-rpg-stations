@@ -1,6 +1,7 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.awt.Color;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -53,6 +54,7 @@ import com.hypixel.hytale.server.core.inventory.transaction.ResourceSlotTransact
 import com.hypixel.hytale.server.core.inventory.transaction.ResourceTransaction;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
+import com.hypixel.hytale.server.core.modules.time.WorldTimeResource;
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.Interaction;
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.RootInteraction;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
@@ -448,6 +450,12 @@ public final class StationService {
         // LIVE off the block's chunk-persisted stash, so a claim placed before a restart still
         // commits to its own action here.
         StationCustodyClaim preClaim = custodyClaimAt(world, blockX, blockY, blockZ);
+        // Doneness first-touch settle: an expired ready window collapses BEFORE anything reads
+        // the claim (the display respawn, the action commit, placement routing below), so what
+        // this press sees and works with is the settled truth - the L4 first-touch posture.
+        if (preClaim != null) {
+            settleDonenessAt(world, preClaim, commandBuffer, playerRef, ref);
+        }
         if (preClaim != null && !preClaim.isEmpty()) {
             // First touch after a restart: the stash survived but its display prop (volatile by
             // construction) did not - respawn it so the player SEES their placed materials. Runs
@@ -877,6 +885,15 @@ public final class StationService {
         // catalog re-fold can never swap a moment out from under a running run.
         s.moments = action.getMoments();
 
+        // The recipe-level Doneness default, snapshotted like every other resolved config value.
+        // The conversion-level altitude folds per settled row where a caller knows one; an
+        // authored program's custody produce runs no conversion, so the recipe default IS its
+        // window. Null when the recipe authors none - the doneness path then costs this session
+        // nothing per heartbeat.
+        StationAsset.Recipe recipeForDoneness = action.getRecipe();
+        s.doneness = recipeForDoneness != null
+                ? StationAsset.Doneness.resolve(null, recipeForDoneness.getDoneness()) : null;
+
         s.idleEnabled = idleEnabled;
         s.idleCycleMs = StationToolScaling.resolvedIdleCycleMs(
                 idleGroup != null ? idleGroup.getCycleMs() : null, s.cycleMs);
@@ -1091,6 +1108,18 @@ public final class StationService {
         if (!stationsEnabled()) {
             stop(s, StopReason.FEATURE_DISABLED, store, commandBuffer);
             return false;
+        }
+        // Doneness while ENGAGED (throttled): the engaged session is itself a touch of its
+        // primary block's stash, so a pot can burn under a player who keeps standing there (a
+        // Duration hold longer than the window, an idle stretch). Guarded on the snapshot so a
+        // window-less action never pays the claim resolve.
+        if (s.doneness != null && s.doneness.hasReadyWindow()) {
+            long nowMs = System.currentTimeMillis();
+            if (nowMs >= s.nextDonenessSettleAtMs) {
+                s.nextDonenessSettleAtMs = nowMs + DONENESS_SETTLE_MS;
+                settleDoneness(world, custodyClaimAt(world, s.blockX, s.blockY, s.blockZ), s.doneness,
+                        commandBuffer, s.playerRef, s.ref);
+            }
         }
         StationHoldController.applyHold(s, store);
         return true;
@@ -4187,6 +4216,11 @@ public final class StationService {
             }
             stash.setTag(StationCustodyClaim.demotedToPatternOnly(tag));
             stash.setOwner(null);
+            // The custody clocks go with the custody half: a demoted stash keeps only its
+            // structure mark, so a doneness window stamp (ProgressGameTime) or an unattended
+            // catch-up stamp (LastGameTime) left behind would be stale bookkeeping over nothing.
+            stash.setProgressGameTime(null);
+            stash.setLastGameTime(null);
             Map<String, StashPile> piles = stash.getPiles();
             if (piles != null) {
                 piles.clear();
@@ -4940,10 +4974,27 @@ public final class StationService {
             }
             StationCustodyClaim claim = custodyClaimAt(world, coords[0], coords[1], coords[2]);
             if (claim != null && claim.ownerId.equals(s.playerUuid)) {
-                removeOrDemoteStashAt(world, coords[0], coords[1], coords[2]);
-                despawnDisplay(blockKey, commandBuffer);
-                giveClaimToOwner(commandBuffer, ownerStore, s.ref, claim,
-                        claim.blockX, claim.blockY, claim.blockZ);
+                String windowedSocket = claim.donenessWindowStart() != null
+                        ? claim.donenessWindowSocketId() : null;
+                if (windowedSocket == null) {
+                    removeOrDemoteStashAt(world, coords[0], coords[1], coords[2]);
+                    despawnDisplay(blockKey, commandBuffer);
+                    giveClaimToOwner(commandBuffer, ownerStore, s.ref, claim,
+                            claim.blockX, claim.blockY, claim.blockZ);
+                } else {
+                    // Doneness (the D38 window case, anchor form): the pile under the OPEN ready
+                    // window stays standing with its window running; every OTHER pile this player
+                    // owns hands back exactly as before.
+                    List<ItemStack> stacks = new ArrayList<>();
+                    for (String socketId : pilesToHandBack(claim, s.playerUuid)) {
+                        stacks.addAll(claim.toItemStacks(socketId));
+                        claim.removePile(socketId);
+                        despawnDisplay(blockKey, socketId, commandBuffer);
+                    }
+                    claim.markDirty();
+                    handBackToOwner(commandBuffer, ownerStore, s.ref, stacks,
+                            claim.blockX, claim.blockY, claim.blockZ);
+                }
             }
             // Anchor block-state reset, mirroring the flip returnCustody already does for the
             // PRIMARY block: a program can hand an anchor its Loaded look and then harvest it
@@ -5479,10 +5530,21 @@ public final class StationService {
         if (claim == null) {
             return;
         }
-        List<String> ownedPiles = claim.pileIdsOwnedBy(s.playerUuid);
+        // The D38 window case rides inside pilesToHandBack: a pile under an OPEN ready window
+        // belongs to the WORLD now - the produced batch stays in it and the window keeps running,
+        // so a stop neither refunds the already-produced output nor duplicates it. The batch is
+        // gathered later (press-F on its display), or expires into its Overdone items where it
+        // stands.
+        List<String> ownedPiles = pilesToHandBack(claim, s.playerUuid);
+        String windowedSocket = claim.donenessWindowStart() != null ? claim.donenessWindowSocketId() : null;
         if (ownedPiles.isEmpty()) {
-            // Nothing of this session's player to touch - never silently swallow another
-            // player's placed items.
+            // Nothing of this session's player to touch (a windowed pile stays standing) - never
+            // silently swallow another player's placed items.
+            if (windowedSocket != null && custody != null) {
+                setBlockState(world, s.blockX, s.blockY, s.blockZ,
+                        StationDoneness.restingStateName(custody.getStates(), claim.totalQuantity() > 0,
+                                true, claim.anyDonenessOverdoneMarked()));
+            }
             return;
         }
         Store<EntityStore> ownerStore = null;
@@ -5507,8 +5569,12 @@ public final class StationService {
             claim.markDirty();
         }
         handBackToOwner(commandBuffer, ownerStore, s.ref, stacks, s.blockX, s.blockY, s.blockZ);
-        if (custody != null && claim.isEmpty()) {
-            flipCustodyState(world, s.blockX, s.blockY, s.blockZ, custody, false);
+        if (custody != null && (claim.isEmpty() || windowedSocket != null)) {
+            // Resting-state reset: Empty when nothing is left; a standing windowed pile keeps its
+            // Ready look (or Loaded where none is authored).
+            setBlockState(world, s.blockX, s.blockY, s.blockZ,
+                    StationDoneness.restingStateName(custody.getStates(), claim.totalQuantity() > 0,
+                            windowedSocket != null, claim.anyDonenessOverdoneMarked()));
         }
     }
 
@@ -5661,6 +5727,11 @@ public final class StationService {
                 return;
             }
             StationCustodyClaim claim = custodyClaimAt(world, blockKey);
+            // Doneness settle BEFORE deciding: an expired window collapses first, so an
+            // overdue gather retrieves the settled Overdone items, never the vanished batch.
+            if (claim != null) {
+                settleDonenessAt(world, claim, commandBuffer, playerRef, ref);
+            }
             boolean hasActiveSession = blockKey != null && sessionWorkingAt(blockKey);
             Custody claimCustody = null;
             if (claim != null) {
@@ -5685,7 +5756,15 @@ public final class StationService {
                 // holding when they reached for it, not whatever the retrieved stack just became.
                 playCollectAnimation(store, ref);
                 List<ItemStack> pileStacks = claim.toItemStacks(socketId);
+                // Gathering the WINDOWED pile before expiry clears its ready window (the batches
+                // key leaves with the pile; the start stamp is cleared here) - the block then
+                // resets to Loaded/Empty per whatever remains.
+                boolean gatheredWindowed = claim.donenessWindowStart() != null
+                        && socketId.equals(claim.donenessWindowSocketId());
                 claim.removePile(socketId);
+                if (gatheredWindowed) {
+                    claim.clearDonenessWindowStamp();
+                }
                 despawnDisplay(blockKey, socketId, commandBuffer);
                 if (!claim.hasAnyPile()) {
                     removeOrDemoteStashAt(world, claim.blockX, claim.blockY, claim.blockZ);
@@ -5695,9 +5774,17 @@ public final class StationService {
                 }
                 List<ItemStack> landed = handBackToOwner(commandBuffer, store, ref, pileStacks,
                         claim.blockX, claim.blockY, claim.blockZ);
-                if (claimCustody != null && claim.isEmpty()) {
+                if (claimCustody != null) {
                     try {
-                        flipCustodyState(world, claim.blockX, claim.blockY, claim.blockZ, claimCustody, false);
+                        // Resting-state reset per what remains: Empty when nothing is left,
+                        // Ready/Overdone when another pile still wears the window/mark, else
+                        // Loaded.
+                        setBlockState(world, claim.blockX, claim.blockY, claim.blockZ,
+                                StationDoneness.restingStateName(claimCustody.getStates(),
+                                        claim.totalQuantity() > 0,
+                                        claim.donenessWindowStart() != null
+                                                && claim.donenessWindowSocketId() != null,
+                                        claim.anyDonenessOverdoneMarked()));
                     } catch (Throwable t) {
                         Log.fine("STATION retrieve block-state flip failed: " + t.getMessage());
                     }
@@ -5962,8 +6049,10 @@ public final class StationService {
     }
 
     /**
-     * Takes whatever block this player's session left in its Working look back OUT of it - to
-     * {@code Loaded} when a custody claim still stands there, else {@code Empty}. Idempotent (a
+     * Takes whatever block this player's session left in its Working look back OUT of it - to its
+     * RESTING look ({@link StationDoneness#restingStateName}: {@code Loaded} when a custody claim
+     * still stands there, {@code Ready} under an open doneness window, {@code Overdone} over a
+     * collapsed pile, else {@code Empty}). Idempotent (a
      * session with no live flip no-ops), so it can be called freely from every "work is no longer
      * running here" moment: the step engine calls it on entering any non-working step and on
      * entering a {@code Walk} phase, and {@link #stop} calls it unconditionally so EVERY exit path
@@ -5990,7 +6079,14 @@ public final class StationService {
             return;
         }
         StationCustodyClaim claim = custodyClaimAt(world, flip.x(), flip.y(), flip.z());
-        flipCustodyState(world, flip.x(), flip.y(), flip.z(), custody, claim != null && claim.totalQuantity() > 0);
+        // The RESTING look for whatever the claim holds: Empty, Loaded, a waiting batch's Ready
+        // (open doneness window), or a collapsed pile's Overdone.
+        setBlockState(world, flip.x(), flip.y(), flip.z(),
+                StationDoneness.restingStateName(custody.getStates(),
+                        claim != null && claim.totalQuantity() > 0,
+                        claim != null && claim.donenessWindowStart() != null
+                                && claim.donenessWindowSocketId() != null,
+                        claim != null && claim.anyDonenessOverdoneMarked()));
     }
 
     /** This session's world, or {@code null} when its entity is gone (a shutdown/disconnect stop). */
@@ -6003,6 +6099,336 @@ public final class StationService {
             return WorldEvictors.worldOf(s.ref);
         } catch (Throwable ignored) {
             return null;
+        }
+    }
+
+    // ==================== The doneness ready window (decision 87/88) ====================
+    //
+    // A produced batch landing in a custody pile under a resolved Doneness.ReadyMs opens ONE
+    // ready window per stash, recorded on persisted GAME-TIME leaves (see StationCustodyClaim's
+    // doneness accessors), and every touch point that already reads the stash settles it LAZILY
+    // through the ONE settleDoneness core below: the toggle/placement first touch, press-F
+    // retrieval, the engaged session's throttled heartbeat, and any future sessionless pass. Game
+    // time stands still while the server is down, so an outage cooks and burns nothing.
+
+    /** How often an ENGAGED session's heartbeat re-checks its primary block's open window (wall-clock throttle). */
+    static final long DONENESS_SETTLE_MS = 1000L;
+
+    /**
+     * The world's current GAME time in epoch milliseconds ({@code WorldTimeResource.getGameTime()},
+     * the same clock the native processing bench elapses against), or {@code null} when the world
+     * or its time resource cannot answer - every doneness operation then no-ops rather than
+     * guessing against wall clock.
+     */
+    @Nullable
+    static Long gameTimeMs(@Nullable World world) {
+        if (world == null) {
+            return null;
+        }
+        try {
+            WorldTimeResource time = world.getEntityStore().getStore()
+                    .getResource(WorldTimeResource.getResourceType());
+            Instant gameTime = time != null ? time.getGameTime() : null;
+            return gameTime != null ? gameTime.toEpochMilli() : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * The RECIPE-level resolved {@code Doneness} of the claim's own committed action (the same
+     * station/action provenance every other claim read uses - never the toucher's selection), or
+     * null when none is authored. This is what the generic touch points settle against; a caller
+     * that knows a specific CONVERSION resolves {@code Doneness.resolve(row, recipe)} itself and
+     * hands the fold to {@link #settleDoneness} directly.
+     */
+    @Nullable
+    private static StationAsset.Doneness donenessForClaim(@Nonnull StationCustodyClaim claim) {
+        StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
+        if (asset == null) {
+            return null;
+        }
+        StationAsset.Recipe recipe = ActionResolver.resolve(asset, claim.actionId).getRecipe();
+        return recipe != null ? StationAsset.Doneness.resolve(null, recipe.getDoneness()) : null;
+    }
+
+    /** The claim's committed action's {@code Custody} group (the block's own state vocabulary), or null. */
+    @Nullable
+    private static Custody custodyOfClaim(@Nonnull StationCustodyClaim claim) {
+        StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
+        return asset != null ? ActionResolver.resolve(asset, claim.actionId).getCustody() : null;
+    }
+
+    /** The claim's occupancy block key ({@code "<worldUuid>:<x>:<y>:<z>"}), or null when the world has no uuid. */
+    @Nullable
+    private static String claimBlockKey(@Nonnull World world, @Nonnull StationCustodyClaim claim) {
+        try {
+            UUID worldUuid = world.getWorldConfig().getUuid();
+            return worldUuid != null
+                    ? StationAnchors.blockKey(worldUuid.toString(), claim.blockX, claim.blockY, claim.blockZ)
+                    : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** True while any live session's Working flip currently holds {@code blockKey} (the Working look wins there). */
+    private boolean blockHeldWorking(@Nullable String blockKey) {
+        if (blockKey == null) {
+            return false;
+        }
+        for (WorkingFlip flip : workingByPlayer.values()) {
+            if (blockKey.equals(flip.blockKey())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The live session working {@code blockKey} (primary block or claimed anchor), or null. The
+     * same two-step walk {@link #sessionWorkingAt} runs, answering the session itself - what the
+     * doneness moments ride when someone IS engaged at the block.
+     */
+    @Nullable
+    private StationSession sessionAt(@Nonnull String blockKey) {
+        UUID occupant = byBlock.get(blockKey);
+        if (occupant != null) {
+            StationSession s = byPlayer.get(occupant);
+            if (s != null && !s.stopped.get()) {
+                return s;
+            }
+        }
+        for (StationSession s : byPlayer.values()) {
+            if (!s.stopped.get()
+                    && (blockKey.equals(s.blockKey) || s.anchorBlocks.containsValue(blockKey))) {
+                return s;
+            }
+        }
+        return null;
+    }
+
+    /** The claim's committed action's own authored {@code Moments} entry for {@code momentId} (canonical lowercase keys), or null. */
+    @Nullable
+    private static Presentation claimActionMoment(@Nonnull StationCustodyClaim claim, @Nonnull String momentId) {
+        StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
+        if (asset == null) {
+            return null;
+        }
+        Map<String, Presentation> moments = ActionResolver.resolve(asset, claim.actionId).getMoments();
+        return moments != null ? moments.get(momentId) : null;
+    }
+
+    /**
+     * {@code Produce.To:"Custody"} committed one whole batch (called ONCE per committed produce
+     * PHASE, never per item): when the session's resolved {@code Doneness} authors a ready window,
+     * (re)stamp the window's game-time start on the receiving stash and count the batch on
+     * {@code socketId}'s pile (a multi-socket phase's window sits on its FIRST produced socket).
+     * A FRESH open (the first batch) additionally flips the block to {@code States.Ready} (unless
+     * a work step is actively holding it in its Working look - the resting flip shows Ready at the
+     * next stop instead), fires the {@code ready} moment through the session's own cue queue, and
+     * toasts the worker; a later batch while the window is open re-stamps the clock silently
+     * ("stirring the pot" - the whole pile's window measures time since the LAST batch landed).
+     */
+    void noteCustodyProduce(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nullable String anchorId,
+            @Nullable String socketId) {
+        StationAsset.Doneness doneness = s.doneness;
+        if (socketId == null || doneness == null || !doneness.hasReadyWindow()) {
+            return;
+        }
+        String blockKey = anchorBlockKeyFor(s, anchorId);
+        int[] coords = blockKey != null ? anchorCoords(s, anchorId, blockKey) : null;
+        World world = sessionWorld(s);
+        Long nowGame = gameTimeMs(world);
+        if (coords == null || nowGame == null) {
+            return;
+        }
+        StationCustodyClaim claim = custodyClaimAt(world, coords[0], coords[1], coords[2]);
+        if (claim == null) {
+            return;
+        }
+        int batches = claim.noteDonenessBatch(socketId, nowGame);
+        claim.markDirty();
+        if (batches != 1) {
+            return;
+        }
+        Custody custody = anchorCustody(s, anchorId, c -> c.getStates() != null, false);
+        Custody.States states = custody != null ? custody.getStates() : null;
+        if (states != null && states.getReady() != null && !states.getReady().isBlank()
+                && !blockHeldWorking(blockKey)) {
+            setBlockState(world, coords[0], coords[1], coords[2], states.getReady());
+        }
+        emitMoment(store, s, StationFlairs.MOMENT_READY, null,
+                new Vector3d(coords[0] + 0.5, coords[1] + 0.5, coords[2] + 0.5));
+        toast(s.playerRef, RpgMsg.tr("ui.station.output_ready"));
+    }
+
+    /**
+     * The piles a present-player stop hands back: the stopping player's OWN piles, MINUS a pile
+     * under an OPEN doneness ready window (the D38 window case: the produced batch belongs to the
+     * pile and the window keeps running - it is world state now, gathered later or expiring where
+     * it stands; a stop must neither refund it nor duplicate it). Pure over the claim record, so
+     * the rule is pinned without a live server; both hand-back paths ({@code returnCustody} and
+     * the anchor sweep) read it.
+     */
+    @Nonnull
+    static List<String> pilesToHandBack(@Nonnull StationCustodyClaim claim, @Nonnull UUID player) {
+        List<String> owned = new ArrayList<>(claim.pileIdsOwnedBy(player));
+        String windowed = claim.donenessWindowStart() != null ? claim.donenessWindowSocketId() : null;
+        if (windowed != null) {
+            owned.remove(windowed);
+        }
+        return owned;
+    }
+
+    /** {@link #settleDoneness} resolving the claim's own recipe-level doneness - the generic touch-point form. */
+    boolean settleDonenessAt(@Nonnull World world, @Nullable StationCustodyClaim claim,
+            @Nullable CommandBuffer<EntityStore> commandBuffer, @Nullable PlayerRef toucher,
+            @Nullable Ref<EntityStore> toucherRef) {
+        return claim == null ? false
+                : settleDoneness(world, claim, donenessForClaim(claim), commandBuffer, toucher, toucherRef);
+    }
+
+    /**
+     * The ONE lazy window-settle core (decision 87): every touch point that reads a stash calls
+     * this (directly or via {@link #settleDonenessAt}) BEFORE acting on the contents, and a future
+     * sessionless pass calls the same function with its own resolved fold. Cheap when nothing is
+     * open (one persisted-leaf read). When the open window's game-time elapsed has reached the
+     * resolved {@code ReadyMs} (boundary-exact: {@code elapsed >= ReadyMs} settles), the windowed
+     * pile's whole counted tally collapses to the authored {@code Overdone} entries scaled by the
+     * produced-batch count (the pile's owner and {@code Unique} stack untouched; no other pile is
+     * touched), the window clears, the block flips to its {@code States.Overdone} resting look
+     * (unless a work step actively holds it), the pile's display prop despawns (it respawns from
+     * the settled contents on the next touch), the {@code overdone} moment fires - through an
+     * engaged session's cue queue when one is working the block, else immediately at the block
+     * like a structure moment - and the toucher (when known) gets the overdone toast.
+     *
+     * <p>A window whose content no longer resolves a ready window (the recipe changed) closes
+     * silently; a purely-presentational window (no valid {@code Overdone} entry) never settles and
+     * clears only at gather. Returns {@code true} only when an expired window actually collapsed.
+     */
+    boolean settleDoneness(@Nonnull World world, @Nullable StationCustodyClaim claim,
+            @Nullable StationAsset.Doneness resolved, @Nullable CommandBuffer<EntityStore> commandBuffer,
+            @Nullable PlayerRef toucher, @Nullable Ref<EntityStore> toucherRef) {
+        if (claim == null || claim.donenessWindowStart() == null) {
+            return false;
+        }
+        long start = claim.donenessWindowStart();
+        String socketId = claim.donenessWindowSocketId();
+        if (socketId == null) {
+            // A stale stamp with no keyed pile (a gathered pile, a demoted stash): self-heal it.
+            claim.clearDonenessWindowStamp();
+            claim.markDirty();
+            return false;
+        }
+        if (resolved == null || !resolved.hasReadyWindow()) {
+            // The content changed under an open window (the recipe no longer authors one): close
+            // it silently rather than hold a Ready look nothing can ever settle.
+            claim.clearDonenessWindow();
+            claim.markDirty();
+            return false;
+        }
+        List<Ingredient> degradable = StationDoneness.degradableOverdone(resolved);
+        if (degradable.isEmpty()) {
+            // Purely presentational: the Ready look and moment, nothing ever degrades; the window
+            // clears at gather.
+            return false;
+        }
+        Long nowGame = gameTimeMs(world);
+        if (nowGame == null || !StationDoneness.expired(start, nowGame, resolved.getReadyMs())) {
+            return false;
+        }
+        int batches = claim.donenessBatches(socketId);
+        claim.settleDonenessOverdone(socketId, StationDoneness.overdoneReplacement(degradable, batches));
+        claim.markDirty();
+        String blockKey = claimBlockKey(world, claim);
+        Custody custody = custodyOfClaim(claim);
+        if (custody != null && !blockHeldWorking(blockKey)) {
+            setBlockState(world, claim.blockX, claim.blockY, claim.blockZ,
+                    StationDoneness.restingStateName(custody.getStates(), claim.totalQuantity() > 0,
+                            false, claim.anyDonenessOverdoneMarked()));
+        }
+        // The prop over the pile now renders the wrong item: drop it and let the standing
+        // first-touch respawn rebuild it from the settled contents.
+        despawnDisplay(blockKey, socketId, commandBuffer);
+        StationSession engaged = blockKey != null ? sessionAt(blockKey) : null;
+        Vector3d pos = new Vector3d(claim.blockX + 0.5, claim.blockY + 0.5, claim.blockZ + 0.5);
+        if (engaged != null) {
+            try {
+                emitMoment(world.getEntityStore().getStore(), engaged, StationFlairs.MOMENT_OVERDONE, null, pos);
+            } catch (Throwable t) {
+                Log.fine("STATION overdone moment emission failed: " + t.getMessage());
+            }
+        } else {
+            playPresentationAt(world, toucher, toucherRef,
+                    claimActionMoment(claim, StationFlairs.MOMENT_OVERDONE),
+                    claim.blockX, claim.blockY, claim.blockZ);
+        }
+        if (toucher != null) {
+            toast(toucher, RpgMsg.tr("ui.station.output_overdone"));
+        }
+        return true;
+    }
+
+    /**
+     * Immediate, sessionless presentation playback at a block - the structure-moment route
+     * ({@code StationStructures} delegates its pattern moments here): sounds, facing-relative
+     * particles and (when a player is known) the shake play at the block center NOW
+     * ({@code DelayMs} is not honored on this route; a session's cue queue is where delays live),
+     * and the interaction/effect payloads fire on {@code ref} when one is supplied. Never throws.
+     */
+    static void playPresentationAt(@Nonnull World world, @Nullable PlayerRef playerRef,
+            @Nullable Ref<EntityStore> ref, @Nullable Presentation p, int x, int y, int z) {
+        if (p == null) {
+            return;
+        }
+        try {
+            Store<EntityStore> store = world.getEntityStore().getStore();
+            Vector3d pos = new Vector3d(x + 0.5, y + 0.5, z + 0.5);
+            Presentation.SoundCue[] sounds = p.getSounds();
+            if (sounds != null) {
+                for (Presentation.SoundCue cue : sounds) {
+                    if (cue != null && cue.hasEventId()) {
+                        Sound3D.play(cue.getEventId(), pos, store, "STATION");
+                    }
+                }
+            }
+            spawnPresentationParticles(store, p.getParticles(), pos, () -> blockYawSafe(world, x, y, z));
+            Presentation.Shake shake = p.getShake();
+            if (shake != null && playerRef != null && shake.getEffectId() != null
+                    && !shake.getEffectId().isBlank()) {
+                float intensity = shake.getIntensity() != null ? shake.getIntensity().floatValue() : 1.0f;
+                CameraShakeService.shake(playerRef, shake.getEffectId(), intensity);
+            }
+            if (ref != null && ref.isValid()) {
+                Presentation.Interaction interaction = p.getInteraction();
+                if (interaction != null && interaction.hasId()) {
+                    NativeChainFire.fire(store, ref, interaction.getId(), InteractionType.Use);
+                }
+                EffectRef effect = p.getEffect();
+                if (effect != null && effect.hasId()) {
+                    Long durMs = effect.getDurationMs();
+                    if (durMs != null && durMs > 0) {
+                        NativeEffectUtil.applyFor(store, ref, effect.getId(), durMs / 1000f,
+                                OverlapBehavior.OVERWRITE);
+                    } else {
+                        NativeEffectUtil.apply(store, ref, effect.getId());
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.fine("STATION sessionless moment playback failed at (" + x + ", " + y + ", " + z + "): "
+                    + t.getMessage());
+        }
+    }
+
+    /** The block's facing yaw for a sessionless moment's facing-relative particle offset; 0.0 fail-soft. */
+    private static double blockYawSafe(@Nonnull World world, int x, int y, int z) {
+        try {
+            return StationBlockFacing.yawRadians(world, x, y, z);
+        } catch (Throwable t) {
+            return 0.0;
         }
     }
 

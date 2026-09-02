@@ -2556,6 +2556,77 @@ public final class StationValidator {
     }
 
     /**
+     * The doneness ready-window coverage (decision 87), minimal by design - the per-leaf fold is
+     * {@code Doneness.resolve} (conversion over recipe), evaluated per authored row plus once for
+     * the bare recipe-level default:
+     * <ul>
+     *   <li>{@code DONENESS_OVERDONE_WITHOUT_READY}: a resolved fold carrying {@code Overdone}
+     *       entries with no reachable {@code ReadyMs} - the degrade result can never settle
+     *       because no window ever opens.</li>
+     *   <li>{@code DONENESS_WITHOUT_PRODUCE_SOCKET}: a resolved ready window on an action whose
+     *       effective program never lands produce in a custody pile (no step authoring
+     *       {@code Produce.To:"Custody"}) - the window has no pile to sit on, so it can never
+     *       open.</li>
+     * </ul>
+     * Malformed {@code Overdone} ENTRIES (route-less / family / tags) are the codec's own
+     * decode-time warn; deeper editor metadata stays with the validator wave.
+     */
+    private static void checkDoneness(@Nullable StationAsset.Recipe recipe, @Nullable StationStep[] effectiveSteps,
+            @Nonnull String actionLabel, @Nonnull String id, @Nonnull List<Finding> out) {
+        if (recipe == null) {
+            return;
+        }
+        StationAsset.Doneness recipeLevel = recipe.getDoneness();
+        StationAsset.Conversion[] conversions = recipe.getConversions();
+        boolean anyWindow = false;
+        boolean overdoneWithoutReadyWarned = false;
+        List<StationAsset.Doneness> folds = new ArrayList<>();
+        if (conversions != null) {
+            for (StationAsset.Conversion c : conversions) {
+                if (c != null) {
+                    folds.add(StationAsset.Doneness.resolve(c.getDoneness(), recipeLevel));
+                }
+            }
+        }
+        if (folds.isEmpty()) {
+            folds.add(StationAsset.Doneness.resolve(null, recipeLevel));
+        }
+        for (StationAsset.Doneness fold : folds) {
+            if (fold == null) {
+                continue;
+            }
+            anyWindow |= fold.hasReadyWindow();
+            if (!overdoneWithoutReadyWarned && fold.getOverdone() != null && fold.getOverdone().length > 0
+                    && !fold.hasReadyWindow()) {
+                overdoneWithoutReadyWarned = true;
+                out.add(Finding.warning(DOMAIN, "DONENESS_OVERDONE_WITHOUT_READY",
+                        actionLabel + " authors Doneness.Overdone with no reachable ReadyMs - no window"
+                                + " ever opens, so nothing can degrade into those items", id));
+            }
+        }
+        if (!anyWindow) {
+            return;
+        }
+        boolean landsInCustody = false;
+        if (effectiveSteps != null) {
+            for (StationStep step : effectiveSteps) {
+                StationStep.Produce produce = step != null ? step.getProduce() : null;
+                if (produce != null && !produce.isEmpty()
+                        && StationStep.Produce.TO_CUSTODY.equalsIgnoreCase(produce.effectiveTo())) {
+                    landsInCustody = true;
+                    break;
+                }
+            }
+        }
+        if (!landsInCustody) {
+            out.add(Finding.warning(DOMAIN, "DONENESS_WITHOUT_PRODUCE_SOCKET",
+                    actionLabel + " authors a Doneness ready window, but nothing in this action lands"
+                            + " produce in a custody pile (no step authors Produce.To:'Custody'), so the"
+                            + " window can never open", id));
+        }
+    }
+
+    /**
      * The two set-recipe ORDER advisories, both file-readability nudges (the engine's tier sort is
      * explicit and stable, never an invisible reordering):
      *
@@ -3179,6 +3250,7 @@ public final class StationValidator {
         // Custody presence feeds the match-any-input advisory below; a Ref'd entry may inherit its
         // Custody from the base action, so hasRef counts as "custody unknown" and never warns.
         checkRecipe(def.getRecipe(), def.getCustody() != null || def.hasRef(), id, actionLabel, out);
+        checkDoneness(def.getRecipe(), effectiveSteps, actionLabel, id, out);
         checkWork(def.getWork(), id, actionLabel, out);
         checkToolGroup(def.getTool(), id, actionLabel + " Tool", out);
         checkRequiresGroup(def.getRequires(), id, actionLabel + " Requires", factorKnown, out);

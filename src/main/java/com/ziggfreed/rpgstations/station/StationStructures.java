@@ -11,25 +11,18 @@ import java.util.function.UnaryOperator;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import org.joml.Vector3d;
 import org.joml.Vector3i;
 
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
-import com.hypixel.hytale.protocol.InteractionType;
 import com.hypixel.hytale.server.core.Message;
-import com.hypixel.hytale.server.core.asset.type.entityeffect.config.OverlapBehavior;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
-import com.ziggfreed.common.camera.CameraShakeService;
 import com.ziggfreed.common.cast.WorldEvictors;
-import com.ziggfreed.common.effect.NativeEffectUtil;
 import com.ziggfreed.common.i18n.Msg;
-import com.ziggfreed.common.interaction.NativeChainFire;
-import com.ziggfreed.common.sound.Sound3D;
 import com.ziggfreed.common.world.BlockOps;
 import com.ziggfreed.common.world.pattern.BlockPattern;
 import com.ziggfreed.common.world.pattern.BlockReader;
@@ -41,7 +34,6 @@ import com.ziggfreed.common.world.stash.BlockStash;
 import com.ziggfreed.common.world.stash.BlockStashes;
 import com.ziggfreed.rpgstations.api.FactorContext;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
-import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
@@ -647,66 +639,17 @@ public final class StationStructures {
 
     /**
      * Plays one pattern moment's presentation at the anchor: sounds and particles positionally
-     * (the particle path shares {@code StationService}'s one leak-guarded spawn core, with the
-     * anchor block's own facing driving any {@code PositionOffset}), the shake on the triggering
-     * player when one exists, and the two native-composition payloads on their entity ref. Cues
-     * play at once - a structure moment has no session to queue a {@code DelayMs} against, so an
-     * authored delay reads as zero (the same degrade a nonsense delay gets everywhere). An applied
-     * {@code Effect} is untracked and lives out its own duration/TTL.
+     * (with the anchor block's own facing driving any {@code PositionOffset}), the shake on the
+     * triggering player when one exists, and the two native-composition payloads on their entity
+     * ref. Cues play at once - a structure moment has no session to queue a {@code DelayMs}
+     * against, so an authored delay reads as zero (the same degrade a nonsense delay gets
+     * everywhere). An applied {@code Effect} is untracked and lives out its own duration/TTL.
+     * One immediate-playback core serves every sessionless moment in this engine
+     * ({@link StationService#playPresentationAt}); this is its structure-moment call site.
      */
     private static void playPatternMoment(@Nonnull World world, @Nullable PlayerRef playerRef,
             @Nullable Ref<EntityStore> ref, @Nullable Presentation p, int x, int y, int z) {
-        if (p == null) {
-            return;
-        }
-        try {
-            Store<EntityStore> store = world.getEntityStore().getStore();
-            Vector3d pos = new Vector3d(x + 0.5, y + 0.5, z + 0.5);
-            Presentation.SoundCue[] sounds = p.getSounds();
-            if (sounds != null) {
-                for (Presentation.SoundCue cue : sounds) {
-                    if (cue != null && cue.hasEventId()) {
-                        Sound3D.play(cue.getEventId(), pos, store, "STRUCTURE");
-                    }
-                }
-            }
-            StationService.spawnPresentationParticles(store, p.getParticles(), pos,
-                    () -> patternBlockYaw(world, x, y, z));
-            Presentation.Shake shake = p.getShake();
-            if (shake != null && playerRef != null && shake.getEffectId() != null
-                    && !shake.getEffectId().isBlank()) {
-                float intensity = shake.getIntensity() != null ? shake.getIntensity().floatValue() : 1.0f;
-                CameraShakeService.shake(playerRef, shake.getEffectId(), intensity);
-            }
-            if (ref != null && ref.isValid()) {
-                Presentation.Interaction interaction = p.getInteraction();
-                if (interaction != null && interaction.hasId()) {
-                    NativeChainFire.fire(store, ref, interaction.getId(), InteractionType.Use);
-                }
-                EffectRef effect = p.getEffect();
-                if (effect != null && effect.hasId()) {
-                    Long durMs = effect.getDurationMs();
-                    if (durMs != null && durMs > 0) {
-                        NativeEffectUtil.applyFor(store, ref, effect.getId(), durMs / 1000f,
-                                OverlapBehavior.OVERWRITE);
-                    } else {
-                        NativeEffectUtil.apply(store, ref, effect.getId());
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            Log.fine("STRUCTURE moment playback failed at (" + x + ", " + y + ", " + z + "): "
-                    + t.getMessage());
-        }
-    }
-
-    /** The anchor block's facing yaw for a moment's facing-relative particle offset; 0.0 fail-soft. */
-    private static double patternBlockYaw(@Nonnull World world, int x, int y, int z) {
-        try {
-            return StationBlockFacing.yawRadians(world, x, y, z);
-        } catch (Throwable t) {
-            return 0.0;
-        }
+        StationService.playPresentationAt(world, playerRef, ref, p, x, y, z);
     }
 
     private static void toast(@Nullable PlayerRef playerRef, @Nonnull Message message) {

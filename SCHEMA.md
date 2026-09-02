@@ -115,6 +115,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Conversions` | array of [Conversion](#field-actionasset-recipe-conversions-item) | `null` | Hand-authored input-to-output conversions, evaluated FIRST (before any FromCrafting-derived ones). |
 | `FromCrafting` | [FromCrafting](#field-actionasset-recipe-fromcrafting) | `null` | Derive additional Conversions from the engine's own native crafting/processing recipes; null = no derivation. |
 | `Yield` | [Yield](#field-actionasset-recipe-yield) | `null` | Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived); null = each conversion's own authored quantity, unchanged. |
+| `Doneness` | [Doneness](#field-actionasset-recipe-doneness) | `null` | The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window. |
 
 <a id="field-actionasset-work"></a>
 ### ActionAsset.Work
@@ -182,6 +183,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Category` | `string` | `null` | Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged. |
 | `Tier` | `integer` | `null` | Selection tier: lower runs first, authored order breaks ties; defaults to 0. Derived rows run at tier 1, so an unauthored hand-written row already outranks them. |
 | `IsExactSet` | `boolean` | `null` | When true, the row matches only while the pile(s) its inputs draw from hold nothing beyond those inputs (per drawn socket; other sockets never block). Defaults to false. Author exact-set rows before looser rows at the same tier. |
+| `Doneness` | [Doneness](#field-actionasset-recipe-conversions-item-doneness) | `null` | This row's own ready window; each leaf falls back to the Recipe-level Doneness default. Null = the recipe default whole. |
 
 <a id="field-actionasset-recipe-fromcrafting"></a>
 #### ActionAsset.Recipe.FromCrafting
@@ -202,6 +204,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Scale` | `double` | `null` | Multiplier on the base quantity, floored to a whole item; reader-defaults to 1.0 (no scaling). |
 | `Min` | `integer` | `null` | Lower clamp on the final quantity; null = the engine's own 1-item floor. |
 | `Max` | `integer` | `null` | Upper clamp on the final quantity; null = uncapped. |
+
+<a id="field-actionasset-recipe-doneness"></a>
+#### ActionAsset.Recipe.Doneness
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ReadyMs` | `long` | `null` | How long, in world GAME-TIME milliseconds, a produced batch sits Ready in its custody pile before degrading. Game time stands still while the server is down, so an outage never burns anything. Omit for no window (output waits indefinitely). |
+| `Overdone` | array of [Ingredient](#type-ingredient) | `null` | What the windowed pile collapses to once the window expires: exact-ItemId entries, each Quantity scaled by the number of batches produced into the window. Omit to make the window purely presentational (the Ready look and moment, nothing degrades). |
 
 <a id="field-actionasset-work-percyclecontributions-item"></a>
 #### ActionAsset.Work.PerCycleContributions[]
@@ -256,6 +266,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `EmoteId` | `string` | `null` | The registered EmoteAsset id looped while working; null = no work animation played. |
 | `Swing` | [Swing](#field-actionasset-worker-animation-swing) | `null` | The optional per-swing CADENCE layer (how often the work animation re-fires); null = no swing layer. What a swing sounds and looks like is the Moments 'swing' entry, not this group. |
 | `ActionClip` | `string` | `null` | The Action-slot clip id for a SEAT-MODE swing (plays against the held item's own ItemPlayerAnimations set). Null/blank falls to the 'Chop' default. |
+
+<a id="field-actionasset-recipe-conversions-item-doneness"></a>
+##### ActionAsset.Recipe.Conversions[].Doneness
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ReadyMs` | `long` | `null` | How long, in world GAME-TIME milliseconds, a produced batch sits Ready in its custody pile before degrading. Game time stands still while the server is down, so an outage never burns anything. Omit for no window (output waits indefinitely). |
+| `Overdone` | array of [Ingredient](#type-ingredient) | `null` | What the windowed pile collapses to once the window expires: exact-ItemId entries, each Quantity scaled by the number of batches produced into the window. Omit to make the window purely presentational (the Ready look and moment, nothing degrades). |
 
 <a id="field-actionasset-recipe-fromcrafting-nativetime"></a>
 ##### ActionAsset.Recipe.FromCrafting.NativeTime
@@ -347,6 +365,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Conversions` | array of [Conversion](#field-actiondef-recipe-conversions-item) | `null` | Hand-authored input-to-output conversions, evaluated FIRST (before any FromCrafting-derived ones). |
 | `FromCrafting` | [FromCrafting](#field-actiondef-recipe-fromcrafting) | `null` | Derive additional Conversions from the engine's own native crafting/processing recipes; null = no derivation. |
 | `Yield` | [Yield](#field-actiondef-recipe-yield) | `null` | Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived); null = each conversion's own authored quantity, unchanged. |
+| `Doneness` | [Doneness](#field-actiondef-recipe-doneness) | `null` | The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window. |
 
 <a id="field-actiondef-work"></a>
 ### ActionDef.Work
@@ -414,6 +433,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Category` | `string` | `null` | Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged. |
 | `Tier` | `integer` | `null` | Selection tier: lower runs first, authored order breaks ties; defaults to 0. Derived rows run at tier 1, so an unauthored hand-written row already outranks them. |
 | `IsExactSet` | `boolean` | `null` | When true, the row matches only while the pile(s) its inputs draw from hold nothing beyond those inputs (per drawn socket; other sockets never block). Defaults to false. Author exact-set rows before looser rows at the same tier. |
+| `Doneness` | [Doneness](#field-actiondef-recipe-conversions-item-doneness) | `null` | This row's own ready window; each leaf falls back to the Recipe-level Doneness default. Null = the recipe default whole. |
 
 <a id="field-actiondef-recipe-fromcrafting"></a>
 #### ActionDef.Recipe.FromCrafting
@@ -434,6 +454,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Scale` | `double` | `null` | Multiplier on the base quantity, floored to a whole item; reader-defaults to 1.0 (no scaling). |
 | `Min` | `integer` | `null` | Lower clamp on the final quantity; null = the engine's own 1-item floor. |
 | `Max` | `integer` | `null` | Upper clamp on the final quantity; null = uncapped. |
+
+<a id="field-actiondef-recipe-doneness"></a>
+#### ActionDef.Recipe.Doneness
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ReadyMs` | `long` | `null` | How long, in world GAME-TIME milliseconds, a produced batch sits Ready in its custody pile before degrading. Game time stands still while the server is down, so an outage never burns anything. Omit for no window (output waits indefinitely). |
+| `Overdone` | array of [Ingredient](#type-ingredient) | `null` | What the windowed pile collapses to once the window expires: exact-ItemId entries, each Quantity scaled by the number of batches produced into the window. Omit to make the window purely presentational (the Ready look and moment, nothing degrades). |
 
 <a id="field-actiondef-work-percyclecontributions-item"></a>
 #### ActionDef.Work.PerCycleContributions[]
@@ -488,6 +516,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `EmoteId` | `string` | `null` | The registered EmoteAsset id looped while working; null = no work animation played. |
 | `Swing` | [Swing](#field-actiondef-worker-animation-swing) | `null` | The optional per-swing CADENCE layer (how often the work animation re-fires); null = no swing layer. What a swing sounds and looks like is the Moments 'swing' entry, not this group. |
 | `ActionClip` | `string` | `null` | The Action-slot clip id for a SEAT-MODE swing (plays against the held item's own ItemPlayerAnimations set). Null/blank falls to the 'Chop' default. |
+
+<a id="field-actiondef-recipe-conversions-item-doneness"></a>
+##### ActionDef.Recipe.Conversions[].Doneness
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ReadyMs` | `long` | `null` | How long, in world GAME-TIME milliseconds, a produced batch sits Ready in its custody pile before degrading. Game time stands still while the server is down, so an outage never burns anything. Omit for no window (output waits indefinitely). |
+| `Overdone` | array of [Ingredient](#type-ingredient) | `null` | What the windowed pile collapses to once the window expires: exact-ItemId entries, each Quantity scaled by the number of batches produced into the window. Omit to make the window purely presentational (the Ready look and moment, nothing degrades). |
 
 <a id="field-actiondef-recipe-fromcrafting-nativetime"></a>
 ##### ActionDef.Recipe.FromCrafting.NativeTime
@@ -785,6 +821,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Empty` | `string` | `null` | The block State.Definitions name shown while no input is held in custody. |
 | `Loaded` | `string` | `null` | The block State.Definitions name shown while custody holds input but no work is running. |
 | `Working` | `string` | `null` | The block State.Definitions name shown ONLY while a work step is actively executing at this block; reverts to Loaded/Empty on step exit and every session stop. Omit for no working flip. |
+| `Ready` | `string` | `null` | The block State.Definitions name shown while a produced batch waits in custody under an open Doneness ready window (the Working look wins while work actually runs). Omit for no ready flip. |
+| `Overdone` | `string` | `null` | The block State.Definitions name shown after a ready window expired and the pile collapsed to its Overdone items, until that pile is gathered or reloaded. Omit for no overdone flip. |
 
 <a id="field-custody-display"></a>
 ### Custody.Display
@@ -1311,6 +1349,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Category` | `string` | `null` | Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged. |
 | `Tier` | `integer` | `null` | Selection tier: lower runs first, authored order breaks ties; defaults to 0. Derived rows run at tier 1, so an unauthored hand-written row already outranks them. |
 | `IsExactSet` | `boolean` | `null` | When true, the row matches only while the pile(s) its inputs draw from hold nothing beyond those inputs (per drawn socket; other sockets never block). Defaults to false. Author exact-set rows before looser rows at the same tier. |
+| `Doneness` | [Doneness](#field-extensionasset-conversions-item-doneness) | `null` | This row's own ready window; each leaf falls back to the Recipe-level Doneness default. Null = the recipe default whole. |
 
 <a id="field-extensionasset-steps-item"></a>
 ### ExtensionAsset.Steps[]
@@ -1335,6 +1374,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
 | `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
+
+<a id="field-extensionasset-conversions-item-doneness"></a>
+#### ExtensionAsset.Conversions[].Doneness
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ReadyMs` | `long` | `null` | How long, in world GAME-TIME milliseconds, a produced batch sits Ready in its custody pile before degrading. Game time stands still while the server is down, so an outage never burns anything. Omit for no window (output waits indefinitely). |
+| `Overdone` | array of [Ingredient](#type-ingredient) | `null` | What the windowed pile collapses to once the window expires: exact-ItemId entries, each Quantity scaled by the number of batches produced into the window. Omit to make the window purely presentational (the Ready look and moment, nothing degrades). |
 
 <a id="field-extensionasset-steps-item-anchor"></a>
 #### ExtensionAsset.Steps[].Anchor

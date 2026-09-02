@@ -74,9 +74,14 @@ public final class StationFlairs {
     public static final String MOMENT_RARE_FIND = "rare_find";
     /** The session-completion moment, played at the player's own position. */
     public static final String MOMENT_COMPLETION = "completion";
+    /** A produced batch's doneness window opening: output now waits Ready in its custody pile. */
+    public static final String MOMENT_READY = "ready";
+    /** A doneness window expiring: the waiting pile collapsed to its authored Overdone items. */
+    public static final String MOMENT_OVERDONE = "overdone";
 
     private static final Set<String> WELL_KNOWN_MOMENT_IDS = Set.of(
-            MOMENT_CYCLE, MOMENT_SWING, MOMENT_IMPACT, MOMENT_RARE_FIND, MOMENT_COMPLETION);
+            MOMENT_CYCLE, MOMENT_SWING, MOMENT_IMPACT, MOMENT_RARE_FIND, MOMENT_COMPLETION,
+            MOMENT_READY, MOMENT_OVERDONE);
 
     /**
      * The prefix an author uses to mint a moment id of their own: a loot roll's {@code Cue} names a

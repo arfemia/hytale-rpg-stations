@@ -184,6 +184,16 @@ final class StationSession {
      */
     @Nullable Map<String, Presentation> moments;
 
+    /**
+     * The running action's RECIPE-level {@code Doneness} default, snapshotted at engage (like
+     * every other resolved config value): what a custody-landing produce opens a ready window
+     * with, and what the engaged heartbeat's throttled settle resolves against. Null when the
+     * action's recipe authors none - the whole doneness path then costs this session nothing.
+     */
+    @Nullable StationAsset.Doneness doneness;
+    /** Next game-time doneness settle check while engaged ({@code StationService#DONENESS_SETTLE_MS} throttle). */
+    long nextDonenessSettleAtMs;
+
     // Opt-in idle practice mode (Work.Idle). The first three are the resolved config snapshot;
     // idleMode is a RUNTIME flag flipped by runCycle as materials come and go mid-session.
     boolean idleEnabled;

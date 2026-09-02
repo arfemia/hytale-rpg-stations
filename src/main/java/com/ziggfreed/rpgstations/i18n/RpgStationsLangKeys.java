@@ -61,6 +61,10 @@ import javax.annotation.Nonnull;
  * that WAS found but that the puppet cannot path to used to reuse {@code ui.station.anchor_missing}
  * ("No {0} found within {1} blocks"), which told the player the exact wrong thing - two distinct
  * failures now carry two distinct toasts.
+ * The doneness leg adds {@code ui.station.output_ready} (a produced batch's ready window opening,
+ * toasted to the worker once per window, {@code StationService#noteCustodyProduce}) and
+ * {@code ui.station.output_overdone} (an expired window collapsing to its Overdone items, toasted
+ * to whoever's touch settled it, {@code StationService#settleDoneness}).
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -95,6 +99,11 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.pattern_requirements_unmet",
             "rpgstations.ui.station.pattern_requirements_unmet_named",
             "rpgstations.ui.station.structure_lost",
+            // The doneness ready-window toasts: a produced batch now waiting Ready in its custody
+            // pile (to the worker, once per window open), and an expired window collapsing to its
+            // Overdone items (to whoever's touch settled it).
+            "rpgstations.ui.station.output_ready",
+            "rpgstations.ui.station.output_overdone",
             "rpgstations.ui.station.not_shared",
             "rpgstations.ui.station.not_shared_named",
             "rpgstations.ui.station.inventory_full",

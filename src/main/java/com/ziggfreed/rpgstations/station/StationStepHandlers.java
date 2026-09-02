@@ -646,8 +646,12 @@ final class StationStepHandlers {
         if (StationStep.Produce.TO_CUSTODY.equalsIgnoreCase(to)) {
             try {
                 List<Custody.ResolvedSocket> sockets = actionSockets(ctx);
+                String windowSocketId = null;
                 for (Ingredient item : items) {
                     String socketId = StationCustody.socketIdFor(item.getSocket(), produce.getSocket(), sockets);
+                    if (windowSocketId == null) {
+                        windowSocketId = socketId;
+                    }
                     boolean placed = StationService.getInstance().produceIntoCustody(ctx.session, ctx.commandBuffer,
                             step.getAt(), socketId, item.getItemId(), item.effectiveQuantity());
                     if (!placed) {
@@ -658,6 +662,11 @@ final class StationStepHandlers {
                     ctx.session.producedItems.merge(item.getItemId(), item.effectiveQuantity(), Integer::sum);
                 }
                 StationService.clearIterationLedgerOnCommittedProduce(ctx.session);
+                // Doneness: ONE batch per committed produce phase (never per item) - the ready
+                // window sits on the phase's FIRST produced socket and (re)starts its game-time
+                // clock now that the whole batch stands in custody.
+                StationService.getInstance().noteCustodyProduce(ctx.session, ctx.store, ctx.commandBuffer,
+                        step.getAt(), windowSocketId);
             } catch (Throwable t) {
                 Log.warn("STATION Produce To:Custody step failed for '" + ctx.session.stationId + "': "
                         + t.getMessage());

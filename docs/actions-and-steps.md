@@ -125,6 +125,51 @@ with two informational findings and never reorders anything itself:
 Exactly these ingredients make the kebab; anything else in the pot falls through to the match-any
 stew row on the next tier.
 
+## Doneness: the ready window on produced output
+
+When a step lands its output in a [custody pile](custody-and-placed-display.md) (a `Produce` phase
+with `To: "Custody"`), an optional `Doneness` group gives that batch ONE unambiguous window: it
+sits **Ready** to collect for `ReadyMs`, then - if nobody gathered it - collapses once to the
+authored `Overdone` items.
+
+```json
+"Recipe": {
+  "Doneness": { "ReadyMs": 120000,
+                "Overdone": [ { "ItemId": "Ingredient_Charcoal", "Quantity": 1 } ] },
+  "Conversions": [ ... ]
+}
+```
+
+- **Two altitudes, per-leaf precedence.** `Recipe.Doneness` is the default every conversion row
+  inherits (rows derived from native recipes included); a row's own `Doneness` wins per leaf, so a
+  row authoring only `ReadyMs` still inherits the recipe's `Overdone`. No `Doneness` anywhere =
+  deterministic output exactly as before - nothing waits, nothing degrades.
+- **The clock is world GAME time, never wall clock.** Game time stands still while the server is
+  down, so an outage cooks and burns nothing: a stew ten seconds from done at shutdown is still ten
+  seconds from done at the next boot.
+- **The window is lazy.** Nothing ticks it; it settles at the moments someone (or something)
+  already touches the stash - a press at the station, a press-F retrieval, the working session's
+  own heartbeat. Expiry is boundary-exact: elapsed equal to `ReadyMs` settles.
+- **Each batch re-stamps the clock.** Every committed custody produce counts one batch and restarts
+  the window ("stirring the pot"), so an actively producing session never burns its own pile
+  mid-work; the window runs out only once production stops for `ReadyMs`.
+- **The whole pile burns together.** At expiry the windowed pile's counted contents are REPLACED by
+  the `Overdone` entries, each entry's `Quantity` scaled by the number of batches produced into the
+  window - three stew batches over one window become three servings of charcoal. Anything else
+  sitting in that pile collapses with it; other sockets' piles are never touched, and the pile
+  keeps its owner. `Overdone` entries follow the output rule: exact `ItemId` only.
+- **`ReadyMs` without `Overdone` is legal** and purely presentational: the Ready look and moment
+  play, and the output simply waits forever. `Overdone` without a reachable `ReadyMs` never opens a
+  window (the validator warns).
+- **The batch belongs to the world.** A session stop leaves an open window's pile standing with its
+  clock running - gather it with press-F on its display prop, or find it overdone later. Gathering
+  before expiry ends the window; the block state resets per what remains.
+
+Two `Custody.States` leaves and two `Moments` ids pair with the window: `States.Ready` /
+`States.Overdone` (see [Custody & the placed display](custody-and-placed-display.md)) and the
+`ready` / `overdone` moment ids, authorable in the action's `Moments` map (and overlayable by
+flairs) like any other cue.
+
 ## The step record
 
 An authored program is an ordered array of `StationStep`s. Every field on a step is nullable; a step

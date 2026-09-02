@@ -1210,4 +1210,60 @@ public class StationValidatorTest {
                         Map.of("cyclee", Presentation.ofSound("Fixture_Sound")))));
         assertTrue(codes(validate(a)).contains("UNKNOWN_MOMENT_ID"));
     }
+
+    // ==================== Doneness (the ready window) ====================
+
+    /** A one-row recipe whose ONLY doneness authoring is the handed-in leaves. */
+    private static StationAsset.Recipe donenessRecipe(StationAsset.Doneness recipeLevel,
+            StationAsset.Doneness rowLevel) {
+        return StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                trunkConversion().withDoneness(rowLevel)}, null, null, recipeLevel);
+    }
+
+    @Test
+    void donenessOverdoneWithoutReady_flagged() {
+        StationAsset a = station("burntnowindow", ActionDef.of("Stew")
+                .withRecipe(donenessRecipe(StationAsset.Doneness.of(null,
+                        new Ingredient[] {Ingredient.item("Fixture_Charcoal", 1)}), null)));
+        assertTrue(codes(validate(a)).contains("DONENESS_OVERDONE_WITHOUT_READY"),
+                "Overdone with no reachable ReadyMs can never settle - no window ever opens");
+    }
+
+    @Test
+    void donenessOverdoneWithReadySuppliedByTheRow_notFlagged() {
+        // The per-leaf fold: the recipe supplies Overdone, the row supplies ReadyMs - together
+        // they form a complete window, so the without-ready warn must NOT fire.
+        StationAsset a = station("rowready", ActionDef.of("Stew")
+                .withRecipe(donenessRecipe(
+                        StationAsset.Doneness.of(null, new Ingredient[] {Ingredient.item("Fixture_Charcoal", 1)}),
+                        StationAsset.Doneness.of(5000L, null)))
+                .withSteps(new StationStep[] {StationStep.of("cook")
+                        .withProduce(StationStep.Produce.of(
+                                new Ingredient[] {Ingredient.item("Fixture_Stew", 1)},
+                                StationStep.Produce.TO_CUSTODY))}));
+        assertFalse(codes(validate(a)).contains("DONENESS_OVERDONE_WITHOUT_READY"));
+        assertFalse(codes(validate(a)).contains("DONENESS_WITHOUT_PRODUCE_SOCKET"));
+    }
+
+    @Test
+    void donenessWindowWithoutACustodyProduce_flagged() {
+        // A ready window on an action whose program never lands produce in a custody pile (the
+        // implicit convert loop produces to the inventory) has no pile to sit on.
+        StationAsset a = station("windownowhere", ActionDef.of("Mill")
+                .withRecipe(donenessRecipe(StationAsset.Doneness.of(60000L,
+                        new Ingredient[] {Ingredient.item("Fixture_Charcoal", 1)}), null)));
+        assertTrue(codes(validate(a)).contains("DONENESS_WITHOUT_PRODUCE_SOCKET"));
+    }
+
+    @Test
+    void donenessWindowWithACustodyProduceStep_notFlagged() {
+        StationAsset a = station("windowedpit", ActionDef.of("Stew")
+                .withRecipe(donenessRecipe(StationAsset.Doneness.of(60000L,
+                        new Ingredient[] {Ingredient.item("Fixture_Charcoal", 1)}), null))
+                .withSteps(new StationStep[] {StationStep.of("cook")
+                        .withProduce(StationStep.Produce.of(
+                                new Ingredient[] {Ingredient.item("Fixture_Stew", 1)},
+                                StationStep.Produce.TO_CUSTODY))}));
+        assertFalse(codes(validate(a)).contains("DONENESS_WITHOUT_PRODUCE_SOCKET"));
+    }
 }

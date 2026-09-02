@@ -247,7 +247,8 @@ resolution section for the engine half.
     never authored. DISCOVERY (nearest matching placed block within `MaxRadiusMeters`), CLAIMING,
     and a `StationStep.Walk`/`At` naming an anchor all EXECUTE - see `../station/CLAUDE.md`.
     `ANCHOR_STATION_UNKNOWN` warns an unknown `Station`.
-  - **`Recipe` - ONE transform, singular by design:** `{Conversions?, FromCrafting?, Yield?}`. Its
+  - **`Recipe` - ONE transform, singular by design:** `{Conversions?, FromCrafting?, Yield?,
+    Doneness?}`. Its
     EFFECTIVE conversions (`StationCatalog.resolvedConversions`) are authored `Conversions` FIRST,
     then any `FromCrafting`-derived ones. **One recipe per action.** Two transforms means two
     actions, which is cheap because an action carries no boilerplate to repeat - there is
@@ -266,6 +267,20 @@ resolution section for the engine half.
     inputs draw from hold nothing beyond those inputs, per-entry `Socket` aware; custody-only).
     Exact-first/match-any-last is an authoring convention the validator INFOs nudge
     (`RECIPE_ROW_ORDER_MISLEADING`/`CONVERSION_TIER_SHADOWED`), never an engine reordering.
+  - **`Doneness` - the ready window on produced output (decision 87), TWO altitudes, per-leaf
+    precedence:** `{ReadyMs?: Long, Overdone?: Ingredient[]}` on `Recipe` (the default every row
+    without its own leaf inherits, derived rows included) AND on `Conversion` (that row's own
+    window; each authored leaf wins, mirroring D52's chain - fold via `Doneness.resolve`). A batch
+    a step produces into a custody pile sits READY for `ReadyMs` of world GAME time (game time
+    stands still while the server is down - an outage cooks and burns nothing), then collapses
+    ONCE to the `Overdone` items (exact-`ItemId` entries only, the output route rule; the codec
+    warns and the engine ignores anything else). `ReadyMs` alone = purely presentational (Ready
+    look + `ready` moment, nothing degrades); `Overdone` without a reachable `ReadyMs` never opens
+    a window (`DONENESS_OVERDONE_WITHOUT_READY`); a window on an action with no
+    `Produce.To:"Custody"` step has no pile to sit on (`DONENESS_WITHOUT_PRODUCE_SOCKET`).
+    Unauthored anywhere = deterministic exactly as before. Engine half: `../station/CLAUDE.md`'s
+    doneness bullet (`StationDoneness` + the claim's window record + `StationService`'s one lazy
+    settle core).
   - **`Recipe.Yield` - purely DETERMINISTIC, four leaves:** `Base` (flat quantity; absent = each
     conversion's own authored quantity), `Scale` (multiplier, floored to a whole item,
     reader-default 1.0), `Min`/`Max` clamps. A floor of 1 output is ALWAYS enforced underneath - a
@@ -370,14 +385,21 @@ resolution section for the engine half.
   later placement outside that family is refused until the claim empties again ("50 oak OR 50
   pine, never 100 mixed"). Enforced in the ONE acceptance choke point, so both the held-item route
   and the inventory-scan fallback honour it; the pure core is `station.StationCustody#acceptsFamily`.
-  `States` (`{Empty?, Loaded?, Working?}`) names the block's own `State.Definitions` entries the
-  engine flips between; null = no visual/hint flip. **`Working`** is the third,
-  independently-nullable leaf and means "actively being worked", NOT "has input in it": the engine
-  holds the block in it only while a work step is genuinely executing there, reverting to
-  `Loaded`/`Empty` at the next NON-working step's entry, at a walk phase's departure, at the
-  runtime idle transition, and at every session stop path. It applies to whichever block a step
-  runs AT, so the primary station AND a claimed remote anchor both get it; which steps count is
-  `StationStep.IsWork` (below). Omitting it is byte-identical to pre-knob behavior. `Display`
+  `States` (`{Empty?, Loaded?, Working?, Ready?, Overdone?}`) names the block's own
+  `State.Definitions` entries the engine flips between; null = no visual/hint flip. **`Working`**
+  is independently nullable and means "actively being worked", NOT "has input in it": the engine
+  holds the block in it only while a work step is genuinely executing there, reverting to the
+  RESTING look (`station.StationDoneness#restingStateName`: `Empty`/`Loaded`, or `Ready`/`Overdone`
+  under the doneness pair below) at the next NON-working step's entry, at a walk phase's departure,
+  at the runtime idle transition, and at every session stop path. It applies to whichever block a
+  step runs AT, so the primary station AND a claimed remote anchor both get it; which steps count
+  is `StationStep.IsWork` (below). **`Ready`/`Overdone` (decision 88)** are the doneness pair: a
+  produced batch waiting under an open `Doneness` ready window, and a pile collapsed by an expired
+  one; both inert without an authored `Recipe`/`Conversion.Doneness`. THE STATE SET IS CLOSED BY
+  CODE - overlay is not extension: an extension/pack may re-skin the NAME each leaf points at,
+  never add a state (`States` has no collection, so it was never in D37-conflict, unlike the
+  additively-extensible `Sockets` map below). Omitting any leaf is byte-identical to pre-knob
+  behavior for that flip. `Display`
   (`{Offset: Vec3, Scale, Rotation: Rotation}`, FACING-RELATIVE to the placed block's own yaw, every
   leaf `appendInherited`; the block yaw folds into `Rotation.Yaw`) opts the placed input into a
   PLACED-AS-ENTITY visual - see `../station/CLAUDE.md`'s dedicated bullet for the full engine-side

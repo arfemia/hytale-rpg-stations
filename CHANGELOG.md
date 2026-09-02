@@ -57,6 +57,23 @@ there is no prior public release to diff against, so every entry is additive by 
   bench's category rows (the Cookingbench tabs) derive exactly like a Processing bench's. Item
   matching itself now runs through the shared library's one `ItemMatch` core, so a recipe
   ingredient, an action selector and a socket matcher can never drift apart.
+- **Doneness: a ready window on produced output.** A recipe (or any one conversion row, winning
+  per leaf over the recipe default; native-derived rows inherit the recipe default like any other
+  row) can author `Doneness: { ReadyMs, Overdone }`: a batch a step produces into a custody pile
+  then sits READY to collect for `ReadyMs` of world GAME time and, if nobody gathers it, collapses
+  once into the `Overdone` items - stew left on the fire too long becomes charcoal. The clock is
+  game time, never wall clock, so a server outage cooks and burns nothing; the window settles
+  lazily at whatever next touches the stash (a press at the station, a press-F retrieval, the
+  working session's own heartbeat) with expiry boundary-exact at `elapsed >= ReadyMs`. Every new
+  batch re-stamps the clock ("stirring the pot"), and at expiry the WHOLE windowed pile collapses
+  together - the `Overdone` quantities scale by the batches produced into the window, the pile
+  keeps its owner, and no other socket's pile is touched. A session stop leaves an open window's
+  pile standing with its clock running (the batch is world state now - it is neither refunded nor
+  duplicated); gathering before expiry simply ends the window. Two new `Custody.States` leaves
+  (`Ready`, `Overdone` - the state set stays closed by the engine, packs re-point names only) and
+  two new moment ids (`ready`, `overdone`, flair-overlayable like every cue) carry the look and
+  sound, `ReadyMs` alone is a legal purely-presentational window, and two validator findings catch
+  an `Overdone` that can never settle and a window with no custody produce to sit on.
 - **The sneak+F picker also opens for multi-recipe stations.** A station whose action carries two
   or more hand-authored recipe rows shows one card per row (listed first, labeled by that row's own
   output item with its input-to-output cost line) beside the usual derived-category cards; a

@@ -422,6 +422,141 @@ final class StationCustodyClaim {
         return out;
     }
 
+    // ==================== the doneness window record (decision 87) ====================
+    //
+    // ONE ready window per stash, recorded on persisted leaves so it survives a restart exactly
+    // like the pile it watches: the stash-level ProgressGameTime is the window's (re)start in
+    // WORLD GAME TIME, and the windowed pile carries StationDoneness.BATCHES_KEY in its
+    // PendingCycles map (the pile holding the key IS the windowed pile; the value is how many
+    // produce batches landed while the window was open). The stash-level LastGameTime leaf is
+    // deliberately NOT touched here - it is reserved for the unattended pass's last-settled
+    // catch-up clock. Whoever mutates, marks (the standing dirty contract).
+
+    /** The open window's start in world game-time ms (stash {@code ProgressGameTime}), or null when no window. */
+    @Nullable
+    Long donenessWindowStart() {
+        return stash.getProgressGameTime();
+    }
+
+    /** Clears the window's start stamp (the batches key goes separately, with its pile). */
+    void clearDonenessWindowStamp() {
+        stash.setProgressGameTime(null);
+    }
+
+    /** Closes the whole window: the start stamp AND every pile's batches key (overdone marks stay). */
+    void clearDonenessWindow() {
+        stash.setProgressGameTime(null);
+        Map<String, StashPile> piles = stash.getPiles();
+        if (piles == null) {
+            return;
+        }
+        for (StashPile pile : piles.values()) {
+            Map<String, Integer> pending = pile != null ? pile.getPendingCycles() : null;
+            if (pending != null) {
+                pending.remove(StationDoneness.BATCHES_KEY);
+            }
+        }
+    }
+
+    /**
+     * The socket id of the pile carrying the open window's {@link StationDoneness#BATCHES_KEY},
+     * or null when no pile does. A stash whose start stamp survived without any keyed pile (a
+     * gathered pile, a demoted stash) has no window - the settle self-heals the stale stamp.
+     */
+    @Nullable
+    String donenessWindowSocketId() {
+        Map<String, StashPile> piles = stash.getPiles();
+        if (piles == null) {
+            return null;
+        }
+        for (Map.Entry<String, StashPile> e : piles.entrySet()) {
+            StashPile pile = e.getValue();
+            Map<String, Integer> pending = pile != null ? pile.getPendingCycles() : null;
+            if (pending != null && pending.containsKey(StationDoneness.BATCHES_KEY)) {
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
+    /** The open window's produced-batch count on this socket's pile (0 when it carries none). */
+    int donenessBatches(@Nonnull String socketId) {
+        StashPile pile = stash.pile(socketId);
+        Map<String, Integer> pending = pile != null ? pile.getPendingCycles() : null;
+        Integer batches = pending != null ? pending.get(StationDoneness.BATCHES_KEY) : null;
+        return batches != null && batches > 0 ? batches : 0;
+    }
+
+    /**
+     * Records one produced batch landing in {@code socketId}'s pile and (re)stamps the window
+     * start to {@code nowGameMs}: a stash holds ONE window, so a batches key standing on a
+     * DIFFERENT pile moves here (last producer wins), and a standing overdone mark on this pile is
+     * cleared (fresh output supersedes the collapsed look). Returns the new batch count - {@code 1}
+     * means the window just OPENED (the caller fires the ready moment/flip on exactly that).
+     */
+    int noteDonenessBatch(@Nonnull String socketId, long nowGameMs) {
+        boolean freshWindow = stash.getProgressGameTime() == null;
+        Map<String, StashPile> piles = stash.getPiles();
+        if (piles != null) {
+            for (Map.Entry<String, StashPile> e : piles.entrySet()) {
+                if (e.getValue() == null) {
+                    continue;
+                }
+                // A different pile's key moves here (one window per stash); a stale key on THIS
+                // pile with no open stamp is a closed window's leftover, reset rather than resumed.
+                if (!e.getKey().equals(socketId) || freshWindow) {
+                    Map<String, Integer> pending = e.getValue().getPendingCycles();
+                    if (pending != null) {
+                        pending.remove(StationDoneness.BATCHES_KEY);
+                    }
+                }
+            }
+        }
+        Map<String, Integer> pending = stash.ensurePile(socketId).pendingCyclesMutable();
+        pending.remove(StationDoneness.OVERDONE_KEY);
+        int batches = pending.merge(StationDoneness.BATCHES_KEY, 1, Integer::sum);
+        stash.setProgressGameTime(nowGameMs);
+        return batches;
+    }
+
+    /** True when this socket's pile wears the collapsed-overdone mark (drives the Overdone resting look). */
+    boolean donenessOverdoneMarked(@Nonnull String socketId) {
+        StashPile pile = stash.pile(socketId);
+        Map<String, Integer> pending = pile != null ? pile.getPendingCycles() : null;
+        return pending != null && pending.containsKey(StationDoneness.OVERDONE_KEY);
+    }
+
+    /** True when ANY pile wears the collapsed-overdone mark. */
+    boolean anyDonenessOverdoneMarked() {
+        Map<String, StashPile> piles = stash.getPiles();
+        if (piles == null) {
+            return false;
+        }
+        for (String socketId : piles.keySet()) {
+            if (socketId != null && donenessOverdoneMarked(socketId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Commits an expired window's collapse on {@code socketId}'s pile: the whole counted tally is
+     * REPLACED by {@code replacement} (the pile's owner and {@code Unique} stack untouched), the
+     * batches key comes off, the overdone mark goes on, and the window's start stamp clears. The
+     * caller marks dirty and handles the block flip/moment.
+     */
+    void settleDonenessOverdone(@Nonnull String socketId, @Nonnull Map<String, Integer> replacement) {
+        StashPile pile = stash.ensurePile(socketId);
+        Map<String, Integer> items = pile.itemsMutable();
+        items.clear();
+        items.putAll(replacement);
+        Map<String, Integer> pending = pile.pendingCyclesMutable();
+        pending.remove(StationDoneness.BATCHES_KEY);
+        pending.put(StationDoneness.OVERDONE_KEY, 1);
+        stash.setProgressGameTime(null);
+    }
+
     // ==================== the degenerate (main-pile) view ====================
 
     /** The live, mutable {@value #MAIN_PILE} tally - the socket-less view the pure decision cores default to. */

@@ -250,8 +250,8 @@ public class StationAssetCodecTest {
     // ==================== Recipe: one per action, no per-recipe tool ====================
 
     @Test
-    void recipe_authorsConversionsFromCraftingAndYieldOnly() {
-        assertEquals(java.util.Set.of("Conversions", "FromCrafting", "Yield"),
+    void recipe_authorsConversionsFromCraftingYieldAndDonenessOnly() {
+        assertEquals(java.util.Set.of("Conversions", "FromCrafting", "Yield", "Doneness"),
                 StationAsset.Recipe.CODEC.getEntries().keySet(),
                 "the ACTION's Tool is the one gate; a recipe never carries its own");
     }
@@ -545,6 +545,64 @@ public class StationAssetCodecTest {
         assertEquals(-0.1, c.getDisplay().getOffset().getY());
         assertEquals(0.4, c.getDisplay().getScale());
         assertEquals(90.0, c.getDisplay().getRotation().getRoll());
+    }
+
+    @Test
+    void custody_decodesTheDonenessStatePair() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Custody\": {"
+                + " \"States\": { \"Empty\": \"Default\", \"Loaded\": \"Loaded\","
+                + "   \"Ready\": \"Steaming\", \"Overdone\": \"Burnt\" } } } ] }");
+        Custody.States states = a.getActions()[0].getCustody().getStates();
+        assertEquals("Steaming", states.getReady());
+        assertEquals("Burnt", states.getOverdone());
+        assertNull(states.getWorking(), "the five state leaves stay independently nullable");
+    }
+
+    // ==================== Doneness (the ready window, both altitudes) ====================
+
+    @Test
+    void doneness_decodesOnTheRecipeAndOnAConversion() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Recipe\": {"
+                + " \"Doneness\": { \"ReadyMs\": 60000,"
+                + "   \"Overdone\": [ { \"ItemId\": \"Fixture_Charcoal\", \"Quantity\": 2 } ] },"
+                + " \"Conversions\": [ {"
+                + "   \"Input\": [ { \"ItemId\": \"Fixture_In\" } ],"
+                + "   \"Output\": [ { \"ItemId\": \"Fixture_Out\" } ],"
+                + "   \"Doneness\": { \"ReadyMs\": 5000 } } ] } } ] }");
+        StationAsset.Recipe recipe = a.getActions()[0].getRecipe();
+        assertEquals(60000L, recipe.getDoneness().getReadyMs());
+        assertEquals("Fixture_Charcoal", recipe.getDoneness().getOverdone()[0].getItemId());
+        assertEquals(2, recipe.getDoneness().getOverdone()[0].effectiveQuantity());
+        StationAsset.Conversion row = recipe.getConversions()[0];
+        assertEquals(5000L, row.getDoneness().getReadyMs());
+        assertNull(row.getDoneness().getOverdone(),
+                "the row authors only ReadyMs; the recipe default supplies Overdone at resolve time");
+    }
+
+    @Test
+    void doneness_readerDefaultsToNoWindow() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Recipe\": { \"Conversions\": [ {"
+                + " \"Input\": [ { \"ItemId\": \"Fixture_In\" } ],"
+                + " \"Output\": [ { \"ItemId\": \"Fixture_Out\" } ] } ] } } ] }");
+        StationAsset.Recipe recipe = a.getActions()[0].getRecipe();
+        assertNull(recipe.getDoneness(), "unauthored Doneness reads as null - deterministic exactly as before");
+        assertNull(recipe.getConversions()[0].getDoneness());
+        assertNull(StationAsset.Doneness.resolve(null, null),
+                "neither altitude authored = no window anywhere");
+    }
+
+    @Test
+    void doneness_copyWithsCarryTheLeaf() {
+        StationAsset.Doneness doneness = StationAsset.Doneness.of(1000L, null);
+        StationAsset.Conversion row = StationAsset.Conversion
+                .of(Ingredient.item("Fixture_In", 1), Ingredient.item("Fixture_Out", 1))
+                .withDoneness(doneness);
+        assertEquals(doneness, row.withTier(3).getDoneness(),
+                "withTier carries the doneness leaf");
+        assertEquals(doneness, row.withExactSet(true).getDoneness(),
+                "withExactSet carries the doneness leaf");
+        assertEquals(3, row.withTier(3).withDoneness(doneness).getTier(),
+                "withDoneness carries the tier leaf");
     }
 
     // ==================== Anchors + Steps stay per-action ====================

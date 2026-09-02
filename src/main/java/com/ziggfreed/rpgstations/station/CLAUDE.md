@@ -1066,7 +1066,7 @@ found, it just cannot be pathed to. Both denials roll back every partial claim.
 
 The maintainer ruling is **"Lit = actively cooking"**: a station block's working look (the cooking
 fire's flames) must be on ONLY while work is genuinely running there, never merely because input
-was placed. That is `asset.Custody.States`' third nullable leaf (`../asset/CLAUDE.md`), driven by
+was placed. That is `asset.Custody.States`' nullable `Working` leaf (`../asset/CLAUDE.md`), driven by
 two package-private seams on `StationService`:
 
 - **`enterWorkingState(session, anchorId)`** resolves the anchor through the SAME
@@ -1076,9 +1076,10 @@ two package-private seams on `StationService`:
   instead of flickering once per cycle) and exits any previously-working block first, so at most
   one block per player is ever left working (`workingByPlayer`, a transient `UUID -> WorkingFlip`
   map, never persisted).
-- **`exitWorkingState(session)`** returns the block to `Loaded` (a claim still stands there) or
-  `Empty` (it does not). Idempotent, so every "work is no longer running" moment can call it
-  freely.
+- **`exitWorkingState(session)`** returns the block to its RESTING look
+  (`StationDoneness.restingStateName`): `Loaded` (a claim still stands there), `Ready` (an open
+  doneness window's batch waits), `Overdone` (a collapsed pile), or `Empty`. Idempotent, so every
+  "work is no longer running" moment can call it freely.
 
 **Which steps count as work** is `StationStep.effectiveIsWork()` (derived default: a
 `Consume`+`Produce` atomic-transform CONVERT is work, everything else is not; an authored
@@ -1115,6 +1116,62 @@ sound or particle system. The held-back `RPG_Station_CookingFire` block (`unrele
 `Furniture_Crude_Brazier` verbatim on its `Lit` state for this - the worked example to restore
 from, since the 0.1.0 jar ships the Sawmill alone. Corollary for step `Presentation.Sound`: only ever
 author a ONE-SHOT SoundEvent there - a looping id fired as a one-shot never ends.
+
+## Doneness: the lazy ready window (decisions 87/88)
+
+A `Produce.To:"Custody"` batch under a resolved `Recipe`/`Conversion.Doneness` (the per-leaf fold
+is `asset.StationAsset.Doneness.resolve`, conversion over recipe - see `../asset/CLAUDE.md`) sits
+READY in its pile for `ReadyMs` of WORLD GAME TIME, then collapses once to the authored `Overdone`
+items. The pieces:
+
+- **The clock is game time** (`StationService#gameTimeMs`: `WorldTimeResource.getGameTime()`, the
+  native processing-bench precedent) - it stands still while the server is down, so an outage
+  advances every window by exactly zero (pinned by `StationDonenessTest`'s codec-round-trip case).
+- **The window RECORD is persisted stash state** (`StationCustodyClaim`'s doneness accessors): the
+  stash-level `ProgressGameTime` leaf is the window's (re)start; the windowed pile carries
+  `StationDoneness.BATCHES_KEY` (`"doneness:batches"`, the produced-batch count) in its
+  `PendingCycles` map, and a collapsed pile wears `"doneness:overdone"`. The whole
+  `"doneness:"` `PendingCycles` prefix is RESERVED - any other accrual key (the unattended pass's
+  per-conversion counts) must live outside it. The stash-level `LastGameTime` leaf is deliberately
+  untouched: it is reserved as the unattended pass's last-settled catch-up clock.
+- **One window per stash, opened/re-stamped by `StationService#noteCustodyProduce`** - called ONCE
+  per committed produce PHASE from `StationStepHandlers.producePhase` (never per item; a
+  multi-socket phase's window sits on its FIRST produced socket). Every batch re-stamps the clock
+  ("stirring the pot"); only the FIRST fires the `ready` moment + `ui.station.output_ready` toast
+  and flips `States.Ready` (skipped while a Working flip holds the block - the resting flip shows
+  Ready at the next stop instead).
+- **The settle is LAZY and there is ONE core**, `StationService#settleDoneness` (the
+  `settleDonenessAt` convenience resolves the claim's own recipe-level fold): called at the
+  toggle/placement first touch (before anything reads the claim), press-F retrieval (before the
+  decide, so an overdue gather retrieves the settled items), and the engaged session's heartbeat
+  (throttled by `DONENESS_SETTLE_MS`, guarded on the `s.doneness` engage snapshot); a future
+  sessionless pass calls the same function with its own conversion-resolved fold. Expiry is
+  boundary-exact (`StationDoneness.expired`: `elapsed >= ReadyMs`).
+- **The collapse rule ("one pot, one fate")**: the WHOLE windowed pile's counted tally is replaced
+  by the valid `Overdone` entries (exact-`ItemId` only; others ignored) scaled by the batch count
+  (`StationDoneness.overdoneReplacement`); the pile's owner and `Unique` stack are untouched, no
+  other pile is touched (per-socket isolation), the window clears, `States.Overdone` flips, the
+  pile's display prop despawns (the standing first-touch respawn rebuilds it from the settled
+  contents), the `overdone` moment fires - through an engaged session's cue queue when one works
+  the block (`sessionAt`), else immediately at the block via `playPresentationAt` (the ONE
+  sessionless playback core `StationStructures`' pattern moments also delegate to) - and the
+  toucher gets `ui.station.output_overdone`.
+- **The D38 window case**: `pilesToHandBack` (pure, both hand-back paths read it - `returnCustody`
+  and the anchor sweep) EXEMPTS the open-windowed pile from every present-player stop hand-back:
+  the produced batch belongs to the pile and the window keeps running - it is world state now,
+  gathered later (press-F) or expiring where it stands. A stop neither refunds it (the produce
+  already cleared the iteration ledger) nor duplicates it (`StationRefundLedgerTest`'s window
+  case).
+- **Gather clears**: retrieving the windowed pile takes the batches key with the pile and clears
+  the stamp; the block resets per what remains. `removeOrDemoteStashAt`'s demote branch nulls BOTH
+  game-time clocks (custody bookkeeping dies with the custody half). A window whose content no
+  longer resolves one (a recipe edit) closes silently at the next settle; `ReadyMs` with no valid
+  `Overdone` is purely presentational and clears only at gather.
+
+Pure cores in [`StationDoneness`](StationDoneness.java) (boundary math, replacement rule,
+resting-state pick), record ops on the claim, orchestration on `StationService`; the moment ids
+`ready`/`overdone` are well-known (`StationFlairs.MOMENT_READY`/`MOMENT_OVERDONE`), so flairs
+overlay them like any cue.
 
 ## The placed-input PLACED-AS-ENTITY visual
 
