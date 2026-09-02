@@ -71,7 +71,22 @@ public final class StationStructures {
 
     private static final StationStructures INSTANCE = new StationStructures();
 
+    /**
+     * How long one player's refusal toast at one anchor stays suppressed after showing. A refused
+     * completion (a conflicting anchor, a failed {@code Requires} gate) deliberately leaves its
+     * pending entry standing - a later placement may complete legitimately - so a builder placing
+     * block after block near the anchor keeps re-running the same walk; without a throttle every
+     * one of those placements re-toasts the same refusal.
+     */
+    static final long REFUSAL_TOAST_COOLDOWN_MS = 5_000L;
+
+    /** How many throttle entries may accumulate before a decision prunes the expired ones. */
+    private static final int REFUSAL_TOAST_PRUNE_SIZE = 256;
+
     private final PendingAnchorIndex pending = new PendingAnchorIndex();
+
+    /** (player | world | anchor) -&gt; the last refusal-toast wall-clock ms; in-memory only, never persisted. */
+    private final Map<String, Long> refusalToastAt = new java.util.concurrent.ConcurrentHashMap<>();
 
     private StationStructures() {
     }
@@ -350,11 +365,15 @@ public final class StationStructures {
             return;
         }
         if (tagDecision == ActivationDecision.CONFLICT) {
-            toast(playerRef, RpgMsg.tr("ui.station.structure_conflict"));
+            if (refusalToastAllowed(playerRef, worldUuid, ax, ay, az)) {
+                toast(playerRef, RpgMsg.tr("ui.station.structure_conflict"));
+            }
             return;
         }
         if (!requiresPassed(cp, playerRef)) {
-            toast(playerRef, requirementsUnmetToast(cp));
+            if (refusalToastAllowed(playerRef, worldUuid, ax, ay, az)) {
+                toast(playerRef, requirementsUnmetToast(cp));
+            }
             return;
         }
 
@@ -673,5 +692,40 @@ public final class StationStructures {
         if (playerRef != null) {
             StationService.toast(playerRef, message);
         }
+    }
+
+    /**
+     * The live refusal-toast throttle for {@link #handleCompletedShape}'s CONFLICT/DENIED
+     * branches, keyed per (player, world, anchor) - see {@link #REFUSAL_TOAST_COOLDOWN_MS} for
+     * why the same refusal would otherwise repeat on every nearby placement. The refusal itself is
+     * never throttled, only its toast; a toast-less refusal still refuses.
+     */
+    private boolean refusalToastAllowed(@Nullable PlayerRef playerRef, @Nonnull UUID worldUuid,
+            int ax, int ay, int az) {
+        if (playerRef == null || playerRef.getUuid() == null) {
+            return false; // nobody to toast (an environment-driven walk)
+        }
+        return refusalToastAllowed(refusalToastAt,
+                playerRef.getUuid() + "|" + worldUuid + "|" + ax + "|" + ay + "|" + az,
+                System.currentTimeMillis(), REFUSAL_TOAST_COOLDOWN_MS);
+    }
+
+    /**
+     * PURE throttle decision: {@code true} (and the shown-at record updates) when {@code key} has
+     * not toasted within {@code cooldownMs} of {@code nowMs}. Self-pruning: once the map outgrows
+     * {@link #REFUSAL_TOAST_PRUNE_SIZE}, expired entries are dropped before recording - the map
+     * stays bounded by the refusals genuinely live inside one cooldown window.
+     */
+    static boolean refusalToastAllowed(@Nonnull Map<String, Long> lastShownAt, @Nonnull String key,
+            long nowMs, long cooldownMs) {
+        Long last = lastShownAt.get(key);
+        if (last != null && nowMs - last < cooldownMs) {
+            return false;
+        }
+        if (lastShownAt.size() > REFUSAL_TOAST_PRUNE_SIZE) {
+            lastShownAt.values().removeIf(shownAt -> shownAt == null || nowMs - shownAt >= cooldownMs);
+        }
+        lastShownAt.put(key, nowMs);
+        return true;
     }
 }

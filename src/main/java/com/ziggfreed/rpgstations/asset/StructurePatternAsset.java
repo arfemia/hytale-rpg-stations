@@ -15,6 +15,8 @@ import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
+import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.hypixel.hytale.codec.schema.metadata.ui.UIEditorSectionStart;
 import com.ziggfreed.common.codec.InheritMapCodec;
 import com.ziggfreed.common.codec.Vec3i;
 
@@ -80,10 +82,12 @@ public final class StructurePatternAsset
             .documentation("Ignored - the pattern id comes from the asset filename, not this key. Kept as a schema field for editor display only.").add()
             .appendInherited(new KeyedCodec<>("Identity", Identity.CODEC, false),
                     (a, v) -> a.identity = v, a -> a.identity, (a, p) -> a.identity = p.identity)
-            .documentation("Display identity: the localization keys naming this structure in player-facing messages.").add()
+            .documentation("Display identity: the localization keys naming this structure in player-facing messages.")
+            .metadata(new UIEditorSectionStart("Identity")).add()
             .appendInherited(new KeyedCodec<>("Rotate", Rotate.CODEC, false),
                     (a, v) -> a.rotate = v, a -> a.rotate, (a, p) -> a.rotate = p.rotate)
-            .documentation("Which orientations of the shape count as built: the four yaw quarter-turns (default on) and an optional X-mirror (default off).").add()
+            .documentation("Which orientations of the shape count as built: the four yaw quarter-turns (default on) and an optional X-mirror (default off).")
+            .metadata(new UIEditorSectionStart("Structure")).add()
             .appendInherited(new KeyedCodec<>("Activate", Activate.CODEC, false),
                     (a, v) -> a.activate = v, a -> a.activate, (a, p) -> a.activate = p.activate)
             .documentation("What completion does to the anchor block: the station block it becomes, and the block a broken shape reverts it to.").add()
@@ -92,11 +96,13 @@ public final class StructurePatternAsset
             .documentation("The cells of the shape, each an offset plus what must stand there. Exactly one cell is the anchor. Under native Parent this ARRAY is replaced wholesale, never merged per entry - a child re-authoring any cell re-authors them all.").add()
             .appendInherited(new KeyedCodec<>("Requires", Requires.CODEC, false),
                     (a, v) -> a.requires = v, a -> a.requires, (a, p) -> a.requires = p.requires)
-            .documentation("The activation gate, evaluated against the player whose placement completed the shape; a failing gate leaves the blocks standing and the station unactivated.").add()
+            .documentation("The activation gate, evaluated against the player whose placement completed the shape; a failing gate leaves the blocks standing and the station unactivated.")
+            .metadata(new UIEditorSectionStart("Requirements")).add()
             .appendInherited(new KeyedCodec<>("Moments",
                             new InheritMapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.moments = v, a -> a.moments, (a, p) -> a.moments = p.moments)
-            .documentation("Moment id -> the presentation played at the anchor. Well-known ids: 'activated' (a completed build turned into the station) and 'broken' (the standing shape was broken and reverted). Cues play at once; a DelayMs here is read as zero. Under native Parent the map merges PER MOMENT ID.").add()
+            .documentation("Moment id -> the presentation played at the anchor. Well-known ids: 'activated' (a completed build turned into the station) and 'broken' (the standing shape was broken and reverted). Cues play at once; a DelayMs here is read as zero. Under native Parent the map merges PER MOMENT ID.")
+            .metadata(new UIEditorSectionStart("Moments")).add()
             .afterDecode((StructurePatternAsset asset, com.hypixel.hytale.codec.ExtraInfo extraInfo) -> {
                 if (asset.cells == null || asset.cells.length == 0) {
                     extraInfo.getValidationResults().warn(
@@ -335,7 +341,8 @@ public final class StructurePatternAsset
         public static final BuilderCodec<Activate> CODEC = BuilderCodec.builder(Activate.class, Activate::new)
                 .appendInherited(new KeyedCodec<>("Block", Codec.STRING, false),
                         (o, v) -> o.block = v, o -> o.block, (o, p) -> o.block = p.block)
-                .documentation("The station block item id the anchor is swapped to on completion, keeping its rotation. Author it EQUAL to the anchor cell's own block id for a custom core block that needs no swap - completion then simply arms the block that already stands there.").add()
+                .documentation("The station block item id the anchor is swapped to on completion, keeping its rotation. Author it EQUAL to the anchor cell's own block id for a custom core block that needs no swap - completion then simply arms the block that already stands there.")
+                .metadata(new UIEditor(new UIEditor.Dropdown(AssetEditorDataSets.STATION_BLOCKS))).add()
                 .appendInherited(new KeyedCodec<>("RevertBlock", Codec.STRING, false),
                         (o, v) -> o.revertBlock = v, o -> o.revertBlock, (o, p) -> o.revertBlock = p.revertBlock)
                 .documentation("The block item id a broken shape reverts the anchor to; null = the anchor cell's own authored block id.").add()

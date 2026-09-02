@@ -125,6 +125,10 @@ is the exact inverse of a permanently-opaque channel.
   contribution `Amount`s). `FindingSink` is info/warn only; every hook is try-guarded; nothing here
   can block an asset. This is the correct home for a rule like "do not sum this aggregate factor
   AND the channels it aggregates" - the engine cannot know that, and must not pretend to.
+  A hook that lints STRUCTURE PATTERNS reads `RpgStationsApi.patterns()` from inside its
+  `validate` body: hooks run only in the full pass (post-load), so the live pattern projection is
+  always available at hook time - the scope itself deliberately carries rolls + stations only
+  (test-pinned by `StationValidatorTest`'s registered-hook case).
 - **[`FlairUnlockRegistry`](FlairUnlockRegistry.java)** / **[`FlairUnlockProvider`](FlairUnlockProvider.java)**
   - `unlockedFlairIds(playerId)` returns a `Set<String>`; the engine's flair overlay resolution
   consults the UNION across every registered provider. The engine itself registers the built-in

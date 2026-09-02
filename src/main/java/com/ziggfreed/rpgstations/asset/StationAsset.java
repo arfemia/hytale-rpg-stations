@@ -353,7 +353,8 @@ public final class StationAsset
                 .documentation("Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape).").add()
                 .appendInherited(new KeyedCodec<>("Unattended", Unattended.CODEC, false),
                         (o, v) -> o.unattended = v, o -> o.unattended, (o, p) -> o.unattended = p.unattended)
-                .documentation("Opt-in unattended processing over placed custody: authoring this group at all turns it on (absent = attended-only). While nobody works the station, its recipe conversions keep settling against the placed piles on world game time - the transform happens immediately, and the loot rolls and contribution posts it would have earned accrue on the output pile and pay out to whoever gathers it.").add()
+                .documentation("Opt-in unattended processing over placed custody: authoring this group at all turns it on (absent = attended-only). While nobody works the station, its recipe conversions keep settling against the placed piles on world game time - the transform happens immediately, and the loot rolls and contribution posts it would have earned accrue on the output pile and pay out to whoever gathers it.")
+                .metadata(new UIEditorSectionStart("Unattended")).add()
                 .build();
 
         @Nonnull
@@ -637,7 +638,8 @@ public final class StationAsset
                 .documentation("Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived); null = each conversion's own authored quantity, unchanged.").add()
                 .appendInherited(new KeyedCodec<>("Doneness", Doneness.CODEC, false),
                         (o, v) -> o.doneness = v, o -> o.doneness, (o, p) -> o.doneness = p.doneness)
-                .documentation("The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window.").add()
+                .documentation("The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window.")
+                .metadata(new UIEditorSectionStart("Doneness")).add()
                 .build();
 
         @Nonnull
@@ -1083,7 +1085,8 @@ public final class StationAsset
                 .documentation("When true, the row matches only while the pile(s) its inputs draw from hold nothing beyond those inputs (per drawn socket; other sockets never block). Defaults to false. Author exact-set rows before looser rows at the same tier.").add()
                 .appendInherited(new KeyedCodec<>("Doneness", Doneness.CODEC, false),
                         (o, v) -> o.doneness = v, o -> o.doneness, (o, p) -> o.doneness = p.doneness)
-                .documentation("This row's own ready window; each leaf falls back to the Recipe-level Doneness default. Null = the recipe default whole.").add()
+                .documentation("This row's own ready window; each leaf falls back to the Recipe-level Doneness default. Null = the recipe default whole.")
+                .metadata(new UIEditorSectionStart("Doneness")).add()
                 .build();
 
         /** Convenience for the classic one-in/one-out conversion. */

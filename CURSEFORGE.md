@@ -88,6 +88,33 @@ stacked on the sawmill bench), retrievable with a press of `F` straight off the 
 place stays placed like a chest's contents: it survives logging off and server restarts, waiting
 in the station until you work it, take it back, or the block is broken.
 
+### Multiblock structures
+
+Some stations are not crafted or placed. They are built. A structure pattern describes an
+arrangement of ordinary blocks with one special cell; finish building the shape in the world, in
+any order and facing any way, and that block becomes a working station on the spot. Break any block
+of the standing shape and it turns back, dropping whatever was stored there. The Cooking Pit works
+exactly this way - a ring of stone around an unlit campfire - and a pack can ship its own shapes
+with an optional permission or stat gate on who may raise them.
+
+### Sockets and sharing
+
+A station can offer named places to put things. The pit's pot takes ingredients one press at a
+time while a shelf above it holds the finished meals; the pot itself is a real block sitting on
+the fire, and lifting it off changes what the station does. Each slot keeps its own pile with its
+own owner, so two players can load the same station without their materials ever mixing. By
+default only you can work from or take back what you placed; a station can open any of that up.
+The shipped pit lets anyone cook, and anyone walk off with a finished meal.
+
+### Doneness and unattended work
+
+Cooked things have a done moment. Output sits ready to collect for a while and then, if the recipe
+says so, spoils - stew ignored long past done chars into charcoal, and the block smokes to warn
+you. Stations that opt in also keep working while nobody stands at them: load the pot, walk away,
+and cycles keep settling on world game time in loaded chunks, with the rewards those cycles earned
+paid to whoever comes back and gathers the batch. The clock is game time, not the wall clock, so
+server downtime cooks and burns nothing.
+
 ### The puppet
 
 Optionally hide your character entirely and spawn a stand-in performer to do the work instead - a
@@ -152,6 +179,7 @@ every other asset the engine loads.
 | Folder | What it holds |
 |---|---|
 | `Server/RpgStations/Stations/` | Station definitions - the work loop, its tool gate, its loot, its actions |
+| `Server/RpgStations/Patterns/` | Multiblock structure shapes - the block arrangements that become stations when built |
 | `Server/RpgStations/Actions/` | Standalone, reusable actions a station attaches by reference |
 | `Server/RpgStations/Flairs/` | Cosmetic unlock overlays |
 | `Server/RpgStations/Extensions/` | Additive extensions onto another pack's content |

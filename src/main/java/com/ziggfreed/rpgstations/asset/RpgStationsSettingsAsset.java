@@ -173,7 +173,7 @@ public final class RpgStationsSettingsAsset
                 .appendInherited(new KeyedCodec<>("MaxStashesPerSection", Codec.INTEGER, false),
                         (o, v) -> o.maxStashesPerSection = v, o -> o.maxStashesPerSection,
                         (o, p) -> o.maxStashesPerSection = p.maxStashesPerSection)
-                .documentation("The most blocks in ONE chunk section (a 16x16x16 cube) that may hold placed station input at once. Placing into a station that already holds material always works (it tops the existing store up); only a placement that would CREATE a new one past the ceiling is denied, with a localized toast. Null (the default) means unlimited.")
+                .documentation("The most blocks in ONE chunk section (a 32x32x32 cube) that may hold placed station input at once. Placing into a station that already holds material always works (it tops the existing store up); only a placement that would CREATE a new one past the ceiling is denied, with a localized toast. A multiblock structure's own activation mark never counts against it. Null (the default) means unlimited.")
                 .addValidator(CodecWarnValidators.positive("Limits.MaxStashesPerSection should be positive.")).add()
                 .appendInherited(new KeyedCodec<>("UnattendedIntervalMs", Codec.LONG, false),
                         (o, v) -> o.unattendedIntervalMs = v, o -> o.unattendedIntervalMs,

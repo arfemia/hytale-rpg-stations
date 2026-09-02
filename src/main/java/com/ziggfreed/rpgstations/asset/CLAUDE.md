@@ -812,7 +812,9 @@ they land per-leaf and are never a parallel table that can drift from the codec:
   the same edit as a new leaf** - the coverage test is not a reminder you can defer past a build.
 - **`.metadata(...)` for the in-game Asset Editor.** A bare `UIEditorSectionStart("<label>")` opens
   a section at each top-level group (`Identity`/`Block`/`Requires`/`Flairs`/`Actions` on
-  `StationAsset`, plus `Engine`/`Summary HUD`/`Limits` on `RpgStationsSettingsAsset` -
+  `StationAsset`, `Identity`/`Structure`/`Requirements`/`Moments` on `StructurePatternAsset`,
+  `Sharing`/`Sockets` on `Custody`, `Doneness` on `Recipe` + `Conversion`, `Unattended` on `Work`,
+  plus `Engine`/`Summary HUD`/`Limits` on `RpgStationsSettingsAsset` -
   `StationAsset` lost its old per-group sections when those groups moved onto `ActionDef`, which
   carries none of its own); the rest nest inside a `UIEditor` - `UIEditor.Dropdown("<datasetId>")`
   turns a leaf into a pick list, `UIEditor.LocalizationKeyField("<keyTemplate>")` marks
@@ -846,7 +848,11 @@ they land per-leaf and are never a parallel table that can drift from the codec:
   (`rpgstations:stations`/`actions`/`lootables`/`rollpools` off `station.StationCatalog`/
   `ActionCatalog`/the shared `LootableConfig`/`RollPoolConfig`, `rpgstations:factors` off
   `api.impl.FactorRegistryImpl#registeredIds`, `rpgstations:channels` off
-  `api.impl.ContributionChannelRegistryImpl#registeredIds` - so an asset reload or a late
+  `api.impl.ContributionChannelRegistryImpl#registeredIds`,
+  `rpgstations:station-blocks` off `station.StationService#stationBlockItemIds` (the asset-derived
+  discovery index, backing `StructurePatternAsset.Activate.Block`; `RevertBlock` stays free text
+  since any block id is a legitimate revert, and there is deliberately no `rpgstations:patterns`
+  set because no codec leaf names a pattern id) - so an asset reload or a late
   third-party factor/channel registration simply widens the next answer, and an empty answer is
   legitimate, never an error: nothing has declared a channel yet);
   FIXED sets are the closed union-discriminator vocabularies, each sourced from the SAME constant

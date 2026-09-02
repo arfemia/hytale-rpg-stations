@@ -4468,6 +4468,17 @@ public final class StationService {
     }
 
     /**
+     * Every block ITEM id the asset-derived discovery index resolves to a station, lowercased - the
+     * live source behind the {@code rpgstations:station-blocks} Asset Editor dataset (a pattern's
+     * {@code Activate.Block} pick list). Empty until {@link #seedStationBlockIndexFromAssets} has
+     * run; an empty answer is legitimate there, never an error.
+     */
+    @Nonnull
+    public java.util.Set<String> stationBlockItemIds() {
+        return java.util.Set.copyOf(stationBlockItemToId.keySet());
+    }
+
+    /**
      * The station id a block ITEM id resolves through the asset-derived discovery index
      * ({@link #seedStationBlockIndexFromAssets}), or null when the block is no station.
      * {@code PatternCatalog} reads it to derive which station a pattern's {@code Activate.Block}

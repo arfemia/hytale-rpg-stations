@@ -144,8 +144,6 @@ each originating pile, so a shared worker's interruption never walks off with th
 
 ## Acceptance precedence at a claimed block
 
-## Acceptance precedence at a claimed block
-
 A block already busy with its own session, or already holding a non-empty custody claim, refuses an
 incoming claim from a different program (relevant when the same block is also declared as a
 [multi-station anchor](multi-station-programs.md) by some OTHER action). The check reads the

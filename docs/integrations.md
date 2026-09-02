@@ -46,7 +46,9 @@ answer:
 | `StationSessionCompletedEvent` | The session stops (for any reason); fires after summary enrichers run. |
 | `StationEnhanceCompletedEvent` | An enhancement Stamp commits; carries before/after item copies and the enhancement report. |
 | `StationToolBrokeEvent` | A tool the session was using breaks. |
+| `StationOutputProducedEvent` | A produce phase of an ATTENDED session commits - into a placed custody pile (the receiving socket is named) or the worker's inventory; carries fresh immutable copies of the committed stacks. An unattended settle deliberately fires nothing here: that output surfaces at gather, on the event below. |
 | `StationUnattendedGatheredEvent` | A player gathers a custody pile that accrued [unattended work](unattended-work.md) cycles; carries the gatherer (never null), the granted cycle count, and the batch's already-scaled contributions. |
+| `StationStructureChangedEvent` | A [multiblock structure](structures-and-sockets.md) changes standing state at its anchor - a completed build activates, or a broken one reverts; names the pattern, the block now standing, and the acting player (absent on an environment break). |
 
 Each event's fields document which are plain data (safe to keep) and which are live world-thread
 context valid only during dispatch - a listener that defers work captures the plain fields and

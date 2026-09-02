@@ -11,11 +11,15 @@ import org.junit.jupiter.api.Test;
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 import com.ziggfreed.common.codec.Rotation;
+import com.ziggfreed.common.codec.Vec3i;
 import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.common.factor.FactorFormula;
 import com.ziggfreed.common.loot.LootGrants;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.rpgstations.api.PatternView;
+import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
+import com.ziggfreed.rpgstations.api.impl.ValidationHookRegistryImpl;
 import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
@@ -29,6 +33,7 @@ import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
+import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
 import com.ziggfreed.rpgstations.loot.LootFixtures;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
 import com.ziggfreed.common.validation.Finding;
@@ -1351,5 +1356,362 @@ public class StationValidatorTest {
                         new Ingredient[] {Ingredient.item("Fixture_Charcoal", 1)}), null))
                 .withCustody(Custody.of(100, null, null)));
         assertTrue(codes(validate(a)).contains("DONENESS_WITHOUT_PRODUCE_SOCKET"));
+    }
+
+    // ==================== Sockets (the multi-placement wave's deferred sweep) ====================
+
+    /** A custody group carrying exactly the handed-in socket map, every other leaf unauthored. */
+    private static Custody socketedCustody(Map<String, Custody.Socket> sockets) {
+        return Custody.of(10, null, null, null, null, null, sockets);
+    }
+
+    private static Custody.Socket itemSocket(ActionInput match, Custody.Display display) {
+        return Custody.Socket.of(Custody.Socket.ItemRoute.of(match, 1), null,
+                null, null, null, display, null, null);
+    }
+
+    @Test
+    void itemSocketWithoutADisplay_info() {
+        StationAsset a = station("blindpot", ActionDef.of("Stew")
+                .withRecipe(trunkRecipe())
+                .withCustody(socketedCustody(Map.of("meat", itemSocket(null, null)))));
+        List<Finding> findings = validate(a);
+        assertTrue(codes(findings).contains("SOCKET_NO_DISPLAY"));
+        assertTrue(findings.stream().anyMatch(f -> "SOCKET_NO_DISPLAY".equals(f.code())
+                        && f.severity() == Severity.INFO),
+                "an invisible slot is legal - advisory only");
+    }
+
+    @Test
+    void itemSocketWithItsOwnDisplay_notFlagged() {
+        StationAsset a = station("shownpot", ActionDef.of("Stew")
+                .withRecipe(trunkRecipe())
+                .withCustody(socketedCustody(Map.of("meat",
+                        itemSocket(null, Custody.Display.of(null, null, null))))));
+        assertFalse(codes(validate(a)).contains("SOCKET_NO_DISPLAY"));
+    }
+
+    @Test
+    void blockSocketAuthoringPileLeaves_flagged() {
+        StationAsset a = station("overpot", ActionDef.of("Stew")
+                .withRecipe(trunkRecipe())
+                .withCustody(socketedCustody(Map.of("vessel",
+                        Custody.Socket.of(null, Custody.Socket.BlockRoute.of(Vec3i.of(0, 1, 0), null),
+                                4, true, true, null, Custody.Share.of(true, null, null), null)))));
+        assertTrue(codes(validate(a)).contains("SOCKET_BLOCK_SHARE_INERT"),
+                "Share/MaxQuantity/SingleFamily are pile leaves - a Block socket stores no pile");
+    }
+
+    @Test
+    void blockSocketKeptLean_notFlagged() {
+        StationAsset a = station("leanpot", ActionDef.of("Stew")
+                .withRecipe(trunkRecipe())
+                .withCustody(socketedCustody(Map.of("vessel",
+                        Custody.Socket.of(null, Custody.Socket.BlockRoute.of(Vec3i.of(0, 1, 0), null),
+                                null, null, true, null, null, "fixture.socket.vessel")))));
+        assertFalse(codes(validate(a)).contains("SOCKET_BLOCK_SHARE_INERT"));
+    }
+
+    /** The socketed fixture the address checks below share: one item socket 'pot', one Block socket 'fire'. */
+    private static Custody addressableCustody() {
+        return socketedCustody(Map.of(
+                "pot", itemSocket(null, Custody.Display.of(null, null, null)),
+                "fire", Custody.Socket.of(null, Custody.Socket.BlockRoute.of(Vec3i.of(0, 1, 0), null),
+                        null, null, null, null, null, null)));
+    }
+
+    @Test
+    void conversionEntryNamingAnUndeclaredSocket_flagged() {
+        StationAsset a = station("lostdraw", ActionDef.of("Stew")
+                .withCustody(addressableCustody())
+                .withRecipe(StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(
+                                new Ingredient[] {Ingredient.of("Fixture_Meat", null, 1, "rack")},
+                                new Ingredient[] {Ingredient.of("Fixture_Stew", null, 1, "shelf")},
+                                null, null)})));
+        Set<String> codes = codes(validate(a));
+        assertTrue(codes.contains("CONSUME_SOCKET_UNKNOWN"));
+        assertTrue(codes.contains("PRODUCE_SOCKET_UNKNOWN"));
+    }
+
+    @Test
+    void conversionEntryNamingABlockSocket_flagged() {
+        StationAsset a = station("firedraw", ActionDef.of("Stew")
+                .withCustody(addressableCustody())
+                .withRecipe(StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(
+                                new Ingredient[] {Ingredient.of("Fixture_Meat", null, 1, "fire")},
+                                new Ingredient[] {Ingredient.item("Fixture_Stew", 1)},
+                                null, null)})));
+        assertTrue(codes(validate(a)).contains("CONSUME_SOCKET_UNKNOWN"),
+                "a Block socket stores no pile, so drawing from one can never resolve");
+    }
+
+    @Test
+    void conversionEntryNamingADeclaredItemSocket_notFlagged() {
+        StationAsset a = station("gooddraw", ActionDef.of("Stew")
+                .withCustody(addressableCustody())
+                .withRecipe(StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(
+                                new Ingredient[] {Ingredient.of("Fixture_Meat", null, 1, "pot")},
+                                new Ingredient[] {Ingredient.of("Fixture_Stew", null, 1, "pot")},
+                                null, null)})));
+        Set<String> codes = codes(validate(a));
+        assertFalse(codes.contains("CONSUME_SOCKET_UNKNOWN"));
+        assertFalse(codes.contains("PRODUCE_SOCKET_UNKNOWN"));
+    }
+
+    @Test
+    void socketAddressOnACustodylessAction_flagged() {
+        StationAsset a = station("nostore", ActionDef.of("Mill")
+                .withRecipe(StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(
+                                new Ingredient[] {Ingredient.of("Fixture_Trunk", null, 1, "pot")},
+                                new Ingredient[] {Ingredient.item("Fixture_Plank", 1)},
+                                null, null)})));
+        assertTrue(codes(validate(a)).contains("INGREDIENT_SOCKET_ON_INVENTORY_ROUTE"),
+                "with no Custody the materials move through the inventory, where the address is inert");
+    }
+
+    @Test
+    void consumeSocketOnTheInventoryRoute_flagged() {
+        StationAsset a = station("wrongroute", ActionDef.of("Stew")
+                .withCustody(addressableCustody())
+                .withSteps(new StationStep[] {StationStep.of("cook")
+                        .withConsume(StationStep.Consume.of(
+                                new Ingredient[] {Ingredient.item("Fixture_Meat", 1)},
+                                StationStep.Consume.FROM_INVENTORY, "pot"))}));
+        assertTrue(codes(validate(a)).contains("INGREDIENT_SOCKET_ON_INVENTORY_ROUTE"),
+                "the decode-time warn, promoted to a coded audit finding");
+    }
+
+    @Test
+    void custodyRoutedStepSockets_checkedAgainstTheDeclaredSet() {
+        StationAsset a = station("stepdraw", ActionDef.of("Stew")
+                .withCustody(addressableCustody())
+                .withSteps(new StationStep[] {StationStep.of("cook")
+                        .withConsume(StationStep.Consume.of(
+                                new Ingredient[] {Ingredient.item("Fixture_Meat", 1)},
+                                StationStep.Consume.FROM_CUSTODY, "rack"))
+                        .withProduce(StationStep.Produce.of(
+                                new Ingredient[] {Ingredient.item("Fixture_Stew", 1)},
+                                StationStep.Produce.TO_CUSTODY, "pot"))}));
+        Set<String> codes = codes(validate(a));
+        assertTrue(codes.contains("CONSUME_SOCKET_UNKNOWN"), "the Consume names an undeclared socket");
+        assertFalse(codes.contains("PRODUCE_SOCKET_UNKNOWN"), "the Produce names the declared item socket");
+    }
+
+    @Test
+    void refEntryWithoutItsOwnCustody_addressesLeftUnchecked() {
+        // A Ref'd entry may inherit its Custody from the base action, so an address here is not
+        // provably wrong - the check stays silent rather than false-flagging.
+        StationAsset a = station("refpot", ActionDef.of("Stew").withRef("fixtureprep")
+                .withRecipe(StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(
+                                new Ingredient[] {Ingredient.of("Fixture_Meat", null, 1, "pot")},
+                                new Ingredient[] {Ingredient.item("Fixture_Stew", 1)},
+                                null, null)})));
+        Set<String> codes = codes(validate(a));
+        assertFalse(codes.contains("CONSUME_SOCKET_UNKNOWN"));
+        assertFalse(codes.contains("INGREDIENT_SOCKET_ON_INVENTORY_ROUTE"));
+    }
+
+    @Test
+    void stampBesideSocketsWithoutAMainPile_info() {
+        StationAsset a = station("ritualpot", ActionDef.of("Enhance")
+                .withCustody(socketedCustody(Map.of("weapon",
+                        itemSocket(null, Custody.Display.of(null, null, null)))))
+                .withSteps(new StationStep[] {StationStep.of("strike")
+                        .withStamp(StationStep.Stamp.of(
+                                new Ingredient[] {Ingredient.item("Fixture_Dust", 1)}, null, null))}));
+        assertTrue(codes(validate(a)).contains("STAMP_WITHOUT_MAIN_PILE"),
+                "Stamp reads the 'main' pile's unique stack; these sockets never fill it");
+    }
+
+    @Test
+    void stampBesideAMainSocket_notFlagged() {
+        StationAsset a = station("mainritual", ActionDef.of("Enhance")
+                .withCustody(socketedCustody(Map.of("main",
+                        itemSocket(null, Custody.Display.of(null, null, null)))))
+                .withSteps(new StationStep[] {StationStep.of("strike")
+                        .withStamp(StationStep.Stamp.of(
+                                new Ingredient[] {Ingredient.item("Fixture_Dust", 1)}, null, null))}));
+        assertFalse(codes(validate(a)).contains("STAMP_WITHOUT_MAIN_PILE"));
+    }
+
+    @Test
+    void socketMatchResolvingNoLiveItem_flagged() {
+        // The injectable core behind the live pass: the fixture's identity sets stand in for the
+        // live item map. The match's ONE authored route (a family) resolves nothing.
+        StationAsset a = station("deadmatch", ActionDef.of("Stew")
+                .withRecipe(trunkRecipe())
+                .withCustody(socketedCustody(Map.of("meat",
+                        itemSocket(ActionInput.of(null, "Fixture_Meats", null, null),
+                                Custody.Display.of(null, null, null))))));
+        List<Finding> findings = StationValidator.checkCustodyInputsResolve(List.of(a), List.of(),
+                Set.of("fixture_greens"), tags -> false, itemId -> false);
+        assertTrue(codes(findings).contains("SOCKET_MATCH_UNMATCHED"));
+    }
+
+    @Test
+    void socketMatchWithOneResolvingRoute_notFlagged() {
+        // ANY-OF: the family route misses but the tags route resolves, so the socket is fine.
+        StationAsset a = station("livematch", ActionDef.of("Stew")
+                .withRecipe(trunkRecipe())
+                .withCustody(socketedCustody(Map.of("meat",
+                        itemSocket(ActionInput.of(null, "Fixture_Meats",
+                                        Map.of("Type", new String[] {"Food"}), null),
+                                Custody.Display.of(null, null, null))))));
+        List<Finding> findings = StationValidator.checkCustodyInputsResolve(List.of(a), List.of(),
+                Set.of("fixture_greens"), tags -> true, itemId -> false);
+        assertFalse(codes(findings).contains("SOCKET_MATCH_UNMATCHED"));
+    }
+
+    // ==================== Derived bench fuel (the cooking wave) ====================
+
+    @Test
+    void derivedBenchAuthoringAFuelSlot_info() {
+        List<Finding> out = new java.util.ArrayList<>();
+        StationValidator.checkDerivedBenchFuel(List.of("FixtureFire"), bench -> true,
+                "Station 'pit'", "pit", out);
+        assertTrue(codes(out).contains("DERIVED_ROW_DROPS_BENCH_FUEL"));
+        assertTrue(out.stream().allMatch(f -> f.severity() == Severity.INFO),
+                "the fuel divergence is frequently the authored intent - advisory only");
+    }
+
+    @Test
+    void derivedBenchWithoutAFuelSlot_silent() {
+        List<Finding> out = new java.util.ArrayList<>();
+        StationValidator.checkDerivedBenchFuel(List.of("FixtureFire"), bench -> false,
+                "Station 'pit'", "pit", out);
+        assertTrue(out.isEmpty());
+    }
+
+    // ==================== Structure patterns (validatePatterns) ====================
+
+    private static StructurePatternAsset.Cell patternCell(int x, int y, int z, String itemId, boolean anchor) {
+        return StructurePatternAsset.Cell.of(Vec3i.of(x, y, z),
+                itemId == null ? null : ActionInput.of(itemId, null, null, null),
+                itemId == null ? Boolean.TRUE : null, anchor ? Boolean.TRUE : null);
+    }
+
+    private static StructurePatternAsset ringPattern(String id, StructurePatternAsset.Activate activate,
+            Requires requires, StructurePatternAsset.Identity identity, StructurePatternAsset.Cell... cells) {
+        return StructurePatternAsset.of(id, identity, null, activate, cells, requires, null);
+    }
+
+    private static Set<String> patternCodes(StructurePatternAsset p, Predicate<String> itemKnown,
+            Predicate<String> stationBlockKnown) {
+        return codes(StationValidator.validatePatterns(List.of(p), itemKnown, stationBlockKnown));
+    }
+
+    @Test
+    void patternPastTheCellCeiling_flagged() {
+        StructurePatternAsset.Cell[] cells =
+                new StructurePatternAsset.Cell[StationValidator.PATTERN_CELL_ADVISORY_MAX + 1];
+        for (int i = 0; i < cells.length; i++) {
+            cells[i] = patternCell(i, 0, 0, "Fixture_Rock", i == 0);
+        }
+        StructurePatternAsset p = StructurePatternAsset.of("bigring", null, null,
+                StructurePatternAsset.Activate.of("Fixture_Station", null), cells, null, null);
+        assertTrue(patternCodes(p, id -> true, id -> true).contains("PATTERN_TOO_LARGE"));
+    }
+
+    @Test
+    void duplicateCellOffsets_info() {
+        StructurePatternAsset p = ringPattern("dupring",
+                StructurePatternAsset.Activate.of("Fixture_Station", null), null, null,
+                patternCell(0, 0, 0, "Fixture_Campfire", true),
+                patternCell(1, 0, 0, "Fixture_Rock", false),
+                patternCell(1, 0, 0, "Fixture_Rock", false));
+        List<Finding> findings = StationValidator.validatePatterns(List.of(p), id -> true, id -> true);
+        assertTrue(codes(findings).contains("PATTERN_CELL_DUPLICATE_OFFSET"));
+        assertTrue(findings.stream().anyMatch(f -> "PATTERN_CELL_DUPLICATE_OFFSET".equals(f.code())
+                && f.severity() == Severity.INFO), "two matchers on one cell is legal - usually a typo");
+    }
+
+    @Test
+    void gatedPatternWithoutANameKey_info() {
+        StructurePatternAsset p = ringPattern("gatedring",
+                StructurePatternAsset.Activate.of("Fixture_Station", null),
+                Requires.of("fixture.build.permission", null), null,
+                patternCell(0, 0, 0, "Fixture_Campfire", true));
+        assertTrue(patternCodes(p, id -> true, id -> true).contains("PATTERN_REQUIRES_WITHOUT_NAME_KEY"));
+    }
+
+    @Test
+    void gatedPatternWithANameKey_notFlagged() {
+        StructurePatternAsset p = ringPattern("namedring",
+                StructurePatternAsset.Activate.of("Fixture_Station", null),
+                Requires.of("fixture.build.permission", null),
+                StructurePatternAsset.Identity.of("fixture.structure.ring.name", null),
+                patternCell(0, 0, 0, "Fixture_Campfire", true));
+        assertFalse(patternCodes(p, id -> true, id -> true).contains("PATTERN_REQUIRES_WITHOUT_NAME_KEY"));
+    }
+
+    @Test
+    void unknownActivateBlock_flagged() {
+        StructurePatternAsset p = ringPattern("badring",
+                StructurePatternAsset.Activate.of("Fixture_Station", null), null, null,
+                patternCell(0, 0, 0, "Fixture_Campfire", true));
+        Set<String> codes = patternCodes(p, id -> !"Fixture_Station".equals(id), id -> true);
+        assertTrue(codes.contains("PATTERN_ACTIVATE_BLOCK_UNKNOWN"));
+        assertFalse(codes.contains("PATTERN_REVERT_UNRESOLVABLE"),
+                "the revert (the anchor's own campfire) still resolves");
+    }
+
+    @Test
+    void unresolvableRevertBlock_flagged() {
+        StructurePatternAsset p = ringPattern("stuckring",
+                StructurePatternAsset.Activate.of("Fixture_Station", "Fixture_Gone"), null, null,
+                patternCell(0, 0, 0, "Fixture_Campfire", true));
+        assertTrue(patternCodes(p, id -> !"Fixture_Gone".equals(id), id -> true)
+                .contains("PATTERN_REVERT_UNRESOLVABLE"));
+    }
+
+    @Test
+    void activateBlockResolvingNoStation_flagged() {
+        StructurePatternAsset p = ringPattern("inertring",
+                StructurePatternAsset.Activate.of("Fixture_Deco", null), null, null,
+                patternCell(0, 0, 0, "Fixture_Campfire", true));
+        assertTrue(patternCodes(p, id -> true, id -> false)
+                .contains("PATTERN_ACTIVATE_BLOCK_NO_INTERACTION"));
+    }
+
+    @Test
+    void resolvableActivation_clean() {
+        StructurePatternAsset p = ringPattern("goodring",
+                StructurePatternAsset.Activate.of("Fixture_Station", null), null,
+                StructurePatternAsset.Identity.of("fixture.structure.ring.name", null),
+                patternCell(0, 0, 0, "Fixture_Campfire", true),
+                patternCell(1, 0, 0, "Fixture_Rock", false));
+        assertTrue(StationValidator.validatePatterns(List.of(p), id -> true, id -> true).isEmpty());
+    }
+
+    // ==================== The validation-hook reach (patterns, decision 80) ====================
+
+    @Test
+    void registeredHook_runsInTheFullPass_andReadsThePatternView() {
+        // The pattern-domain reach: a consumer hook runs in the FULL pass and reads the folded
+        // patterns through the api's own patterns() view (live at hook time, since the full pass
+        // runs post-load). The scope carries rolls + stations; patterns come from the api holder.
+        StructurePatternAsset p = ringPattern("hookring",
+                StructurePatternAsset.Activate.of("Fixture_Station", null), null, null,
+                patternCell(0, 0, 0, "Fixture_Campfire", true));
+        PatternCatalog.getInstance().fold(Map.of(p.getId(), p), true);
+        ValidationHookRegistryImpl.getInstance().register((scope, sink) -> {
+            for (PatternView view : RpgStationsApiImpl.getInstance().patterns()) {
+                sink.info("FIXTURE_PATTERN_SEEN", "saw pattern " + view.id(), view.id());
+            }
+        });
+        try {
+            List<Finding> findings = StationValidator.validate();
+            assertTrue(findings.stream().anyMatch(f -> "FIXTURE_PATTERN_SEEN".equals(f.code())
+                            && "hookring".equals(f.sourceId())),
+                    "a hook registered for the pattern domain runs in the full pass and sees the view");
+        } finally {
+            ValidationHookRegistryImpl.getInstance().resetForTests();
+            PatternCatalog.getInstance().clearForTest();
+        }
     }
 }

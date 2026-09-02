@@ -1509,6 +1509,19 @@ additive `rpgstations.lang` overlay resolves correctly. **Unattended checks (dec
 `Work.Unattended` that is enabled - `ActionResolver.effectiveWorkOf` resolves a `Ref` entry's
 group), plus the `DONENESS_WITHOUT_PRODUCE_SOCKET` exemption (an unattended settle lands produce
 in custody itself, so that warn is suppressed for an unattended-enabled action).
+**Socket + pattern checks (the wave's closing sweep)**: `SOCKET_NO_DISPLAY` (INFO) /
+`SOCKET_BLOCK_SHARE_INERT` in `checkCustody`; `SOCKET_MATCH_UNMATCHED` in the injectable
+`checkCustodyInputsResolve` core behind the live pass (an ANY-OF match is flagged only when EVERY
+authored route resolves nothing); `CONSUME_SOCKET_UNKNOWN` / `PRODUCE_SOCKET_UNKNOWN` /
+`INGREDIENT_SOCKET_ON_INVENTORY_ROUTE` in `checkSocketAddresses` (a `Ref` entry with no own
+Custody is left unchecked); `STAMP_WITHOUT_MAIN_PILE` (INFO, `checkStampMainPile`);
+`validatePatterns` over `PatternCatalog.all()` (`PATTERN_ACTIVATE_BLOCK_UNKNOWN` /
+`PATTERN_ACTIVATE_BLOCK_NO_INTERACTION` / `PATTERN_REVERT_UNRESOLVABLE` live-only,
+`PATTERN_TOO_LARGE` / `PATTERN_CELL_DUPLICATE_OFFSET` / `PATTERN_REQUIRES_WITHOUT_NAME_KEY` in
+both passes); `DERIVED_ROW_DROPS_BENCH_FUEL` (INFO, `checkDerivedBenchFuel` behind
+`sourceBenchIdsLive` + `benchAuthorsFuelLive` - fires on the shipped pit by design, matching its
+own `$Comment`). A third-party `ValidationHook` linting patterns reads
+`RpgStationsApi.patterns()` from inside its `validate` body (live at hook time; test-pinned).
 **Multi-station/extension checks**:
 `ACTION_REF_UNKNOWN`, `EXTENSION_TARGET_UNKNOWN`, `EXTENSION_PAYLOAD_MISMATCH`,
 `EXTENSION_KEY_COLLISION`, `EXTENSION_ANCHOR_MISSING`, `EXTENSION_STEP_MISSING_ID`,

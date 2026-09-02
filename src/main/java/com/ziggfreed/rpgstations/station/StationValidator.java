@@ -17,6 +17,9 @@ import javax.annotation.Nullable;
 
 import com.hypixel.hytale.protocol.BenchRequirement;
 import com.hypixel.hytale.protocol.ItemResourceType;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.bench.Bench;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.bench.ProcessingBench;
 import com.hypixel.hytale.server.core.asset.type.entityeffect.config.EntityEffect;
 import com.hypixel.hytale.server.core.asset.type.item.config.CraftingRecipe;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
@@ -42,6 +45,7 @@ import com.ziggfreed.common.loot.reward.RewardSpec;
 import com.ziggfreed.common.loot.stamp.RollPoolConfig;
 import com.ziggfreed.common.loot.stamp.StampSpec;
 import com.ziggfreed.common.loot.stamp.StatRollEntry;
+import com.ziggfreed.common.match.ItemMatch;
 import com.ziggfreed.common.validation.Finding;
 import com.ziggfreed.common.validation.Severity;
 import com.ziggfreed.common.validation.ValidationReport;
@@ -66,6 +70,7 @@ import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
+import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
 import com.ziggfreed.rpgstations.i18n.RpgStationsLangKeys;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
 import com.ziggfreed.rpgstations.loot.StationRewardKinds;
@@ -138,6 +143,24 @@ import com.ziggfreed.rpgstations.util.Log;
  * runs inside the FULL pass over one shared {@code api.ValidationScope}, each inside its own
  * try/catch, its findings folded into the same aggregate report. That is where a rule that needs
  * to know what a specific factor or channel MEANS lives - with the mod that owns the vocabulary.
+ * A hook that lints STRUCTURE PATTERNS reads {@code RpgStationsApi.patterns()} from inside its
+ * {@code validate} body: the full pass runs post-load, so the live pattern projection is always
+ * available at hook time (pinned by the registered-hook test in {@code StationValidatorTest}).
+ *
+ * <p><b>Multi-placement wave (sockets + structures + cooking):</b> the deferred validator sweep
+ * landed here as one batch. Sockets: {@code SOCKET_NO_DISPLAY} (INFO, the invisible-placement
+ * rule), {@code SOCKET_BLOCK_SHARE_INERT}, {@code SOCKET_MATCH_UNMATCHED} (the live family/tag
+ * resolution check carried per socket), {@code CONSUME_SOCKET_UNKNOWN}/{@code
+ * PRODUCE_SOCKET_UNKNOWN} (a recipe row or step phase addressing a socket the action's Custody
+ * never declares), {@code INGREDIENT_SOCKET_ON_INVENTORY_ROUTE} (a socket address on an
+ * inventory-routed phase, the decode warn promoted to a coded finding), and {@code
+ * STAMP_WITHOUT_MAIN_PILE} (INFO - Stamp reads the {@code main} pile's unique stack, so sockets
+ * that exclude {@code main} leave it nothing to enhance). Patterns ({@link #validatePatterns}):
+ * {@code PATTERN_ACTIVATE_BLOCK_UNKNOWN}/{@code PATTERN_REVERT_UNRESOLVABLE} (unknown item ids),
+ * {@code PATTERN_ACTIVATE_BLOCK_NO_INTERACTION} (the swapped-in block resolves no station - an
+ * inert structure), {@code PATTERN_TOO_LARGE}, {@code PATTERN_CELL_DUPLICATE_OFFSET} (INFO), and
+ * {@code PATTERN_REQUIRES_WITHOUT_NAME_KEY} (INFO). Derivation: {@code
+ * DERIVED_ROW_DROPS_BENCH_FUEL} (INFO - a source bench's native Fuel slot never derives).
  *
  * <p>Pure and side-effect-free (apart from {@link #runAndLog} and {@link #runHooks}); never throws.
  */
@@ -207,6 +230,8 @@ public final class StationValidator {
                     StationValidator::modelKnownLive, stationKnown));
             out.addAll(validateExtensions(extensions, stations, actionAssets,
                     dropListKnown, factorKnown, lootableKnown, rollPoolKnown));
+            out.addAll(validatePatterns(PatternCatalog.getInstance().all().values(),
+                    StationValidator::itemKnownLive, StationValidator::stationBlockResolvesLive));
             out.addAll(checkCustodyInputsResolveLive(stations, actionAssets));
             // AFTER the walk above, which is what filled referencedDropLists.
             out.addAll(checkDropListsResolveLive(referencedDropLists));
@@ -241,6 +266,8 @@ public final class StationValidator {
             out.addAll(validateLootables(LootableConfig.getInstance().all().values(),
                     ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), ALWAYS_KNOWN));
+            out.addAll(validatePatterns(PatternCatalog.getInstance().all().values(),
+                    ALWAYS_KNOWN, ALWAYS_KNOWN));
             return out;
         } catch (Throwable t) {
             Log.warn("Station validation (structural) aborted: " + t.getMessage());
@@ -486,6 +513,147 @@ public final class StationValidator {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Live {@code Item} existence check for a pattern's activation/revert block ids. Fails OPEN on
+     * a lookup error AND on an EMPTY/unreadable item map ({@link #benchIdKnownLive}'s own stance) -
+     * a cold unit JVM or a pass before the native layers settled must never flag every pattern.
+     */
+    private static boolean itemKnownLive(@Nonnull String itemId) {
+        try {
+            var assetMap = Item.getAssetMap();
+            if (assetMap == null || assetMap.getAssetCount() == 0) {
+                return true;
+            }
+            return assetMap.getAsset(itemId) != null;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /**
+     * Live "does this block ITEM id resolve to a station" check for a pattern's
+     * {@code Activate.Block}: a completed build swapping its anchor to a block whose {@code Use}
+     * chain runs no {@code rpg_station_use} is an inert structure - it stands, but opens no work.
+     * Reads the same asset-derived discovery index anchor discovery does, and fails OPEN on an
+     * unseeded one exactly like {@link #stationDiscoverableLive}.
+     */
+    private static boolean stationBlockResolvesLive(@Nonnull String blockItemId) {
+        try {
+            StationService service = StationService.getInstance();
+            if (service.discoverableStationIds().isEmpty()) {
+                return true;
+            }
+            return service.stationIdForBlockItem(blockItemId) != null;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /**
+     * Live "does the native bench with this id author a Fuel slot" check
+     * ({@code DERIVED_ROW_DROPS_BENCH_FUEL}): walks the {@code BlockType} asset map for a
+     * {@code ProcessingBench} whose {@code Id} matches (the same open-string equality the engine's
+     * own {@code BenchRequirement} match uses) and reads its {@code Fuel} slots. Fails CLOSED
+     * (false) on any lookup error - an unreadable map is not evidence a fuel slot exists, and this
+     * check only ever produces an INFO.
+     */
+    private static boolean benchAuthorsFuelLive(@Nonnull String benchId) {
+        try {
+            for (BlockType blockType : BlockType.getAssetMap().getAssetMap().values()) {
+                if (blockType == null) {
+                    continue;
+                }
+                Bench bench = blockType.getBench();
+                if (bench instanceof ProcessingBench processing
+                        && bench.getId() != null && benchId.equalsIgnoreCase(bench.getId())
+                        && processing.getFuel() != null && processing.getFuel().length > 0) {
+                    return true;
+                }
+            }
+        } catch (Throwable t) {
+            return false;
+        }
+        return false;
+    }
+
+    /**
+     * The native bench ids a {@code FromCrafting} spec's derivation actually touches: its own
+     * {@code Benches} entries, plus (for the {@code Categories} route) the bench id of every live
+     * recipe whose bench categories intersect the wanted set - the same walk
+     * {@link #benchIdKnownLive} does, collecting instead of testing. Fail-soft: a lookup error
+     * keeps whatever was already collected.
+     */
+    @Nonnull
+    private static Set<String> sourceBenchIdsLive(@Nonnull StationAsset.FromCrafting fc) {
+        Set<String> out = new LinkedHashSet<>();
+        if (fc.getBenches() != null) {
+            for (String bench : fc.getBenches()) {
+                if (bench != null && !bench.isBlank()) {
+                    out.add(bench);
+                }
+            }
+        }
+        String[] wantCategories = fc.getCategories();
+        if (wantCategories == null || wantCategories.length == 0) {
+            return out;
+        }
+        try {
+            for (Item item : Item.getAssetMap().getAssetMap().values()) {
+                if (item == null || !item.hasRecipesToGenerate()) {
+                    continue;
+                }
+                List<CraftingRecipe> recipes = new ArrayList<>(1);
+                item.collectRecipesToGenerate(recipes);
+                for (CraftingRecipe recipe : recipes) {
+                    if (recipe == null || recipe.getBenchRequirement() == null) {
+                        continue;
+                    }
+                    for (BenchRequirement bench : recipe.getBenchRequirement()) {
+                        if (bench == null || bench.id == null || bench.id.isBlank()
+                                || bench.categories == null) {
+                            continue;
+                        }
+                        for (String category : bench.categories) {
+                            if (category == null || category.isBlank()) {
+                                continue;
+                            }
+                            for (String want : wantCategories) {
+                                if (category.equalsIgnoreCase(want)) {
+                                    out.add(bench.id);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            // fail-soft: the Benches half above still reports
+        }
+        return out;
+    }
+
+    /**
+     * Live "does ANY loaded item's raw tag map satisfy this authored TagMatch" probe (the
+     * {@code SOCKET_MATCH_UNMATCHED} tags leg), through the ONE shared {@code ItemMatch.tags}
+     * core the runtime matcher itself answers with. Fails OPEN (true) on a lookup error.
+     */
+    private static boolean anyLiveItemCarriesTags(@Nonnull Map<String, String[]> required) {
+        try {
+            for (Item item : Item.getAssetMap().getAssetMap().values()) {
+                if (item == null || item.getData() == null) {
+                    continue;
+                }
+                if (ItemMatch.tags(required, item.getData().getRawTags())) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     /**
@@ -1388,11 +1556,28 @@ public final class StationValidator {
     @Nonnull
     static List<Finding> checkCustodyInputsResolveLive(@Nonnull Collection<StationAsset> stations,
             @Nonnull Collection<ActionAsset> actionAssets) {
-        List<Finding> out = new ArrayList<>();
         Set<String> live = liveItemResourceTypeIds();
         if (live.isEmpty()) {
-            return out;
+            return new ArrayList<>();
         }
+        return checkCustodyInputsResolve(stations, actionAssets, live,
+                StationValidator::anyLiveItemCarriesTags, StationValidator::itemKnownLive);
+    }
+
+    /**
+     * The injectable core behind {@link #checkCustodyInputsResolveLive} (unit-testable with
+     * fixture identity sets): the custody-level {@code Input} family check above, plus the SAME
+     * resolution check carried PER SOCKET ({@code SOCKET_MATCH_UNMATCHED}, decision 67b's family
+     * check at the socket altitude). A socket {@code Match} is an ANY-OF matcher, so it is flagged
+     * only when EVERY authored route resolves nothing ({@code itemKnown} answering the exact-id
+     * route, {@code liveFamilies} the family route, {@code anyItemCarriesTags} the tags route).
+     */
+    @Nonnull
+    static List<Finding> checkCustodyInputsResolve(@Nonnull Collection<StationAsset> stations,
+            @Nonnull Collection<ActionAsset> actionAssets, @Nonnull Set<String> liveFamilies,
+            @Nonnull Predicate<Map<String, String[]>> anyItemCarriesTags,
+            @Nonnull Predicate<String> itemKnown) {
+        List<Finding> out = new ArrayList<>();
         for (StationAsset asset : stations) {
             if (asset == null) {
                 continue;
@@ -1402,7 +1587,8 @@ public final class StationValidator {
             if (actions != null) {
                 for (int i = 0; i < actions.length; i++) {
                     if (actions[i] != null) {
-                        warnUnmatchedCustodyInput(actions[i].getCustody(), live,
+                        warnUnmatchedCustodyInput(actions[i].getCustody(), liveFamilies,
+                                anyItemCarriesTags, itemKnown,
                                 "Station '" + id + "' action '"
                                         + ActionResolver.effectiveActionId(actions[i], i) + "'", id, out);
                     }
@@ -1414,22 +1600,65 @@ public final class StationValidator {
                 continue;
             }
             String id = a.getId() != null ? a.getId() : "?";
-            warnUnmatchedCustodyInput(a.getBody().getCustody(), live, "Action '" + id + "'", id, out);
+            warnUnmatchedCustodyInput(a.getBody().getCustody(), liveFamilies, anyItemCarriesTags,
+                    itemKnown, "Action '" + id + "'", id, out);
         }
         return out;
     }
 
     private static void warnUnmatchedCustodyInput(@Nullable Custody custody, @Nonnull Set<String> live,
+            @Nonnull Predicate<Map<String, String[]>> anyItemCarriesTags, @Nonnull Predicate<String> itemKnown,
             @Nonnull String label, @Nonnull String id, @Nonnull List<Finding> out) {
-        ActionInput input = custody != null ? custody.getInput() : null;
-        String family = input != null ? input.getResourceTypeId() : null;
-        if (family == null || family.isBlank() || live.contains(family.toLowerCase(Locale.ROOT))) {
+        if (custody == null) {
             return;
         }
-        out.add(Finding.warning(DOMAIN, "CUSTODY_INPUT_RESOURCE_TYPE_UNMATCHED",
-                label + " Custody.Input.ResourceTypeId '" + family + "' matches NO live item's"
-                        + " ResourceTypes family - nothing can ever be placed there (check the"
-                        + " family id against the items meant to load it)", id));
+        ActionInput input = custody.getInput();
+        String family = input != null ? input.getResourceTypeId() : null;
+        if (family != null && !family.isBlank() && !live.contains(family.toLowerCase(Locale.ROOT))) {
+            out.add(Finding.warning(DOMAIN, "CUSTODY_INPUT_RESOURCE_TYPE_UNMATCHED",
+                    label + " Custody.Input.ResourceTypeId '" + family + "' matches NO live item's"
+                            + " ResourceTypes family - nothing can ever be placed there (check the"
+                            + " family id against the items meant to load it)", id));
+        }
+        if (!custody.hasAuthoredSockets()) {
+            return;
+        }
+        for (Map.Entry<String, Custody.Socket> e : custody.getSockets().entrySet()) {
+            Custody.Socket socket = e.getValue();
+            if (socket == null || !socket.hasExactlyOneRoute()) {
+                continue;
+            }
+            String socketLabel = label + " Custody.Sockets['" + e.getKey() + "'].Match";
+            ActionInput match = socket.getItem() != null
+                    ? socket.getItem().getMatch() : socket.getBlock().getMatch();
+            if (match == null) {
+                continue;
+            }
+            // ANY-OF: unmatched only when every authored route resolves nothing.
+            boolean anyRouteAuthored = false;
+            boolean anyRouteResolves = false;
+            String matchItemId = match.getItemId();
+            if (matchItemId != null && !matchItemId.isBlank()) {
+                anyRouteAuthored = true;
+                anyRouteResolves = itemKnown.test(matchItemId);
+            }
+            String matchFamily = match.getResourceTypeId();
+            if (!anyRouteResolves && matchFamily != null && !matchFamily.isBlank()) {
+                anyRouteAuthored = true;
+                anyRouteResolves = live.contains(matchFamily.toLowerCase(Locale.ROOT));
+            }
+            Map<String, String[]> matchTags = match.getTags();
+            if (!anyRouteResolves && matchTags != null && !matchTags.isEmpty()) {
+                anyRouteAuthored = true;
+                anyRouteResolves = anyItemCarriesTags.test(matchTags);
+            }
+            if (anyRouteAuthored && !anyRouteResolves) {
+                out.add(Finding.warning(DOMAIN, "SOCKET_MATCH_UNMATCHED",
+                        socketLabel + " resolves NO live item on any of its authored routes"
+                                + " (exact id / ResourceTypes family / Tags) - nothing can ever satisfy"
+                                + " this socket; check the ids against the items meant to fill it", id));
+            }
+        }
     }
 
     /**
@@ -1568,6 +1797,56 @@ public final class StationValidator {
                     label + " authors Custody.SingleFamily true with an effective MaxQuantity of "
                             + custody.effectiveMaxQuantity() + " - a claim that holds at most one item already"
                             + " refuses a second family on capacity alone, so the family lock never fires", id));
+        }
+        // Per-socket coverage (the sockets wave). An extension's Custody overlay is a DELTA (a
+        // socket there may merge with base leaves), so like CUSTODY_NO_INPUT_MATCHER these two
+        // checks run only on a complete authored group.
+        if (overlay || !custody.hasAuthoredSockets()) {
+            return;
+        }
+        for (Map.Entry<String, Custody.Socket> e : custody.getSockets().entrySet()) {
+            String socketId = e.getKey() == null || e.getKey().isBlank() ? "(blank)" : e.getKey();
+            Custody.Socket socket = e.getValue();
+            if (socket == null) {
+                continue;
+            }
+            String sLabel = label + " Custody.Sockets['" + socketId + "']";
+            // The invisible-placement rule (decision 64D): an Item socket rendering no prop
+            // still stores, works and retrieves - players just get no visual cue anything is
+            // placed. INFO, because a deliberately invisible slot is legal.
+            if (socket.getItem() != null && socket.getBlock() == null && socket.getDisplay() == null) {
+                String detail = custody.getDisplay() != null
+                        ? " (the custody-level Display serves only the classic socket-less pile,"
+                                + " never an authored socket)" : "";
+                out.add(Finding.info(DOMAIN, "SOCKET_NO_DISPLAY",
+                        sLabel + " is an Item socket with no Display group" + detail
+                                + " - its placed materials render nothing at the block; author a"
+                                + " per-socket Display to show the pile", id));
+            }
+            // A Block socket stores nothing: the world block IS its state, so every pile-shaped
+            // leaf on one is inert.
+            if (socket.getBlock() != null && socket.getItem() == null) {
+                List<String> inert = new ArrayList<>();
+                if (socket.getShare() != null) {
+                    inert.add("Share");
+                }
+                if (socket.getMaxQuantity() != null) {
+                    inert.add("MaxQuantity");
+                }
+                if (socket.getSingleFamily() != null) {
+                    inert.add("SingleFamily");
+                }
+                if (socket.getDisplay() != null) {
+                    inert.add("Display");
+                }
+                if (!inert.isEmpty()) {
+                    out.add(Finding.warning(DOMAIN, "SOCKET_BLOCK_SHARE_INERT",
+                            sLabel + " is a Block socket authoring " + String.join("/", inert)
+                                    + " - a Block socket stores no pile (the world block IS its state,"
+                                    + " never custody), so those leaves are inert; keep only"
+                                    + " At/Match/Required/Label on it", id));
+                }
+            }
         }
     }
 
@@ -2449,6 +2728,32 @@ public final class StationValidator {
                                 + StationAsset.FromCrafting.NativeTime.DEFAULT_OFFSET_MS, id));
             }
         }
+        checkDerivedBenchFuel(sourceBenchIdsLive(fc), StationValidator::benchAuthorsFuelLive, label, id, out);
+    }
+
+    /**
+     * The bench-fuel divergence advisory (injectable core; the live wiring is
+     * {@link #sourceBenchIdsLive} + {@link #benchAuthorsFuelLive}): a derived row consumes only
+     * the native recipe's own inputs, so a source bench's {@code Fuel} slot requirement NEVER
+     * derives - the station runs the same recipes fuel-free. INFO, never a warn: that divergence
+     * is frequently the authored intent (the shipped cooking pit grills over an open flame on
+     * purpose), and the fix when it is not - a hand-authored {@code Conversions} row that also
+     * consumes the fuel item - is named in the message.
+     */
+    static void checkDerivedBenchFuel(@Nonnull Collection<String> sourceBenchIds,
+            @Nonnull Predicate<String> benchAuthorsFuel, @Nonnull String label, @Nonnull String id,
+            @Nonnull List<Finding> out) {
+        for (String bench : sourceBenchIds) {
+            if (bench == null || bench.isBlank() || !benchAuthorsFuel.test(bench)) {
+                continue;
+            }
+            out.add(Finding.info(DOMAIN, "DERIVED_ROW_DROPS_BENCH_FUEL",
+                    label + " Recipe.FromCrafting derives rows from native bench '" + bench
+                            + "', which authors a Fuel slot - a fuel requirement never derives (a"
+                            + " derived row consumes only the recipe's own inputs), so this station"
+                            + " runs those recipes fuel-free. If it should want fuel, author a"
+                            + " Conversions row that also consumes the fuel item", id));
+        }
     }
 
     /**
@@ -3171,6 +3476,90 @@ public final class StationValidator {
         return out;
     }
 
+    /** The advisory cell ceiling for {@code PATTERN_TOO_LARGE}: every placement near a shape walks its cells. */
+    static final int PATTERN_CELL_ADVISORY_MAX = 128;
+
+    /**
+     * Structure-pattern coverage (the multiblock wave's deferred sweep), singleton-free like every
+     * other collection validator here; the codec's own decode warns (no cells, no/multiple
+     * anchors, a family-matched anchor, both-or-neither cell routes) are the complement, not
+     * repeated. {@code itemKnown} answers "is this a live item id" and {@code stationBlockKnown}
+     * answers "does this block item id resolve a station through the discovery index" - both
+     * passed {@link #ALWAYS_KNOWN} by the structural pass (cross-layer reads), live by
+     * {@link #validate()}.
+     */
+    @Nonnull
+    public static List<Finding> validatePatterns(@Nonnull Collection<StructurePatternAsset> patterns,
+            @Nonnull Predicate<String> itemKnown, @Nonnull Predicate<String> stationBlockKnown) {
+        List<Finding> out = new ArrayList<>();
+        for (StructurePatternAsset p : patterns) {
+            if (p == null) {
+                continue;
+            }
+            String id = p.getId() == null || p.getId().isBlank() ? "(unnamed)" : p.getId();
+            String label = "Pattern '" + id + "'";
+
+            StructurePatternAsset.Cell[] cells = p.getCells();
+            if (cells != null) {
+                if (cells.length > PATTERN_CELL_ADVISORY_MAX) {
+                    out.add(Finding.warning(DOMAIN, "PATTERN_TOO_LARGE",
+                            label + " authors " + cells.length + " cells (advisory ceiling "
+                                    + PATTERN_CELL_ADVISORY_MAX + ") - every placement near the shape"
+                                    + " walks its cells per orientation, so a pattern this large is a"
+                                    + " real per-placement cost; shrink the shape or split the build", id));
+                }
+                Map<String, Integer> byOffset = new LinkedHashMap<>();
+                for (StructurePatternAsset.Cell cell : cells) {
+                    if (cell != null) {
+                        byOffset.merge(cell.offsetX() + "," + cell.offsetY() + "," + cell.offsetZ(),
+                                1, Integer::sum);
+                    }
+                }
+                for (Map.Entry<String, Integer> e : byOffset.entrySet()) {
+                    if (e.getValue() > 1) {
+                        out.add(Finding.info(DOMAIN, "PATTERN_CELL_DUPLICATE_OFFSET",
+                                label + " authors " + e.getValue() + " cells at offset ("
+                                        + e.getKey() + ") - legal (every matcher must hold there at"
+                                        + " once), but usually a typo'd offset", id));
+                    }
+                }
+            }
+
+            Requires reqs = p.getRequires();
+            String nameKey = p.getIdentity() != null ? p.getIdentity().getNameKey() : null;
+            if (reqs != null && !reqs.isEmpty() && (nameKey == null || nameKey.isBlank())) {
+                out.add(Finding.info(DOMAIN, "PATTERN_REQUIRES_WITHOUT_NAME_KEY",
+                        label + " authors a Requires gate but no Identity.NameKey - a denied builder"
+                                + " gets only the generic refusal toast; author a NameKey so the"
+                                + " denial can name the structure", id));
+            }
+
+            String activate = p.getActivate() != null ? p.getActivate().getBlock() : null;
+            if (activate != null && !activate.isBlank()) {
+                if (!itemKnown.test(activate)) {
+                    out.add(Finding.warning(DOMAIN, "PATTERN_ACTIVATE_BLOCK_UNKNOWN",
+                            label + " Activate.Block '" + activate + "' is not a known item id -"
+                                    + " completion has nothing to swap the anchor to and the"
+                                    + " pattern never activates", id));
+                } else if (!stationBlockKnown.test(activate)) {
+                    out.add(Finding.warning(DOMAIN, "PATTERN_ACTIVATE_BLOCK_NO_INTERACTION",
+                            label + " Activate.Block '" + activate + "' resolves no station (no"
+                                    + " BlockType's Interactions.Use runs an rpg_station_use naming"
+                                    + " one) - the completed build swaps to an inert block that"
+                                    + " opens no work", id));
+                }
+            }
+            String revert = p.effectiveRevertBlock();
+            if (revert != null && !revert.isBlank() && !itemKnown.test(revert)) {
+                out.add(Finding.warning(DOMAIN, "PATTERN_REVERT_UNRESOLVABLE",
+                        label + " reverts its anchor to '" + revert + "', which is not a known item"
+                                + " id - the revert write fails and a broken shape leaves the"
+                                + " activated block standing", id));
+            }
+        }
+        return out;
+    }
+
     /**
      * The station's ORDERED {@code Actions} list: the id contract ({@code ACTION_MISSING_ID}/
      * {@code ACTION_DUPLICATE_ID}), the selection-order contract ({@code UNREACHABLE_ACTION}/
@@ -3352,6 +3741,201 @@ public final class StationValidator {
             checkSteps(steps, actionLabel, id, dropListKnown, factorKnown, lootableKnown, rollPoolKnown,
                     puppetActive, knownAnchorIds, out);
         }
+        checkSocketAddresses(def, actionLabel, id, out);
+        checkStampMainPile(def, steps, actionLabel, id, out);
+    }
+
+    /**
+     * Socket-ADDRESS coverage (the sockets wave): every {@code Socket} leaf a recipe row's entry
+     * or a step phase authors must resolve against the action's OWN effective sockets -
+     * {@code CONSUME_SOCKET_UNKNOWN} for a draw-side address ({@code Conversion.Input} entries, a
+     * {@code Consume} phase's group/entry leaves), {@code PRODUCE_SOCKET_UNKNOWN} for a land-side
+     * one ({@code Conversion.Output}, {@code Produce}), each also catching an address naming a
+     * BLOCK socket (which stores no pile). {@code INGREDIENT_SOCKET_ON_INVENTORY_ROUTE} is the
+     * decode-time warn promoted to a coded finding: a socket address on an INVENTORY-routed phase
+     * ({@code From}/{@code To: "Inventory"}, or a conversion on an action with no Custody at all)
+     * is silently ignored at runtime. A {@code Ref}'d entry with no Custody of its own may inherit
+     * one from its base, so its addresses are left unchecked rather than false-flagged.
+     */
+    private static void checkSocketAddresses(@Nonnull ActionDef def, @Nonnull String actionLabel,
+            @Nonnull String id, @Nonnull List<Finding> out) {
+        Custody custody = def.getCustody();
+        Set<String> itemSocketIds = null;
+        Set<String> blockSocketIds = null;
+        if (custody != null) {
+            itemSocketIds = new HashSet<>();
+            blockSocketIds = new HashSet<>();
+            for (Custody.ResolvedSocket socket : custody.effectiveSockets()) {
+                (socket.itemRoute() ? itemSocketIds : blockSocketIds).add(socket.id());
+            }
+        }
+        boolean noCustody = custody == null && !def.hasRef();
+
+        StationAsset.Recipe recipe = def.getRecipe();
+        StationAsset.Conversion[] conversions = recipe != null ? recipe.getConversions() : null;
+        if (conversions != null) {
+            for (int i = 0; i < conversions.length; i++) {
+                StationAsset.Conversion c = conversions[i];
+                if (c == null) {
+                    continue;
+                }
+                String cLabel = actionLabel + " Recipe.Conversions[" + i + "]";
+                reportEntrySockets(c.getInput(), "CONSUME_SOCKET_UNKNOWN", cLabel + ".Input",
+                        itemSocketIds, blockSocketIds, noCustody, id, out);
+                reportEntrySockets(c.getOutput(), "PRODUCE_SOCKET_UNKNOWN", cLabel + ".Output",
+                        itemSocketIds, blockSocketIds, noCustody, id, out);
+            }
+        }
+        StationStep[] steps = def.getSteps();
+        if (steps == null) {
+            return;
+        }
+        for (int i = 0; i < steps.length; i++) {
+            StationStep step = steps[i];
+            if (step == null) {
+                continue;
+            }
+            String stepLabel = actionLabel + ".Steps[" + i + "]";
+            StationStep.Consume consume = step.getConsume();
+            if (consume != null) {
+                boolean custodyRoute = StationStep.Consume.FROM_CUSTODY
+                        .equalsIgnoreCase(consume.effectiveFrom());
+                if (!custodyRoute) {
+                    if (authorsAnySocketAddress(consume.getSocket(), consume.getItems())) {
+                        out.add(Finding.warning(DOMAIN, "INGREDIENT_SOCKET_ON_INVENTORY_ROUTE",
+                                stepLabel + ".Consume draws From 'Inventory' but names a Socket - the"
+                                        + " address is ignored there; author From: 'Custody' or drop"
+                                        + " the Socket", id));
+                    }
+                } else if (!noCustody) {
+                    reportSocketAddress(consume.getSocket(), "CONSUME_SOCKET_UNKNOWN",
+                            stepLabel + ".Consume.Socket", itemSocketIds, blockSocketIds, false, id, out);
+                    reportEntrySockets(consume.getItems(), "CONSUME_SOCKET_UNKNOWN",
+                            stepLabel + ".Consume.Items", itemSocketIds, blockSocketIds, false, id, out);
+                }
+            }
+            StationStep.Produce produce = step.getProduce();
+            if (produce != null) {
+                boolean custodyRoute = StationStep.Produce.TO_CUSTODY
+                        .equalsIgnoreCase(produce.effectiveTo());
+                if (!custodyRoute) {
+                    if (authorsAnySocketAddress(produce.getSocket(), produce.getItems())) {
+                        out.add(Finding.warning(DOMAIN, "INGREDIENT_SOCKET_ON_INVENTORY_ROUTE",
+                                stepLabel + ".Produce writes To 'Inventory' but names a Socket - the"
+                                        + " address is ignored there; author To: 'Custody' or drop"
+                                        + " the Socket", id));
+                    }
+                } else if (!noCustody) {
+                    reportSocketAddress(produce.getSocket(), "PRODUCE_SOCKET_UNKNOWN",
+                            stepLabel + ".Produce.Socket", itemSocketIds, blockSocketIds, false, id, out);
+                    reportEntrySockets(produce.getItems(), "PRODUCE_SOCKET_UNKNOWN",
+                            stepLabel + ".Produce.Items", itemSocketIds, blockSocketIds, false, id, out);
+                }
+            }
+        }
+    }
+
+    /** True when the phase's group-level {@code Socket} or ANY entry's own is authored non-blank. */
+    private static boolean authorsAnySocketAddress(@Nullable String groupSocket, @Nullable Ingredient[] items) {
+        if (groupSocket != null && !groupSocket.isBlank()) {
+            return true;
+        }
+        if (items != null) {
+            for (Ingredient item : items) {
+                if (item != null && item.getSocket() != null && !item.getSocket().isBlank()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Runs {@link #reportSocketAddress} over every entry's own {@code Socket} leaf. */
+    private static void reportEntrySockets(@Nullable Ingredient[] entries, @Nonnull String code,
+            @Nonnull String site, @Nullable Set<String> itemSocketIds, @Nullable Set<String> blockSocketIds,
+            boolean noCustody, @Nonnull String id, @Nonnull List<Finding> out) {
+        if (entries == null) {
+            return;
+        }
+        for (int i = 0; i < entries.length; i++) {
+            if (entries[i] != null) {
+                reportSocketAddress(entries[i].getSocket(), code, site + "[" + i + "].Socket",
+                        itemSocketIds, blockSocketIds, noCustody, id, out);
+            }
+        }
+    }
+
+    /**
+     * One socket address, one verdict: unresolvable addresses warn under {@code code}; an address
+     * on a custody-less (and Ref-less) action warns as inventory-routed instead; a null
+     * {@code itemSocketIds} means "custody unknown" (a Ref may supply it) and checks nothing.
+     */
+    private static void reportSocketAddress(@Nullable String socketId, @Nonnull String code,
+            @Nonnull String site, @Nullable Set<String> itemSocketIds, @Nullable Set<String> blockSocketIds,
+            boolean noCustody, @Nonnull String id, @Nonnull List<Finding> out) {
+        if (socketId == null || socketId.isBlank()) {
+            return;
+        }
+        if (noCustody) {
+            out.add(Finding.warning(DOMAIN, "INGREDIENT_SOCKET_ON_INVENTORY_ROUTE",
+                    site + " names socket '" + socketId + "' but the action authors no Custody -"
+                            + " its materials move through the worker's inventory, where a socket"
+                            + " address means nothing", id));
+            return;
+        }
+        if (itemSocketIds == null || blockSocketIds == null) {
+            return;
+        }
+        String lower = socketId.toLowerCase(Locale.ROOT);
+        if (itemSocketIds.contains(lower)) {
+            return;
+        }
+        if (blockSocketIds.contains(lower)) {
+            out.add(Finding.warning(DOMAIN, code,
+                    site + " names Block socket '" + socketId + "' - a Block socket stores no pile,"
+                            + " so nothing can be drawn from or landed in it", id));
+            return;
+        }
+        out.add(Finding.warning(DOMAIN, code,
+                site + " names socket '" + socketId + "', which this action's Custody declares no"
+                        + " socket for - the entry can never resolve a pile", id));
+    }
+
+    /**
+     * The Stamp-vs-sockets advisory (the multi-placement wave's deferred note): a Stamp step reads
+     * the placed item from the {@value Custody#MAIN_SOCKET_ID} pile's unique stack, so an action
+     * whose authored sockets exclude that id leaves the ritual nothing to enhance. INFO until
+     * socket-addressed stamping is authorable; the fix today is naming the ritual's item socket
+     * {@value Custody#MAIN_SOCKET_ID} (or keeping the classic socket-less custody, whose one
+     * implicit pile IS {@value Custody#MAIN_SOCKET_ID}).
+     */
+    private static void checkStampMainPile(@Nonnull ActionDef def, @Nullable StationStep[] steps,
+            @Nonnull String actionLabel, @Nonnull String id, @Nonnull List<Finding> out) {
+        if (steps == null || steps.length == 0 || def.getCustody() == null
+                || !def.getCustody().hasAuthoredSockets()) {
+            return;
+        }
+        boolean hasStamp = false;
+        for (StationStep step : steps) {
+            if (step != null && step.getStamp() != null) {
+                hasStamp = true;
+                break;
+            }
+        }
+        if (!hasStamp) {
+            return;
+        }
+        for (Custody.ResolvedSocket socket : def.getCustody().effectiveSockets()) {
+            if (socket.itemRoute() && Custody.MAIN_SOCKET_ID.equals(socket.id())) {
+                return;
+            }
+        }
+        out.add(Finding.info(DOMAIN, "STAMP_WITHOUT_MAIN_PILE",
+                actionLabel + " authors a Stamp step beside Custody.Sockets that declare no '"
+                        + Custody.MAIN_SOCKET_ID + "' Item socket - Stamp reads the placed item from"
+                        + " the '" + Custody.MAIN_SOCKET_ID + "' pile, so the ritual never finds"
+                        + " anything to enhance; name the ritual's item socket '"
+                        + Custody.MAIN_SOCKET_ID + "' (socket-addressed stamping is not authorable)", id));
     }
 
     private static boolean isKnownFunction(@Nonnull String function) {

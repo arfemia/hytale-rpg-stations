@@ -13,6 +13,7 @@ import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.hypixel.hytale.codec.schema.metadata.ui.UIEditorSectionStart;
 import com.ziggfreed.common.codec.InheritMapCodec;
 import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.common.codec.Vec3i;
@@ -97,10 +98,12 @@ public final class Custody {
             .documentation("Opts the placed input into a placed-as-entity prop visual at the block-top anchor; null = no visual.").add()
             .appendInherited(new KeyedCodec<>("Share", Share.CODEC, false),
                     (o, v) -> o.share = v, o -> o.share, (o, p) -> o.share = p.share)
-            .documentation("Who besides an owner may place, work from, or take back placed materials here; every leaf defaults false (owner-only). A socket may override any leaf for its own pile.").add()
+            .documentation("Who besides an owner may place, work from, or take back placed materials here; every leaf defaults false (owner-only). A socket may override any leaf for its own pile.")
+            .metadata(new UIEditorSectionStart("Sharing")).add()
             .appendInherited(new KeyedCodec<>("Sockets", new InheritMapCodec<>(Socket.CODEC), false),
                     (o, v) -> o.sockets = v, o -> o.sockets, (o, p) -> o.sockets = p.sockets)
-            .documentation("Named placement slots by socket id (author ids lower-case; matching is case-insensitive), each holding its own independently owned pile. Merged per socket id under Parent inheritance, per leaf within a socket. Omit for the classic single-pile custody: the custody-level leaves above then act as the one implicit socket.").add()
+            .documentation("Named placement slots by socket id (author ids lower-case; matching is case-insensitive), each holding its own independently owned pile. Merged per socket id under Parent inheritance, per leaf within a socket. Omit for the classic single-pile custody: the custody-level leaves above then act as the one implicit socket.")
+            .metadata(new UIEditorSectionStart("Sockets")).add()
             .afterDecode((Custody custody, ExtraInfo extraInfo) -> {
                 if (custody.sockets == null) {
                     return;

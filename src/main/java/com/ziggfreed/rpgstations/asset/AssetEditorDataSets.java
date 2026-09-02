@@ -16,6 +16,7 @@ import com.ziggfreed.rpgstations.loot.StationLootEngine;
 import com.ziggfreed.rpgstations.station.ActionCatalog;
 import com.ziggfreed.rpgstations.station.StationCameraPreset;
 import com.ziggfreed.rpgstations.station.StationCatalog;
+import com.ziggfreed.rpgstations.station.StationService;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -56,6 +57,7 @@ public final class AssetEditorDataSets {
 
     /** Every dataset id this class serves, prefixed so it can never collide with a first-party or third-party set. */
     public static final String STATIONS = "rpgstations:stations";
+    public static final String STATION_BLOCKS = "rpgstations:station-blocks";
     public static final String ACTIONS = "rpgstations:actions";
     public static final String LOOTABLES = "rpgstations:lootables";
     public static final String ROLLPOOLS = "rpgstations:rollpools";
@@ -95,6 +97,13 @@ public final class AssetEditorDataSets {
      */
     public static void register(@Nonnull EventRegistry registry) {
         EditorDataSets.live(registry, STATIONS, () -> StationCatalog.getInstance().all().keySet());
+        // StructurePatternAsset.Activate.Block: the block item ids the asset-derived discovery
+        // index resolves to a station - exactly the values a pattern activation is useful with
+        // (RevertBlock stays free text: any block id is a legitimate revert). There is
+        // deliberately NO rpgstations:patterns dataset: no codec leaf names a pattern id (the
+        // runtime's stash tag is not authored), and a dataset nothing consumes is a decoy.
+        EditorDataSets.live(registry, STATION_BLOCKS,
+                () -> StationService.getInstance().stationBlockItemIds());
         EditorDataSets.live(registry, ACTIONS, () -> ActionCatalog.getInstance().all().keySet());
         EditorDataSets.live(registry, LOOTABLES, () -> LootableConfig.getInstance().all().keySet());
         EditorDataSets.live(registry, ROLLPOOLS, () -> RollPoolConfig.getInstance().all().keySet());

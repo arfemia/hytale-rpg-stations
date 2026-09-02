@@ -24,8 +24,10 @@ import com.ziggfreed.rpgstations.station.PatternCells.CellMatcher;
 import com.ziggfreed.rpgstations.station.StationStructures.ActivationDecision;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Detection over a stub world: a completed build resolves through the exact zc walk the live path
@@ -270,5 +272,43 @@ public class StructureDetectionTest {
         assertEquals("ring", StationCustodyClaim.patternIdOfTag(tag));
         assertEquals(2, StationCustodyClaim.patternVariantOfTag(tag));
         assertEquals(tag.toLowerCase(Locale.ROOT), tag, "the segment is lowercase throughout");
+    }
+
+    // ==================== the refusal-toast throttle ====================
+
+    @Test
+    void refusalToast_throttlesPerKeyWithinTheCooldown() {
+        Map<String, Long> shownAt = new HashMap<>();
+        long cooldown = StationStructures.REFUSAL_TOAST_COOLDOWN_MS;
+
+        assertTrue(StationStructures.refusalToastAllowed(shownAt, "p1|w|0|64|0", 1_000L, cooldown),
+                "the first refusal at an anchor always toasts");
+        assertFalse(StationStructures.refusalToastAllowed(shownAt, "p1|w|0|64|0",
+                1_000L + cooldown - 1, cooldown), "a repeat inside the cooldown stays silent");
+        assertTrue(StationStructures.refusalToastAllowed(shownAt, "p1|w|0|64|0",
+                1_000L + cooldown, cooldown), "the cooldown's boundary re-arms the toast");
+    }
+
+    @Test
+    void refusalToast_keysAreIndependent() {
+        Map<String, Long> shownAt = new HashMap<>();
+        long cooldown = StationStructures.REFUSAL_TOAST_COOLDOWN_MS;
+
+        assertTrue(StationStructures.refusalToastAllowed(shownAt, "p1|w|0|64|0", 1_000L, cooldown));
+        assertTrue(StationStructures.refusalToastAllowed(shownAt, "p2|w|0|64|0", 1_000L, cooldown),
+                "a second player at the same anchor gets their own toast");
+        assertTrue(StationStructures.refusalToastAllowed(shownAt, "p1|w|9|64|9", 1_000L, cooldown),
+                "the same player at another anchor gets their own toast");
+    }
+
+    @Test
+    void refusalToast_pruningDropsOnlyExpiredEntries() {
+        Map<String, Long> shownAt = new HashMap<>();
+        for (int i = 0; i < 400; i++) {
+            StationStructures.refusalToastAllowed(shownAt, "p|w|" + i + "|64|0", 1_000L, 5_000L);
+        }
+        // Far past every entry's cooldown: the next decision prunes the map back down.
+        StationStructures.refusalToastAllowed(shownAt, "p|w|999|64|0", 60_000L, 5_000L);
+        assertEquals(1, shownAt.size(), "expired entries are swept once the map outgrows its bound");
     }
 }

@@ -149,8 +149,9 @@ there is no prior public release to diff against, so every entry is additive by 
   breaks (fire, physics, unattributed explosions) run the same drop-once cleanup a player break
   does, so a destroyed block never strands stored materials.
 - **Settings: `Limits.MaxStashesPerSection` caps placed-input stores per chunk section** (a
-  16x16x16 cube, the scope a per-chunk store can enforce). Topping up material already placed is
-  never denied; only a placement that would open a new store past the ceiling is. The
+  32x32x32 cube, the scope a per-chunk store can enforce). Topping up material already placed is
+  never denied; only a placement that would open a new store past the ceiling is, and a
+  multiblock structure's own activation mark never counts against it. The
   `Limits.MaxCustodyClaimsPerWorld` spelling is ignored with a boot warning naming the
   replacement.
 - **Two new api events and a structure view for consumer mods (apiVersion 6, artifact 0.6.0).**
@@ -166,6 +167,27 @@ there is no prior public release to diff against, so every entry is additive by 
   activation/revert blocks, rotation flags - so a mod can lint its own content against the shapes
   this engine recognizes without live world handles.
 - **The Asset Editor shows each knob's real default beside its dropdown.** The station schemas already offer pick lists on the closed discriminators (`Look.Source`, `Hide.Route`, `Prop.Source`/`Slot`, `Mount.Surface`, `Consume.From`/`Produce.To`, `OnConditionFail.Result`); they now also declare each one's unauthored default (PlayerClone, Scale, MirrorHeld, Hotbar, Block, Inventory, Fail), plus the engine master `Enabled` and a work action's `Looping` (both true) and the summary HUD's `Enabled`, so an unauthored field renders its effective value instead of the control's zero-state. `FromCrafting.Types` exports its closed Crafting/Processing pair as a per-entry dropdown. Decode is unchanged.
+- **The content audit covers the socket, structure and cooking surface, warn-or-info throughout
+  (content always loads).** Sockets: an Item socket rendering no display prop (advisory - placement still works,
+  players just see nothing), pile-shaped leaves on a Block socket (which stores nothing), a socket
+  matcher no loaded item can ever satisfy, a recipe row or step phase addressing a socket its
+  action never declares, and a socket address on an inventory-routed phase (where it is ignored).
+  Structures: an activation block that is unknown or resolves no station (an inert build), an
+  unresolvable revert block, an oversized cell list, duplicate cell offsets, and a gated pattern
+  with no display name for its refusal toast. Cooking and enhancement: a station deriving recipes
+  from a native bench that wants fuel (the fuel requirement never derives; the pit says the same
+  in its own file comment), and a Stamp ritual beside sockets that never fill the pile Stamp reads
+  from. A third-party validation hook can lint structure patterns too, through the api's
+  read-only pattern view, live during the full pass.
+- **Editor sections for the new schemas, and a station-block pick list.** The Asset Editor puts
+  the new groups under their own sections (a structure pattern's
+  Identity/Structure/Requirements/Moments, custody's Sharing and Sockets, a recipe row's Doneness,
+  work's Unattended), and a pattern's activation block offers a live dropdown of every block the
+  discovery index maps to a station.
+- **A refused structure completion toasts once, not on every placed block.** A refusal (a
+  conflicting anchor, a failed build gate) leaves the half-built shape re-checkable on purpose, so
+  each nearby placement re-runs the walk; the refusal toast is throttled per player per anchor
+  with a short cooldown, while the refusal itself never is.
 
 A standalone, richly self-sufficient diegetic interactive work-station engine: with RPG Stations
 alone installed, a station runs its full work loop (camera/hold/mount, tool gating, recipe
