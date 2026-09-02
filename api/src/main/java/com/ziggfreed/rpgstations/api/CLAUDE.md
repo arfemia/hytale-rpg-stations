@@ -64,7 +64,8 @@ is the exact inverse of a permanently-opaque channel.
   `get()` before RpgStations finishes `setup()` (or when it is simply not installed) throws
   `IllegalStateException` - a caller MUST presence-check the plugin first; this method performs no
   detection of its own. Exposes `factors()`, `channels()`, `validationHooks()`, `flairUnlocks()`,
-  `summaryEnrichers()`, a read-only `stations()` catalog view, and
+  `summaryEnrichers()`, a read-only `stations()` catalog view, a read-only `patterns()` structure
+  view (default-bodied, empty when not overridden - see the `PatternView` bullet), and
   **`stationCount()`** - the cheap presence-check/count path (`stationCount() > 0`), a
   default-bodied method (`stations().size()`) the shipped implementation overrides with the direct
   catalog size so a caller who only wants a count never pays for materializing a full
@@ -161,6 +162,16 @@ is the exact inverse of a permanently-opaque channel.
   blank/absent `Param`, so a consumer that needs to flag one (an author who wrote a `Channel` and
   an `Amount` but forgot the `Param` its channel requires) iterates the raw list. The engine cannot
   make that check itself - whether `Param` is required is the channel owner's contract.
+- **[`PatternView`](PatternView.java)** - read-only per-structure-pattern projection behind
+  `RpgStationsApi.patterns()` (default-bodied, empty unless overridden; the shipped implementation
+  builds one view per folded pattern, id-sorted): `id()`, effective `activateBlock()`/
+  `revertBlock()`, the `rotateYaw90()`/`rotateMirror()` recognition flags, and `cells()` -
+  anchor-relative offsets (the anchor cell reads `(0,0,0)`) each with a matcher summary
+  (`route` from the `ROUTE_*` vocabulary `ItemId`/`ResourceTypeId`/`Tags`/`Empty`/`None` plus that
+  route's `value`; a legally multi-routed cell reports its DOMINANT route in that order). Enough
+  for a consumer lint to check reference structure - which blocks a shape names, where its cells
+  sit, what its anchor becomes - with no live world handles; every accessor is a plain immutable
+  snapshot taken at query time.
 - **`StationCycleCompletedEvent`'s two lists (plus `contributionScale()`)** - `contributions()`
   carries the action's own `Work.PerCycleContributions` at their ALREADY-SCALED amounts: the
   engine applies the action's own `ContributionScale` ladder (a `../asset/CLAUDE.md`
@@ -181,9 +192,10 @@ is the exact inverse of a permanently-opaque channel.
   `hytale:tool_*` FACTORS directly. **A listener MUST filter both by `StationContribution#channel()`**:
   both lists carry every channel the action authored, so consuming an entry you did not declare is
   reading another mod's vocabulary.
-- **`event/`** - the six `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
+- **`event/`** - the eight `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
   `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`/
-  `StationEnhanceCompletedEvent`/`StationUnattendedGatheredEvent`), immutable,
+  `StationEnhanceCompletedEvent`/`StationUnattendedGatheredEvent`/`StationOutputProducedEvent`/
+  `StationStructureChangedEvent`), immutable,
   dispatched via `HytaleServer.get().getEventBus().dispatchFor(...)` + `hasListener()` on the
   owning world thread - see `../../station/CLAUDE.md` for the concrete firing rules and
   `com.ziggfreed.rpgstations.station.StationEvents` (the implementation). Each event's javadoc
@@ -201,7 +213,17 @@ is the exact inverse of a permanently-opaque channel.
   world uuid and position, the station/action ids, the granted cycle count (already capped by
   `Work.Unattended.MaxCycles`), and `contributions()` ALREADY SCALED (idle rate x the
   gatherer-resolved `ContributionScale` x the cycle count) - grant each verbatim, filtered by
-  channel exactly as on `StationCycleCompletedEvent`.
+  channel exactly as on `StationCycleCompletedEvent`. **`StationOutputProducedEvent`** fires once
+  per COMMITTED produce phase of an ATTENDED session (both destinations: placed custody, where
+  `socketId()` names the receiving pile, or the worker's inventory, where it is null), AFTER the
+  whole batch landed, carrying the worker (`Ref` + `PlayerRef` + uuid, NEVER null - an unattended
+  settle deliberately does not fire it; that output surfaces on `StationUnattendedGatheredEvent`
+  at gather), the landing block, the station/action ids, and fresh immutable `ItemStack` copies
+  of what was committed. **`StationStructureChangedEvent`** fires when a multiblock pattern
+  changes standing state at its anchor - activation (`activated()` true, the actor is the placer)
+  or revert (`false`, the actor is the breaker, null on an environment break) - AFTER the anchor
+  swap and pattern bookkeeping committed, carrying the pattern id and the block item id now
+  standing at the anchor.
 
 api `compileOnly` deps: the Hytale server jar (`IEvent`, `Store`/`Ref`/`CommandBuffer`,
 `UICommandBuilder`, `Message`, `ItemStack`) + the `ziggfreed-common` jar (`SummaryRow`). jsr305
@@ -229,13 +251,16 @@ exists specifically so a consumer can detect which additive members are present 
 reflection: bump it by exactly one integer per addition batch that lands under this policy (not
 per individual method - a coordinated wave of additions is one bump), never on its own.
 `apiVersion()` itself is exempt from "default-bodied only" since it shipped before the freeze; it
-will never change again once RpgStations reaches 1.0.0. Current value is **5**: the
-`FactorContext.socketFilled(String)` additive accessor (with its `Builder.socketsFilled` leaf -
-the engine-computed plain-data readings behind the `rpgstations:socket_filled` built-in) bumped
-it from 4, which the `StationUnattendedGatheredEvent` event class had reached (from the
+will never change again once RpgStations reaches 1.0.0. Current value is **6**: one coordinated
+bump for the multi-placement wave's api batch - the `StationOutputProducedEvent` +
+`StationStructureChangedEvent` event classes plus the `patterns()` default-bodied view (with its
+`PatternView` type) - from 5, which the `FactorContext.socketFilled(String)` additive accessor
+(with its `Builder.socketsFilled` leaf -
+the engine-computed plain-data readings behind the `rpgstations:socket_filled` built-in) had
+reached from 4, itself the `StationUnattendedGatheredEvent` event class's bump (from the
 `stationCount()` default-bodied addition's 3). **The api ARTIFACT's semver tracks this integer:
 `apiVersion()` N ships as artifact `0.N.0`** (`gradle.properties` `api_version`, currently
-`0.5.0`), so the number a consumer branches on and the number on the jar they compile against can
+`0.6.0`), so the number a consumer branches on and the number on the jar they compile against can
 never disagree; a bump of one is a bump of the other, in the same change.
 
 `RpgStationsApi.isAvailable()`/`find()` (added the same round) are convenience, not a way around

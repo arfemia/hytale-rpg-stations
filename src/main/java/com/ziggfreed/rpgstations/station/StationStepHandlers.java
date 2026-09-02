@@ -621,6 +621,10 @@ final class StationStepHandlers {
      * {@code grant}, because what it does next is COUNT and ANNOUNCE the stack: only
      * {@code grantOrDrop} distinguishes "landed on the ground" from "the ground drop failed too",
      * and a stack that reached neither place must not be reported to the player as output.
+     *
+     * <p>EITHER committed route also reports ONE api {@code StationOutputProducedEvent} for the
+     * whole batch, through {@code StationService#fireOutputProduced}, after the commit lands -
+     * the attended produce moment a consumer mod observes.
      */
     @Nullable
     static StationStepResult producePhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
@@ -647,6 +651,7 @@ final class StationStepHandlers {
             try {
                 List<Custody.ResolvedSocket> sockets = actionSockets(ctx);
                 String windowSocketId = null;
+                List<ItemStack> committed = new ArrayList<>(items.length);
                 for (Ingredient item : items) {
                     String socketId = StationCustody.socketIdFor(item.getSocket(), produce.getSocket(), sockets);
                     if (windowSocketId == null) {
@@ -660,6 +665,7 @@ final class StationStepHandlers {
                                         + step.getAt() + "'");
                     }
                     ctx.session.producedItems.merge(item.getItemId(), item.effectiveQuantity(), Integer::sum);
+                    committed.add(new ItemStack(item.getItemId(), item.effectiveQuantity()));
                 }
                 StationService.clearIterationLedgerOnCommittedProduce(ctx.session);
                 // Doneness: ONE batch per committed produce phase (never per item) - the ready
@@ -667,6 +673,10 @@ final class StationStepHandlers {
                 // clock now that the whole batch stands in custody.
                 StationService.getInstance().noteCustodyProduce(ctx.session, ctx.store, ctx.commandBuffer,
                         step.getAt(), windowSocketId);
+                // ONE output-produced moment per committed phase (the attended custody commit
+                // route); the batch reports the socket its readiness window sits on.
+                StationService.getInstance().fireOutputProduced(ctx.session, ctx.store,
+                        step.getAt(), windowSocketId, committed);
             } catch (Throwable t) {
                 Log.warn("STATION Produce To:Custody step failed for '" + ctx.session.stationId + "': "
                         + t.getMessage());
@@ -681,6 +691,7 @@ final class StationStepHandlers {
                     "Produce.To '" + to + "' is not implemented");
         }
         try {
+            List<ItemStack> committed = new ArrayList<>(items.length);
             for (Ingredient item : items) {
                 int quantity = item.effectiveQuantity();
                 // grantOrDrop, not grant: this loop both COUNTS the output into the session ledger
@@ -697,6 +708,7 @@ final class StationStepHandlers {
                     continue;
                 }
                 ctx.session.producedItems.merge(item.getItemId(), quantity, Integer::sum);
+                committed.add(new ItemStack(item.getItemId(), quantity));
                 if (ctx.session.playerRef != null) {
                     StationService.notifyItemGain(ctx.session.playerRef, item.getItemId(), quantity, false);
                 }
@@ -707,6 +719,9 @@ final class StationStepHandlers {
             // ONCE after every item lands, so a mid-list grant failure still leaves the ledger able
             // to refund the inputs.
             StationService.clearIterationLedgerOnCommittedProduce(ctx.session);
+            // ONE output-produced moment per committed phase (the inventory route; a stack that
+            // reached neither the inventory nor the ground is excluded - the player never got it).
+            StationService.getInstance().fireOutputProduced(ctx.session, ctx.store, null, null, committed);
         } catch (Throwable t) {
             Log.warn("STATION Produce step failed for '" + ctx.session.stationId + "': " + t.getMessage());
             return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL, t.getMessage());

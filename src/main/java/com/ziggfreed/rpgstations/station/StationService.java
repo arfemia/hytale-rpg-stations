@@ -4884,6 +4884,37 @@ public final class StationService {
         return true;
     }
 
+    /**
+     * The api's output-produced funnel ({@code StationStepHandlers.producePhase} reports through
+     * here): fires {@code StationOutputProducedEvent} for ONE committed produce phase, resolving
+     * where the batch landed - the {@code anchorId} custody anchor's block for a placed-custody
+     * produce ({@code socketId} names the receiving pile), the session's own primary block for an
+     * inventory produce ({@code anchorId} and {@code socketId} null). A batch nothing landed from
+     * fires nothing; a session whose live handles are already gone (teardown racing the phase)
+     * skips silently rather than reporting a moment nobody owns.
+     */
+    void fireOutputProduced(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nullable String anchorId, @Nullable String socketId, @Nonnull List<ItemStack> outputs) {
+        try {
+            if (outputs.isEmpty() || s.ref == null || s.playerRef == null || s.playerUuid == null) {
+                return;
+            }
+            UUID worldUuid = s.playerRef.getWorldUuid();
+            if (worldUuid == null) {
+                return;
+            }
+            String blockKey = anchorBlockKeyFor(s, anchorId);
+            int[] coords = blockKey != null ? anchorCoords(s, anchorId, blockKey) : null;
+            int x = coords != null ? coords[0] : s.blockX;
+            int y = coords != null ? coords[1] : s.blockY;
+            int z = coords != null ? coords[2] : s.blockZ;
+            StationEvents.fireOutputProduced(store, s.playerRef, s.ref, s.playerUuid, worldUuid,
+                    x, y, z, s.stationId, s.actionId, socketId, outputs);
+        } catch (Throwable t) {
+            Log.fine("STATION output-produced event skipped for '" + s.stationId + "': " + t.getMessage());
+        }
+    }
+
     /** The {@code Display} group the custody's socket of this id carries, or null (an unknown socket renders nothing). */
     @Nullable
     private static Custody.Display socketDisplayOf(@Nonnull Custody custody, @Nonnull String socketId) {

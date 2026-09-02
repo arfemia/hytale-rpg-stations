@@ -1,6 +1,7 @@
 package com.ziggfreed.rpgstations.api;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Optional;
 
 import javax.annotation.Nonnull;
@@ -76,6 +77,20 @@ public interface RpgStationsApi {
      */
     default int stationCount() {
         return stations().size();
+    }
+
+    /**
+     * A read-only snapshot of every currently-folded multiblock structure pattern: ids, cells
+     * (anchor-relative offsets plus a per-cell matcher summary), activation/revert block ids, and
+     * rotation flags - enough for a consumer lint to check reference structure against the shapes
+     * this engine recognizes. No live world handles; see {@link PatternView}.
+     *
+     * <p>Default-bodied per the additive growth policy (empty when not overridden); the shipped
+     * implementation builds one view per folded pattern, id-sorted.
+     */
+    @Nonnull
+    default Collection<PatternView> patterns() {
+        return Collections.emptyList();
     }
 
     /**

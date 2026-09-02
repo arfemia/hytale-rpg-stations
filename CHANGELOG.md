@@ -153,6 +153,18 @@ there is no prior public release to diff against, so every entry is additive by 
   never denied; only a placement that would open a new store past the ceiling is. The
   `Limits.MaxCustodyClaimsPerWorld` spelling is ignored with a boot warning naming the
   replacement.
+- **Two new api events and a structure view for consumer mods (apiVersion 6, artifact 0.6.0).**
+  `StationOutputProducedEvent` fires once per committed produce phase of an attended session -
+  whether the batch landed in placed custody (the receiving socket named) or in the worker's
+  inventory - carrying fresh immutable copies of the committed stacks; an unattended settle
+  deliberately fires nothing, since that output pays out at gather on the existing
+  `StationUnattendedGatheredEvent`. `StationStructureChangedEvent` fires when a multiblock
+  pattern activates at its anchor or a standing build reverts, naming the pattern, the block now
+  standing, and the acting player (absent on an environment break). `RpgStationsApi.patterns()`
+  (default-bodied, per the additive growth policy) hands a consumer a read-only projection of
+  every folded structure pattern - anchor-relative cells with per-cell matcher summaries,
+  activation/revert blocks, rotation flags - so a mod can lint its own content against the shapes
+  this engine recognizes without live world handles.
 - **The Asset Editor shows each knob's real default beside its dropdown.** The station schemas already offer pick lists on the closed discriminators (`Look.Source`, `Hide.Route`, `Prop.Source`/`Slot`, `Mount.Surface`, `Consume.From`/`Produce.To`, `OnConditionFail.Result`); they now also declare each one's unauthored default (PlayerClone, Scale, MirrorHeld, Hotbar, Block, Inventory, Fail), plus the engine master `Enabled` and a work action's `Looping` (both true) and the summary HUD's `Enabled`, so an unauthored field renders its effective value instead of the control's zero-state. `FromCrafting.Types` exports its closed Crafting/Processing pair as a per-entry dropdown. Decode is unchanged.
 
 A standalone, richly self-sufficient diegetic interactive work-station engine: with RPG Stations

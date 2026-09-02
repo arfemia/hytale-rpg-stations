@@ -8,11 +8,14 @@ import javax.annotation.Nonnull;
 import com.ziggfreed.rpgstations.api.ContributionChannelRegistry;
 import com.ziggfreed.rpgstations.api.FactorRegistry;
 import com.ziggfreed.rpgstations.api.FlairUnlockRegistry;
+import com.ziggfreed.rpgstations.api.PatternView;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.StationView;
 import com.ziggfreed.rpgstations.api.SummaryEnricherRegistry;
 import com.ziggfreed.rpgstations.api.ValidationHookRegistry;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
+import com.ziggfreed.rpgstations.station.PatternCatalog;
 import com.ziggfreed.rpgstations.station.StationCatalog;
 
 /**
@@ -26,7 +29,7 @@ public final class RpgStationsApiImpl implements RpgStationsApi {
     private static final RpgStationsApiImpl INSTANCE = new RpgStationsApiImpl();
 
     /** Bumped additively per {@code api/CLAUDE.md}'s growth policy; never on a signature change. */
-    private static final int API_VERSION = 5;
+    private static final int API_VERSION = 6;
 
     private RpgStationsApiImpl() {
     }
@@ -91,5 +94,18 @@ public final class RpgStationsApiImpl implements RpgStationsApi {
     @Override
     public int stationCount() {
         return StationCatalog.getInstance().size();
+    }
+
+    @Override
+    @Nonnull
+    public Collection<PatternView> patterns() {
+        Collection<StructurePatternAsset> assets = PatternCatalog.getInstance().all().values();
+        Collection<PatternView> out = new ArrayList<>(assets.size());
+        for (StructurePatternAsset a : assets) {
+            if (a != null) {
+                out.add(new PatternViewImpl(a));
+            }
+        }
+        return out;
     }
 }

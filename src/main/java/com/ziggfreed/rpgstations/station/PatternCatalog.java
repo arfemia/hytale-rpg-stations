@@ -263,6 +263,16 @@ public final class PatternCatalog {
         return snapshot.compiled().isEmpty();
     }
 
+    /**
+     * A read-only, id-sorted snapshot of every FOLDED pattern asset (a cell-less pattern that the
+     * compile skipped is still included - a consumer lint may well want to see it) - the source
+     * the api's {@code patterns()} view is built from.
+     */
+    @Nonnull
+    public Map<String, StructurePatternAsset> all() {
+        return java.util.Collections.unmodifiableMap(new TreeMap<>(patterns));
+    }
+
     /** The compiled patterns, sorted by pattern id (the deterministic candidate order). */
     @Nonnull
     List<CompiledPattern> compiled() {

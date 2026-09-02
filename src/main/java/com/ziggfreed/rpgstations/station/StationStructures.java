@@ -326,8 +326,8 @@ public final class StationStructures {
     /**
      * One completed DETECT walk: decide against the anchor's stash tag, evaluate the gate, and on
      * {@link ActivationDecision#ACTIVATE} swap the anchor (carrying its placed rotation), stamp the
-     * stash's pattern segment, feed the station discovery index, clear the pending entries, and
-     * play the {@code activated} moment.
+     * stash's pattern segment, feed the station discovery index, clear the pending entries, play
+     * the {@code activated} moment, and fire the api structure-changed event.
      */
     private void handleCompletedShape(@Nonnull World world, @Nonnull UUID worldUuid,
             @Nonnull ChunkStore chunkStore, @Nullable PlayerRef playerRef,
@@ -394,6 +394,14 @@ public final class StationStructures {
         pending.removeAt(worldUuid, ax, ay, az);
         playPatternMoment(world, playerRef, placerRef,
                 cp.asset().moment(StructurePatternAsset.MOMENT_ACTIVATED), ax, ay, az);
+        // The api structure-changed moment, after everything committed: the block NOW standing is
+        // the swap's write, else whatever already stood there (the no-swap custom-core style).
+        String standing = !swap.skip() ? swap.blockItemId()
+                : currentId != null ? BlockOps.baseItemIdOf(currentId) : activateBlock;
+        if (standing != null && !standing.isBlank()) {
+            StationEvents.fireStructureChanged(worldUuid, ax, ay, az, cp.id(), standing, true,
+                    playerRef != null ? playerRef.getUuid() : null, placerRef);
+        }
         Log.fine("STRUCTURE '" + cp.id() + "' activated at (" + ax + ", " + ay + ", " + az
                 + "), variant " + match.variantIndex());
     }
@@ -524,8 +532,9 @@ public final class StationStructures {
      * The shape at {@code (ax, ay, az)} is gone: stop every session working the anchor
      * ({@code StopReason.STRUCTURE_LOST}, the present-player hand-back family), drop whatever the
      * stash still holds at the block once and remove it (the custody break funnel - which also
-     * despawns the display props and de-indexes the block), play the {@code broken} moment, and
-     * swap the anchor back to its revert block carrying its current rotation.
+     * despawns the display props and de-indexes the block), play the {@code broken} moment, swap
+     * the anchor back to its revert block carrying its current rotation, and fire the api
+     * structure-changed event.
      */
     private void revertAt(@Nonnull Store<EntityStore> store,
             @Nullable CommandBuffer<EntityStore> commandBuffer, @Nonnull World world,
@@ -555,6 +564,14 @@ public final class StationStructures {
             } else {
                 BlockOps.setBlock(chunkStore, ax, ay, az, swap.blockItemId());
             }
+        }
+        // The api structure-changed moment, after the swap-back: the actor is the breaking player,
+        // null on an environment break (an explosion has no acting player).
+        String standing = !swap.skip() ? swap.blockItemId()
+                : currentId != null ? BlockOps.baseItemIdOf(currentId) : null;
+        if (standing != null && !standing.isBlank()) {
+            StationEvents.fireStructureChanged(worldUuid, ax, ay, az, cp.id(), standing, false,
+                    breakerPlayerRef != null ? breakerPlayerRef.getUuid() : null, breakerRef);
         }
         Log.fine("STRUCTURE '" + cp.id() + "' broken - anchor at (" + ax + ", " + ay + ", " + az
                 + ") reverted" + (swap.skip() ? " (no swap needed)" : " to '" + swap.blockItemId() + "'"));

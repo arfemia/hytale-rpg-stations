@@ -82,6 +82,14 @@ is used.
   whole new action (`ActionResolver#effectiveActions`). The RAW list is exposed alongside the two derived views
   precisely because a blank/absent `Param` cannot appear in the derived ones, and only a channel's
   own owner knows whether its `Param` is required.
+- **[`PatternViewImpl`](PatternViewImpl.java)** - the read-only per-structure-pattern projection
+  behind `RpgStationsApi.patterns()` (the `stationCount()`-style default-bodied addition the
+  shipped impl overrides), built at query time from `station.PatternCatalog.all()` (the raw
+  id-sorted folded assets - a cell-less pattern the compile skipped is still visible to a lint).
+  Everything is snapshotted at construction into plain immutable values; cell offsets are
+  normalized ANCHOR-relative (the frame the runtime walk matches in), and a cell's matcher
+  summary reports its dominant route (`ItemId` > `ResourceTypeId` > `Tags`, with `Empty`/`None`
+  for the air and malformed cells) - see the api `PatternView` javadoc for the vocabulary.
 
 Every registry follows the same guard discipline as `RpgStationsApi.get()`'s own contract:
 cheap, side-effect-free reads/registrations; nothing here retains a live world-thread object past

@@ -13,11 +13,14 @@ import com.hypixel.hytale.event.IEventDispatcher;
 import com.hypixel.hytale.server.core.HytaleServer;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.api.event.StationCycleCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationEnhanceCompletedEvent;
+import com.ziggfreed.rpgstations.api.event.StationOutputProducedEvent;
 import com.ziggfreed.rpgstations.api.event.StationSessionCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationSessionStartedEvent;
+import com.ziggfreed.rpgstations.api.event.StationStructureChangedEvent;
 import com.ziggfreed.rpgstations.api.event.StationToolBrokeEvent;
 import com.ziggfreed.rpgstations.api.event.StationUnattendedGatheredEvent;
 import com.ziggfreed.rpgstations.util.Log;
@@ -27,9 +30,11 @@ import com.ziggfreed.rpgstations.util.Log;
  * (design section 3.1, the kweebec {@code event.RoundEvents} recipe -
  * {@code additional-mods/kweebec-nightmare/.../event/RoundEvents.java}): resolve the dispatcher,
  * guard on {@code hasListener()} (silent no-op with zero listeners), dispatch synchronously on
- * the calling (world) thread, whole body try/catch(Throwable)-guarded to a warn log. {@link
- * StationService} is the only caller, every firing point on the world thread per the design's
- * firing rules (section 3.1).
+ * the calling (world) thread, whole body try/catch(Throwable)-guarded to a warn log. The callers
+ * are {@link StationService} (session/cycle/gather moments, plus the produce-committed funnel the
+ * step engine's produce phase reports through) and {@link StationStructures} (the
+ * structure-changed moment); every firing point is on the world thread per the design's firing
+ * rules (section 3.1).
  */
 final class StationEvents {
 
@@ -127,6 +132,50 @@ final class StationEvents {
             }
         } catch (Throwable t) {
             log("StationUnattendedGathered", t);
+        }
+    }
+
+    /**
+     * Fires the output-produced moment from {@code StationService#fireOutputProduced} (the funnel
+     * {@code StationStepHandlers.producePhase} reports through), AFTER one produce phase's whole
+     * batch committed - to placed custody ({@code socketId} names the receiving pile) or to the
+     * worker's inventory ({@code socketId} null). Attended sessions only; an unattended settle
+     * surfaces its output at gather instead.
+     */
+    static void fireOutputProduced(@Nonnull Store<EntityStore> store, @Nonnull PlayerRef playerRef,
+            @Nonnull Ref<EntityStore> worker, @Nonnull UUID workerId, @Nonnull UUID worldUuid,
+            int blockX, int blockY, int blockZ, @Nonnull String stationId, @Nonnull String actionId,
+            @Nullable String socketId, @Nonnull List<ItemStack> outputs) {
+        try {
+            IEventDispatcher<StationOutputProducedEvent, StationOutputProducedEvent> d =
+                    HytaleServer.get().getEventBus().dispatchFor(StationOutputProducedEvent.class);
+            if (d.hasListener()) {
+                d.dispatch(new StationOutputProducedEvent(store, playerRef, worker, workerId, worldUuid,
+                        blockX, blockY, blockZ, stationId, actionId, socketId, outputs));
+            }
+        } catch (Throwable t) {
+            log("StationOutputProduced", t);
+        }
+    }
+
+    /**
+     * Fires the structure-changed moment from {@code StationStructures}, AFTER an anchor swap and
+     * its pattern bookkeeping committed - activation ({@code activated} true, {@code actor} the
+     * placer) or revert ({@code activated} false, {@code actor} the breaker, null on an
+     * environment break).
+     */
+    static void fireStructureChanged(@Nonnull UUID worldUuid, int anchorX, int anchorY, int anchorZ,
+            @Nonnull String patternId, @Nonnull String blockItemId, boolean activated,
+            @Nullable UUID actorId, @Nullable Ref<EntityStore> actor) {
+        try {
+            IEventDispatcher<StationStructureChangedEvent, StationStructureChangedEvent> d =
+                    HytaleServer.get().getEventBus().dispatchFor(StationStructureChangedEvent.class);
+            if (d.hasListener()) {
+                d.dispatch(new StationStructureChangedEvent(worldUuid, anchorX, anchorY, anchorZ,
+                        patternId, blockItemId, activated, actorId, actor));
+            }
+        } catch (Throwable t) {
+            log("StationStructureChanged", t);
         }
     }
 

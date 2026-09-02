@@ -187,6 +187,12 @@ a discriminator.
   iteration's consumed ledger, so refund and custody-return stay mutually exclusive per iteration.
   A `Walk` phase can split a `Consume`+`Produce` pair across a suspend, which is exactly why the
   `iterationConsumed` ledger refunds an in-flight iteration at `stop()`.
+- **A committed produce phase reports ONE api `StationOutputProducedEvent`** (both destinations;
+  the inventory route excludes a stack that reached neither the inventory nor the ground), through
+  `StationService#fireOutputProduced` - the funnel that resolves where the batch landed (the
+  `At`-anchor block for custody, the primary block for inventory). Attended sessions only: the
+  unattended settle fires nothing, its output pays out at gather on
+  `StationUnattendedGatheredEvent`.
 
 ## Action resolution: Id lookup -> Ref overlay -> extension overlays
 
@@ -1000,10 +1006,11 @@ pattern is idempotent, the pattern's `Requires` gate (evaluated against the plac
 places still evaluate it) denies with `ui.station.pattern_requirements_unmet[_named]`, and an
 activation swaps the anchor via `BlockOps.setBlock` CARRYING its read rotation (`swapFor`, pure:
 skip when the base ids already match - the custom-core style), stamps the stash tag's pattern
-segment, feeds `registerKnownStationBlock`, and plays the `activated` moment
+segment, feeds `registerKnownStationBlock`, plays the `activated` moment
 (`playPatternMoment`: sounds/particles positionally - the particles through
 `StationService.spawnPresentationParticles`, the ONE leak-guarded spawn core - shake/native
-payloads on the placer; cues play at once, no session exists to queue a `DelayMs`).
+payloads on the placer; cues play at once, no session exists to queue a `DelayMs`), and fires the
+api `StationStructureChangedEvent` (activated=true, actor=the placer, the block now standing).
 
 **No stored membership** (decision: re-walk from the index). The one persisted mark is the anchor
 stash tag's `|pattern=<id>/<variant>` segment (`StationCustodyClaim`'s tag vocabulary: a
@@ -1035,8 +1042,9 @@ reader with the broken position overlaid as air (`withBrokenAt` - the event fire
 removal). A failed walk reverts: `stopSessionsForStructureLost` (every session at the anchor,
 primary or claimed remote, `StopReason.STRUCTURE_LOST` - the present-player hand-back family,
 `ui.station.structure_lost`), then the L4 `onCustodyBlockBroken` funnel (drop remaining piles
-once, remove stash, despawn props, de-index), the `broken` moment, and the swap back to
-`effectiveRevertBlock` (again rotation-carrying). Pure cores + the walk live under
+once, remove stash, despawn props, de-index), the `broken` moment, the swap back to
+`effectiveRevertBlock` (again rotation-carrying), and the api `StationStructureChangedEvent`
+(activated=false, actor=the breaker, null on an environment break). Pure cores + the walk live under
 `PatternCompileTest` / `StructureDetectionTest` / `StructureRevertTest` /
 `PendingAnchorIndexTest`; the live chunk walk, the deferred-scan timing and the in-game swap
 visuals are smoke-owed.

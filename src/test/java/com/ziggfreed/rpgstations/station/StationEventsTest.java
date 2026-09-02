@@ -45,4 +45,16 @@ class StationEventsTest {
         assertDoesNotThrow(() -> StationEvents.fireToolBroke(null, null, PLAYER_ID, SESSION_ID,
                 "sawmill", "Tool_Hatchet_Iron"));
     }
+
+    @Test
+    void fireOutputProduced_noListener_neverThrows() {
+        assertDoesNotThrow(() -> StationEvents.fireOutputProduced(null, null, null, PLAYER_ID,
+                SESSION_ID, 0, 64, 0, "cookingpit", "Stew", "output", List.of()));
+    }
+
+    @Test
+    void fireStructureChanged_noListener_neverThrows() {
+        assertDoesNotThrow(() -> StationEvents.fireStructureChanged(SESSION_ID, 0, 64, 0,
+                "cookingpit", "RPG_Station_CookingPit", true, PLAYER_ID, null));
+    }
 }
