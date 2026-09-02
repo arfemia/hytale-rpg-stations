@@ -125,6 +125,9 @@ the WHOLE set executes:
 - **Extensions**: `asset.ExtensionAsset` (`Server/RpgStations/Extensions/*.json`) folds into
   `ExtensionCatalog` - see its own bullet below.
 - **Flairs/Settings**: unchanged catalog shape (`FlairCatalog`, `SettingsCatalog`).
+- **Structure patterns**: `asset.StructurePatternAsset` (`Server/RpgStations/Patterns/*.json`)
+  folds into `PatternCatalog`, which COMPILES rather than merely stores - see the multiblock
+  section below.
 - **Lootables/RollPools are the SHARED library's stores** at `Server/ZiggfreedCommon/{Lootables,
   RollPools}/`, folded into `LootableConfig`/`RollPoolConfig` - this mod registers neither. What
   stays station-side is the pass around them; see `../loot/CLAUDE.md`.
@@ -918,6 +921,77 @@ called from the ONE placement router, so both the held-item place route and the 
 fallback honour it; an empty pile accepts anything again. It is orthogonal to `MaxQuantity` (a
 capacity of 1 already enforces exclusivity on its own, which is what
 `CUSTODY_SINGLE_FAMILY_REDUNDANT` warns about).
+
+## Multiblock structures (`StructurePatternAsset` -> `PatternCatalog` -> `StationStructures`)
+
+A player-built arrangement becomes a station: [`PatternCatalog`](PatternCatalog.java) folds
+`asset.StructurePatternAsset` (`Server/RpgStations/Patterns/*.json`, the schema bullet in
+`../asset/CLAUDE.md`) and compiles each pattern into TWO zc `world.pattern.BlockPattern` forms
+published as one immutable snapshot (sorted by pattern id = the deterministic candidate order):
+**DETECT** (the authored cells verbatim - the anchor tests as its pre-activation block) and
+**HOLD** (the standing-build re-check - the anchor cell's matcher replaced by `Activate.Block`,
+and any cell coinciding with a Block-route socket `At` of the activated station's actions
+EXCLUDED, so the pot placed onto its socket never reads as the shape breaking; the station
+resolves from `Activate.Block` through `StationService#stationIdForBlockItem`, the same
+asset-derived index below). Per-cell payloads are [`PatternCells`](PatternCells.java)
+`CellMatcher`s (exact id / resource family / tags over the block's ITEM identity,
+base-normalized via `BlockOps.baseItemIdOf` so state variants fold; `Empty` cells match the
+engine's `"Empty"` air answer; a malformed both/neither cell matches NOTHING). The placement
+`PatternIndex` seeds from every DETECT cell authoring an exact `ItemId`; the catalog recompiles at
+every pattern AND station fold plus once post-load.
+
+[`StationStructures`](StationStructures.java) is the runtime, fed by the same two event surfaces
+custody listens on. **Placement is DEFERRED**: `PlaceBlockEvent` fires BEFORE the engine writes
+the block, so `onBlockPlaced` only pre-filters (index probe + pending-radius check) and hands the
+authoritative walk to `world.execute` - which both sees the real placement and re-verifies against
+a later listener cancelling it, and keeps the anchor swap from being clobbered by the engine's own
+write. The scan walks pending candidates first, then the placed block's own index candidates;
+the FIRST completed walk is THE outcome (`decideActivation`, pure): a stash already tagged by
+ANOTHER pattern (or a foreign consumer) refuses with `ui.station.structure_conflict`, the same
+pattern is idempotent, the pattern's `Requires` gate (evaluated against the placer; creative
+places still evaluate it) denies with `ui.station.pattern_requirements_unmet[_named]`, and an
+activation swaps the anchor via `BlockOps.setBlock` CARRYING its read rotation (`swapFor`, pure:
+skip when the base ids already match - the custom-core style), stamps the stash tag's pattern
+segment, feeds `registerKnownStationBlock`, and plays the `activated` moment
+(`playPatternMoment`: sounds/particles positionally - the particles through
+`StationService.spawnPresentationParticles`, the ONE leak-guarded spawn core - shake/native
+payloads on the placer; cues play at once, no session exists to queue a `DelayMs`).
+
+**No stored membership** (decision: re-walk from the index). The one persisted mark is the anchor
+stash tag's `|pattern=<id>/<variant>` segment (`StationCustodyClaim`'s tag vocabulary: a
+pattern-only tag is `rpgstations:|pattern=...`, upgraded IN PLACE to
+`rpgstations:<station>/<action>|pattern=...` by the first engage - `ensureClaimAt` stamps the
+custody half in front of the segment, and `stampNewStash` PRESERVES an existing segment). **The
+mark must OUTLIVE the custody record**: draining a station's last pile used to remove the stash
+outright, which would have erased the mark and left the standing build revert-proof - the three
+block-still-stands removal sites (`returnCustody`, `retrieveCustody`, `releaseAnchorClaims`) route
+through `removeOrDemoteStashAt`, which DEMOTES a pattern-marked stash to its pattern-only shape
+(custody half + owner dropped, so the emptied station is open to the next engager exactly as a
+removal would have been) instead of deleting it; only the block-GONE path (`onCustodyBlockBroken`)
+still removes outright. The
+volatile [`PendingAnchorIndex`](PendingAnchorIndex.java) buys build-order freedom (anchor-first
+works: an indexed placement that completes nothing registers its implied anchors; later placements
+within `maxBoundingRadius` re-walk just those; bounded per world, evicted on world remove, never
+persisted - post-restart a half-built shape completes by re-placing any exact-id block,
+documented).
+
+**Break side** (`onBlockBroken`, called from BOTH break systems BEFORE `onCustodyBlockBroken` so
+an anchor's tag is still readable): the broken position's pending entries drop and a pattern-only
+stash there is removed (anchor broken = clean up only, no swap-back onto air; a custody-carrying
+stash stays for the L4 funnel right behind). Then the member re-walk: `holdCandidatesFor` (pure -
+WIDER than the index on purpose, testing every HOLD cell matcher so a family/tag-matched ring
+block still finds its anchor; Empty cells and the anchor cell skipped) derives each implied
+anchor, a pattern-tagged stash there gates the walk, and `holdStands` walks the TAGGED variant
+(stale index degrades to any-variant, so a `Rotate` re-tune never demolishes builds) over a
+reader with the broken position overlaid as air (`withBrokenAt` - the event fires before
+removal). A failed walk reverts: `stopSessionsForStructureLost` (every session at the anchor,
+primary or claimed remote, `StopReason.STRUCTURE_LOST` - the present-player hand-back family,
+`ui.station.structure_lost`), then the L4 `onCustodyBlockBroken` funnel (drop remaining piles
+once, remove stash, despawn props, de-index), the `broken` moment, and the swap back to
+`effectiveRevertBlock` (again rotation-carrying). Pure cores + the walk live under
+`PatternCompileTest` / `StructureDetectionTest` / `StructureRevertTest` /
+`PendingAnchorIndexTest`; the live chunk walk, the deferred-scan timing and the in-game swap
+visuals are smoke-owed.
 
 ## Anchor discovery: the DERIVED block-item seed (AV wave) + the two denial toasts
 

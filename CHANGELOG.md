@@ -38,6 +38,23 @@ there is no prior public release to diff against, so every entry is additive by 
   inside one pile), `Use` lets them work from it, and `Reclaim` lets them take it back out. A
   session stop hands back only the stopping player's own piles; an interrupted work cycle refunds
   what it consumed into the pile it came from; everything else stays standing for its owner.
+- **Multiblock structures: build a station out of world blocks.** A new `StructurePatternAsset`
+  (`Server/RpgStations/Patterns/*.json`) describes an arrangement of blocks - exact ids, whole
+  resource families ("any rock"), tag matches, or required-empty cells - with one ANCHOR cell.
+  When a player finishes building the shape (any build order, any of the four compass orientations
+  by default, optionally mirrored), the anchor block turns into the pattern's station block,
+  keeping the rotation it was placed with, and is an ordinary station from then on; a pattern
+  whose activation block equals its own anchor block arms a custom core block with no swap at all.
+  An optional `Requires` gate (permission and/or factors) checks the builder before activating,
+  authored `activated`/`broken` moments play at the anchor, and a spot already claimed by a
+  different structure refuses politely. Breaking any block of the standing shape reverts the
+  anchor to its original block, stops whoever was working there (their placed materials hand
+  back), and drops anything else stored at the block - fire and explosions included. A standing
+  ACTIVATED structure survives restarts (its mark lives on the block's own chunk). Caveat: the
+  half-built-shape memory is in-memory only, so a partial build does not auto-complete across a
+  restart - re-place any exact-id block of the pattern (the anchor is the natural one) and
+  detection picks the build up again. The type is deliberately not extension-targetable: a cell
+  appended by another pack would invalidate every standing build of the original shape.
 - **An explosion or fire destroying a station block drops its placed materials.** Environmental
   breaks (fire, physics, unattributed explosions) run the same drop-once cleanup a player break
   does, so a destroyed block never strands stored materials.

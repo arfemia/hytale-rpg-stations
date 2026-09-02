@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * TWO guards over the same walk, both about the shipped documentation surface: every
- * {@code KeyedCodec} leaf on the seven Pattern A asset types (and every nested {@code BuilderCodec}
+ * {@code KeyedCodec} leaf on every Pattern A asset type (and every nested {@code BuilderCodec}
  * group they reach) must carry a non-blank {@code .documentation(...)} string, AND no such string may
  * narrate this project's own internal process. Both matter because a documentation string ships in
  * the jar schema and is the source of the generated schema reference, so it is read by pack authors
@@ -51,7 +51,7 @@ class AssetDocumentationCoverageTest {
     };
 
     @Test
-    void everyLeafOnTheSevenPatternATypesAndTheirNestedGroupsIsDocumented() {
+    void everyLeafOnEveryPatternATypeAndItsNestedGroupsIsDocumented() {
         List<String> undocumented = new ArrayList<>();
         List<String> narrated = new ArrayList<>();
         walkEveryPatternAType(undocumented, narrated);
@@ -83,6 +83,7 @@ class AssetDocumentationCoverageTest {
         walk("ActionAsset", ActionAsset.CODEC, undocumented, narrated, visited);
         walk("LootableAsset", LootableAsset.CODEC, undocumented, narrated, visited);
         walk("RollPool", RollPoolAsset.CODEC, undocumented, narrated, visited);
+        walk("StructurePatternAsset", StructurePatternAsset.CODEC, undocumented, narrated, visited);
         walk("FlairAsset", FlairAsset.CODEC, undocumented, narrated, visited);
         walk("ExtensionAsset", ExtensionAsset.CODEC, undocumented, narrated, visited);
         walk("RpgStationsSettingsAsset", RpgStationsSettingsAsset.CODEC, undocumented, narrated, visited);

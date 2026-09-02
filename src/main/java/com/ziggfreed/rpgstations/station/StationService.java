@@ -89,6 +89,7 @@ import com.ziggfreed.common.util.NumberFormatter;
 import com.ziggfreed.common.world.BlockOps;
 import com.ziggfreed.common.world.stash.BlockStash;
 import com.ziggfreed.common.world.stash.BlockStashes;
+import com.ziggfreed.common.world.stash.StashPile;
 import com.ziggfreed.rpgstations.api.EnhanceLine;
 import com.ziggfreed.rpgstations.api.FactorContext;
 import com.ziggfreed.rpgstations.api.StationContribution;
@@ -217,7 +218,16 @@ public final class StationService {
          * {@link #ANCHOR_LOST} (the in-flight iteration refunds, standing custody follows the
          * normal hand-back/leave-it rule, block states reset through the one stop funnel).
          */
-        SOCKET_LOST
+        SOCKET_LOST,
+        /**
+         * The multiblock shape around a pattern-activated station was broken mid-session
+         * ({@code StationStructures}' HOLD re-walk failed): the station is about to revert to a
+         * plain block, so every session working that anchor ends gracefully here - the same
+         * present-player hand-back family as {@link #SOCKET_LOST} (the in-flight iteration
+         * refunds, the stopping player's own piles hand back through the one stop funnel; whatever
+         * remains drops at the block when the revert removes the stash).
+         */
+        STRUCTURE_LOST
     }
 
     private static final StationService INSTANCE = new StationService();
@@ -2522,10 +2532,23 @@ public final class StationService {
      */
     private static void spawnMomentParticles(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
             @Nullable Presentation.ModelParticle[] particles, @Nonnull Vector3d targetPos) {
+        spawnPresentationParticles(store, particles, targetPos, () -> momentBlockYaw(store, s));
+    }
+
+    /**
+     * The session-free core of {@link #spawnMomentParticles}, shared with
+     * {@code StationStructures}' pattern-moment playback so the per-burst duration-cap LEAK GUARD
+     * and the facing-relative offset composition live in exactly one place. {@code blockYaw}
+     * supplies the facing yaw LAZILY - it is resolved only when some burst actually authors a
+     * {@code PositionOffset}, keeping the no-offset path free of the world read.
+     */
+    static void spawnPresentationParticles(@Nonnull Store<EntityStore> store,
+            @Nullable Presentation.ModelParticle[] particles, @Nonnull Vector3d targetPos,
+            @Nonnull java.util.function.DoubleSupplier blockYaw) {
         if (particles == null || particles.length == 0) {
             return;
         }
-        double blockYaw = Double.NaN;
+        double resolvedYaw = Double.NaN;
         for (Presentation.ModelParticle burst : particles) {
             if (burst == null || !burst.hasSystemId()) {
                 continue;
@@ -2533,14 +2556,14 @@ public final class StationService {
             Vector3d pos = targetPos;
             Vec3 offset = burst.getPositionOffset();
             if (offset != null) {
-                if (Double.isNaN(blockYaw)) {
-                    blockYaw = momentBlockYaw(store, s);
+                if (Double.isNaN(resolvedYaw)) {
+                    resolvedYaw = blockYaw.getAsDouble();
                 }
                 double[] world = StationBlockFacing.rotateOffset(
                         offset.getX() != null ? offset.getX() : 0.0,
                         offset.getY() != null ? offset.getY() : 0.0,
                         offset.getZ() != null ? offset.getZ() : 0.0,
-                        blockYaw);
+                        resolvedYaw);
                 pos = new Vector3d(targetPos.x() + world[0], targetPos.y() + world[1], targetPos.z() + world[2]);
             }
             Rotation rot = burst.getRotationOffset();
@@ -3937,10 +3960,15 @@ public final class StationService {
             if (tag == null) {
                 StationCustodyClaim.stampNewStash(stash, ownerId, stationId, actionId);
                 BlockStashes.markDirty(accessor, sectionRef);
-            } else if (StationCustodyClaim.stationIdOfTag(tag) == null) {
+            } else if (!StationCustodyClaim.isOurTag(tag)) {
                 Log.warn("STATION block (" + x + ", " + y + ", " + z + ") already carries another"
                         + " consumer's stash ('" + tag + "') - refusing to store placed input there");
                 return null;
+            } else if (StationCustodyClaim.stationIdOfTag(tag) == null) {
+                // OUR tag but no custody half yet: a pattern-activated anchor being engaged for
+                // the first time. Stamp the custody identity in; the pattern segment is preserved.
+                StationCustodyClaim.stampNewStash(stash, ownerId, stationId, actionId);
+                BlockStashes.markDirty(accessor, sectionRef);
             }
             return StationCustodyClaim.of(stash, x, y, z,
                     () -> BlockStashes.markDirty(accessor, sectionRef));
@@ -3965,6 +3993,43 @@ public final class StationService {
             return BlockStashes.removeStashAt(chunkStore.getStore(), sectionRef, x, y, z);
         } catch (Throwable t) {
             Log.fine("STATION custody remove failed at (" + x + ", " + y + ", " + z + "): " + t.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * {@link #removeStashAt} for a block that STILL STANDS (a drained claim, a hand-back): a stash
+     * carrying a multiblock-structure pattern mark is not removed but DEMOTED to its pattern-only
+     * shape (tag kept, custody half and owner dropped), because the mark is what lets a later ring
+     * break find and revert the standing build - and dropping the owner keeps the emptied station
+     * open to whoever places next, exactly as a full removal would have. A markless stash removes
+     * as before; the block-GONE path ({@link #onCustodyBlockBroken}) keeps the full removal, since
+     * the structure bookkeeping goes with the block.
+     */
+    private static boolean removeOrDemoteStashAt(@Nonnull World world, int x, int y, int z) {
+        try {
+            ChunkStore chunkStore = world.getChunkStore();
+            Ref<ChunkStore> sectionRef = chunkStore.getChunkSectionReferenceAtBlock(x, y, z);
+            if (sectionRef == null || !sectionRef.isValid()) {
+                return false;
+            }
+            Store<ChunkStore> accessor = chunkStore.getStore();
+            BlockStash stash = BlockStashes.stashAt(accessor, sectionRef, x, y, z);
+            String tag = stash != null ? stash.getTag() : null;
+            if (StationCustodyClaim.patternIdOfTag(tag) == null) {
+                return BlockStashes.removeStashAt(accessor, sectionRef, x, y, z);
+            }
+            stash.setTag(StationCustodyClaim.demotedToPatternOnly(tag));
+            stash.setOwner(null);
+            Map<String, StashPile> piles = stash.getPiles();
+            if (piles != null) {
+                piles.clear();
+            }
+            BlockStashes.markDirty(accessor, sectionRef);
+            return true;
+        } catch (Throwable t) {
+            Log.fine("STATION custody remove/demote failed at (" + x + ", " + y + ", " + z + "): "
+                    + t.getMessage());
             return false;
         }
     }
@@ -4154,6 +4219,38 @@ public final class StationService {
     /** Package-private for {@link StationBlockPlaceSystem} test wiring; the live count of indexed station blocks. */
     int knownStationBlockCount() {
         return knownStationBlocks.size();
+    }
+
+    /**
+     * The station id a block ITEM id resolves through the asset-derived discovery index
+     * ({@link #seedStationBlockIndexFromAssets}), or null when the block is no station.
+     * {@code PatternCatalog} reads it to derive which station a pattern's {@code Activate.Block}
+     * becomes (the Block-socket HOLD exclusion and the post-activation index feed both key off it).
+     */
+    @Nullable
+    String stationIdForBlockItem(@Nullable String blockItemId) {
+        if (blockItemId == null || blockItemId.isBlank()) {
+            return null;
+        }
+        return stationBlockItemToId.get(blockItemId.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    /**
+     * Stops EVERY live session working {@code blockKey} - as its primary block, or holding it as a
+     * claimed remote anchor - with {@link StopReason#STRUCTURE_LOST} ({@code StationStructures}'
+     * revert path: the multiblock shape is gone, so the station there is about to become a plain
+     * block). The sweep mirrors {@link #sessionWorkingAt}'s shape: {@link #byBlock} alone cannot
+     * answer a non-exclusive station's sessions, so every live session is checked once - a cold
+     * path bounded by the players online, run only when a standing shape actually broke.
+     */
+    void stopSessionsForStructureLost(@Nonnull String blockKey, @Nonnull Store<EntityStore> store,
+            @Nullable CommandBuffer<EntityStore> commandBuffer) {
+        for (StationSession s : new ArrayList<>(byPlayer.values())) {
+            if (!s.stopped.get()
+                    && (blockKey.equals(s.blockKey) || s.anchorBlocks.containsValue(blockKey))) {
+                stop(s, StopReason.STRUCTURE_LOST, store, commandBuffer);
+            }
+        }
     }
 
     /**
@@ -4677,7 +4774,7 @@ public final class StationService {
             }
             StationCustodyClaim claim = custodyClaimAt(world, coords[0], coords[1], coords[2]);
             if (claim != null && claim.ownerId.equals(s.playerUuid)) {
-                removeStashAt(world, coords[0], coords[1], coords[2]);
+                removeOrDemoteStashAt(world, coords[0], coords[1], coords[2]);
                 despawnDisplay(blockKey, commandBuffer);
                 giveClaimToOwner(commandBuffer, ownerStore, s.ref, claim,
                         claim.blockX, claim.blockY, claim.blockZ);
@@ -5237,7 +5334,7 @@ public final class StationService {
         }
         boolean stashGone = !claim.hasAnyPile();
         if (stashGone) {
-            removeStashAt(world, s.blockX, s.blockY, s.blockZ);
+            removeOrDemoteStashAt(world, s.blockX, s.blockY, s.blockZ);
             despawnDisplay(s.blockKey, commandBuffer);
         } else {
             claim.markDirty();
@@ -5424,7 +5521,7 @@ public final class StationService {
                 claim.removePile(socketId);
                 despawnDisplay(blockKey, socketId, commandBuffer);
                 if (!claim.hasAnyPile()) {
-                    removeStashAt(world, claim.blockX, claim.blockY, claim.blockZ);
+                    removeOrDemoteStashAt(world, claim.blockX, claim.blockY, claim.blockZ);
                     despawnDisplay(blockKey, commandBuffer);
                 } else {
                     claim.markDirty();
@@ -6035,7 +6132,8 @@ public final class StationService {
         }
     }
 
-    private static void toast(@Nonnull PlayerRef playerRef, @Nonnull Message message) {
+    /** Package-private: {@code StationStructures}' pattern toasts ride the same yellow notification. */
+    static void toast(@Nonnull PlayerRef playerRef, @Nonnull Message message) {
         try {
             NotificationUtil.sendNotification(playerRef.getPacketHandler(), message.color(Color.YELLOW));
         } catch (Throwable t) {
@@ -6064,6 +6162,7 @@ public final class StationService {
             case ANCHOR_LOST -> "ui.station.stop.anchor_lost";
             case PATH_BLOCKED -> "ui.station.stop.path_blocked";
             case SOCKET_LOST -> "ui.station.socket_lost";
+            case STRUCTURE_LOST -> "ui.station.structure_lost";
             default -> null;
         };
     }

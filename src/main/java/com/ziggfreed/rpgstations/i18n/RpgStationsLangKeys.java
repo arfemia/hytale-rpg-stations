@@ -88,6 +88,13 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.socket_missing",
             "rpgstations.ui.station.socket_missing_named",
             "rpgstations.ui.station.socket_lost",
+            // The multiblock-structure toasts: a completed shape whose anchor another pattern
+            // already claims, the pattern's Requires gate failing for the placer (plus its
+            // NameKey-naming form), and the STRUCTURE_LOST stop toast.
+            "rpgstations.ui.station.structure_conflict",
+            "rpgstations.ui.station.pattern_requirements_unmet",
+            "rpgstations.ui.station.pattern_requirements_unmet_named",
+            "rpgstations.ui.station.structure_lost",
             "rpgstations.ui.station.not_shared",
             "rpgstations.ui.station.not_shared_named",
             "rpgstations.ui.station.inventory_full",

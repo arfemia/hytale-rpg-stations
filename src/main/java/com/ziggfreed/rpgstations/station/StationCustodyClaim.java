@@ -146,12 +146,46 @@ final class StationCustodyClaim {
         return new StationCustodyClaim(owner, stationId, actionId, blockX, blockY, blockZ, stash, dirtyMarker);
     }
 
-    // ==================== the stash Tag (station/action identity, restart-stable) ====================
+    // ==================== the stash Tag (station/action + pattern identity, restart-stable) ====================
+    //
+    // Three tag shapes, all under the one TAG_PREFIX (so the foreign-consumer refusal treats every
+    // one of them as ours):
+    //   rpgstations:<station>/<action>                            - plain custody (the classic tag)
+    //   rpgstations:<station>/<action>|pattern=<patternId>/<v>    - custody at a pattern-activated anchor
+    //   rpgstations:|pattern=<patternId>/<v>                      - an activated anchor nobody engaged yet
+    // The pattern segment records WHICH pattern stands at the anchor and in WHICH variant (the
+    // orientation index), so a break re-walk and a revert can answer both across restarts with no
+    // stored membership.
+
+    /** The separator that opens the pattern segment of a stash {@code Tag}. */
+    static final String PATTERN_SEGMENT = "|pattern=";
+
+    /** True when the tag is this mod's (any of its shapes); false for null or another consumer's. */
+    static boolean isOurTag(@Nullable String tag) {
+        return tag != null && tag.startsWith(TAG_PREFIX);
+    }
 
     /** The {@code Tag} value a claim's stash carries: this mod's prefix plus the owning station and action ids. */
     @Nonnull
     static String encodeTag(@Nonnull String stationId, @Nonnull String actionId) {
         return TAG_PREFIX + stationId + "/" + actionId;
+    }
+
+    /** The tag's custody half (everything before any pattern segment; the whole tag when none). */
+    @Nonnull
+    private static String custodyHalf(@Nonnull String tag) {
+        int at = tag.indexOf(PATTERN_SEGMENT);
+        return at >= 0 ? tag.substring(0, at) : tag;
+    }
+
+    /** The tag's pattern segment including its separator, or {@code ""} when none. */
+    @Nonnull
+    static String patternSegmentOf(@Nullable String tag) {
+        if (tag == null) {
+            return "";
+        }
+        int at = tag.indexOf(PATTERN_SEGMENT);
+        return at >= 0 ? tag.substring(at) : "";
     }
 
     /** The station id a stash {@code Tag} encodes, or {@code null} for a tag this mod did not write. */
@@ -160,11 +194,12 @@ final class StationCustodyClaim {
         if (tag == null || !tag.startsWith(TAG_PREFIX)) {
             return null;
         }
-        int slash = tag.indexOf('/', TAG_PREFIX.length());
+        String custody = custodyHalf(tag);
+        int slash = custody.indexOf('/', TAG_PREFIX.length());
         if (slash <= TAG_PREFIX.length()) {
             return null;
         }
-        return tag.substring(TAG_PREFIX.length(), slash);
+        return custody.substring(TAG_PREFIX.length(), slash);
     }
 
     /** The action id a stash {@code Tag} encodes, or {@code null} for a tag this mod did not write. */
@@ -173,8 +208,74 @@ final class StationCustodyClaim {
         if (stationIdOfTag(tag) == null) {
             return null;
         }
-        String actionId = tag.substring(tag.indexOf('/', TAG_PREFIX.length()) + 1);
+        String custody = custodyHalf(tag);
+        String actionId = custody.substring(custody.indexOf('/', TAG_PREFIX.length()) + 1);
         return actionId.isBlank() ? null : actionId;
+    }
+
+    /** The pattern id a stash {@code Tag}'s pattern segment names (lowercase), or {@code null} when none. */
+    @Nullable
+    static String patternIdOfTag(@Nullable String tag) {
+        if (!isOurTag(tag)) {
+            return null;
+        }
+        String segment = patternSegmentOf(tag);
+        if (segment.isEmpty()) {
+            return null;
+        }
+        String body = segment.substring(PATTERN_SEGMENT.length());
+        int slash = body.indexOf('/');
+        String patternId = slash >= 0 ? body.substring(0, slash) : body;
+        return patternId.isBlank() ? null : patternId.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** The variant index a stash {@code Tag}'s pattern segment recorded, or {@code null} when absent/unparseable. */
+    @Nullable
+    static Integer patternVariantOfTag(@Nullable String tag) {
+        if (patternIdOfTag(tag) == null) {
+            return null;
+        }
+        String body = patternSegmentOf(tag).substring(PATTERN_SEGMENT.length());
+        int slash = body.indexOf('/');
+        if (slash < 0 || slash + 1 >= body.length()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(body.substring(slash + 1));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * {@code existingTag} with its pattern segment set to {@code (patternId, variantIndex)}: a
+     * null/blank/foreign existing tag yields the pattern-only shape (no custody half yet); one of
+     * ours keeps its custody half and replaces any prior segment.
+     */
+    @Nonnull
+    static String withPatternSegment(@Nullable String existingTag, @Nonnull String patternId, int variantIndex) {
+        String segment = PATTERN_SEGMENT + patternId.toLowerCase(java.util.Locale.ROOT) + "/" + variantIndex;
+        if (!isOurTag(existingTag)) {
+            return TAG_PREFIX + segment;
+        }
+        return custodyHalf(existingTag) + segment;
+    }
+
+    /** {@code tag} with its pattern segment removed (the plain custody tag; the prefix alone when custody-less). */
+    @Nonnull
+    static String withoutPatternSegment(@Nonnull String tag) {
+        return custodyHalf(tag);
+    }
+
+    /**
+     * The PATTERN-ONLY shape of {@code tag} (the prefix plus its pattern segment, custody half
+     * dropped): what a pattern-activated anchor's stash demotes to when its last pile drains -
+     * the structure mark must outlive the custody record, or a later ring break could no longer
+     * revert the build. The caller ensures a segment exists ({@link #patternIdOfTag} non-null).
+     */
+    @Nonnull
+    static String demotedToPatternOnly(@Nonnull String tag) {
+        return TAG_PREFIX + patternSegmentOf(tag);
     }
 
     @Nullable
@@ -417,11 +518,13 @@ final class StationCustodyClaim {
      * The identity stamp for a stash minted by {@code StationService#ensureClaimAt}: this mod's
      * tag plus the stash-level owner, so a freshly created stash always records enough to survive
      * a save and to resolve back into a claim. Piles are minted by the first {@link #addTo} into
-     * each socket, which is also what records each pile's own owner.
+     * each socket, which is also what records each pile's own owner. A pattern segment already on
+     * the stash (a pattern-activated anchor being engaged for the first time) is PRESERVED - the
+     * custody half is written in front of it, never over it.
      */
     static void stampNewStash(@Nonnull BlockStash stash, @Nonnull UUID ownerId,
             @Nonnull String stationId, @Nonnull String actionId) {
-        stash.setTag(encodeTag(stationId, actionId));
+        stash.setTag(encodeTag(stationId, actionId) + patternSegmentOf(stash.getTag()));
         stash.setOwner(ownerId.toString());
     }
 }

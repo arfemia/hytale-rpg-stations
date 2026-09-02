@@ -152,4 +152,4 @@ server restart.
 
 ---
 
-Previous: [Multi-Station Programs](multi-station-programs.md) · Next: [Puppet & Performers](puppet-presentation.md)
+Previous: [Multi-Station Programs](multi-station-programs.md) · Next: [Structures & Sockets](structures-and-sockets.md)

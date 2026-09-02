@@ -93,6 +93,16 @@ public class AssetCodecInitTest {
         assertDoesNotThrow(() -> assertNotNull(ExtensionAsset.StepInsertion.Anchor.CODEC));
     }
 
+    /** The multiblock structure-pattern type and its nested groups. */
+    @Test
+    void structurePatternAssetCodecs_initializeWithoutThrowing() {
+        assertDoesNotThrow(() -> assertNotNull(StructurePatternAsset.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StructurePatternAsset.Identity.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StructurePatternAsset.Rotate.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StructurePatternAsset.Activate.CODEC));
+        assertDoesNotThrow(() -> assertNotNull(StructurePatternAsset.Cell.CODEC));
+    }
+
     @Test
     void rollPoolAndStatRollEntryCodecs_initializeWithoutThrowing() {
         assertDoesNotThrow(() -> assertNotNull(RollPoolAsset.CODEC));

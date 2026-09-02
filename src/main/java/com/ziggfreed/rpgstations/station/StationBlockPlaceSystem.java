@@ -23,9 +23,13 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
  * ("the engine finds station blocks it has seen"); the bounded ring scan is the last resort for
  * a placed-but-never-interacted anchor.
  *
- * <p>Read-only w.r.t. the world (the index is in-memory + non-persisted, like every other custody/
- * session structure); a non-station placement is a cheap no-op. Sibling to
- * {@link StationCustodyBreakSystem} (which handles the break side, removing the index entry).
+ * <p>ALSO the multiblock-structure placement feed ({@link StationStructures#onBlockPlaced}): might
+ * this placement have completed or advanced an authored pattern? That half pre-filters cheaply on
+ * this thread and defers its authoritative walk (and any anchor activation, which does write the
+ * world) to {@code world.execute} - the event fires BEFORE the engine writes the placed block, so
+ * nothing here reads or writes the world inline. A non-station, non-pattern placement is a cheap
+ * no-op. Sibling to {@link StationCustodyBreakSystem} (which handles the break side, removing the
+ * index entry and re-checking standing structures).
  */
 public final class StationBlockPlaceSystem extends EntityEventSystem<EntityStore, PlaceBlockEvent> {
 
@@ -56,6 +60,11 @@ public final class StationBlockPlaceSystem extends EntityEventSystem<EntityStore
         }
         var pos = event.getTargetBlock();
         StationService.getInstance().onStationBlockPlaced(worldUuid, pos.x, pos.y, pos.z, blockItemId);
+        // Multiblock structures: might this placement have completed (or advanced) an authored
+        // pattern? Pre-filters cheaply here and defers the authoritative walk - the engine writes
+        // the placed block AFTER this event. A no-pattern install early-outs on the first check.
+        StationStructures.getInstance().onBlockPlaced(store, ref, playerRef, worldUuid,
+                pos.x, pos.y, pos.z, blockItemId);
     }
 
     @Nullable

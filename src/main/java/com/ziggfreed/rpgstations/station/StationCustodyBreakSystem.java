@@ -60,6 +60,11 @@ public final class StationCustodyBreakSystem extends EntityEventSystem<EntitySto
         }
         var pos = event.getTargetBlock();
         String blockKey = StationAnchors.blockKey(worldUuid.toString(), pos.x, pos.y, pos.z);
+        // Multiblock structures FIRST, while an activated anchor's stash tag is still readable:
+        // a member break re-walks each candidate anchor's HOLD form and reverts a broken shape.
+        StationStructures.getInstance().onBlockBroken(store, commandBuffer, worldUuid,
+                pos.x, pos.y, pos.z, event.getBlockType() != null ? event.getBlockType().getId() : null,
+                playerRef, ref);
         StationService.getInstance().onCustodyBlockBroken(store, commandBuffer, blockKey, pos.x, pos.y, pos.z);
     }
 
@@ -99,6 +104,11 @@ public final class StationCustodyBreakSystem extends EntityEventSystem<EntitySto
             }
             var pos = event.getTargetBlock();
             String blockKey = StationAnchors.blockKey(worldUuid.toString(), pos.x(), pos.y(), pos.z());
+            // Multiblock structures FIRST (same order as the player route); no actor exists to
+            // attribute, so the broken moment plays positionally and no gate is consulted.
+            StationStructures.getInstance().onBlockBroken(store, commandBuffer, worldUuid,
+                    pos.x(), pos.y(), pos.z(),
+                    event.getBlockType() != null ? event.getBlockType().getId() : null, null, null);
             StationService.getInstance().onCustodyBlockBroken(store, commandBuffer, blockKey,
                     pos.x(), pos.y(), pos.z());
         }

@@ -119,4 +119,4 @@ entity, even after an ungraceful shutdown.
 
 ---
 
-Previous: [Custody & Placed Display](custody-and-placed-display.md) · Next: [Selection & Output Categories](selection.md)
+Previous: [Structures & Sockets](structures-and-sockets.md) · Next: [Selection & Output Categories](selection.md)

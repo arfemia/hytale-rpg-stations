@@ -13,7 +13,7 @@ only the four things that genuinely belong to the STATION - `Identity`, `Block`,
 work cadence, custody, worker presentation, moments) lives INSIDE an [`ActionDef`](ActionDef.java)
 entry; an action reads its own groups, or the [`ActionAsset`](ActionAsset.java) its `Ref` names,
 and nothing else. File/folder layout:
-`Server/RpgStations/{Stations,Actions,Flairs,Extensions,Settings}/` (loot tables and roll pools are the shared library's, at `Server/ZiggfreedCommon/{Lootables,RollPools}/`). The
+`Server/RpgStations/{Stations,Actions,Patterns,Flairs,Extensions,Settings}/` (loot tables and roll pools are the shared library's, at `Server/ZiggfreedCommon/{Lootables,RollPools}/`). The
 multi-station seam (`ActionDef.Anchors`, `StationStep.Walk`/`At`, `Produce.To:"Custody"`) fully
 EXECUTES, with no decode-only decoys anywhere in the schema. See `../station/CLAUDE.md`'s
 resolution section for the engine half.
@@ -585,6 +585,22 @@ resolution section for the engine half.
   extension-point decision, not a filing one:** those three are one roll each precisely because a
   layering mod re-tuning any of them should never have to inherit the other two. Split by default
   when authoring a station - merging ids later is free, unpicking a shipped one is not.
+- **[`StructurePatternAsset`](StructurePatternAsset.java)** - a multiblock structure pattern,
+  `Server/RpgStations/Patterns/<Name>.json` (Pattern A, id = lowercased filename, native `Parent`
+  per leaf): `{Identity{NameKey,DescKey}, Rotate{Yaw90 (default true), Mirror (default false)},
+  Activate{Block, RevertBlock (defaults to the anchor cell's own id)}, Cells[], Requires,
+  Moments{activated, broken}}`. Each `Cells[]` entry is `{Offset: Vec3i, Block: ActionInput XOR
+  Empty: true (exactly one, warned), IsAnchor}` - EXACTLY ONE anchor cell (unauthored = the cell
+  at offset (0,0,0), decode-warned; the anchor must author an exact `Block.ItemId` since detection
+  seeds from exact ids, warned otherwise). `Activate.Block` equal to the anchor cell's own id is
+  the custom-core-block style (no swap) - authoring, never a mode. **`Cells` is REPLACED WHOLESALE
+  under `Parent`** (the standard array rule, documented at the leaf), and the type is deliberately
+  NON-extensible (no `ExtensionAsset` target: a cell appended by another pack would deactivate
+  every standing build). `Moments` is the same `InheritMapCodec<Presentation>` map every flair/
+  moment surface uses ($-keys legal); its cues play AT ONCE at the anchor (no session exists to
+  queue a `DelayMs`, documented at the leaf). Compiled by `station.PatternCatalog` into DETECT +
+  HOLD walk forms over ziggfreed-common's `world.pattern` engine; runtime in
+  `station.StationStructures` - see `../station/CLAUDE.md`'s multiblock section.
 - **[`FlairAsset`](FlairAsset.java)** - a standalone, ANY-mod-authorable cosmetic flair layer,
   `Server/RpgStations/Flairs/<Name>.json` (Pattern A, id = lowercased filename): `{Stations?[],
   Moments}`. `Stations` null/empty = applies to every station; `Moments` is an OPEN
@@ -688,8 +704,9 @@ resolution section for the engine half.
   - **Deliberately NON-extensible** (docs state each): `Requires` (an extension must never
     tighten/loosen another author's gate), `Settings` (owner-only singleton), scalar groups
     (`Work`/`Hold`/`Camera`/`Animation` - override is load-order's job, not extension), the
-    INTERNALS of an existing `Roll` (extenders add their OWN Rolls beside it), and
-    `FlairAsset.Moments`.
+    INTERNALS of an existing `Roll` (extenders add their OWN Rolls beside it),
+    `FlairAsset.Moments`, and the whole `StructurePatternAsset` (a cell list is the pattern's
+    identity - an appended cell would deactivate every standing build).
   - **The presentation-overlay exception (`Puppet`, `Custody` incl. `Custody.States`,
     `ContributionScale`)**: these three carry per-leaf overlay precisely because "override is
     load-order's job" would otherwise force a pack that only wants to RE-SKIN a base station's

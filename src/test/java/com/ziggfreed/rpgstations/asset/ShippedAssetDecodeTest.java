@@ -65,6 +65,8 @@ public class ShippedAssetDecodeTest {
                     RawJsonReader.fromJsonString(body), null, info(RollPoolAsset.class, key)),
             "Flairs", (body, key) -> FlairAsset.CODEC.decodeAndInheritJsonAsset(
                     RawJsonReader.fromJsonString(body), null, info(FlairAsset.class, key)),
+            "Patterns", (body, key) -> StructurePatternAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(StructurePatternAsset.class, key)),
             "Settings", (body, key) -> RpgStationsSettingsAsset.CODEC.decodeAndInheritJsonAsset(
                     RawJsonReader.fromJsonString(body), null, info(RpgStationsSettingsAsset.class, key)));
 

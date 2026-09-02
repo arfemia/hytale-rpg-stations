@@ -204,6 +204,17 @@ and its block's state matter to the visiting program.
 }
 ```
 
+## Pattern-activated stations as anchors
+
+A station raised from a multiblock structure pattern (see
+[Structures & Sockets](structures-and-sockets.md)) is an ORDINARY station for anchor purposes: once
+activated, its block resolves through the same discovery index, claims the same way, and its custody
+reads and writes exactly like a directly-placed block - an `Anchors` declaration never needs to know
+or care how the target station came to stand there. The standing rules apply unchanged too:
+persisted FOREIGN custody at the block refuses an anchor claim, including across restarts (the
+placed materials live on the block's own chunk, so someone else's stew waiting at the fire blocks
+your program's claim on it even after the server bounces).
+
 ## Lifecycle at the edges
 
 A server restart mid-walk or mid-program loses the session, its anchor claims, and its puppet by

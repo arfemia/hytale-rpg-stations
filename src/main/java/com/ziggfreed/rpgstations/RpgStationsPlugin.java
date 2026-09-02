@@ -36,6 +36,7 @@ import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
 import com.ziggfreed.rpgstations.command.RpgStationsCommand;
 import com.ziggfreed.rpgstations.interaction.StationRetrieveInteraction;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
@@ -44,12 +45,14 @@ import com.ziggfreed.rpgstations.station.ExtensionCatalog;
 import com.ziggfreed.rpgstations.station.FlairCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.station.StationBlockPlaceSystem;
+import com.ziggfreed.rpgstations.station.PatternCatalog;
 import com.ziggfreed.rpgstations.station.StationCatalog;
 import com.ziggfreed.rpgstations.station.StationCustodyBreakSystem;
 import com.ziggfreed.rpgstations.station.StationDeathSystem;
 import com.ziggfreed.rpgstations.station.StationFrameSystem;
 import com.ziggfreed.rpgstations.station.StationInterruptDamageSystem;
 import com.ziggfreed.rpgstations.station.StationService;
+import com.ziggfreed.rpgstations.station.StationStructures;
 import com.ziggfreed.rpgstations.station.StationValidator;
 import com.ziggfreed.rpgstations.station.ZigFlairUnlockProvider;
 import com.ziggfreed.rpgstations.ui.StationSummaryHud;
@@ -118,6 +121,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerStationAssetStore();
         registerActionAssetStore();
         registerExtensionAssetStore();
+        registerPatternAssetStore();
         registerFlairAssetStore();
         registerFlairUnlockDefault();
         registerSettingsAssetStore();
@@ -195,6 +199,14 @@ public class RpgStationsPlugin extends JavaPlugin {
                     StationService.getInstance().seedStationBlockIndexFromAssets();
                 } catch (Throwable t) {
                     Log.warn("Deferred station discovery seeding failed: " + t.getMessage());
+                }
+                try {
+                    // Recompile the structure patterns AFTER the final index seed above: the
+                    // Activate.Block -> station derivation and the Block-socket HOLD exclusion
+                    // both read layers that can settle after the pattern fold.
+                    PatternCatalog.getInstance().rebuild();
+                } catch (Throwable t) {
+                    Log.warn("Deferred structure-pattern recompile failed: " + t.getMessage());
                 }
                 try {
                     StationValidator.runAndLog();
@@ -297,6 +309,7 @@ public class RpgStationsPlugin extends JavaPlugin {
                 World removed = event.getWorld();
                 if (removed != null) {
                     StationService.getInstance().onWorldRemoved(removed);
+                    StationStructures.getInstance().onWorldRemoved(removed);
                     WorldEvictors.onWorldRemoved(removed);
                 }
             } catch (Throwable t) {
@@ -339,6 +352,9 @@ public class RpgStationsPlugin extends JavaPlugin {
         // re-run post-load from registerPostLoadAudit() because a native Item/BlockType layer can
         // settle AFTER this station fold fires.
         StationService.getInstance().seedStationBlockIndexFromAssets();
+        // A station layer can change which station a pattern's Activate.Block derives (and its
+        // Block-socket cells), so the compiled pattern forms recompile against the fresh catalog.
+        PatternCatalog.getInstance().rebuild();
         // Structural-only at fold time (D4 fix) - the FULL pass (incl. cross-layer reference
         // checks) runs once, post-load, from registerPostLoadAudit().
         StationValidator.runStructuralAndLog();
@@ -401,6 +417,38 @@ public class RpgStationsPlugin extends JavaPlugin {
         ExtensionCatalog.getInstance().fold(layer, false);
         Log.info("Extension asset layer: folded " + layer.size() + " extension(s) into ExtensionCatalog: "
                 + layer.keySet());
+    }
+
+    /**
+     * Registers the {@link StructurePatternAsset} Pattern-A store at
+     * {@code Server/RpgStations/Patterns} and folds every loaded entry into {@link PatternCatalog},
+     * which compiles the DETECT/HOLD walk forms and seeds the placement index. The catalog also
+     * recompiles on every STATION fold and once post-load ({@link #registerPostLoadAudit}), because
+     * the HOLD form's Block-socket exclusion and the derived station id both read layers that can
+     * settle after the pattern layer.
+     */
+    private void registerPatternAssetStore() {
+        AssetStoreRegistrar.registerStore(
+                StructurePatternAsset.class,
+                new DefaultAssetMap<String, StructurePatternAsset>(),
+                "RpgStations/Patterns",
+                StructurePatternAsset::getId,
+                StructurePatternAsset.CODEC,
+                null);
+        getEventRegistry().register(LoadedAssetsEvent.class, StructurePatternAsset.class,
+                RpgStationsPlugin::onPatternAssetsLoaded);
+    }
+
+    private static void onPatternAssetsLoaded(
+            LoadedAssetsEvent<String, StructurePatternAsset, DefaultAssetMap<String, StructurePatternAsset>> event) {
+        DefaultAssetMap<String, StructurePatternAsset> assetMap = event.getAssetMap();
+        Map<String, StructurePatternAsset> layer = new LinkedHashMap<>();
+        for (Map.Entry<String, StructurePatternAsset> entry : assetMap.getAssetMap().entrySet()) {
+            layer.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
+        }
+        PatternCatalog.getInstance().fold(layer, false);
+        Log.info("Pattern asset layer: folded " + layer.size()
+                + " structure pattern(s) into PatternCatalog: " + layer.keySet());
     }
 
     /**

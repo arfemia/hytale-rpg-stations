@@ -42,6 +42,7 @@ import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.asset.StringOrObjectCodec;
+import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
 
 /**
  * Walks every authorable RpgStations asset type's declared static {@code CODEC} field via
@@ -134,6 +135,7 @@ public final class SchemaDocWriter {
         register("StampSpec", StampSpec.CODEC);
         register("RollPool", RollPoolAsset.CODEC);
         register("LootableAsset", LootableAsset.CODEC);
+        register("StructurePatternAsset", StructurePatternAsset.CODEC);
         register("FlairAsset", FlairAsset.CODEC);
         register("ExtensionAsset", ExtensionAsset.CODEC);
         register("SettingsAsset", RpgStationsSettingsAsset.CODEC);

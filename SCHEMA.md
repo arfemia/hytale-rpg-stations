@@ -25,6 +25,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 - [StampSpec](#type-stampspec)
 - [RollPool](#type-rollpool)
 - [LootableAsset](#type-lootableasset)
+- [StructurePatternAsset](#type-structurepatternasset)
 - [FlairAsset](#type-flairasset)
 - [ExtensionAsset](#type-extensionasset)
 - [SettingsAsset](#type-settingsasset)
@@ -1168,6 +1169,73 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Weight` | `double` | `null` | How often this entry comes up relative to its neighbours. Omit for 1. A weight of 0 is never picked, which is how an entry is parked without deleting it. |
 | `Conditions` | array of [Condition](#type-condition) | `null` | Every entry must pass before this outcome competes at all. This is where a premium entry says what earns it, and where an outcome says it only happens on a win. A factor nobody can answer keeps the entry out of the bag. |
 | `Grants` | [LootGrants](#type-lootgrants) | `null` | What being picked hands over. The same four leaves a roll grants through, so an entry can pay items, a native drop list, commands, or any registered reward kind. |
+
+<a id="type-structurepatternasset"></a>
+## StructurePatternAsset
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Tags` | map of array of `string` | `null` | Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.<br><br>For example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.<br><br>Tags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**. |
+| `Name` | `string` | `null` | Ignored - the pattern id comes from the asset filename, not this key. Kept as a schema field for editor display only. |
+| `Identity` | [Identity](#field-structurepatternasset-identity) | `null` | Display identity: the localization keys naming this structure in player-facing messages. |
+| `Rotate` | [Rotate](#field-structurepatternasset-rotate) | `null` | Which orientations of the shape count as built: the four yaw quarter-turns (default on) and an optional X-mirror (default off). |
+| `Activate` | [Activate](#field-structurepatternasset-activate) | `null` | What completion does to the anchor block: the station block it becomes, and the block a broken shape reverts it to. |
+| `Cells` | array of [Cell](#field-structurepatternasset-cells-item) | `null` | The cells of the shape, each an offset plus what must stand there. Exactly one cell is the anchor. Under native Parent this ARRAY is replaced wholesale, never merged per entry - a child re-authoring any cell re-authors them all. |
+| `Requires` | [Requires](#type-requires) | `null` | The activation gate, evaluated against the player whose placement completed the shape; a failing gate leaves the blocks standing and the station unactivated. |
+| `Moments` | map of [Presentation](#type-presentation) | `null` | Moment id -> the presentation played at the anchor. Well-known ids: 'activated' (a completed build turned into the station) and 'broken' (the standing shape was broken and reverted). Cues play at once; a DelayMs here is read as zero. Under native Parent the map merges PER MOMENT ID. |
+
+<a id="field-structurepatternasset-identity"></a>
+### StructurePatternAsset.Identity
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `NameKey` | `string` | `null` | The localization key resolved client-side for the structure's display name; null = generic wording in player-facing messages. |
+| `DescKey` | `string` | `null` | The localization key resolved client-side for the structure's description; null = no description shown. |
+
+<a id="field-structurepatternasset-rotate"></a>
+### StructurePatternAsset.Rotate
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Yaw90` | `boolean` | `null` | Recognize the shape in all four yaw quarter-turn orientations (default true); false = only the authored orientation counts. |
+| `Mirror` | `boolean` | `null` | Additionally recognize the X-mirrored form of each orientation (default false); only worth authoring for an asymmetric shape. |
+
+<a id="field-structurepatternasset-activate"></a>
+### StructurePatternAsset.Activate
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Block` | `string` | `null` | The station block item id the anchor is swapped to on completion, keeping its rotation. Author it EQUAL to the anchor cell's own block id for a custom core block that needs no swap - completion then simply arms the block that already stands there. |
+| `RevertBlock` | `string` | `null` | The block item id a broken shape reverts the anchor to; null = the anchor cell's own authored block id. |
+
+<a id="field-structurepatternasset-cells-item"></a>
+### StructurePatternAsset.Cells[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Offset` | [Vec3i](#field-structurepatternasset-cells-item-offset) | `null` | This cell's position in whole blocks, relative to the authored frame (the anchor cell's offset is subtracted out, so any consistent frame works); unauthored axes read 0. |
+| `Block` | [ActionInput](#field-structurepatternasset-cells-item-block) | `null` | What block must stand in this cell: an exact ItemId, a ResourceTypeId family (any rock), or Tags. A state variant (lit/unlit) matches through its base block. Exactly one of Block \| Empty. |
+| `Empty` | `boolean` | `null` | True = this cell must hold AIR for the shape to count as built. Exactly one of Block \| Empty. |
+| `IsAnchor` | `boolean` | `null` | True on exactly ONE cell: the block that becomes the station on completion. The anchor cell must author an exact Block.ItemId (detection seeds from it). Default false; with no anchor authored, the cell at offset (0,0,0) stands in. |
+
+<a id="field-structurepatternasset-cells-item-offset"></a>
+#### StructurePatternAsset.Cells[].Offset
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `X` | `integer` | `null` | The X component in whole blocks; unauthored means 0 (each axis is independently optional). |
+| `Y` | `integer` | `null` | The Y component in whole blocks; unauthored means 0 (each axis is independently optional). |
+| `Z` | `integer` | `null` | The Z component in whole blocks; unauthored means 0 (each axis is independently optional). |
+
+<a id="field-structurepatternasset-cells-item-block"></a>
+#### StructurePatternAsset.Cells[].Block
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ItemId` | `string` | `null` | Match an exact held item id (one of several optional routes; match = ANY route satisfied). |
+| `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
+| `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
+| `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
 
 <a id="type-flairasset"></a>
 ## FlairAsset

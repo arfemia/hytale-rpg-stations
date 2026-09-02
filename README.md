@@ -39,6 +39,7 @@ for the developer guide.
   to end, followed by [Actions & Step Programs](docs/actions-and-steps.md),
   [Multi-Station Programs](docs/multi-station-programs.md),
   [Custody & Placed Display](docs/custody-and-placed-display.md),
+  [Structures & Sockets](docs/structures-and-sockets.md),
   [Puppet & Performers](docs/puppet-presentation.md),
   [Selection & Output Categories](docs/selection.md), [Loot & Factors](docs/loot-and-factors.md),
   [Native Composition](docs/native-composition.md),
