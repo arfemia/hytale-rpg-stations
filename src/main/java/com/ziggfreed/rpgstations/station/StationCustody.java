@@ -1,6 +1,8 @@
 package com.ziggfreed.rpgstations.station;
 
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -15,7 +17,7 @@ import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
-import com.ziggfreed.common.codec.TagMatch;
+import com.ziggfreed.common.match.ItemMatch;
 
 /**
  * PURE, unit-testable decision cores for placed-input custody (design section 9.4, phase-2 leg
@@ -77,12 +79,23 @@ final class StationCustody {
     /** {@link #available(StationCustodyClaim, String, String, Function)} over ONE pile's live tally. */
     static int availableInPile(@Nullable Map<String, Integer> items, @Nullable String itemId,
             @Nullable String resourceTypeId, @Nonnull Function<String, String[]> resourceTypesOf) {
+        return availableInPile(items,
+                entryId -> matchesEntry(entryId, itemId, resourceTypeId, resourceTypesOf));
+    }
+
+    /**
+     * The predicate core of {@link #availableInPile(Map, String, String, Function)}: total quantity
+     * of the pile entries {@code matches} accepts. The id/family form above and the full
+     * ingredient-route form ({@link #ingredientEntryMatcher}, which also speaks the Tags and
+     * match-any routes) both count through here.
+     */
+    static int availableInPile(@Nullable Map<String, Integer> items, @Nonnull Predicate<String> matches) {
         if (items == null) {
             return 0;
         }
         int total = 0;
         for (Map.Entry<String, Integer> e : items.entrySet()) {
-            if (matchesEntry(e.getKey(), itemId, resourceTypeId, resourceTypesOf) && e.getValue() != null) {
+            if (e.getValue() != null && matches.test(e.getKey())) {
                 total += e.getValue();
             }
         }
@@ -112,6 +125,18 @@ final class StationCustody {
     static int drainFromPile(@Nullable Map<String, Integer> items, @Nullable String itemId, @Nullable String resourceTypeId,
             int quantity, @Nonnull Function<String, String[]> resourceTypesOf,
             @Nullable Map<String, Integer> drainedOut) {
+        return drainFromPile(items,
+                entryId -> matchesEntry(entryId, itemId, resourceTypeId, resourceTypesOf),
+                quantity, drainedOut);
+    }
+
+    /**
+     * The predicate core of {@link #drainFromPile(Map, String, String, int, Function, Map)}:
+     * oldest-placed-first over the entries {@code matches} accepts, same removal/tally contract.
+     * The full ingredient-route form drains through here with {@link #ingredientEntryMatcher}.
+     */
+    static int drainFromPile(@Nullable Map<String, Integer> items, @Nonnull Predicate<String> matches,
+            int quantity, @Nullable Map<String, Integer> drainedOut) {
         if (items == null || quantity <= 0) {
             return 0;
         }
@@ -120,7 +145,7 @@ final class StationCustody {
         while (it.hasNext() && remaining > 0) {
             Map.Entry<String, Integer> e = it.next();
             Integer have = e.getValue();
-            if (have == null || have <= 0 || !matchesEntry(e.getKey(), itemId, resourceTypeId, resourceTypesOf)) {
+            if (have == null || have <= 0 || !matches.test(e.getKey())) {
                 continue;
             }
             int take = Math.min(have, remaining);
@@ -140,20 +165,93 @@ final class StationCustody {
     private static boolean matchesEntry(@Nonnull String entryItemId, @Nullable String wantItemId,
             @Nullable String wantResourceTypeId, @Nonnull Function<String, String[]> resourceTypesOf) {
         if (wantItemId != null && !wantItemId.isBlank()) {
-            return wantItemId.equalsIgnoreCase(entryItemId);
+            return ItemMatch.itemId(wantItemId, entryItemId);
         }
-        if (wantResourceTypeId != null && !wantResourceTypeId.isBlank()) {
-            String[] types = resourceTypesOf.apply(entryItemId);
-            if (types == null) {
+        return ItemMatch.resourceFamily(wantResourceTypeId, resourceTypesOf.apply(entryItemId));
+    }
+
+    /**
+     * The FULL ingredient-route pile-entry matcher: which tallied item ids one {@link Ingredient}
+     * accepts, all four routes - exact {@code ItemId}, {@code ResourceTypeId} family,
+     * {@code Tags}, and the route-less MATCH-ANY (which accepts every entry). The identity
+     * resolvers are injected so the availability count, the exact-set check and the drain all
+     * answer through ONE matcher and stay unit-testable without a live asset map. Route pick when
+     * several are somehow authored (validator-flagged content) keeps the shipped order: family,
+     * then exact id, then tags.
+     */
+    @Nonnull
+    static Predicate<String> ingredientEntryMatcher(@Nonnull Ingredient in,
+            @Nonnull Function<String, String[]> resourceTypesOf,
+            @Nonnull Function<String, Map<String, String[]>> tagsOf) {
+        if (in.hasResourceRoute()) {
+            return entryId -> ItemMatch.resourceFamily(in.getResourceTypeId(), resourceTypesOf.apply(entryId));
+        }
+        if (in.hasItemRoute()) {
+            return entryId -> ItemMatch.itemId(in.getItemId(), entryId);
+        }
+        if (in.hasTagsRoute()) {
+            return entryId -> ItemMatch.tags(in.getTags(), tagsOf.apply(entryId));
+        }
+        return entryId -> true; // match-any: the "whatever is in the pot" row
+    }
+
+    /**
+     * PURE (the {@code IsExactSet} knob): do the pile(s) this conversion's inputs draw from hold
+     * NOTHING beyond those inputs? Inputs are grouped by their resolved socket
+     * ({@link #socketIdFor}: the entry's own {@code Socket}, else the first Item socket), and for
+     * each drawn pile the check is twofold: the pile's TOTAL quantity equals the summed needs
+     * addressed to it (no extra quantity), and every item id present matches at least one of the
+     * inputs drawing from it (no foreign material). Piles no input draws from are never consulted -
+     * extras elsewhere never block. Availability (each input individually satisfied) is the
+     * caller's own preceding check, not repeated here.
+     */
+    static boolean exactSetSatisfied(@Nonnull StationAsset.Conversion c,
+            @Nonnull Function<String, Map<String, Integer>> pileOf,
+            @Nonnull List<Custody.ResolvedSocket> sockets,
+            @Nonnull Function<String, String[]> resourceTypesOf,
+            @Nonnull Function<String, Map<String, String[]>> tagsOf) {
+        Ingredient[] inputs = c.getInput();
+        if (inputs == null || inputs.length == 0) {
+            return false;
+        }
+        Map<String, List<Ingredient>> bySocket = new LinkedHashMap<>();
+        Map<String, Integer> needBySocket = new LinkedHashMap<>();
+        for (Ingredient in : inputs) {
+            if (in == null) {
+                continue;
+            }
+            String socketId = socketIdFor(in.getSocket(), null, sockets);
+            bySocket.computeIfAbsent(socketId, k -> new ArrayList<>()).add(in);
+            needBySocket.merge(socketId, in.effectiveQuantity(), Integer::sum);
+        }
+        for (Map.Entry<String, List<Ingredient>> drawn : bySocket.entrySet()) {
+            Map<String, Integer> pile = pileOf.apply(drawn.getKey());
+            int total = 0;
+            if (pile != null) {
+                for (Integer q : pile.values()) {
+                    total += q != null ? q : 0;
+                }
+            }
+            if (total != needBySocket.getOrDefault(drawn.getKey(), 0)) {
                 return false;
             }
-            for (String t : types) {
-                if (wantResourceTypeId.equalsIgnoreCase(t)) {
-                    return true;
+            if (pile == null) {
+                continue; // total 0 == need 0: an all-match-any zero-need group, vacuously exact
+            }
+            for (String entryId : pile.keySet()) {
+                boolean matched = false;
+                for (Ingredient in : drawn.getValue()) {
+                    if (ingredientEntryMatcher(in, resourceTypesOf, tagsOf).test(entryId)) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    return false;
                 }
             }
         }
-        return false;
+        return true;
     }
 
     /**
@@ -220,34 +318,32 @@ final class StationCustody {
     static boolean matchesInput(@Nonnull ActionInput matcher, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
             @Nullable String heldFunction) {
-        String wantItem = matcher.getItemId();
-        if (wantItem != null && !wantItem.isBlank() && wantItem.equalsIgnoreCase(heldItemId)) {
+        if (ItemMatch.any(matcher.getItemId(), matcher.getTags(), matcher.getResourceTypeId(),
+                heldItemId, heldTags, heldResourceTypeIds)) {
             return true;
-        }
-        String wantResource = matcher.getResourceTypeId();
-        if (wantResource != null && !wantResource.isBlank() && heldResourceTypeIds != null) {
-            for (String t : heldResourceTypeIds) {
-                if (wantResource.equalsIgnoreCase(t)) {
-                    return true;
-                }
-            }
         }
         String wantFunction = matcher.getFunction();
-        if (wantFunction != null && !wantFunction.isBlank() && wantFunction.equalsIgnoreCase(heldFunction)) {
-            return true;
-        }
-        return TagMatch.matches(matcher.getTags(), heldTags);
+        return wantFunction != null && !wantFunction.isBlank() && wantFunction.equalsIgnoreCase(heldFunction);
     }
 
     /**
      * The no-explicit-{@code Input} fallback: does {@code heldItemId}/{@code heldResourceTypeIds}
      * satisfy ANY resolved {@code Recipe.Conversions} entry's input (the sawmill's "logs by
      * ResourceTypeId family" - zero extra authoring on top of the existing {@code Recipe} group)?
+     * The tag-less overload for callers with no resolved tag map; the engine passes the held
+     * item's live raw tags through the 4-arg form so a {@code Tags}-route input accepts too.
      */
     static boolean matchesAnyConversionInput(@Nonnull StationAsset.Conversion[] conversions,
             @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds) {
+        return matchesAnyConversionInput(conversions, heldItemId, heldResourceTypeIds, null);
+    }
+
+    /** {@link #matchesAnyConversionInput(StationAsset.Conversion[], String, String[])} with the held item's raw tags. */
+    static boolean matchesAnyConversionInput(@Nonnull StationAsset.Conversion[] conversions,
+            @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds,
+            @Nullable Map<String, String[]> heldTags) {
         for (StationAsset.Conversion c : conversions) {
-            if (matchesConversionInput(c, heldItemId, heldResourceTypeIds)) {
+            if (matchesConversionInput(c, heldItemId, heldResourceTypeIds, heldTags)) {
                 return true;
             }
         }
@@ -264,11 +360,18 @@ final class StationCustody {
      */
     static boolean matchesConversionInput(@Nullable StationAsset.Conversion conversion,
             @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds) {
+        return matchesConversionInput(conversion, heldItemId, heldResourceTypeIds, null);
+    }
+
+    /** {@link #matchesConversionInput(StationAsset.Conversion, String, String[])} with the held item's raw tags. */
+    static boolean matchesConversionInput(@Nullable StationAsset.Conversion conversion,
+            @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds,
+            @Nullable Map<String, String[]> heldTags) {
         if (conversion == null || conversion.getInput() == null) {
             return false;
         }
         for (Ingredient in : conversion.getInput()) {
-            if (matchesIngredient(in, heldItemId, heldResourceTypeIds)) {
+            if (matchesIngredient(in, heldItemId, heldResourceTypeIds, heldTags)) {
                 return true;
             }
         }
@@ -276,29 +379,38 @@ final class StationCustody {
     }
 
     /**
-     * PURE: does {@code heldItemId}/{@code heldResourceTypeIds} satisfy ONE {@link Ingredient}? An
-     * ingredient authors exactly one of {@code ResourceTypeId} (a native family - the sawmill's "any
-     * Trunk of this species") or {@code ItemId} (exact); the family route wins when both are somehow
-     * present, matching the pre-array loop byte for byte.
+     * PURE: does {@code heldItemId}/{@code heldResourceTypeIds} satisfy ONE {@link Ingredient}? The
+     * tag-less overload; a {@code Tags}-route ingredient never matches through it (the caller has
+     * no tag identity to test), and a route-less MATCH-ANY ingredient matches everything.
      */
     static boolean matchesIngredient(@Nullable Ingredient in, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds) {
+        return matchesIngredient(in, heldItemId, heldResourceTypeIds, null);
+    }
+
+    /**
+     * PURE: does a held/placed material satisfy ONE {@link Ingredient}? An ingredient authors at
+     * most one of {@code ResourceTypeId} (a native family - the sawmill's "any Trunk of this
+     * species"), {@code ItemId} (exact) or {@code Tags} (native item tags); NONE authored is the
+     * match-any input, which accepts everything. The family route wins when several are somehow
+     * present (validator-flagged content), matching the pre-array loop byte for byte; the
+     * comparing itself is ziggfreed-common's {@link ItemMatch}.
+     */
+    static boolean matchesIngredient(@Nullable Ingredient in, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags) {
         if (in == null) {
             return false;
         }
-        String resourceId = in.getResourceTypeId();
-        if (resourceId != null && !resourceId.isBlank()) {
-            if (heldResourceTypeIds != null) {
-                for (String t : heldResourceTypeIds) {
-                    if (resourceId.equalsIgnoreCase(t)) {
-                        return true;
-                    }
-                }
-            }
-            return false;
+        if (in.hasResourceRoute()) {
+            return ItemMatch.resourceFamily(in.getResourceTypeId(), heldResourceTypeIds);
         }
-        String itemId = in.getItemId();
-        return itemId != null && !itemId.isBlank() && itemId.equalsIgnoreCase(heldItemId);
+        if (in.hasItemRoute()) {
+            return ItemMatch.itemId(in.getItemId(), heldItemId);
+        }
+        if (in.hasTagsRoute()) {
+            return ItemMatch.tags(in.getTags(), heldTags);
+        }
+        return true; // match-any
     }
 
     // ==================== per-socket ownership + sharing (decision 82: one owner per pile) ====================

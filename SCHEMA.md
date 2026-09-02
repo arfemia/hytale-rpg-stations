@@ -176,10 +176,12 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Input` | array of [Ingredient](#type-ingredient) | `null` | The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, exactly one of ItemId \| ResourceTypeId. Every entry must be available for the cycle to run. |
+| `Input` | array of [Ingredient](#type-ingredient) | `null` | The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, at most one of ItemId \| ResourceTypeId \| Tags (none = match any placed material). Every entry must be available for the cycle to run. |
 | `Output` | array of [Ingredient](#type-ingredient) | `null` | The conversion outputs (native CraftingRecipe.Output shape): each an exact-ItemId Ingredient. Every entry needs inventory room for the cycle to run. |
 | `DurationMs` | `long` | `null` | Optional per-conversion pace override in ms; highest precedence (> NativeTime > Work.CycleMs). Null = none. |
 | `Category` | `string` | `null` | Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged. |
+| `Tier` | `integer` | `null` | Selection tier: lower runs first, authored order breaks ties; defaults to 0. Derived rows run at tier 1, so an unauthored hand-written row already outranks them. |
+| `IsExactSet` | `boolean` | `null` | When true, the row matches only while the pile(s) its inputs draw from hold nothing beyond those inputs (per drawn socket; other sockets never block). Defaults to false. Author exact-set rows before looser rows at the same tier. |
 
 <a id="field-actionasset-recipe-fromcrafting"></a>
 #### ActionAsset.Recipe.FromCrafting
@@ -406,10 +408,12 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Input` | array of [Ingredient](#type-ingredient) | `null` | The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, exactly one of ItemId \| ResourceTypeId. Every entry must be available for the cycle to run. |
+| `Input` | array of [Ingredient](#type-ingredient) | `null` | The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, at most one of ItemId \| ResourceTypeId \| Tags (none = match any placed material). Every entry must be available for the cycle to run. |
 | `Output` | array of [Ingredient](#type-ingredient) | `null` | The conversion outputs (native CraftingRecipe.Output shape): each an exact-ItemId Ingredient. Every entry needs inventory room for the cycle to run. |
 | `DurationMs` | `long` | `null` | Optional per-conversion pace override in ms; highest precedence (> NativeTime > Work.CycleMs). Null = none. |
 | `Category` | `string` | `null` | Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged. |
+| `Tier` | `integer` | `null` | Selection tier: lower runs first, authored order breaks ties; defaults to 0. Derived rows run at tier 1, so an unauthored hand-written row already outranks them. |
+| `IsExactSet` | `boolean` | `null` | When true, the row matches only while the pile(s) its inputs draw from hold nothing beyond those inputs (per drawn socket; other sockets never block). Defaults to false. Author exact-set rows before looser rows at the same tier. |
 
 <a id="field-actiondef-recipe-fromcrafting"></a>
 #### ActionDef.Recipe.FromCrafting
@@ -593,7 +597,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Items` | array of [Ingredient](#type-ingredient) | `null` | The items this phase consumes, each an Ingredient (exactly one of ItemId \| ResourceTypeId, plus Quantity). All-or-nothing: a shortfall on any entry consumes none of them. |
+| `Items` | array of [Ingredient](#type-ingredient) | `null` | The items this phase consumes, each an Ingredient (at most one of ItemId \| ResourceTypeId \| Tags, plus Quantity; a route-less entry matches any placed material and needs From:'Custody'). All-or-nothing: a shortfall on any entry consumes none of them. |
 | `From` | `string` | `null` | The source for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the block's placed-input claim). |
 | `Socket` | `string` | `null` | The custody socket every entry of this phase drains from, unless an entry names its own Socket. Absent = the first Item socket. Only meaningful with From: 'Custody'. |
 
@@ -644,8 +648,9 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `ItemId` | `string` | `null` | Exact item id (exactly one of ItemId \| ResourceTypeId). An OUTPUT uses only ItemId. |
-| `ResourceTypeId` | `string` | `null` | A native Item.ResourceTypes family id (the 'any log' route); INPUT only. Exactly one of ItemId \| ResourceTypeId. |
+| `ItemId` | `string` | `null` | Exact item id (at most one of ItemId \| ResourceTypeId \| Tags). An OUTPUT uses only ItemId. |
+| `ResourceTypeId` | `string` | `null` | A native Item.ResourceTypes family id (the 'any log' route); INPUT only. At most one of ItemId \| ResourceTypeId \| Tags. |
+| `Tags` | map of array of `string` | `null` | Match by native item tags (tag family -> accepted values; an empty value list matches on the family key alone); INPUT only. At most one of ItemId \| ResourceTypeId \| Tags; an INPUT authoring none matches any placed material. |
 | `Quantity` | `integer` | `null` | The item count; reader-defaults to 1 when omitted or non-positive. |
 | `Socket` | `string` | `null` | The custody socket THIS entry draws from / lands in, overriding the phase's own Socket ('meat from the meat rack, greens from the basket' in one row). Absent = the phase's Socket, else the first Item socket. Only meaningful on a Custody-routed phase. |
 
@@ -1300,10 +1305,12 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Input` | array of [Ingredient](#type-ingredient) | `null` | The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, exactly one of ItemId \| ResourceTypeId. Every entry must be available for the cycle to run. |
+| `Input` | array of [Ingredient](#type-ingredient) | `null` | The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, at most one of ItemId \| ResourceTypeId \| Tags (none = match any placed material). Every entry must be available for the cycle to run. |
 | `Output` | array of [Ingredient](#type-ingredient) | `null` | The conversion outputs (native CraftingRecipe.Output shape): each an exact-ItemId Ingredient. Every entry needs inventory room for the cycle to run. |
 | `DurationMs` | `long` | `null` | Optional per-conversion pace override in ms; highest precedence (> NativeTime > Work.CycleMs). Null = none. |
 | `Category` | `string` | `null` | Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged. |
+| `Tier` | `integer` | `null` | Selection tier: lower runs first, authored order breaks ties; defaults to 0. Derived rows run at tier 1, so an unauthored hand-written row already outranks them. |
+| `IsExactSet` | `boolean` | `null` | When true, the row matches only while the pile(s) its inputs draw from hold nothing beyond those inputs (per drawn socket; other sockets never block). Defaults to false. Author exact-set rows before looser rows at the same tier. |
 
 <a id="field-extensionasset-steps-item"></a>
 ### ExtensionAsset.Steps[]

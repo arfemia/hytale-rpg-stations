@@ -401,13 +401,22 @@ final class StationStepHandlers {
             return null;
         }
         Ingredient[] items = consume.getItems();
+        boolean fromCustody = StationStep.Consume.FROM_CUSTODY.equalsIgnoreCase(consume.effectiveFrom());
         for (Ingredient item : items) {
-            if (item == null || consumeRef(item) == null) {
+            if (item == null || item.routeCount() > 1) {
                 return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
-                        "Consume step '" + step.getId() + "' has an item with neither ItemId nor ResourceTypeId");
+                        "Consume step '" + step.getId() + "' has an item authoring several routes"
+                                + " (at most one of ItemId | ResourceTypeId | Tags)");
+            }
+            if (item.isMatchAny() && !fromCustody) {
+                // Match-any is a statement about the station's own placed pile; draining arbitrary
+                // stacks out of a player's open inventory is never what an author meant.
+                return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
+                        "Consume step '" + step.getId() + "' has a route-less (match-any) item,"
+                                + " which only From:'Custody' supports");
             }
         }
-        if (StationStep.Consume.FROM_CUSTODY.equalsIgnoreCase(consume.effectiveFrom())) {
+        if (fromCustody) {
             return consumeFromCustody(ctx, step, items);
         }
         if (!StationStep.Consume.FROM_INVENTORY.equalsIgnoreCase(consume.effectiveFrom())) {
@@ -422,11 +431,19 @@ final class StationStepHandlers {
             // The exact-item entries are checked as ONE batch (two entries naming the same item must
             // not each pass against the same stack); resource-family entries have no batch API, so
             // they are pre-summed per family and each family checked once with its total (two
-            // entries on the same family must not each pass against the same stock).
+            // entries on the same family must not each pass against the same stock). Tag entries
+            // count the container walk through the same matcher the drain uses.
             List<ItemStack> itemInputs = new ArrayList<>();
             Map<String, Integer> resourceNeeds = new LinkedHashMap<>();
             for (Ingredient item : items) {
-                if (isResourceRoute(item)) {
+                if (item.hasTagsRoute()) {
+                    if (InventoryIngredients.countMatching(combined,
+                            StationService.liveIngredientMatcher(item)) < item.effectiveQuantity()) {
+                        return StationStepResult.fail(StationService.shortInputStopReason(repeating),
+                                "Consume step '" + step.getId() + "' is short on a Tags-matched item"
+                                        + " (needs " + item.effectiveQuantity() + ")");
+                    }
+                } else if (isResourceRoute(item)) {
                     resourceNeeds.merge(consumeRef(item), item.effectiveQuantity(), Integer::sum);
                 } else {
                     itemInputs.add(new ItemStack(consumeRef(item), item.effectiveQuantity()));
@@ -444,9 +461,17 @@ final class StationStepHandlers {
                         "Consume step '" + step.getId() + "' is short on its authored Items");
             }
             for (Ingredient item : items) {
-                String ref = consumeRef(item);
                 int quantity = item.effectiveQuantity();
-                if (isResourceRoute(item)) {
+                if (item.hasTagsRoute()) {
+                    Map<String, Integer> drainedOut = new LinkedHashMap<>();
+                    InventoryIngredients.drainMatching(combined, StationService.liveIngredientMatcher(item),
+                            quantity, drainedOut);
+                    for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
+                        ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
+                        StationService.recordIterationConsumedItem(ctx.session, e.getKey(), e.getValue());
+                    }
+                } else if (isResourceRoute(item)) {
+                    String ref = consumeRef(item);
                     ResourceQuantity resource = new ResourceQuantity(ref, quantity);
                     ResourceTransaction tx = storageContainer(ctx.player).canRemoveResource(resource)
                             ? storageContainer(ctx.player).removeResource(resource)
@@ -456,6 +481,7 @@ final class StationStepHandlers {
                     // mid-iteration stop refunds them - unless a Produce.To:Custody clears the ledger.
                     StationService.recordIterationConsumedResource(ctx.session, tx, ref);
                 } else {
+                    String ref = consumeRef(item);
                     ItemStack input = new ItemStack(ref, quantity);
                     if (storageContainer(ctx.player).canRemoveItemStack(input)) {
                         storageContainer(ctx.player).removeItemStack(input);
@@ -492,6 +518,16 @@ final class StationStepHandlers {
         return item != null && item.getResourceTypeId() != null && !item.getResourceTypeId().isBlank();
     }
 
+    /** PURE: a log-friendly name for whichever route an ingredient authors (diagnostics only). */
+    @Nonnull
+    private static String describeRoute(@Nonnull Ingredient item) {
+        String ref = consumeRef(item);
+        if (ref != null) {
+            return ref;
+        }
+        return item.hasTagsRoute() ? "Tags " + item.getTags().keySet() : "any material";
+    }
+
     /**
      * The player's Storage section as its raw item CONTAINER: the one unwrap of the shared
      * {@code PlayerAccess.storage} read, so the reagent probe and drain paths below never repeat
@@ -524,12 +560,9 @@ final class StationStepHandlers {
         String groupSocket = consume != null ? consume.getSocket() : null;
         List<Custody.ResolvedSocket> sockets = actionSockets(ctx);
         for (Ingredient item : items) {
-            String ref = consumeRef(item);
-            boolean isResource = isResourceRoute(item);
             String socketId = StationCustody.socketIdFor(item.getSocket(), groupSocket, sockets);
             int have = StationCustody.availableInPile(claim != null ? claim.items(socketId) : null,
-                    isResource ? null : ref, isResource ? ref : null,
-                    StationService::liveResourceTypeIdsOf);
+                    StationService.liveIngredientMatcher(item));
             int need = item.effectiveQuantity();
             if (have < need) {
                 // Design 2.4: a REPEATING program's shortage is the graceful natural end
@@ -537,18 +570,17 @@ final class StationStepHandlers {
                 boolean repeating = ctx.action.getWork() != null && ctx.action.getWork().effectiveLooping();
                 return StationStepResult.fail(StationService.shortInputStopReason(repeating),
                         "Consume step '" + step.getId() + "' custody ran short ("
-                                + have + "/" + need + " of '" + ref + "' in socket '" + socketId + "')");
+                                + have + "/" + need + " of '" + describeRoute(item)
+                                + "' in socket '" + socketId + "')");
             }
         }
         String anchorBlockKey = StationService.anchorBlockKeyFor(ctx.session, step.getAt());
         for (Ingredient item : items) {
-            String ref = consumeRef(item);
-            boolean isResource = isResourceRoute(item);
             String socketId = StationCustody.socketIdFor(item.getSocket(), groupSocket, sockets);
             Map<String, Integer> drainedOut = new LinkedHashMap<>();
             StationCustody.drainFromPile(claim != null ? claim.items(socketId) : null,
-                    isResource ? null : ref, isResource ? ref : null,
-                    item.effectiveQuantity(), StationService::liveResourceTypeIdsOf, drainedOut);
+                    StationService.liveIngredientMatcher(item),
+                    item.effectiveQuantity(), drainedOut);
             for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
                 ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
             }

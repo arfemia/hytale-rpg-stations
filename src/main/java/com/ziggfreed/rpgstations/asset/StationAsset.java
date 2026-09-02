@@ -817,17 +817,35 @@ public final class StationAsset
      * (the matched recipe category, else the matched bench id when the recipe carries no category);
      * a hand-authored conversion MAY author it directly. Null = untagged (the conversion belongs to
      * no named category, so it is only ever produced by the unfiltered - no picker selection - path).
+     *
+     * <p><b>{@link #tier} (set-recipe wave):</b> the OPTIONAL selection tier, reader-default 0,
+     * LOWER runs first. The runnable scan stable-sorts candidate rows by effective tier and keeps
+     * AUTHORED ORDER inside a tier, so a file authoring no Tier anywhere selects in pure authored
+     * order exactly as before. Derived rows are stamped tier 1 by {@code StationRecipeDeriver}, so
+     * a hand-authored default-0 row outranks derivation without any authoring; author an explicit
+     * Tier to place a row on either side of the derived block.
+     *
+     * <p><b>{@link #isExactSet} (set-recipe wave):</b> an INDEPENDENT knob: when true, the row
+     * matches only while the pile(s) its inputs draw from hold NOTHING beyond those inputs - the
+     * "exactly these ingredients in the pot" recipe. Evaluated per drawn socket pile; material in
+     * OTHER sockets never blocks. Only meaningful on a custody-routed action (a player's open
+     * inventory is never an exact set); authoring exact-set rows BEFORE looser rows at the same
+     * tier is the readable convention the validator nudges toward.
      */
     public static final class Conversion {
         @Nullable protected Ingredient[] input;
         @Nullable protected Ingredient[] output;
         @Nullable protected Long durationMs;
         @Nullable protected String category;
+        @Nullable protected Integer tier;
+        @Nullable protected Boolean isExactSet;
+        /** Engine-side mark (never authored/encoded): true on a {@code FromCrafting}-derived row. */
+        transient boolean derived;
 
         public static final BuilderCodec<Conversion> CODEC = BuilderCodec.builder(Conversion.class, Conversion::new)
                 .appendInherited(new KeyedCodec<>("Input", new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
                         (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input)
-                .documentation("The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, exactly one of ItemId | ResourceTypeId. Every entry must be available for the cycle to run.").add()
+                .documentation("The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, at most one of ItemId | ResourceTypeId | Tags (none = match any placed material). Every entry must be available for the cycle to run.").add()
                 .appendInherited(new KeyedCodec<>("Output", new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
                         (o, v) -> o.output = v, o -> o.output, (o, p) -> o.output = p.output)
                 .documentation("The conversion outputs (native CraftingRecipe.Output shape): each an exact-ItemId Ingredient. Every entry needs inventory room for the cycle to run.").add()
@@ -837,6 +855,12 @@ public final class StationAsset
                 .appendInherited(new KeyedCodec<>("Category", Codec.STRING, false),
                         (o, v) -> o.category = v, o -> o.category, (o, p) -> o.category = p.category)
                 .documentation("Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged.").add()
+                .appendInherited(new KeyedCodec<>("Tier", Codec.INTEGER, false),
+                        (o, v) -> o.tier = v, o -> o.tier, (o, p) -> o.tier = p.tier)
+                .documentation("Selection tier: lower runs first, authored order breaks ties; defaults to 0. Derived rows run at tier 1, so an unauthored hand-written row already outranks them.").add()
+                .appendInherited(new KeyedCodec<>("IsExactSet", Codec.BOOLEAN, false),
+                        (o, v) -> o.isExactSet = v, o -> o.isExactSet, (o, p) -> o.isExactSet = p.isExactSet)
+                .documentation("When true, the row matches only while the pile(s) its inputs draw from hold nothing beyond those inputs (per drawn socket; other sockets never block). Defaults to false. Author exact-set rows before looser rows at the same tier.").add()
                 .build();
 
         /** Convenience for the classic one-in/one-out conversion. */
@@ -868,6 +892,22 @@ public final class StationAsset
             c.output = output;
             c.durationMs = durationMs;
             c.category = category;
+            return c;
+        }
+
+        /** The tier every {@code FromCrafting}-derived row runs at, so an unauthored (tier 0) hand-written row outranks derivation. */
+        public static final int DERIVED_TIER = 1;
+
+        /**
+         * Deriver-only factory: a {@code FromCrafting}-derived row, stamped {@link #DERIVED_TIER}
+         * and carrying the engine-side derived mark the picker reads. Content never authors this.
+         */
+        @Nonnull
+        public static Conversion derivedRow(@Nullable Ingredient[] input, @Nullable Ingredient[] output,
+                @Nullable Long durationMs, @Nullable String category) {
+            Conversion c = of(input, output, durationMs, category);
+            c.tier = DERIVED_TIER;
+            c.derived = true;
             return c;
         }
 
@@ -921,6 +961,53 @@ public final class StationAsset
         @Nullable
         public String getCategory() {
             return category;
+        }
+
+        /** The authored selection tier (lower first), or null for the reader-default 0. */
+        @Nullable
+        public Integer getTier() {
+            return tier;
+        }
+
+        /** {@link #getTier()}, reader-defaulted to 0 when unauthored. */
+        public int effectiveTier() {
+            return tier != null ? tier : 0;
+        }
+
+        /** The authored exact-set knob, or null for the reader-default false. */
+        @Nullable
+        public Boolean getIsExactSet() {
+            return isExactSet;
+        }
+
+        /** {@link #getIsExactSet()}, reader-defaulted to false when unauthored. */
+        public boolean effectiveIsExactSet() {
+            return Boolean.TRUE.equals(isExactSet);
+        }
+
+        /** True on a {@code FromCrafting}-derived row (engine mark, never authored). */
+        public boolean isDerived() {
+            return derived;
+        }
+
+        /** Copy-with: the same row carrying an explicit {@link #tier}; the derived mark is carried over. */
+        @Nonnull
+        public Conversion withTier(@Nullable Integer tier) {
+            Conversion c = of(input, output, durationMs, category);
+            c.tier = tier;
+            c.isExactSet = isExactSet;
+            c.derived = derived;
+            return c;
+        }
+
+        /** Copy-with: the same row carrying an explicit {@link #isExactSet}; the derived mark is carried over. */
+        @Nonnull
+        public Conversion withExactSet(@Nullable Boolean isExactSet) {
+            Conversion c = of(input, output, durationMs, category);
+            c.tier = tier;
+            c.isExactSet = isExactSet;
+            c.derived = derived;
+            return c;
         }
     }
 

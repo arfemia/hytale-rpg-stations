@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -109,6 +110,55 @@ public class StationRecipeDeriverTest {
         assertEquals(6, inputs[0].effectiveQuantity());
         assertEquals("Rock", inputs[1].getItemId());
         assertEquals(3, inputs[1].effectiveQuantity());
+    }
+
+    @Test
+    void tagsRouteInput_isDerivedVerbatim() {
+        // The native ItemTag input route (resolved to its tag NAME by the live adapter) derives
+        // onto the Ingredient.Tags presence form instead of skipping the candidate.
+        CraftingCandidate tagInput = new CraftingCandidate("Food_Stew", List.of("Prepared"),
+                List.of(Ingredient.tagged(Map.of("CookingIngredient", new String[0]), 3)));
+        List<StationAsset.Conversion> derived =
+                StationRecipeDeriver.deriveFromCrafting(spec("Prepared"), List.of(tagInput));
+        assertEquals(1, derived.size());
+        Ingredient in = derived.get(0).primaryInput();
+        assertTrue(in.hasTagsRoute());
+        assertTrue(in.getTags().containsKey("CookingIngredient"));
+        assertEquals(3, in.effectiveQuantity());
+    }
+
+    @Test
+    void routeLessNativeInput_skipsTheCandidate_neverDerivesMatchAny() {
+        CraftingCandidate broken = new CraftingCandidate("Broken_Recipe", List.of("Prepared"),
+                List.of(Ingredient.matchAny(1)));
+        List<StationAsset.Conversion> derived =
+                StationRecipeDeriver.deriveFromCrafting(spec("Prepared"), List.of(broken));
+        assertTrue(derived.isEmpty());
+    }
+
+    @Test
+    void craftingBenchCategories_deriveLikeProcessingOnes() {
+        // A Crafting-type bench's own BenchRequirement.Categories rows (the Cookingbench
+        // Prepared/Baked/Ingredients tabs) scope derivation exactly like a Processing bench's:
+        // the category route is bench-type-agnostic, and the Types filter still applies on top.
+        CraftingCandidate baked = new CraftingCandidate("Food_Bread", List.of("Baked"),
+                List.of("Cookingbench"), List.of("Crafting"), 5f,
+                List.of(Ingredient.item("Ingredient_Dough", 1), Ingredient.resource("Fuel", 3)));
+        List<StationAsset.Conversion> byCategory =
+                StationRecipeDeriver.deriveFromCrafting(spec("Baked"), List.of(baked));
+        assertEquals(1, byCategory.size());
+        assertEquals("Food_Bread", byCategory.get(0).primaryOutput().getItemId());
+        assertEquals("Baked", byCategory.get(0).getCategory());
+        List<StationAsset.Conversion> byCategoryAndType = StationRecipeDeriver.deriveFromCrafting(
+                StationAsset.FromCrafting.of(new String[] {"Baked"}, null,
+                        new String[] {StationAsset.FromCrafting.TYPE_CRAFTING}, null),
+                List.of(baked));
+        assertEquals(1, byCategoryAndType.size());
+        List<StationAsset.Conversion> wrongType = StationRecipeDeriver.deriveFromCrafting(
+                StationAsset.FromCrafting.of(new String[] {"Baked"}, null,
+                        new String[] {StationAsset.FromCrafting.TYPE_PROCESSING}, null),
+                List.of(baked));
+        assertTrue(wrongType.isEmpty());
     }
 
     @Test

@@ -70,10 +70,18 @@ Instead of hand-listing every conversion, a station can derive its convert recip
 engine's own crafting/processing recipe catalog:
 
 - `Categories` - native recipe categories to pull from (e.g. every wood species that shares the
-  `WoodPlanks` category derives its own conversion, with zero per-species authoring).
+  `WoodPlanks` category derives its own conversion, with zero per-species authoring). The route is
+  bench-type-agnostic: a Crafting-type bench's category rows (the Cookingbench's `Prepared` /
+  `Baked` / `Ingredients` tabs) derive exactly like a Processing bench's.
 - `Benches` - native `BenchRequirement` bench ids to scope to (a second derivation route for recipes
   that carry a bench requirement but no category at all).
 - `Types` - which recipe kinds to derive, `Crafting` and/or `Processing`; absent means both.
+
+A derived conversion carries the native recipe's WHOLE input list, each entry on the route the
+recipe itself used: an exact `ItemId`, a `ResourceTypeId` family, or a native `ItemTag` (which
+derives onto the `Ingredient.Tags` route, so a "any item tagged CookingIngredient" recipe works at
+a station too). Derived rows run at selection tier 1, so any hand-authored row outranks the whole
+derived block by default (see [Recipe rows](actions-and-steps.md)).
 
 A hand-authored `Recipe.Conversions` entry can also carry an optional `Category` tag directly - a
 derived conversion is stamped with its source category automatically, which is what powers the

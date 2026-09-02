@@ -20,8 +20,11 @@ overlays only (`StationSummaryHud`, no player interaction).
   category id means; the caller (the station engine, resolving native recipe categories per
   decision 49's rider) supplies the ordered `Category` list and owns everything downstream
   (updating the session's chosen category, etc.).
-  **Caller contract (binding, NOT enforced inside the page - decision 50):** open ONLY when 2+
-  categories are available; NEVER auto-open (sneak+F only, per the round-3 selector-entity
+  **Caller contract (binding, NOT enforced inside the page - decision 50, widened by decision
+  96):** open ONLY when 2+ rows are available - 2+ distinct derived CATEGORIES, or 2+ AUTHORED
+  conversions (each authored row rides the same `Category` value type, keyed
+  `StationService#conversionRowKey` and labeled by its own output item - the page still treats
+  every id as opaque); NEVER auto-open (sneak+F only, per the round-3 selector-entity
   press-F pattern the ledger documents as the fallback if a sneak read misbehaves in-game).
   - **Route the engine calls**: `RpgStationPickerPage.open(ref, store, categories,
     showLocked, callback)` - a static, try-guarded, never-throws helper (mirrors
@@ -50,10 +53,12 @@ overlays only (`StationSummaryHud`, no player interaction).
   - **Maintainer picker-smoke fix (decision 66, 2026-07-29): PREVIEW THE PLACED MATERIAL.** Every
     card's icon/name/cost used to describe the alphabetically-first conversion in its category, so
     a sawmill loaded with any log species previewed three BLACKWOOD cards. `StationService
-    #buildPickerCategories` now threads a preferred input (`#pickerPreviewInputItemId`: the block's
-    custody claim, else the held stack, else null) into the 4-arg `#representativeConversionFor`,
-    which returns the first conversion in that category whose INPUT matches. Display-only - which
-    conversion RUNS was always correct. See the ledger's decision 66 for the full rationale.
+    #buildPickerCategories` now threads a preferred input (`#pickerPreviewInputItemId`: the pile
+    the tab's own first candidate conversion draws from - per-entry `Socket`, else the first Item
+    socket, the decision-96 refinement; else the held stack, else null) into the 4-arg
+    `#representativeConversionFor`, which returns the first conversion in that category whose
+    INPUT matches. Display-only - which conversion RUNS was always correct. See the ledger's
+    decision 66 for the full rationale.
   - **Maintainer picker-smoke fix (decision 66): NOT GREYED OUT, BIGGER, WIDER.** Three
     evidence-grounded `.ui` changes, each measured against the client's own modding texture set
     (`Assets.zip` `Common/UI/Custom/Common/**`, what `"../Common/..."` resolves to from a custom

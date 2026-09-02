@@ -74,6 +74,57 @@ Consume -> Produce -> Roll -> Presentation. This is exactly what every plain sin
 Sawmill authoring one `Mill` action and no `Steps` on it) runs, and it is byte-identical behavior to a
 hand-authored one-step program.
 
+## Recipe rows: ingredient routes, tiers, and exact sets
+
+A `Recipe.Conversions` row's `Input`/`Output` are arrays of the one `Ingredient` leaf. An **input**
+entry names its material through AT MOST one of three routes, or none at all:
+
+| Route | Matches | Example |
+|---|---|---|
+| `ItemId` | exactly that item | `{ "ItemId": "Food_Fish_Raw", "Quantity": 1 }` |
+| `ResourceTypeId` | any item of that native resource family | `{ "ResourceTypeId": "Fuel", "Quantity": 3 }` |
+| `Tags` | any item carrying the named native tags | `{ "Tags": { "Type": ["Ingredient"] }, "Quantity": 2 }` |
+| *(none)* | **any placed material** (match-any) | `{ "Quantity": 3 }` |
+
+`Tags` is the same tag map an action's `Select` and a socket's `Match` use: each family key lists
+accepted values, and an EMPTY value list (`{ "Raw": [] }`) matches on the family key's presence
+alone - the single-native-tag form. An **output** entry is always an exact `ItemId`.
+
+A **match-any** input is a statement about the station's own placed pile ("whatever is in the pot"),
+so it draws only from [custody](custody-and-placed-display.md) - a station without custody can never
+run such a row, and the validator says so. Each input can also carry its own `Socket`, so one row
+draws meat from the meat rack and greens from the basket.
+
+Two optional knobs order and sharpen a multi-row recipe:
+
+- **`Tier`** (int, default 0): the scan tries lower tiers first, and keeps AUTHORED ORDER inside a
+  tier - author no `Tier` anywhere and the file's own order is exactly the scan order, as always.
+  Conversions derived from native recipes run at tier 1, so any hand-written row outranks the
+  derived block with no authoring at all; give a row an explicit `Tier` to place it on either side.
+- **`IsExactSet`** (bool, default false): the row matches only while the pile(s) its inputs draw
+  from hold NOTHING beyond those inputs - "exactly 2 meat and 1 vegetable in the pot". Extra
+  quantity or a foreign item in a drawn pile skips the row (the scan falls through to the next,
+  typically looser, one); material in sockets the row does not draw from never blocks it.
+
+The readable convention: author exact-set rows FIRST and the match-any fallback LAST (or on a
+higher tier), so the file reads in the order it resolves. The validator nudges toward that shape
+with two informational findings and never reorders anything itself:
+
+```json
+"Conversions": [
+  { "IsExactSet": true,
+    "Input":  [ { "ResourceTypeId": "Meat", "Quantity": 2, "Socket": "Ingredients" },
+                { "ResourceTypeId": "Vegetable", "Quantity": 1, "Socket": "Ingredients" } ],
+    "Output": [ { "ItemId": "Food_Kebab_Meat" } ] },
+  { "Tier": 1,
+    "Input":  [ { "Quantity": 3, "Socket": "Ingredients" } ],
+    "Output": [ { "ItemId": "Food_Stew" } ] }
+]
+```
+
+Exactly these ingredients make the kebab; anything else in the pot falls through to the match-any
+stew row on the next tier.
+
 ## The step record
 
 An authored program is an ordered array of `StationStep`s. Every field on a step is nullable; a step

@@ -433,10 +433,31 @@ idle-cadence and durability-drain reader defaults.
 
 ## Recipe ingredients (`asset.Ingredient` ARRAYS, the native CraftingRecipe shape)
 
-`Conversion.Input`/`Output` are `asset.Ingredient[]` (`../asset/CLAUDE.md`) - exactly one of
-`ItemId`/`ResourceTypeId` per Input entry, `ItemId` only on an Output entry; `ResourceTypeId` is a
-native `Item.ResourceTypes` FAMILY (e.g. `Wood_Hardwood_Trunk` = any hardwood log).
-`ItemResourceType` exposes its id as a PUBLIC FIELD `.id` (no `getId()` - a protocol class quirk).
+`Conversion.Input`/`Output` are `asset.Ingredient[]` (`../asset/CLAUDE.md`) - an Input entry
+authors AT MOST one of `ItemId`/`ResourceTypeId`/`Tags` (route-less = the legal MATCH-ANY input,
+which draws only from placed custody, never a player's open inventory - the inventory scan skips
+such a row and the validator warns `MATCH_ANY_INPUT_WITHOUT_CUSTODY`); an Output entry is `ItemId`
+only. `ResourceTypeId` is a native `Item.ResourceTypes` FAMILY (e.g. `Wood_Hardwood_Trunk` = any
+hardwood log); `Tags` is the shared `TagMatch` map (an empty value list = family-key presence, the
+single-native-tag form). `ItemResourceType` exposes its id as a PUBLIC FIELD `.id` (no `getId()` -
+a protocol class quirk). **All route COMPARING is ziggfreed-common's `match.ItemMatch`**, reached
+through `StationCustody.ingredientEntryMatcher` (piles; `StationService.liveIngredientMatcher` is
+the live-resolver wiring) and `StationCustody.matchesIngredient`/`matchesInput` (held/placed
+acceptance) - `ActionInput` and `Ingredient` stay two leaves over ONE matcher, pinned by
+`IngredientActionInputRouteParityTest`. A `Tags` input consumed from INVENTORY counts/drains
+through `InventoryIngredients` (a slot walk over the same predicate; no native batch API speaks
+our tag-map shape).
+
+**Selection order is `Conversion.Tier` (lower first), stable-sorted in `selectConversion`
+(`StationService.tierOrdered`), authored order inside a tier** - no Tier authored anywhere = pure
+authored order byte-identical; derived rows are stamped `Conversion.DERIVED_TIER` (1) so an
+unauthored hand-written row outranks derivation. `Conversion.IsExactSet` is an independent knob:
+the row matches only while the pile(s) its inputs draw from (per-entry `Socket` aware) hold
+nothing beyond those inputs (`StationCustody.exactSetSatisfied`; extras in undrawn sockets never
+block; inert on the inventory route). Exact-first / match-any-last is an authoring CONVENTION the
+validator nudges (`RECIPE_ROW_ORDER_MISLEADING` / `CONVERSION_TIER_SHADOWED` INFOs), never an
+invisible engine reordering. Pinned by `RecipeTierSelectionTest` + `StationSetRecipeMatchTest`.
+
 A conversion is ALL-OR-NOTHING per cycle: `firstRunnableConversion`/`firstRunnableConversionFromCustody`
 require EVERY input available and room for EVERY output before a cycle starts, and the chosen
 conversion's whole arrays drive the implicit program's one atomic Consume/Produce step pair
@@ -445,9 +466,13 @@ convenience the picker preview, custody acceptance, and validator labels speak i
 path).
 [`StationRecipeDeriver`](StationRecipeDeriver.java)'s `Recipe.FromCrafting` derives one
 `Conversion` per LIVE `Item` whose native `Recipe.BenchRequirement[].Categories` intersects the
-authored `Categories`, carrying that recipe's WHOLE native `Input` array (a multi-material recipe
-derives rather than being skipped; only a recipe with no inputs at all, or one whose input names
-neither an item nor a resource type, is skipped), zero hardcoding. The PURE core (`resolve`/`deriveFromCrafting`)
+authored `Categories` (bench-TYPE-agnostic: a Crafting bench's category rows, e.g. the
+Cookingbench tabs, scope exactly like a Processing bench's), carrying that recipe's WHOLE native
+`Input` array (a multi-material recipe derives rather than being skipped; a native `ItemTag` input
+derives onto the `Ingredient.Tags` presence form, its tag NAME recovered from the items' own raw
+tag keys since `MaterialQuantity` exposes only the index - an unresolvable tag skips the candidate
+with ONE fold WARN naming the output item; only a recipe with no inputs at all, or one with no
+usable route, is skipped), zero hardcoding. The PURE core (`resolve`/`deriveFromCrafting`)
 takes injected `CraftingCandidate`s, unit-tested without a live item map. A derived conversion
 carries a quantity of 1: the native `CraftingRecipe.primaryOutputQuantity` is a protected field with
 no getter and is absent from the recipe packet, so it is unreadable at that seam (and is verified 1
@@ -882,17 +907,23 @@ stay standing with their props.
 
 [`StationCustody`](StationCustody.java) stays the PURE decision core (`placeableQuantity` incl.
 the socket-aware min-of-caps form, `available`/`drain` + the per-pile `availableInPile`/
-`drainFromPile`, `matchesInput`/`matchesAnyConversionInput`, `acceptsFamily`/`pileAcceptsFamily`
-(per-socket, decision 89), the share cores, the block-socket cores, `routePlacement`) - zero
+`drainFromPile` (each with a Predicate core the four-route `ingredientEntryMatcher` feeds),
+`matchesInput`/`matchesAnyConversionInput`/`matchesIngredient` (tags-aware overloads; comparing is
+zc `match.ItemMatch`), `exactSetSatisfied` (the `IsExactSet` per-drawn-pile check),
+`acceptsFamily`/`pileAcceptsFamily` (per-socket, decision 89), the share cores, the block-socket
+cores, `routePlacement`) - zero
 engine touch, operating on the claim view (whose detached test constructor wraps a real
 `BlockStash`). `toggle` gates a `Custody`-governing action behind ONE state-dependent F:
 not-loaded + a matching held stack places/tops-up (`placeIntoCustody`, socket-routed); a foreign
 claim denies (`ui.station.occupied` for the degenerate custody, the per-socket share gates for
 authored sockets); otherwise falls through to the classic engage flow, sourcing viability from
-the claim (`firstRunnableConversionFromCustody`, per-socket availability). The implicit program's
+the claim (`firstRunnableConversionFromCustody`, per-socket availability + the `IsExactSet`
+skip). The implicit program's
 `Consume` phase reads `From:"Custody"` whenever the resolved action authors `Custody`
-(`StationStepHandlers`'s Consume phase, family-matched over an injected
-`itemId -> resourceTypeId[]` resolver, same pattern as `StationToolScaling`).
+(`StationStepHandlers`'s Consume phase, matched over injected `itemId -> resourceTypeId[]` and
+`itemId -> rawTags` resolvers, same pattern as `StationToolScaling`; a `Tags` input consumed
+`From:"Inventory"` counts/drains through [`InventoryIngredients`](InventoryIngredients.java)'s
+slot walk, and a match-any item is custody-only there too).
 
 **Hand-back vs leave-it at stop** (`custodyReturnsAtStop`, pure + test-pinned): every stop whose
 player is still present hands custody back through `returnCustody` (room-checked, hotbar-first
@@ -1339,7 +1370,16 @@ silently never grants), `CAMERA_RECIPE_WITHOUT_CAMERA` (a
 `CUSTODY_SINGLE_FAMILY_REDUNDANT` (`SingleFamily: true` where the effective `MaxQuantity <= 1`
 already enforces exclusivity), and `CONSUME_DUPLICATE_ITEM_REF` (one Consume's `Items` array
 authoring the same item/family ref in two entries - the engine sums them, one combined entry says
-it plainly). **Retired checks** (the fields/shapes they warned about no longer exist):
+it plainly; tag-route and match-any entries are exempt, they have no single ref to key on).
+**Set-recipe checks**: `MATCH_ANY_INPUT_WITHOUT_CUSTODY` (a route-less input on an action with no
+`Custody` - match-any draws only from placed material, so the row/step can never run; also fired
+for a match-any `Consume.Items` entry whose `From` is not `Custody`), `OUTPUT_TAGS` (a `Tags` map
+on an output entry, ignored like `OUTPUT_RESOURCE_TYPE`), and the two order INFOs
+`RECIPE_ROW_ORDER_MISLEADING` (an `IsExactSet` row authored after a looser same-tier row, or a
+match-any row authored before other same-tier rows - the file reads differently than the scan
+resolves) + `CONVERSION_TIER_SHADOWED` (a row tiered behind a match-any row, which accepts any
+material). `DUPLICATE_CONVERSION_INPUT` is suppressed when the earlier same-ref row authors
+`IsExactSet` (the exact-then-loose ladder repeats a ref on purpose). **Retired checks** (the fields/shapes they warned about no longer exist):
 `WAVE3_PENDING` (the multi-station seam executes, so the boundary warn has nothing left to gate -
 the anchor/walk checks above are the live coverage), the reserved-field set from the pre-phase-2
 step union (`UNIMPLEMENTED_STEP_TYPE`, `UNIMPLEMENTED_CONSUME_SOURCE`, `UNIMPLEMENTED_PRODUCE_DEST`,

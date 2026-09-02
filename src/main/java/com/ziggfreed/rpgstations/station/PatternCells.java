@@ -8,7 +8,7 @@ import java.util.function.UnaryOperator;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.ziggfreed.common.codec.TagMatch;
+import com.ziggfreed.common.match.ItemMatch;
 import com.ziggfreed.common.world.BlockOps;
 import com.ziggfreed.common.world.pattern.CellPredicate;
 import com.ziggfreed.rpgstations.asset.ActionInput;
@@ -119,7 +119,10 @@ final class PatternCells {
         }
         Map<String, String[]> wantTags = m.tags();
         if (wantTags != null && !wantTags.isEmpty()) {
-            return TagMatch.matches(wantTags, tagsOf.apply(base));
+            // The shared tag semantics every matcher in this mod speaks (values ANY-of plus the
+            // empty-value-list key-presence form), so a pattern cell's tag route can never drift
+            // from an ingredient's or an action selector's.
+            return ItemMatch.tags(wantTags, tagsOf.apply(base));
         }
         return false;
     }

@@ -361,20 +361,27 @@ public class StationServiceTest {
 
     @Test
     void decideRoute_plainPress_alwaysToggles() {
-        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, 5));
-        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, 0));
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, 5, 0));
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, 0, 0));
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(false, 0, 5));
     }
 
     @Test
     void decideRoute_sneakMultiCategory_opensPicker() {
-        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, 2));
-        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, 9));
+        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, 2, 0));
+        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, 9, 1));
     }
 
     @Test
     void decideRoute_sneakSingleOrZeroCategory_toggles() {
-        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(true, 1));
-        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(true, 0));
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(true, 1, 0));
+        assertEquals(StationService.Route.TOGGLE, StationService.decideRoute(true, 0, 1));
+    }
+
+    @Test
+    void decideRoute_sneakMultiAuthoredConversions_opensPicker_decision96() {
+        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, 0, 2));
+        assertEquals(StationService.Route.PICKER, StationService.decideRoute(true, 1, 3));
     }
 
     @Test

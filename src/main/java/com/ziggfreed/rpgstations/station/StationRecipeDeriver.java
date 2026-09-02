@@ -4,14 +4,17 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.hypixel.hytale.assetstore.AssetRegistry;
 import com.hypixel.hytale.protocol.BenchRequirement;
 import com.hypixel.hytale.server.core.asset.type.item.config.CraftingRecipe;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
@@ -123,8 +126,8 @@ public final class StationRecipeDeriver {
 
     /**
      * Derive one Conversion per candidate that MATCHES the spec (category intersect OR bench-id
-     * match, then filtered by the declared recipe kinds) and whose recipe has EXACTLY ONE input.
-     * Deterministic order (sorted by output item id). Pure.
+     * match, then filtered by the declared recipe kinds) and whose recipe carries at least one
+     * usable input. Deterministic order (sorted by output item id). Pure.
      *
      * <p><b>Multi-input (decision 73):</b> a native recipe's WHOLE {@code Input} array derives into
      * the conversion's own {@code Ingredient[]} input, so a multi-material native recipe is a real
@@ -181,20 +184,24 @@ public final class StationRecipeDeriver {
             List<Ingredient> inputs = new ArrayList<>(cand.inputs.size());
             boolean everyInputUsable = true;
             for (Ingredient nativeInput : cand.inputs) {
-                String ref = inputRef(nativeInput);
-                if (nativeInput == null || ref == null) {
+                // A candidate input must carry ONE real route (ItemId, ResourceTypeId, or the Tags
+                // route the live adapter resolves from a native ItemTag). A route-less input here is
+                // an unusable native reference, never a derived match-any row.
+                if (nativeInput == null || nativeInput.routeCount() == 0) {
                     Log.fine("STATION FromCrafting skips '" + cand.itemId
-                            + "': a native input has neither ItemId nor ResourceTypeId");
+                            + "': a native input has no usable ItemId / ItemTag / ResourceTypeId route");
                     everyInputUsable = false;
                     break;
                 }
                 int inQty = nativeInput.getQuantity() != null && nativeInput.getQuantity() > 0
                         ? nativeInput.getQuantity() : 1;
-                boolean isResource = nativeInput.getResourceTypeId() != null
-                        && !nativeInput.getResourceTypeId().isBlank();
-                inputs.add(isResource
-                        ? Ingredient.resource(nativeInput.getResourceTypeId(), inQty)
-                        : Ingredient.item(nativeInput.getItemId(), inQty));
+                if (nativeInput.hasResourceRoute()) {
+                    inputs.add(Ingredient.resource(nativeInput.getResourceTypeId(), inQty));
+                } else if (nativeInput.hasItemRoute()) {
+                    inputs.add(Ingredient.item(nativeInput.getItemId(), inQty));
+                } else {
+                    inputs.add(Ingredient.tagged(nativeInput.getTags(), inQty));
+                }
             }
             if (!everyInputUsable) {
                 continue;
@@ -205,7 +212,9 @@ public final class StationRecipeDeriver {
             // category so a multi-output station can group the picker by it. The do-not-rework
             // guard on this deriver lifts for exactly this addition.
             String category = deriveSourceCategory(cand, wantCategories, wantBenches, catMatch);
-            derived.add(StationAsset.Conversion.of(inputs.toArray(new Ingredient[0]), output,
+            // Set-recipe wave: every derived row runs at Conversion.DERIVED_TIER (1), so a
+            // hand-authored row at the reader-default tier 0 outranks derivation with no authoring.
+            derived.add(StationAsset.Conversion.derivedRow(inputs.toArray(new Ingredient[0]), output,
                     durationMs, category));
         }
         derived.sort(Comparator.comparing(c -> c.getOutput()[0].getItemId(), String.CASE_INSENSITIVE_ORDER));
@@ -239,11 +248,21 @@ public final class StationRecipeDeriver {
      * Extract a {@link CraftingCandidate} from every live {@code Item} that carries a native
      * crafting recipe. Never throws; returns an empty list if the asset map is unreadable
      * (e.g. a unit JVM).
+     *
+     * <p><b>The native {@code ItemTag} input route:</b> a recipe input selecting by item tag keeps
+     * only its registered tag INDEX at this seam ({@code MaterialQuantity} exposes no tag-name
+     * getter), and the registry maps name to index one way only - so {@link #liveTagNamesByIndex}
+     * rebuilds the reverse map from the item assets themselves: every raw tag KEY an item carries
+     * (the engine expands families, values and {@code family=value} pairs all into keys) is
+     * resolved through {@code AssetRegistry.getTagIndex} once per fold. A recipe tag that no item
+     * carries resolves to no name; the candidate is then skipped with ONE fold WARN naming its
+     * output item, never silently.
      */
     @Nonnull
     public static List<CraftingCandidate> liveCandidates() {
         List<CraftingCandidate> out = new ArrayList<>();
         try {
+            Map<Integer, String> tagNames = liveTagNamesByIndex();
             for (Item item : Item.getAssetMap().getAssetMap().values()) {
                 if (item == null || item.getId() == null || !item.hasRecipesToGenerate()) {
                     continue;
@@ -285,15 +304,36 @@ public final class StationRecipeDeriver {
                     }
                     float timeSeconds = recipe.getTimeSeconds();
                     List<Ingredient> inputs = new ArrayList<>();
+                    boolean everyInputResolvable = true;
                     MaterialQuantity[] mqs = recipe.getInput();
                     if (mqs != null) {
                         for (MaterialQuantity mq : mqs) {
                             if (mq == null) {
                                 continue;
                             }
-                            inputs.add(Ingredient.of(mq.getItemId(), mq.getResourceTypeId(),
-                                    mq.getQuantity()));
+                            // Native consumption precedence: exact ItemId, then the ItemTag, then
+                            // the resource family.
+                            if (mq.getItemId() != null) {
+                                inputs.add(Ingredient.item(mq.getItemId(), mq.getQuantity()));
+                            } else if (mq.getTagIndex() != AssetRegistry.TAG_NOT_FOUND) {
+                                String tagName = tagNames.get(mq.getTagIndex());
+                                if (tagName == null) {
+                                    Log.warn("STATION FromCrafting skips '" + item.getId()
+                                            + "': its native recipe selects an ItemTag (index "
+                                            + mq.getTagIndex() + ") that no loaded item carries, so"
+                                            + " the tag name cannot be resolved");
+                                    everyInputResolvable = false;
+                                    break;
+                                }
+                                inputs.add(Ingredient.tagged(
+                                        Map.of(tagName, new String[0]), mq.getQuantity()));
+                            } else {
+                                inputs.add(Ingredient.resource(mq.getResourceTypeId(), mq.getQuantity()));
+                            }
                         }
+                    }
+                    if (!everyInputResolvable) {
+                        continue;
                     }
                     out.add(new CraftingCandidate(item.getId(), categories, benchIds, types,
                             timeSeconds, inputs));
@@ -303,6 +343,35 @@ public final class StationRecipeDeriver {
             Log.warn("STATION could not enumerate the Item asset map for FromCrafting: " + t.getMessage());
         }
         return out;
+    }
+
+    /**
+     * The reverse tag map (registered index -&gt; tag name), rebuilt per fold from every loaded
+     * item's raw tag keys. Complete for every tag a recipe can meaningfully select: a recipe tag
+     * matching NO item's expanded keys would consume nothing natively either.
+     */
+    @Nonnull
+    private static Map<Integer, String> liveTagNamesByIndex() {
+        Map<Integer, String> names = new HashMap<>();
+        for (Item item : Item.getAssetMap().getAssetMap().values()) {
+            if (item == null || item.getData() == null) {
+                continue;
+            }
+            Map<String, String[]> raw = item.getData().getRawTags();
+            if (raw == null) {
+                continue;
+            }
+            for (String key : raw.keySet()) {
+                if (key == null) {
+                    continue;
+                }
+                int index = AssetRegistry.getTagIndex(key);
+                if (index != AssetRegistry.TAG_NOT_FOUND) {
+                    names.putIfAbsent(index, key);
+                }
+            }
+        }
+        return names;
     }
 
     // ==================== Helpers ====================

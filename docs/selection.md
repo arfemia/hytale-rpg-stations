@@ -11,9 +11,9 @@ reads as the diegetic crouch-to-exit signal, read fresh at the moment of the pre
 The routing is a small, pure decision tree, in priority order:
 
 1. Not sneaking -> always the plain work toggle.
-2. Sneaking, and the resolved action derives 2 or more distinct output CATEGORIES -> open the
-   multi-output PICKER.
-3. Sneaking, one or zero categories -> falls through to the plain work toggle (a single-category
+2. Sneaking, and the resolved action derives 2 or more distinct output CATEGORIES, or carries 2 or
+   more hand-authored `Recipe.Conversions` rows -> open the multi-output PICKER.
+3. Sneaking, otherwise -> falls through to the plain work toggle (a single-category, single-recipe
    action never shows anything for sneak+F).
 
 Sneak+F is picker-or-toggle everywhere - there is no separate native-crafting-window route; every
@@ -37,6 +37,17 @@ conversions in the first place), so no per-conversion category authoring is need
 
 A conversion can also be tagged explicitly by hand-authoring its own `Category` field, for an action
 whose conversions are not native-derived.
+
+### Hand-authored recipe rows in the picker
+
+An action carrying 2 or more hand-authored `Recipe.Conversions` rows (a set-recipe station: the
+exact kebab beside the anything-goes stew) opens the picker too, with one card PER AUTHORED ROW,
+listed first, each labeled and iconed by that row's own output item and showing its input-to-output
+cost line. Derived conversions keep the category rule above - a station deriving 33 species still
+shows three category cards, never 33 rows. Selecting an authored row commits the next session to
+exactly that recipe; each row's preview draws from the custody pile its own first input addresses
+(its `Socket`, else the first Item socket), so a multi-socket station's cards describe the material
+actually placed where each recipe looks.
 
 ## The plain-F default: first-authored priority
 

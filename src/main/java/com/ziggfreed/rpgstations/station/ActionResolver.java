@@ -20,7 +20,7 @@ import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
-import com.ziggfreed.common.codec.TagMatch;
+import com.ziggfreed.common.match.ItemMatch;
 
 /**
  * Resolves ONE of a station's ordered actions into the flat group view every engine read uses. The
@@ -389,19 +389,13 @@ public final class ActionResolver {
     private static boolean matches(@Nonnull ActionInput input, @Nullable String heldItemId,
             @Nullable String heldResourceTypeId, @Nullable Map<String, String[]> heldTags,
             @Nullable String heldFunction) {
-        String wantItem = input.getItemId();
-        if (wantItem != null && !wantItem.isBlank() && wantItem.equalsIgnoreCase(heldItemId)) {
-            return true;
-        }
-        String wantResource = input.getResourceTypeId();
-        if (wantResource != null && !wantResource.isBlank() && wantResource.equalsIgnoreCase(heldResourceTypeId)) {
+        if (ItemMatch.itemId(input.getItemId(), heldItemId)
+                || ItemMatch.resourceFamily(input.getResourceTypeId(), heldResourceTypeId)
+                || ItemMatch.tags(input.getTags(), heldTags)) {
             return true;
         }
         String wantFunction = input.getFunction();
-        if (wantFunction != null && !wantFunction.isBlank() && wantFunction.equalsIgnoreCase(heldFunction)) {
-            return true;
-        }
-        return TagMatch.matches(input.getTags(), heldTags);
+        return wantFunction != null && !wantFunction.isBlank() && wantFunction.equalsIgnoreCase(heldFunction);
     }
 
     /**

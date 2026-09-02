@@ -45,10 +45,17 @@ resolution section for the engine half.
 
 ## Shared leaf vocabulary (the DRY layer every type reuses)
 
-- **[`Ingredient`](Ingredient.java)** - the ONE item-quantity leaf (`{ItemId|ResourceTypeId,
-  Quantity}`, exactly one of `ItemId`/`ResourceTypeId`, native-shaped like vanilla
-  `MaterialQuantity`). Used by `StationAsset.Conversion.Input/Output`,
-  `ExtensionAsset.Conversions`, `StationStep.Stamp.Reagents`, and
+- **[`Ingredient`](Ingredient.java)** - the ONE item-quantity leaf
+  (`{ItemId|ResourceTypeId|Tags, Quantity, Socket?}`, native-shaped like vanilla
+  `MaterialQuantity` incl. its `ItemTag` route). AT MOST one route per entry: `ItemId` exact,
+  `ResourceTypeId` a native family, `Tags` the shared `TagMatch` map (an EMPTY value list under a
+  family key = key-presence, the single-native-tag form); the family and tag routes are INPUT-only,
+  and an INPUT authoring NO route is the legal MATCH-ANY entry (accepts whatever its custody pile
+  holds; never drawn from a player's open inventory - the validator warns
+  `MATCH_ANY_INPUT_WITHOUT_CUSTODY`). Route comparing delegates to ziggfreed-common's
+  `match.ItemMatch` (one core under both this leaf and `ActionInput`, parity-tested). Used by
+  `StationAsset.Conversion.Input/Output`, `ExtensionAsset.Conversions`,
+  `StationStep.Stamp.Reagents` (exact/family routes only), and
   `StationStep.Consume.Items`/`Produce.Items`. **Every one of those sites takes an `Ingredient`
   ARRAY**, mirroring native `CraftingRecipe.Input`/`Output`: "2 planks + 1 nail -> 1 crate" is ONE
   conversion and ONE atomic step-phase pair, never a step split, and `StationRecipeDeriver`
@@ -252,6 +259,13 @@ resolution section for the engine half.
     recipe's `TimeSeconds`, defaults intentionally slower than vanilla); `Conversion` gains a
     nullable `DurationMs`. Per-cycle time precedence (engine-side): authored `Conversion.DurationMs`
     &gt; `FromCrafting.NativeTime` linear transform &gt; `Work.CycleMs`.
+    **Set-recipe knobs (both nullable, orthogonal)**: `Conversion.Tier` (int, reader-default 0,
+    LOWER scans first, stable authored order inside a tier; derived rows are stamped
+    `Conversion.DERIVED_TIER` = 1 so unauthored hand-written rows outrank derivation) and
+    `Conversion.IsExactSet` (bool, default false: the row matches only while the pile(s) its
+    inputs draw from hold nothing beyond those inputs, per-entry `Socket` aware; custody-only).
+    Exact-first/match-any-last is an authoring convention the validator INFOs nudge
+    (`RECIPE_ROW_ORDER_MISLEADING`/`CONVERSION_TIER_SHADOWED`), never an engine reordering.
   - **`Recipe.Yield` - purely DETERMINISTIC, four leaves:** `Base` (flat quantity; absent = each
     conversion's own authored quantity), `Scale` (multiplier, floored to a whole item,
     reader-default 1.0), `Min`/`Max` clamps. A floor of 1 output is ALWAYS enforced underneath - a

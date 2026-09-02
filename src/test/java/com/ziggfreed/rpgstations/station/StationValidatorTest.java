@@ -279,6 +279,91 @@ public class StationValidatorTest {
     }
 
     @Test
+    void duplicateInputBehindAnExactSetRow_isTheLegitLadder_notFlagged() {
+        StationAsset a = station("ladder", ActionDef.of("Cook").withRecipe(
+                StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(Ingredient.item("Fixture_Trunk", 2),
+                                Ingredient.item("Fixture_Kebab", 1)).withExactSet(true),
+                        StationAsset.Conversion.of(Ingredient.item("Fixture_Trunk", 1),
+                                Ingredient.item("Fixture_Beam", 1))})));
+        assertFalse(codes(validate(a)).contains("DUPLICATE_CONVERSION_INPUT"),
+                "the exact-then-loose ladder repeats a ref on purpose");
+    }
+
+    @Test
+    void matchAnyInputWithoutCustody_flagged() {
+        StationAsset a = station("anynocustody", ActionDef.of("Cook").withRecipe(
+                StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(Ingredient.matchAny(3),
+                                Ingredient.item("Fixture_Stew", 1))})));
+        assertTrue(codes(validate(a)).contains("MATCH_ANY_INPUT_WITHOUT_CUSTODY"));
+    }
+
+    @Test
+    void tagsRouteInput_isValid_andTagsOutput_flagged() {
+        StationAsset a = station("tagsio", ActionDef.of("Cook").withRecipe(
+                StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(
+                                new Ingredient[] {Ingredient.tagged(
+                                        Map.of("Fixture_Tag", new String[0]), 1)},
+                                new Ingredient[] {Ingredient.tagged(
+                                        Map.of("Fixture_Tag", new String[0]), 1)},
+                                null, null)})));
+        var found = codes(validate(a));
+        assertFalse(found.contains("AMBIGUOUS_CONVERSION_INPUT"), "a lone Tags input is a legal route");
+        assertTrue(found.contains("MISSING_CONVERSION_OUTPUT"),
+                "an output must be an exact ItemId; a Tags output row never runs");
+    }
+
+    @Test
+    void exactSetRowAfterALooserSameTierRow_getsTheOrderInfo() {
+        StationAsset a = station("misleading", ActionDef.of("Cook").withRecipe(
+                StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(Ingredient.item("Fixture_Meat", 1),
+                                Ingredient.item("Fixture_Roast", 1)),
+                        StationAsset.Conversion.of(Ingredient.item("Fixture_Meat", 2),
+                                Ingredient.item("Fixture_Kebab", 1)).withExactSet(true)})));
+        assertTrue(codes(validate(a)).contains("RECIPE_ROW_ORDER_MISLEADING"));
+    }
+
+    @Test
+    void matchAnyRowAuthoredBeforeSameTierRows_getsTheOrderInfo() {
+        StationAsset a = station("anyfirst", ActionDef.of("Cook").withRecipe(
+                StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(Ingredient.matchAny(1),
+                                Ingredient.item("Fixture_Stew", 1)),
+                        StationAsset.Conversion.of(Ingredient.item("Fixture_Meat", 1),
+                                Ingredient.item("Fixture_Roast", 1))})));
+        assertTrue(codes(validate(a)).contains("RECIPE_ROW_ORDER_MISLEADING"));
+    }
+
+    @Test
+    void higherTierRowBehindAMatchAnyRow_getsTheShadowInfo() {
+        StationAsset a = station("shadowed", ActionDef.of("Cook").withRecipe(
+                StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(Ingredient.matchAny(1),
+                                Ingredient.item("Fixture_Stew", 1)),
+                        StationAsset.Conversion.of(Ingredient.item("Fixture_Meat", 1),
+                                Ingredient.item("Fixture_Roast", 1)).withTier(2)})));
+        assertTrue(codes(validate(a)).contains("CONVERSION_TIER_SHADOWED"));
+    }
+
+    @Test
+    void exactFirstLadderWithTiers_isCleanOfOrderAdvisories() {
+        StationAsset a = station("cleanladder", ActionDef.of("Cook").withRecipe(
+                StationAsset.Recipe.of(new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(Ingredient.item("Fixture_Meat", 2),
+                                Ingredient.item("Fixture_Kebab", 1)).withExactSet(true),
+                        StationAsset.Conversion.of(Ingredient.item("Fixture_Meat", 1),
+                                Ingredient.item("Fixture_Roast", 1)),
+                        StationAsset.Conversion.of(Ingredient.matchAny(1),
+                                Ingredient.item("Fixture_Stew", 1)).withTier(1)})));
+        var found = codes(validate(a));
+        assertFalse(found.contains("RECIPE_ROW_ORDER_MISLEADING"), "got: " + found);
+        assertFalse(found.contains("CONVERSION_TIER_SHADOWED"), "got: " + found);
+    }
+
+    @Test
     void fromCraftingWithNeitherCategoriesNorBenches_flagged() {
         StationAsset a = station("noderive", ActionDef.of("Mill").withRecipe(
                 StationAsset.Recipe.of(null, StationAsset.FromCrafting.of(new String[0]))));

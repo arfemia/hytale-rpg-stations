@@ -587,7 +587,7 @@ public final class StationStep {
         public static final BuilderCodec<Consume> CODEC = BuilderCodec.builder(Consume.class, Consume::new)
                 .appendInherited(new KeyedCodec<>("Items", new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
                         (o, v) -> o.items = v, o -> o.items, (o, p) -> o.items = p.items)
-                .documentation("The items this phase consumes, each an Ingredient (exactly one of ItemId | ResourceTypeId, plus Quantity). All-or-nothing: a shortfall on any entry consumes none of them.")
+                .documentation("The items this phase consumes, each an Ingredient (at most one of ItemId | ResourceTypeId | Tags, plus Quantity; a route-less entry matches any placed material and needs From:'Custody'). All-or-nothing: a shortfall on any entry consumes none of them.")
                 .addValidator(CodecWarnValidators.nonEmptyIfAuthored("StationStep.Consume.Items is an empty array; author at least one entry or omit the group.")).add()
                 .appendInherited(new KeyedCodec<>("From", Codec.STRING, false),
                         (o, v) -> o.from = v, o -> o.from, (o, p) -> o.from = p.from)

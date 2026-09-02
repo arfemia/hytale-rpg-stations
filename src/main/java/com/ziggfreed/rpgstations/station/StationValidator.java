@@ -2280,8 +2280,8 @@ public final class StationValidator {
     }
 
     /** One action's own {@code Recipe} group (the whole of "what this action makes"). */
-    private static void checkRecipe(@Nullable StationAsset.Recipe recipe, @Nonnull String id,
-                                    @Nonnull String label, @Nonnull List<Finding> out) {
+    private static void checkRecipe(@Nullable StationAsset.Recipe recipe, boolean mayHaveCustody,
+                                    @Nonnull String id, @Nonnull String label, @Nonnull List<Finding> out) {
         if (recipe == null) {
             return;
         }
@@ -2297,7 +2297,7 @@ public final class StationValidator {
             checkFromCrafting(fromCrafting, id, rLabel, out);
         }
         if (hasConversions) {
-            checkConversions(conversions, id, rLabel, out);
+            checkConversions(conversions, mayHaveCustody, id, rLabel, out);
         }
         if (recipe.getYield() != null) {
             checkYield(recipe.getYield(), id, rLabel, out);
@@ -2453,13 +2453,17 @@ public final class StationValidator {
 
     /**
      * Per-conversion structure over the decision-73 {@code Ingredient[]} Input/Output arrays: EVERY
-     * input entry must carry exactly one route and a positive quantity, EVERY output entry must be an
-     * exact item id. The duplicate-input check keys on the conversion's PRIMARY (first) input, which
-     * is what the runnable scan's first-match-wins ordering actually turns on.
+     * input entry carries at most one route (route-less = the custody match-any input) and a
+     * positive quantity, EVERY output entry must be an exact item id. The duplicate-input check
+     * keys on the conversion's PRIMARY (first) input, which is what the runnable scan's
+     * first-match-wins ordering turns on inside a tier; the two set-recipe advisories
+     * ({@code RECIPE_ROW_ORDER_MISLEADING}, {@code CONVERSION_TIER_SHADOWED}) nudge the
+     * exact-sets-first / match-any-last authoring convention without ever reordering anything.
      */
-    private static void checkConversions(@Nonnull StationAsset.Conversion[] conversions, @Nonnull String id,
-                                         @Nonnull String label, @Nonnull List<Finding> out) {
+    private static void checkConversions(@Nonnull StationAsset.Conversion[] conversions, boolean mayHaveCustody,
+                                         @Nonnull String id, @Nonnull String label, @Nonnull List<Finding> out) {
         Set<String> seenInputs = new HashSet<>();
+        Set<String> seenExactSetInputs = new HashSet<>();
         for (int i = 0; i < conversions.length; i++) {
             StationAsset.Conversion c = conversions[i];
             String cLabel = label + " conversion[" + i + "]";
@@ -2470,20 +2474,24 @@ public final class StationValidator {
             }
             boolean inputsOk = true;
             for (Ingredient in : c.getInput()) {
-                boolean hasItemId = in != null && in.getItemId() != null && !in.getItemId().isBlank();
-                boolean hasResource = in != null && in.getResourceTypeId() != null
-                        && !in.getResourceTypeId().isBlank();
-                if (!hasItemId && !hasResource) {
+                if (in == null) {
                     out.add(Finding.error(DOMAIN, "MISSING_CONVERSION_INPUT",
-                            cLabel + " has an Input entry with neither ItemId nor ResourceTypeId", id));
+                            cLabel + " has a null Input entry", id));
                     inputsOk = false;
                     break;
                 }
-                if (hasItemId && hasResource) {
+                if (in.routeCount() > 1) {
                     out.add(Finding.error(DOMAIN, "AMBIGUOUS_CONVERSION_INPUT",
-                            cLabel + " has an Input entry setting both ItemId and ResourceTypeId (exactly one is required)", id));
+                            cLabel + " has an Input entry setting several of ItemId / ResourceTypeId /"
+                                    + " Tags (at most one route per entry)", id));
                     inputsOk = false;
                     break;
+                }
+                if (in.isMatchAny() && !mayHaveCustody) {
+                    out.add(Finding.warning(DOMAIN, "MATCH_ANY_INPUT_WITHOUT_CUSTODY",
+                            cLabel + " has a route-less (match-any) Input entry, but the action"
+                                    + " authors no Custody - match-any draws only from placed"
+                                    + " material, so this row can never run", id));
                 }
                 if (in.getQuantity() != null && in.getQuantity() <= 0) {
                     out.add(Finding.error(DOMAIN, "NONPOSITIVE_CONVERSION_COUNT",
@@ -2503,13 +2511,20 @@ public final class StationValidator {
             for (Ingredient outIng : outputs) {
                 if (outIng == null || outIng.getItemId() == null || outIng.getItemId().isBlank()) {
                     out.add(Finding.error(DOMAIN, "MISSING_CONVERSION_OUTPUT",
-                            cLabel + " has an Output entry with no ItemId", id));
+                            cLabel + " has an Output entry with no ItemId (an output is always an"
+                                    + " exact item; a route-less or Tags/ResourceTypeId output row"
+                                    + " never runs)", id));
                     outputsOk = false;
                     break;
                 }
                 if (outIng.getResourceTypeId() != null && !outIng.getResourceTypeId().isBlank()) {
                     out.add(Finding.warning(DOMAIN, "OUTPUT_RESOURCE_TYPE",
                             cLabel + " has an Output entry setting ResourceTypeId; an output must be an exact ItemId (the ResourceTypeId is ignored)", id));
+                }
+                if (outIng.getTags() != null && !outIng.getTags().isEmpty()) {
+                    out.add(Finding.warning(DOMAIN, "OUTPUT_TAGS",
+                            cLabel + " has an Output entry setting Tags; an output must be an exact"
+                                    + " ItemId (the Tags are ignored)", id));
                 }
                 if (outIng.getQuantity() != null && outIng.getQuantity() <= 0) {
                     out.add(Finding.error(DOMAIN, "NONPOSITIVE_CONVERSION_COUNT",
@@ -2520,12 +2535,106 @@ public final class StationValidator {
                 continue;
             }
             Ingredient primary = c.primaryInput();
-            String inputRef = primary.getResourceTypeId() != null && !primary.getResourceTypeId().isBlank()
-                    ? primary.getResourceTypeId() : primary.getItemId();
-            if (!seenInputs.add(inputRef.toLowerCase(Locale.ROOT))) {
-                out.add(Finding.warning(DOMAIN, "DUPLICATE_CONVERSION_INPUT",
-                        cLabel + " repeats input '" + inputRef
-                                + "' (first match wins; this entry is dead)", id));
+            String inputRef = primary.hasResourceRoute() ? primary.getResourceTypeId()
+                    : primary.hasItemRoute() ? primary.getItemId() : null;
+            if (inputRef != null) {
+                String key = inputRef.toLowerCase(Locale.ROOT);
+                if (c.effectiveIsExactSet()) {
+                    seenExactSetInputs.add(key);
+                    seenInputs.add(key);
+                } else if (!seenInputs.add(key) && !seenExactSetInputs.contains(key)) {
+                    // The exact-then-loose ladder repeats a ref on purpose (the exact-set row
+                    // yields once the pile is contaminated), so it is exempt from the dead-entry
+                    // warning; a plain repeat still is one.
+                    out.add(Finding.warning(DOMAIN, "DUPLICATE_CONVERSION_INPUT",
+                            cLabel + " repeats input '" + inputRef
+                                    + "' (first match wins; this entry is dead)", id));
+                }
+            }
+        }
+        checkConversionOrderAdvisories(conversions, id, label, out);
+    }
+
+    /**
+     * The two set-recipe ORDER advisories, both file-readability nudges (the engine's tier sort is
+     * explicit and stable, never an invisible reordering):
+     *
+     * <ul>
+     *   <li>{@code RECIPE_ROW_ORDER_MISLEADING} (INFO) - inside one effective tier, an
+     *       {@code IsExactSet} row authored AFTER a non-exact row, or a match-any-input row
+     *       authored before another row: the file reads in a different order than the scan
+     *       effectively resolves, so re-author exact sets first and match-any last.</li>
+     *   <li>{@code CONVERSION_TIER_SHADOWED} (INFO) - a row whose effective tier is HIGHER than a
+     *       match-any-input row's: the match-any row satisfies any material, so the higher-tier
+     *       row runs only while the match-any row itself cannot (short quantity, exact-set
+     *       contamination), which is rarely what its author expected.</li>
+     * </ul>
+     */
+    private static void checkConversionOrderAdvisories(@Nonnull StationAsset.Conversion[] conversions,
+            @Nonnull String id, @Nonnull String label, @Nonnull List<Finding> out) {
+        Integer lowestMatchAnyTier = null;
+        int lowestMatchAnyIndex = -1;
+        Map<Integer, Integer> firstLooseRowByTier = new HashMap<>();
+        for (int i = 0; i < conversions.length; i++) {
+            StationAsset.Conversion c = conversions[i];
+            if (c == null || c.getInput() == null || c.getInput().length == 0) {
+                continue;
+            }
+            int tier = c.effectiveTier();
+            boolean matchAnyInput = false;
+            for (Ingredient in : c.getInput()) {
+                if (in != null && in.isMatchAny()) {
+                    matchAnyInput = true;
+                    break;
+                }
+            }
+            if (matchAnyInput && (lowestMatchAnyTier == null || tier < lowestMatchAnyTier)) {
+                lowestMatchAnyTier = tier;
+                lowestMatchAnyIndex = i;
+            }
+            if (matchAnyInput && i < conversions.length - 1) {
+                boolean laterRowSameTier = false;
+                for (int j = i + 1; j < conversions.length; j++) {
+                    if (conversions[j] != null && conversions[j].effectiveTier() == tier) {
+                        laterRowSameTier = true;
+                        break;
+                    }
+                }
+                if (laterRowSameTier) {
+                    out.add(Finding.info(DOMAIN, "RECIPE_ROW_ORDER_MISLEADING",
+                            label + " conversion[" + i + "] matches ANY material but is authored"
+                                    + " before other tier-" + tier + " rows; author the match-any"
+                                    + " fallback last (or give it a higher Tier) so the file reads"
+                                    + " the way it resolves", id));
+                }
+            }
+            if (c.effectiveIsExactSet()) {
+                Integer firstLoose = firstLooseRowByTier.get(tier);
+                if (firstLoose != null) {
+                    out.add(Finding.info(DOMAIN, "RECIPE_ROW_ORDER_MISLEADING",
+                            label + " conversion[" + i + "] is an IsExactSet row authored after the"
+                                    + " looser tier-" + tier + " conversion[" + firstLoose
+                                    + "]; author exact sets first so the file reads the way the"
+                                    + " scan resolves", id));
+                }
+            } else {
+                firstLooseRowByTier.putIfAbsent(tier, i);
+            }
+        }
+        if (lowestMatchAnyTier == null) {
+            return;
+        }
+        for (int i = 0; i < conversions.length; i++) {
+            StationAsset.Conversion c = conversions[i];
+            if (c == null || i == lowestMatchAnyIndex) {
+                continue;
+            }
+            if (c.effectiveTier() > lowestMatchAnyTier) {
+                out.add(Finding.info(DOMAIN, "CONVERSION_TIER_SHADOWED",
+                        label + " conversion[" + i + "] (tier " + c.effectiveTier()
+                                + ") sits behind the match-any conversion[" + lowestMatchAnyIndex
+                                + "] (tier " + lowestMatchAnyTier + "), which accepts any material -"
+                                + " this row runs only when the match-any row itself cannot", id));
             }
         }
     }
@@ -3067,7 +3176,9 @@ public final class StationValidator {
         StationStep[] effectiveSteps = ActionResolver.effectiveStepsOf(def);
         boolean noCycleOutput = effectiveSteps != null && effectiveSteps.length > 0;
 
-        checkRecipe(def.getRecipe(), id, actionLabel, out);
+        // Custody presence feeds the match-any-input advisory below; a Ref'd entry may inherit its
+        // Custody from the base action, so hasRef counts as "custody unknown" and never warns.
+        checkRecipe(def.getRecipe(), def.getCustody() != null || def.hasRef(), id, actionLabel, out);
         checkWork(def.getWork(), id, actionLabel, out);
         checkToolGroup(def.getTool(), id, actionLabel + " Tool", out);
         checkRequiresGroup(def.getRequires(), id, actionLabel + " Requires", factorKnown, out);
@@ -3255,19 +3366,25 @@ public final class StationValidator {
                     out.add(Finding.warning(DOMAIN, "CONSUME_STEP_EMPTY",
                             stepLabel + " authors a Consume phase with no Items", id));
                 } else {
+                    boolean consumesCustody = StationStep.Consume.FROM_CUSTODY
+                            .equalsIgnoreCase(consume.effectiveFrom());
                     Map<String, Integer> consumeRefCounts = new LinkedHashMap<>();
                     for (Ingredient item : consume.getItems()) {
-                        boolean hasItemId = item != null && item.getItemId() != null && !item.getItemId().isBlank();
-                        boolean hasResourceTypeId = item != null && item.getResourceTypeId() != null
-                                && !item.getResourceTypeId().isBlank();
-                        if (!hasItemId && !hasResourceTypeId) {
+                        if (item == null) {
                             out.add(Finding.warning(DOMAIN, "CONSUME_STEP_EMPTY",
-                                    stepLabel + " Consume has an item with neither ItemId nor ResourceTypeId", id));
-                        } else if (hasItemId && hasResourceTypeId) {
+                                    stepLabel + " Consume has a null Items entry", id));
+                        } else if (item.routeCount() > 1) {
                             out.add(Finding.warning(DOMAIN, "AMBIGUOUS_CONVERSION_INPUT",
-                                    stepLabel + " Consume has an item setting both ItemId and ResourceTypeId (exactly one is expected)", id));
-                        } else {
-                            String ref = hasResourceTypeId ? item.getResourceTypeId() : item.getItemId();
+                                    stepLabel + " Consume has an item setting several of ItemId /"
+                                            + " ResourceTypeId / Tags (at most one route per entry)", id));
+                        } else if (item.isMatchAny()) {
+                            if (!consumesCustody) {
+                                out.add(Finding.warning(DOMAIN, "MATCH_ANY_INPUT_WITHOUT_CUSTODY",
+                                        stepLabel + " Consume has a route-less (match-any) item, which"
+                                                + " only From:'Custody' supports - this step always fails", id));
+                            }
+                        } else if (!item.hasTagsRoute()) {
+                            String ref = item.hasResourceRoute() ? item.getResourceTypeId() : item.getItemId();
                             consumeRefCounts.merge(ref.toLowerCase(Locale.ROOT), 1, Integer::sum);
                         }
                     }
@@ -3289,7 +3406,9 @@ public final class StationValidator {
                     for (Ingredient item : produce.getItems()) {
                         if (item == null || item.getItemId() == null || item.getItemId().isBlank()) {
                             out.add(Finding.warning(DOMAIN, "PRODUCE_STEP_EMPTY",
-                                    stepLabel + " Produce has an item with no ItemId", id));
+                                    stepLabel + " Produce has an item with no ItemId (a produced item"
+                                            + " is always an exact id; ResourceTypeId/Tags routes are"
+                                            + " input-only)", id));
                         }
                     }
                 }

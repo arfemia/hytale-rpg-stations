@@ -277,6 +277,40 @@ public class StationAssetCodecTest {
     }
 
     @Test
+    void conversion_decodesTierExactSetAndTagsRoute() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Recipe\": { \"Conversions\": [ {"
+                + " \"Input\": [ { \"Tags\": { \"Fixture_Family\": [\"Prepared\"] }, \"Quantity\": 2,"
+                + "               \"Socket\": \"Rack\" },"
+                + "              { \"Quantity\": 3 } ],"
+                + " \"Output\": [ { \"ItemId\": \"Fixture_Stew\" } ],"
+                + " \"Tier\": 2, \"IsExactSet\": true } ] } } ] }");
+        StationAsset.Conversion c = a.getActions()[0].getRecipe().getConversions()[0];
+        assertEquals(2, c.getTier());
+        assertEquals(2, c.effectiveTier());
+        assertTrue(c.effectiveIsExactSet());
+        assertFalse(c.isDerived(), "an authored row never wears the derived mark");
+        Ingredient tagged = c.getInput()[0];
+        assertTrue(tagged.hasTagsRoute());
+        assertEquals("Prepared", tagged.getTags().get("Fixture_Family")[0]);
+        assertEquals("Rack", tagged.getSocket());
+        Ingredient matchAny = c.getInput()[1];
+        assertTrue(matchAny.isMatchAny(), "a route-less input decodes as the legal match-any form");
+        assertEquals(3, matchAny.effectiveQuantity());
+    }
+
+    @Test
+    void conversion_tierAndExactSetReaderDefaults() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Recipe\": { \"Conversions\": [ {"
+                + " \"Input\": [ { \"ItemId\": \"Fixture_In\" } ],"
+                + " \"Output\": [ { \"ItemId\": \"Fixture_Out\" } ] } ] } } ] }");
+        StationAsset.Conversion c = a.getActions()[0].getRecipe().getConversions()[0];
+        assertNull(c.getTier());
+        assertEquals(0, c.effectiveTier(), "unauthored Tier reads as 0 (authored order intact)");
+        assertNull(c.getIsExactSet());
+        assertFalse(c.effectiveIsExactSet());
+    }
+
+    @Test
     void recipe_isRunnableOnlyWithConversionsOrADeriveRule() {
         assertFalse(StationAsset.Recipe.of(null, null, null).isRunnable());
         assertTrue(StationAsset.Recipe.of(null,

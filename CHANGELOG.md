@@ -38,6 +38,31 @@ there is no prior public release to diff against, so every entry is additive by 
   inside one pile), `Use` lets them work from it, and `Reclaim` lets them take it back out. A
   session stop hands back only the stopping player's own piles; an interrupted work cycle refunds
   what it consumed into the pile it came from; everything else stays standing for its owner.
+- **Set recipes: tag and match-any ingredients, tiers, and exact sets.** A recipe row's input now
+  names its material through any of three routes - an exact `ItemId`, a `ResourceTypeId` family, or
+  native item `Tags` (the same tag map action selection and socket matchers use, so "any item
+  tagged CookingIngredient" is one input line; a family key with an empty value list matches on the
+  key alone) - or through NO route at all, the match-any input that accepts whatever its custody
+  pile holds ("three of anything in the pot"; it never draws from a player's open inventory, and
+  the validator flags a match-any row on a station without placed custody). Two optional knobs
+  order a multi-row recipe: `Tier` (lower scans first, authored order unchanged inside a tier, and
+  a file authoring no tiers keeps exactly its authored order; native-derived rows run at tier 1, so
+  any hand-written row outranks the derived block by default) and `IsExactSet` (the row matches
+  only while the pile(s) it draws from hold nothing beyond its own inputs, per input `Socket`;
+  extras elsewhere never block) - so "exactly 2 meat + 1 vegetable makes kebab, anything else makes
+  stew" is two rows and zero code. Ordering stays explicit and readable: the engine never
+  invisibly reorders, and two informational validator findings nudge the exact-first /
+  match-any-last authoring convention. Native derivation also widens: recipe inputs selecting by
+  native `ItemTag` now derive (previously the whole recipe was skipped), and a Crafting-type
+  bench's category rows (the Cookingbench tabs) derive exactly like a Processing bench's. Item
+  matching itself now runs through the shared library's one `ItemMatch` core, so a recipe
+  ingredient, an action selector and a socket matcher can never drift apart.
+- **The sneak+F picker also opens for multi-recipe stations.** A station whose action carries two
+  or more hand-authored recipe rows shows one card per row (listed first, labeled by that row's own
+  output item with its input-to-output cost line) beside the usual derived-category cards; a
+  station deriving 33 species still shows three category cards, never 33 rows. Picking a row
+  commits the next session to exactly that recipe, per session as before, and each card's preview
+  reads the custody pile its own recipe actually draws from.
 - **Multiblock structures: build a station out of world blocks.** A new `StructurePatternAsset`
   (`Server/RpgStations/Patterns/*.json`) describes an arrangement of blocks - exact ids, whole
   resource families ("any rock"), tag matches, or required-empty cells - with one ANCHOR cell.

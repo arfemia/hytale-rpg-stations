@@ -3,6 +3,7 @@ package com.ziggfreed.rpgstations.station;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -3316,12 +3317,48 @@ public final class StationService {
                 .resolvedConversions(asset, action.getActionId(), recipe);
         conversions = conversionsForCategory(conversions,
                 effectiveCategory(chosenCategory, recipe.getFromCrafting(), conversions));
+        // Set-recipe wave: the runnable scan walks candidates by effective Tier ascending, STABLE
+        // inside a tier - a file authoring no Tier anywhere scans in pure authored order exactly as
+        // before, and derived rows (stamped tier 1) yield to unauthored tier-0 hand-written rows.
+        conversions = tierOrdered(conversions);
         Custody custody = action.getCustody();
         ConversionCheck check = fromCustody
                 ? firstRunnableConversionFromCustody(claim, player, conversions,
                         custody != null ? custody.effectiveSockets() : List.of())
                 : firstRunnableConversion(player, conversions);
         return check.state == ConversionState.RUNNABLE ? check.withRecipe(recipe) : check;
+    }
+
+    /**
+     * PURE (the {@code Conversion.Tier} knob): the candidate rows re-ordered by effective tier
+     * ascending, STABLE so authored order decides inside a tier. Returns the SAME array when
+     * nothing would move (every effective tier equal), so the no-Tier-anywhere file costs one scan
+     * and keeps its byte-identical order. Null rows sort at tier 0 and are skipped downstream.
+     */
+    @Nullable
+    static StationAsset.Conversion[] tierOrdered(@Nullable StationAsset.Conversion[] conversions) {
+        if (conversions == null || conversions.length < 2) {
+            return conversions;
+        }
+        boolean anyDiffer = false;
+        int first = effectiveTierOf(conversions[0]);
+        for (int i = 1; i < conversions.length; i++) {
+            if (effectiveTierOf(conversions[i]) != first) {
+                anyDiffer = true;
+                break;
+            }
+        }
+        if (!anyDiffer) {
+            return conversions;
+        }
+        StationAsset.Conversion[] ordered = conversions.clone();
+        Arrays.sort(ordered, Comparator.comparingInt(StationService::effectiveTierOf));
+        return ordered;
+    }
+
+    /** PURE: a row's effective tier (null row = 0, matching the unauthored reader-default). */
+    private static int effectiveTierOf(@Nullable StationAsset.Conversion c) {
+        return c != null ? c.effectiveTier() : 0;
     }
 
     /**
@@ -3352,11 +3389,12 @@ public final class StationService {
     }
 
     /**
-     * PURE (decision 50/56, re-scoped by decision 65): the sneak+F routing decision. A non-sneak
-     * press always {@link Route#TOGGLE}s (plain F engages work). A sneak press opens the
-     * {@link Route#PICKER} when the station derives 2+ distinct output categories, else
-     * {@link Route#TOGGLE} (a single-category station never shows a picker). Unit-tested across
-     * every combination.
+     * PURE (decision 50/56, re-scoped by decision 65; widened by decision 96): the sneak+F routing
+     * decision. A non-sneak press always {@link Route#TOGGLE}s (plain F engages work). A sneak
+     * press opens the {@link Route#PICKER} when the station derives 2+ distinct output categories
+     * OR the resolved action carries 2+ AUTHORED conversions (set recipes make conversion choice
+     * player-visible; the derived rows keep the category rule, so 33 derived species never explode
+     * into 33 rows), else {@link Route#TOGGLE}. Unit-tested across every combination.
      *
      * <p><b>Decision 65 (maintainer ruling, 2026-07-29) retired the native-bench route</b> that
      * decision 51a had put ahead of the picker here: a station block authoring a native
@@ -3367,26 +3405,60 @@ public final class StationService {
      * authoring) is gone rather than left dormant. Sneak+F is picker-or-toggle everywhere now.
      */
     @Nonnull
-    static Route decideRoute(boolean sneaking, int distinctCategoryCount) {
+    static Route decideRoute(boolean sneaking, int distinctCategoryCount, int authoredConversionCount) {
         if (!sneaking) {
             return Route.TOGGLE;
         }
-        return distinctCategoryCount > 1 ? Route.PICKER : Route.TOGGLE;
+        return distinctCategoryCount > 1 || authoredConversionCount >= 2 ? Route.PICKER : Route.TOGGLE;
+    }
+
+    /** The picker row-key namespace for one AUTHORED conversion (a category id never carries a colon-prefixed reserved word). */
+    static final String CONVERSION_ROW_PREFIX = "conversion:";
+
+    /** PURE: the picker row key addressing the authored conversion at {@code resolvedIndex}. */
+    @Nonnull
+    static String conversionRowKey(int resolvedIndex) {
+        return CONVERSION_ROW_PREFIX + resolvedIndex;
     }
 
     /**
-     * PURE (decision 56): the conversions a session with the given chosen output category may run.
-     * {@code chosenCategory} null/blank returns the input array UNCHANGED (the byte-identical
-     * all-categories behavior every station has today); a set category returns only the conversions
-     * whose {@code Category} matches it (case-insensitive). A null input array returns null. An
+     * PURE: the resolved-array index a picker row key addresses, or {@code -1} for a plain
+     * category id (or a malformed key). The inverse of {@link #conversionRowKey}.
+     */
+    static int parseConversionRowIndex(@Nullable String chosen) {
+        if (chosen == null || !chosen.regionMatches(true, 0, CONVERSION_ROW_PREFIX, 0,
+                CONVERSION_ROW_PREFIX.length())) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(chosen.substring(CONVERSION_ROW_PREFIX.length()));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    /**
+     * PURE (decision 56, widened by decision 96): the conversions a session with the given chosen
+     * selection may run. {@code chosenCategory} null/blank returns the input array UNCHANGED (the
+     * byte-identical all-categories behavior every station has today); a set category returns only
+     * the conversions whose {@code Category} matches it (case-insensitive); an authored-row key
+     * ({@link #conversionRowKey}) returns exactly that one row. A null input array returns null. An
      * untagged conversion (null {@code Category}) is EXCLUDED once a category is chosen - a chosen
-     * output never silently falls back to an untagged conversion.
+     * output never silently falls back to an untagged conversion. An authored-row key whose index
+     * no longer resolves (content refolded between pick and press) falls back to the unfiltered
+     * array rather than blanking the station.
      */
     @Nullable
     static StationAsset.Conversion[] conversionsForCategory(@Nullable StationAsset.Conversion[] all,
             @Nullable String chosenCategory) {
         if (all == null || chosenCategory == null || chosenCategory.isBlank()) {
             return all;
+        }
+        int rowIndex = parseConversionRowIndex(chosenCategory);
+        if (rowIndex >= 0) {
+            return rowIndex < all.length && all[rowIndex] != null
+                    ? new StationAsset.Conversion[] {all[rowIndex]}
+                    : all;
         }
         List<StationAsset.Conversion> kept = new ArrayList<>(all.length);
         for (StationAsset.Conversion c : all) {
@@ -3595,7 +3667,8 @@ public final class StationService {
             @Nullable StationCustodyClaim claim, int blockX, int blockY, int blockZ) {
         StationAsset.Conversion[] conversions = allConversionsFor(asset, action);
         List<String> categories = distinctConversionCategories(conversions);
-        if (decideRoute(true, categories.size()) != Route.PICKER) {
+        List<Integer> authoredRows = authoredConversionIndexes(conversions);
+        if (decideRoute(true, categories.size(), authoredRows.size()) != Route.PICKER) {
             return false;
         }
         PlayerRef playerRef = PlayerAccess.playerRef(store, ref);
@@ -3606,12 +3679,21 @@ public final class StationService {
         // No engine path produces a LOCKED output category (no per-category tool gate exists), so
         // every tab renders unlocked; the page keeps its own knob for whenever one does.
         boolean showLocked = true;
-        String previewInputItemId = pickerPreviewInputItemId(claim, player);
-        List<PickerCategories.Category> tabs = buildPickerCategories(conversions, categories, previewInputItemId,
-                liveResourceTypeIdsOf(previewInputItemId));
+        // Decision 96: AUTHORED rows first (each labeled by its own output item; the default-tier
+        // scan runs them ahead of derived rows too), then one tab per derived category.
+        List<PickerCategories.Category> tabs = new ArrayList<>();
+        Custody custody = action.getCustody();
+        List<Custody.ResolvedSocket> sockets = custody != null ? custody.effectiveSockets() : List.of();
+        for (int index : authoredRows) {
+            PickerCategories.Category row = authoredConversionRow(conversions[index], index);
+            if (row != null) {
+                tabs.add(row);
+            }
+        }
+        tabs.addAll(buildPickerCategories(conversions, categories, claim, sockets, player));
         if (tabs.size() < 2) {
-            // Every representative output resolved empty (defensive) - nothing meaningful to show;
-            // fall through to the plain engage rather than opening an empty picker.
+            // Every row/representative output resolved empty (defensive) - nothing meaningful to
+            // show; fall through to the plain engage rather than opening an empty picker.
             return false;
         }
         return RpgStationPickerPage.open(ref, store, tabs, showLocked,
@@ -3619,10 +3701,49 @@ public final class StationService {
     }
 
     /**
-     * The material the picker should PREVIEW recipes for (decision 66): whatever is PLACED IN THE
-     * BLOCK (the custody claim's oldest-placed entry - its {@code items()} map is insertion-ordered),
-     * else the player's currently HELD stack, else null (the first-derived fallback, i.e. the
-     * pre-decision-66 behavior).
+     * PURE (decision 96): the resolved-array indexes of the AUTHORED (non-derived) conversions -
+     * the rows the picker offers individually. A {@code FromCrafting}-derived row is excluded by
+     * its engine mark, so a station deriving 33 species never explodes into 33 rows.
+     */
+    @Nonnull
+    static List<Integer> authoredConversionIndexes(@Nullable StationAsset.Conversion[] conversions) {
+        List<Integer> out = new ArrayList<>();
+        if (conversions == null) {
+            return out;
+        }
+        for (int i = 0; i < conversions.length; i++) {
+            if (conversions[i] != null && !conversions[i].isDerived()) {
+                out.add(i);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * One AUTHORED conversion's picker row: keyed {@link #conversionRowKey}, labeled and iconed by
+     * its own primary OUTPUT item (the row IS a concrete recipe, unlike a category tab), cost line
+     * from its own input-to-output shape. Null when the row has no resolvable output item id
+     * (defensive; such a row is not runnable either).
+     */
+    @Nullable
+    private static PickerCategories.Category authoredConversionRow(@Nonnull StationAsset.Conversion c,
+            int resolvedIndex) {
+        Ingredient output = c.primaryOutput();
+        String icon = output != null ? output.getItemId() : null;
+        if (icon == null || icon.isBlank()) {
+            return null;
+        }
+        return PickerCategories.Category.unlocked(conversionRowKey(resolvedIndex), icon,
+                NativeNames.itemNameMsg(icon), pickerCostLine(c));
+    }
+
+    /**
+     * The material one picker tab should PREVIEW recipes for (decision 66, refined by decision 96):
+     * whatever is PLACED in the pile the candidate row actually DRAWS from - the socket named by
+     * the category's first conversion's first input (per-entry {@code Socket}, else the first Item
+     * socket, the same resolution the consume path uses; the degenerate custody reads its one
+     * {@code main} pile, the classic oldest-placed read) - else the player's currently HELD stack,
+     * else null (the first-derived fallback).
      *
      * <p>Deliberately NOT gated on claim ownership: the ask is "show the recipes for the block
      * placed in it", and what is physically loaded is the honest preview even when someone else
@@ -3630,15 +3751,15 @@ public final class StationService {
      * this preview does not and must not pre-empt).
      */
     @Nullable
-    private static String pickerPreviewInputItemId(@Nullable StationCustodyClaim claim, @Nonnull Player player) {
+    private static String pickerPreviewInputItemId(@Nullable StationCustodyClaim claim, @Nonnull Player player,
+            @Nullable StationAsset.Conversion firstCandidate, @Nonnull List<Custody.ResolvedSocket> sockets) {
         if (claim != null && !claim.isEmpty()) {
-            // Walk the piles in insertion order (the degenerate custody has just its 'main' pile,
-            // so this IS the classic oldest-placed read there) and preview the first item found.
-            for (String socketId : claim.pileIds()) {
-                for (String itemId : claim.items(socketId).keySet()) {
-                    if (itemId != null && !itemId.isBlank()) {
-                        return itemId;
-                    }
+            Ingredient firstInput = firstCandidate != null ? firstCandidate.primaryInput() : null;
+            String socketId = StationCustody.socketIdFor(
+                    firstInput != null ? firstInput.getSocket() : null, null, sockets);
+            for (String itemId : claim.items(socketId).keySet()) {
+                if (itemId != null && !itemId.isBlank()) {
+                    return itemId;
                 }
             }
         }
@@ -3648,27 +3769,31 @@ public final class StationService {
     }
 
     /**
-     * Build the picker's ordered tab list (one unlocked tab per category with a resolvable output
-     * icon). Maintainer smoke fix: a category id is not itself a localized display name, so each
-     * tab's NAME is its representative output item's own native item name ({@link
+     * Build the picker's ordered category-tab list (one unlocked tab per category with a resolvable
+     * output icon). Maintainer smoke fix: a category id is not itself a localized display name, so
+     * each tab's NAME is its representative output item's own native item name ({@link
      * NativeNames#itemNameMsg}, client-resolved in the viewer's own locale - no hand-authored
      * per-category lang key needed), and its COST LINE is that same representative conversion's
      * input-to-output shape ({@link #pickerCostLine}).
      *
-     * <p>Decision 66: {@code previewInputItemId} (+ its resource-type family) biases EVERY tab onto
-     * the conversion that consumes the material actually loaded/held, so a sawmill full of oak
-     * previews Oak Planks / Oak Decorative / Oak Ornate instead of three Blackwood tabs. One
-     * preferred item drives all tabs, so the strip stays internally consistent (never oak in one
-     * tab and blackwood in the next).
+     * <p>Decision 66: the preview material (+ its resource-type family) biases each tab onto the
+     * conversion that consumes the material actually loaded/held, so a sawmill full of oak
+     * previews Oak Planks / Oak Decorative / Oak Ornate instead of three Blackwood tabs. Decision
+     * 96 resolves that material PER TAB from the pile the tab's own first candidate draws from
+     * ({@link #pickerPreviewInputItemId}); on a single-pile station every tab reads the same pile,
+     * so the strip stays internally consistent exactly as before.
      */
     @Nonnull
     private static List<PickerCategories.Category> buildPickerCategories(
             @Nullable StationAsset.Conversion[] conversions, @Nonnull List<String> categories,
-            @Nullable String previewInputItemId, @Nullable String[] previewInputResourceTypeIds) {
+            @Nullable StationCustodyClaim claim, @Nonnull List<Custody.ResolvedSocket> sockets,
+            @Nonnull Player player) {
         List<PickerCategories.Category> tabs = new ArrayList<>(categories.size());
         for (String cat : categories) {
+            String previewInputItemId = pickerPreviewInputItemId(claim, player,
+                    representativeConversionFor(conversions, cat), sockets);
             StationAsset.Conversion rep = representativeConversionFor(conversions, cat, previewInputItemId,
-                    previewInputResourceTypeIds);
+                    liveResourceTypeIdsOf(previewInputItemId));
             Ingredient repOutput = rep != null ? rep.primaryOutput() : null;
             if (repOutput == null) {
                 continue; // no representative item to render as the tab icon; skip this category
@@ -3730,10 +3855,17 @@ public final class StationService {
     }
 
     /**
-     * Scan {@code conversions} (the caller's already action-resolved
+     * Scan {@code conversions} (the caller's already action-resolved and tier-ordered
      * {@code StationCatalog.resolvedConversions} result) in order; the FIRST whose input the
      * inventory satisfies wins. {@code NO_ROOM} is reported only when some conversion had its
      * input but lacked output room.
+     *
+     * <p><b>Route coverage on this route:</b> a {@code Tags} input counts the combined container's
+     * matching stacks directly (there is no native batch check for our tag-map shape); a MATCH-ANY
+     * (route-less) input never matches here - "anything" is a statement about a station's own
+     * placed pile, and a scan that could drain arbitrary stacks out of a player's open inventory
+     * would consume valuables nobody offered. Such a row simply is not runnable without custody
+     * (the validator flags the authoring); {@code IsExactSet} is likewise inert on this route.
      */
     @Nonnull
     private ConversionCheck firstRunnableConversion(@Nonnull Player player,
@@ -3745,24 +3877,29 @@ public final class StationService {
         try {
             var combined = PlayerAccess.combinedBackpackStorageHotbar(player);
             for (StationAsset.Conversion c : conversions) {
-                if (!runnableShape(c)) {
+                if (!runnableShape(c) || hasMatchAnyInput(c)) {
                     continue;
                 }
                 // The exact-item entries are checked as ONE batch (two entries naming the same item
                 // must not each pass against the same stack); resource-family entries have no batch
-                // API, so they are checked individually.
+                // API, so they are checked individually, and tag entries count the container walk.
                 List<ItemStack> itemInputs = new ArrayList<>();
                 boolean hasEveryInput = true;
                 for (Ingredient in : c.getInput()) {
-                    String ref = ingredientRef(in);
                     int need = in.effectiveQuantity();
-                    if (isResourceRoute(in)) {
-                        if (!combined.canRemoveResource(new ResourceQuantity(ref, need))) {
+                    if (in.hasTagsRoute()) {
+                        if (InventoryIngredients.countMatching(combined,
+                                liveIngredientMatcher(in)) < need) {
+                            hasEveryInput = false;
+                            break;
+                        }
+                    } else if (isResourceRoute(in)) {
+                        if (!combined.canRemoveResource(new ResourceQuantity(ingredientRef(in), need))) {
                             hasEveryInput = false;
                             break;
                         }
                     } else {
-                        itemInputs.add(new ItemStack(ref, need));
+                        itemInputs.add(new ItemStack(ingredientRef(in), need));
                     }
                 }
                 if (!hasEveryInput || (!itemInputs.isEmpty() && !combined.canRemoveItemStacks(itemInputs))) {
@@ -3783,16 +3920,17 @@ public final class StationService {
     }
 
     /**
-     * PURE: is this conversion a runnable SHAPE - both sides authored, every input carrying a usable
-     * route ref, every output an exact non-blank item id? A malformed conversion is skipped by both
-     * runnable scans (the validator flags it at author time).
+     * PURE: is this conversion a runnable SHAPE - both sides authored, every input carrying at
+     * most one route (a route-less input is the legal custody match-any), every output an exact
+     * non-blank item id? A malformed conversion is skipped by both runnable scans (the validator
+     * flags it at author time).
      */
     private static boolean runnableShape(@Nullable StationAsset.Conversion c) {
         if (c == null || !c.isComplete()) {
             return false;
         }
         for (Ingredient in : c.getInput()) {
-            if (in == null || ingredientRef(in) == null) {
+            if (in == null || in.routeCount() > 1) {
                 return false;
             }
         }
@@ -3802,6 +3940,27 @@ public final class StationService {
             }
         }
         return true;
+    }
+
+    /** PURE: does any input of {@code c} take the route-less MATCH-ANY form (custody-only)? */
+    private static boolean hasMatchAnyInput(@Nonnull StationAsset.Conversion c) {
+        for (Ingredient in : c.getInput()) {
+            if (in != null && in.isMatchAny()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The LIVE item-id matcher for one ingredient, all four routes (exact / family / tags /
+     * match-any), with the identity resolvers wired to the live asset map - the one seam every
+     * engine-side count and drain builds its predicate through.
+     */
+    @Nonnull
+    static Predicate<String> liveIngredientMatcher(@Nonnull Ingredient in) {
+        return StationCustody.ingredientEntryMatcher(in,
+                StationService::liveResourceTypeIdsOf, StationService::liveRawTagsOf);
     }
 
     /**
@@ -3865,17 +4024,24 @@ public final class StationService {
                 }
                 boolean hasEveryInput = true;
                 for (Ingredient in : c.getInput()) {
-                    String ref = ingredientRef(in);
-                    boolean isResource = isResourceRoute(in);
                     String socketId = StationCustody.socketIdFor(in.getSocket(), null, sockets);
-                    int have = StationCustody.availableInPile(claim.items(socketId), isResource ? null : ref,
-                            isResource ? ref : null, StationService::liveResourceTypeIdsOf);
+                    int have = StationCustody.availableInPile(claim.items(socketId),
+                            StationCustody.ingredientEntryMatcher(in,
+                                    StationService::liveResourceTypeIdsOf, StationService::liveRawTagsOf));
                     if (have < in.effectiveQuantity()) {
                         hasEveryInput = false;
                         break;
                     }
                 }
                 if (!hasEveryInput) {
+                    continue;
+                }
+                // The IsExactSet knob: the row matches only while the pile(s) it draws from hold
+                // nothing beyond its own inputs; a contaminated pile just skips this row and the
+                // scan falls through to the next (typically looser) one.
+                if (c.effectiveIsExactSet() && !StationCustody.exactSetSatisfied(c,
+                        claim::items, sockets,
+                        StationService::liveResourceTypeIdsOf, StationService::liveRawTagsOf)) {
                     continue;
                 }
                 if (!InventoryGrant.canAddAll(player, outputStacks(c))) {
@@ -4992,7 +5158,8 @@ public final class StationService {
         }
         StationAsset.Conversion[] conversions = allConversionsFor(asset, action);
         return conversions.length > 0
-                && StationCustody.matchesAnyConversionInput(conversions, heldItemId, heldResourceTypeIds);
+                && StationCustody.matchesAnyConversionInput(conversions, heldItemId, heldResourceTypeIds,
+                        heldTags);
     }
 
     /** The refusal key a placement that moved nothing toasts: socket-specific with authored sockets, the classic generic line without. */
@@ -5860,9 +6027,9 @@ public final class StationService {
         return out;
     }
 
-    /** Live raw tags for {@code itemId} (the SAME route {@link #tagsMatch} reads), empty when unresolvable. */
+    /** Live raw tags for {@code itemId} (the SAME route every tag matcher reads), empty when unresolvable. */
     @Nonnull
-    private static Map<String, String[]> liveRawTagsOf(@Nullable String itemId) {
+    static Map<String, String[]> liveRawTagsOf(@Nullable String itemId) {
         if (itemId == null || itemId.isBlank()) {
             return Map.of();
         }
