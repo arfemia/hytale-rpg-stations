@@ -24,7 +24,7 @@ is used.
   the custody socket named by `Param` satisfied at the evaluated block - the engine pre-resolves
   the readings into the api `FactorContext` at the engage gate over EVERY action's sockets, and
   the provider is a plain-data read that fails closed on an id the context carries no reading
-  for; the shipped cooking pit gates Grill `Max: 0` / Stew `Min: 1` on it), while every
+  for; the held-back cooking-pit exemplar gates Grill `Max: 0` / Stew `Min: 1` on it), while every
   `hytale:` one is a straight native read that means the same thing with no station involved -
   `tool_power` (an `ItemToolSpec` power, its native `GatherType` passed as the `Param` so the
   addressing is explicit, defaulting to the station's own when omitted), `tool_quality`,

@@ -235,8 +235,8 @@ single form answers its head) returns EVERY match in that order, and
 back to the first match when none does - so the engage gate denies that one with the honest
 requirements-unmet toast, and a single-action station selects and denies byte-identically to the
 pre-gate walk. `Requires` is a "when it applies" concern beside `Select` (the `ActionDef` javadoc's
-own grouping), which is what lets the shipped cooking pit layer a vessel-gated Stew over an open
-Grill on one block. A station authoring no actions selects nothing and is inert
+own grouping), which is what lets the cooking-pit exemplar (held under `unreleased/`) layer a
+vessel-gated Stew over an open Grill on one block. A station authoring no actions selects nothing and is inert
 (`STATION_NO_ACTIONS`). A loaded custody claim already owned by the
 player commits to ITS OWN action first, BYPASSING selection (re-pressing F with a different item
 held never switches a ritual already in progress; the engage gate still checks the committed
@@ -1140,10 +1140,11 @@ persisted stash (non-empty keeps Loaded correct, empty resets to Empty).
 `AmbientSoundEventId` (LOOPING+MONO validated, "a looping ambient sound event that emits from this
 block when placed") and per-state `Particles`; both start and STOP automatically with the
 `setBlockInteractionState` flip, which matters because nothing in the protocol can stop a playing
-sound or particle system. The SHIPPED `RPG_Station_CookingPit` block copies vanilla
+sound or particle system. The `RPG_Station_CookingPit` block (held under
+`unreleased/Server/Item/Items/` with the rest of the cooking-pit family) copies vanilla
 `Furniture_Crude_Brazier` verbatim on its `Lit` state for this (the held-back
-`RPG_Station_CookingFire` under `unreleased/Server/Item/Items/` is the same pairing), and the
-shipped `RPG_Station_Cooking_Pot` block carries the vanilla cauldron's always-on bubbling ambient
+`RPG_Station_CookingFire` beside it is the same pairing), and the held
+`RPG_Station_Cooking_Pot` block carries the vanilla cauldron's always-on bubbling ambient
 the same native way. Corollary for step `Presentation.Sound`: only ever
 author a ONE-SHOT SoundEvent there - a looping id fired as a one-shot never ends (both cauldron
 bubbling events loop, which is why the pit's Stew cycle cue is a one-shot slosh and the bubbling
@@ -1526,8 +1527,8 @@ Custody is left unchecked); `STAMP_WITHOUT_MAIN_PILE` (INFO, `checkStampMainPile
 `PATTERN_ACTIVATE_BLOCK_NO_INTERACTION` / `PATTERN_REVERT_UNRESOLVABLE` live-only,
 `PATTERN_TOO_LARGE` / `PATTERN_CELL_DUPLICATE_OFFSET` / `PATTERN_REQUIRES_WITHOUT_NAME_KEY` in
 both passes); `DERIVED_ROW_DROPS_BENCH_FUEL` (INFO, `checkDerivedBenchFuel` behind
-`sourceBenchIdsLive` + `benchAuthorsFuelLive` - fires on the shipped pit by design, matching its
-own `$Comment`). A third-party `ValidationHook` linting patterns reads
+`sourceBenchIdsLive` + `benchAuthorsFuelLive` - fires on the held-back pit by design when that
+content is restored, matching its own `$Comment`). A third-party `ValidationHook` linting patterns reads
 `RpgStationsApi.patterns()` from inside its `validate` body (live at hook time; test-pinned).
 **Multi-station/extension checks**:
 `ACTION_REF_UNKNOWN`, `EXTENSION_TARGET_UNKNOWN`, `EXTENSION_PAYLOAD_MISMATCH`,

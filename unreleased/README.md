@@ -5,8 +5,8 @@ is simply not shipping in 0.1.0, which is a deliberate Sawmill-only release. Thi
 byte-exact mirror of `src/main/resources/`, so restoring is a move, not a rewrite.
 
 Gradle only treats `src/main/resources` as a resource root, so nothing under `unreleased/` reaches
-the built jar. The files stay tracked in git and their history followed them here (moved with
-`git mv`, so `git log --follow` still works on every one).
+the built jar. The files stay tracked in git and their history followed them here (committed as
+renames, so `git log --follow` still works on every one).
 
 ## Restore everything
 
@@ -29,6 +29,7 @@ Restore one station instead of all of them:
 | `CookingFire` | `Stations/CookingFire.json`, `Item/Items/RPG_Station_CookingFire.json`, `Item/RootInteractions/RPG_Station_CookingFire_Use.json` | Half of the two-station fish-prep exemplar; ships with `CuttingBoard` or not at all. |
 | `CuttingBoard` | `Stations/CuttingBoard.json`, `Actions/PrepFish.json`, `Item/Items/RPG_Station_CuttingBoard.json`, `Item/RootInteractions/RPG_Station_CuttingBoard_Use.json`, `Emote/RPG_Emote_Knife.json` | The other half. Its `prepfish` program claims the cooking fire as a remote anchor, so the pair is one feature. |
 | `MountSpike` | `Stations/MountSpike.json`, `Item/Items/RPG_Station_MountSpike.json`, `Item/RootInteractions/RPG_Station_MountSpike_Use.json` | An `Hold.Mount.Surface: "Entity"` standing-mount experiment. Its own `$Comment` records the Entity mount as in-game unverified. |
+| `CookingPit` | `Patterns/CookingPit.json`, `Stations/CookingPit.json`, `Item/Items/RPG_Station_CookingPit.json`, `Item/Items/RPG_Station_Cooking_Pot.json`, `Item/Items/RPG_Food_Hearty_Stew.json`, `Item/RootInteractions/RPG_Station_CookingPit_Use.json` | The buildable cooking-pit exemplar (the stone-ring structure pattern, the two-action Grill/Stew station, the pot vessel block and the stew meal). Finished and reviewed; held for a later release so 0.1.0 stays a single well-tested station. `station/HeldCookingPitPatternTest` decodes these held files directly and pins the whole loop (activation, the pot's headroom, the vessel gate, the ruled recipe-row order), so a restore ships pre-verified. Restore with `.\unreleased\restore.ps1 -Only CookingPit`. |
 | NPC performer harness | `NPC/Roles/RPG_Performer_Spike.json` | Drives the throwaway `/rpgstations npcspike` dev harness, which is unwired for 0.1.0 (see below). |
 
 ## The one code change that goes with this
@@ -43,7 +44,10 @@ still in git**, just unreferenced. Restoring means putting those three sites bac
 
 - **Every `.lang` key stayed in `src/main/resources/Server/Languages/`.** All 9 locales keep their
   `station.cookingfire.*`, `station.cuttingboard.*`, `station.mountspike.*`, `action.prepfish.label`,
-  and emote keys. An unreferenced lang key is invisible at runtime, so holding them back would have
+  and emote keys, plus the whole cooking-pit family (`station.cookingpit.*`,
+  `structure.cookingpit.*`, `socket.cookingpit.*`, and the `RPG_Station_CookingPit.*` /
+  `RPG_Station_Cooking_Pot.*` / `RPG_Food_Hearty_Stew.*` item keys). An unreferenced lang key is
+  invisible at runtime, so holding them back would have
   bought nothing and risked losing translation work. `i18n/RpgStationsLangKeys.java` and
   `LangFileIntegrityTest` therefore need no change either, in either direction.
 - Shared assets the Sawmill also uses: `Entity/Effects/RPG/RPG_Station_Hold.json`,

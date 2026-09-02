@@ -115,30 +115,25 @@ there is no prior public release to diff against, so every entry is additive by 
   half-built-shape memory is in-memory only, so a partial build does not auto-complete across a
   restart - re-place any exact-id block of the pattern (the anchor is the natural one) and
   detection picks the build up again. The type is deliberately not extension-targetable: a cell
-  appended by another pack would invalidate every standing build of the original shape.
-- **The Cooking Pit: a buildable cooking station that ships in the jar.** Lay a ring of any
-  stone-family blocks around an unlit campfire and the campfire becomes a working cooking pit -
-  no bench, no recipe, just the shape (breaking the ring turns it back). On the bare pit, GRILL:
-  press use with raw meat, a raw vegetable or a raw fish piece and the pit cooks it through the
-  campfire's own native recipes, hands-free and tool-free. Craft the iron Cooking Pot (three
-  iron bars at any workbench) and place it in the open cell above the flame, and the same press
-  becomes STEW: drop up to six ingredients into the pot one press at a time - any food, any crop,
-  any caught fish - and the pot decides the dish. Exactly meats and vegetables makes a meat kebab,
-  exactly vegetables a caesar salad, and anything else simmers into the Hearty Stew, the pot's
-  own meal whose proper mix of meat and greens buffs health and stamina at once. Everything cooks
-  on while you walk away (in loaded chunks, on game time), and everything but the salad burns to
-  charcoal if left sitting long past done - the pit smokes to show you. The pit is communal: two
-  players can load different parts at once, piles still belong to whoever placed them, and a
-  finished meal can be collected by anyone. Mounting or removing the pot never breaks the standing
-  structure, and a pit whose pot is removed simply refuses to stew (and stops cooking the pot's
-  contents) until one stands again.
+  appended by another pack would invalidate every standing build of the original shape. The
+  authored Cooking Pit pattern that exercises this end to end is held under `unreleased/` (see
+  the release-scope note below); the pattern engine itself ships, fully authorable by any pack.
+- **The Cooking Pit exemplar: authored and HELD under `unreleased/`, not in the shipped jar.**
+  A complete buildable cooking station exists in this repo - a stone ring around an unlit
+  campfire becomes a working pit (Grill on the bare pit through the campfire's own native
+  recipes; craft the iron Cooking Pot, mount it in the open cell, and the same press becomes
+  Stew, deciding kebab / caesar salad / Hearty Stew off the ruled recipe rows), exercising the
+  multiblock, socket, doneness, unattended and sharing machinery above end to end. It is held
+  back from 0.1.0 with the rest of the held content set (see the release-scope note below); the
+  engine features it exercises all ship, and `HeldCookingPitPatternTest` keeps the held files
+  build-verified so a later restore ships pre-verified.
 - **A gate factor for pot-shaped stations: `rpgstations:socket_filled`.** A station action's
   `Requires.Conditions` can ask whether a named custody socket is satisfied at this block - an
   Item socket's pile holds something, a Block socket's world block stands and matches - with the
-  socket id as the condition's `Param`. The cooking pit's two actions gate on the same reading in
-  opposite directions (`Min: 1` on Stew, `Max: 0` on Grill), which is the whole
-  one-block-two-jobs layering; the reading spans every action's sockets, fails closed on a socket
-  the evaluation cannot see, and reaches any registered factor provider through the api
+  socket id as the condition's `Param`. The held-back cooking-pit exemplar's two actions gate on
+  the same reading in opposite directions (`Min: 1` on Stew, `Max: 0` on Grill), which is the
+  whole one-block-two-jobs layering; the reading spans every action's sockets, fails closed on a
+  socket the evaluation cannot see, and reaches any registered factor provider through the api
   `FactorContext.socketFilled(String)`.
 - **Action selection respects each action's own `Requires` gate.** When several actions match what
   you are holding, the press picks the first whose gate actually passes, falling back to the first
@@ -177,8 +172,8 @@ there is no prior public release to diff against, so every entry is additive by 
   Structures: an activation block that is unknown or resolves no station (an inert build), an
   unresolvable revert block, an oversized cell list, duplicate cell offsets, and a gated pattern
   with no display name for its refusal toast. Cooking and enhancement: a station deriving recipes
-  from a native bench that wants fuel (the fuel requirement never derives; the pit says the same
-  in its own file comment), and a Stamp ritual beside sockets that never fill the pile Stamp reads
+  from a native bench that wants fuel (the fuel requirement never derives; the held-back pit's
+  own file comment says the same), and a Stamp ritual beside sockets that never fill the pile Stamp reads
   from. A third-party validation hook can lint structure patterns too, through the api's
   read-only pattern view, live during the full pass.
 - **The audit flags a socket cap above the custody-level cap** (`SOCKET_MAX_EXCEEDS_CUSTODY_MAX`, warning): the effective capacity is the smaller of the two, so `/rpgstations validate` surfaces the same authoring the decode-time warning reports at load.
@@ -200,16 +195,20 @@ factors a station's formulas read, and receives the contributions a station post
 cycle. Neither side hard-depends on the other. See `CLAUDE.md` for the full package-by-package
 reference.
 
-**Release scope: the engine is complete; the shipped default content is the Sawmill plus the
-Cooking Pit family (the pit's structure pattern, its station, the Cooking Pot and the Hearty
-Stew).** The engine entries below all ship in full. What 0.1.0 deliberately does NOT ship is three
-finished default stations held back for a later release: the two-station fish-prep exemplar
+**Release scope: the engine is complete; the shipped default content is the Sawmill alone.** The
+engine entries above all ship in full. What 0.1.0 deliberately does NOT ship is the finished
+default content held back for a later release: the buildable Cooking Pit family (the pit's
+structure pattern, its two-action station, the Cooking Pot vessel and the Hearty Stew), the
+two-station fish-prep exemplar
 (`CuttingBoard` plus `CookingFire`, the multi-station claimed-anchor walk) and the `MountSpike`
 standing-mount experiment, whose Entity-surface mount is still in-game unverified. They live, complete and
 restorable in one command, under `unreleased/` (see `unreleased/README.md`); their lang keys stay
-shipped in all 9 locales. The throwaway `/rpgstations npcspike` dev harness is unwired for the same
-reason, with `NpcPerformerSpike.java` kept in git. Capabilities those stations demonstrated
-(multi-station walks, the Entity mount surface, step programs) are engine features and remain fully
+shipped in all 9 locales, and the cooking pit keeps a build-run parity gate
+(`HeldCookingPitPatternTest`) over its held files. The throwaway `/rpgstations npcspike` dev
+harness is unwired for the same
+reason, with `NpcPerformerSpike.java` kept in git. Capabilities the held stations demonstrate
+(multiblock structure patterns, custody sockets, doneness windows, unattended processing,
+multi-station walks, the Entity mount surface, step programs) are engine features and remain fully
 authorable by any pack.
 
 **The `api` extension surface is NOT frozen at 0.1.0.** The freeze was always scoped to a 1.0.0

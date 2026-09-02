@@ -131,14 +131,15 @@ pot onto the pit (or taking it off) must never read as the structure breaking. T
 socket target cell should be authored `Empty` only when the pattern truly requires it clear AT
 BUILD TIME - after activation the socket machinery owns that cell.
 
-## The shipped Cooking Pit, end to end
+## The Cooking Pit, end to end
 
-The jar ships a complete worked example of everything above:
+The worked example below lives with the mod's held content (the `unreleased/` mirror in this
+repository, not in the shipped jar), and any pack can author the same today:
 `Server/RpgStations/Patterns/CookingPit.json` (the shape),
 `Server/RpgStations/Stations/CookingPit.json` (the two-action station), the
 `RPG_Station_CookingPit` block it activates into, the craftable `RPG_Station_Cooking_Pot` vessel
 block, and the `RPG_Food_Hearty_Stew` meal. Read the three JSON files side by side - each carries
-`$Comment`s explaining its own knobs - and play the loop like this:
+`$Comment`s explaining its own knobs - and the loop plays like this:
 
 1. **Build the pit.** Place an unlit campfire (`Deco_Campfire_Off`) and ring it with any
    stone-family blocks (`ResourceTypeId: "Rock"` cells - cobblestone, stone, bricks and marble mix

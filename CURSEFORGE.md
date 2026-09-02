@@ -6,9 +6,9 @@ RPG Stations adds interactive work stations to your Hytale server. No menus, no 
 conversions - materials go in, your character (or a stand-in performer) visibly does the work over
 real time, and results come out.
 
-**0.1.0 ships two stations: the Sawmill and the Cooking Pit.**
+**0.1.0 ships one station: the Sawmill.**
 
-**The Sawmill:** craft the bench at a tier 2 Workbench, load logs onto it,
+Craft the bench at a tier 2 Workbench, load logs onto it,
 press `F`, and your character saws them into that wood family's planks one cycle at a time, with a
 held-tool gate, a tool-scaling yield curve, and a session summary when you stop.
 
@@ -23,33 +23,24 @@ tier and concentrated essence at the deepest. And a few cycles into any session 
 be forged at any bench, and is the only tool in the game that reaches the top rung of the sawmill's
 own curve.
 
-**The Cooking Pit** you don't craft at all - you build it. Lay a ring of any stone blocks around an
-unlit campfire and the fire becomes a working cooking pit on the spot (break the ring and it turns
-back). Press `F` with raw meat, a vegetable or a raw fish piece and the pit grills it over the open
-flame, no tool needed. Then craft the iron Cooking Pot - three iron bars at any workbench - and set
-it above the flame, and the pit changes jobs: feed the pot up to six ingredients, one press each,
-and it decides the dish. Exactly meat and vegetables makes a kebab; exactly vegetables, a caesar
-salad; any other mix simmers down into a Hearty Stew, whose meat-and-greens body strengthens health
-and stamina at once. The pit keeps cooking after you walk away, and everything but the salad chars
-into charcoal if you leave it sitting too long past done - the pit smokes to warn you. It is also
-communal: friends can load different parts of the same pit, what each of you placed stays yours, and
-a finished meal can be lifted off by whoever passes by.
-
 Every number in all of that is an ordinary content leaf, so a server can retune what better tools are
 worth, change what the finds hand over, or key the whole thing off something else entirely.
 
-The engine underneath is the full thing, not a Sawmill special case - multi-action stations, step
+The engine underneath is the full thing, not a Sawmill special case: it also supports multiblock
+builds (arrange ordinary blocks in the world and the shape becomes a station), named placement
+sockets, timed cooking windows, and unattended processing that keeps working while nobody stands
+there, all ready for content packs and future stations to use. Multi-action stations, step
 programs, multi-station walks, placed-input custody and props, the puppet performer, conditional
-loot, and enhancement stamping are all live and all authorable. Every one of them is driven from
-ordinary content assets, so a pack (or your own server-side assets) can add stations this release
-does not ship. Later releases will grow the shipped default set.
+loot, and enhancement stamping are live and authorable the same way. Every one of them is driven
+from ordinary content assets, so a pack (or your own server-side assets) can add stations this
+release does not ship. Later releases will grow the shipped default set.
 
 Full documentation, including a page-by-page authoring guide and the complete schema reference for
 every content type, ships alongside this mod's release.
 
 ## Required dependency: ZiggfreedCommon
 
-RPG Stations has exactly **one hard dependency**: **ZiggfreedCommon `>=1.4.0`**. Install it first -
+RPG Stations has exactly **one hard dependency**: **ZiggfreedCommon `>=2.0.0`**. Install it first -
 the server loads it before RPG Stations. That is the whole list - **no other mod is required**. RPG
 Stations is a complete, standalone reward loop (conditional loot, command rewards, enhancement) on
 its own. See [Integrations](#integrations) below for how an add-on hooks it.
@@ -66,9 +57,8 @@ gets the exact same authoring surface RPG Stations' own default content ships th
 ### Multi-action stations
 
 One station block can offer several distinct jobs, picked diegetically by what you're holding and by
-what stands at the block - no dropdown, no menu. The shipped Cooking Pit is the full form: the same
-press grills on a bare pit and stews once the pot is mounted, because each job carries its own
-requirements and the press picks the first job whose requirements actually hold. The Sawmill uses
+what stands at the block - no dropdown, no menu. Each job carries its own requirements and the
+press picks the first job whose requirements actually hold. The Sawmill uses
 the lighter form: sneak and press `F` to pick which cut you want from the log you're holding
 (planks, decorative, or ornate) if you do not want the default.
 
@@ -87,33 +77,6 @@ in, a repeat press tops it up. Loaded materials can render as a real placed prop
 stacked on the sawmill bench), retrievable with a press of `F` straight off the display. What you
 place stays placed like a chest's contents: it survives logging off and server restarts, waiting
 in the station until you work it, take it back, or the block is broken.
-
-### Multiblock structures
-
-Some stations are not crafted or placed. They are built. A structure pattern describes an
-arrangement of ordinary blocks with one special cell; finish building the shape in the world, in
-any order and facing any way, and that block becomes a working station on the spot. Break any block
-of the standing shape and it turns back, dropping whatever was stored there. The Cooking Pit works
-exactly this way - a ring of stone around an unlit campfire - and a pack can ship its own shapes
-with an optional permission or stat gate on who may raise them.
-
-### Sockets and sharing
-
-A station can offer named places to put things. The pit's pot takes ingredients one press at a
-time while a shelf above it holds the finished meals; the pot itself is a real block sitting on
-the fire, and lifting it off changes what the station does. Each slot keeps its own pile with its
-own owner, so two players can load the same station without their materials ever mixing. By
-default only you can work from or take back what you placed; a station can open any of that up.
-The shipped pit lets anyone cook, and anyone walk off with a finished meal.
-
-### Doneness and unattended work
-
-Cooked things have a done moment. Output sits ready to collect for a while and then, if the recipe
-says so, spoils - stew ignored long past done chars into charcoal, and the block smokes to warn
-you. Stations that opt in also keep working while nobody stands at them: load the pot, walk away,
-and cycles keep settling on world game time in loaded chunks, with the rewards those cycles earned
-paid to whoever comes back and gathers the batch. The clock is game time, not the wall clock, so
-server downtime cooks and burns nothing.
 
 ### The puppet
 
@@ -207,7 +170,7 @@ session-summary HUD tuning, layered like any other asset - there is no separate 
 
 ## Installation
 
-1. Install **ZiggfreedCommon** (`>=1.4.0`) - drop it into your server's `Mods/` folder.
+1. Install **ZiggfreedCommon** (`>=2.0.0`) - drop it into your server's `Mods/` folder.
 2. Drop the **RPG Stations** jar into the same `Mods/` folder.
 3. Optionally add a content pack that ships station catalog content.
 4. Restart the server. Confirm the boot log shows each loaded station id and no asset validation
@@ -220,12 +183,6 @@ base improvement, not a day-one freebie. Admins can `/give` the block directly
 (`RPG_Station_Sawmill`). A content pack that ships its own block under the same id replaces the
 jar's, so a pack that authors no recipe on its copy removes that craftability and owns acquisition
 its own way - a shop, a quest, whatever that pack's economy wants.
-
-**Getting the Cooking Pit in-game.** Nothing to craft: place an unlit campfire and surround it with
-a full ring of any stone-family blocks (cobblestone, stone, bricks, marble - they mix freely),
-leaving the cell above the fire open. The campfire becomes the pit the moment the ring completes.
-The Cooking Pot is crafted from three iron bars at any workbench and placed in that open cell when
-you want to stew instead of grill.
 
 ## Integrations
 

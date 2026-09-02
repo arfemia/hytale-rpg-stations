@@ -39,9 +39,11 @@ import static org.junit.jupiter.api.Assertions.fail;
  * {@code PerStat} / {@code Tags} group - the list {@code asset/CLAUDE.md} keeps current.
  *
  * <p>An unmapped folder under a scanned {@code RpgStations} root FAILS rather than being skipped, so
- * a new asset type is covered here the day it ships its first file. The optional pack root is not a
- * declared Gradle task input, so a PACK-only edit can leave this task {@code UP-TO-DATE} locally:
- * pass {@code --rerun-tasks} when a pack file is the only thing that moved.
+ * a new asset type is covered here the day it ships its first file; a mapped folder holding zero
+ * files is legal (a registered store can be empty in a given release scope), because only files are
+ * ever judged. The optional roots are not declared Gradle task inputs, so an edit touching only one
+ * of them can leave this task {@code UP-TO-DATE} locally: pass {@code --rerun-tasks} when such a
+ * file is the only thing that moved.
  */
 public class ShippedAssetDecodeTest {
 
@@ -74,11 +76,19 @@ public class ShippedAssetDecodeTest {
     private static final Path JAR_ROOT = Path.of("src", "main", "resources", "Server", "RpgStations");
 
     /**
+     * This repo's own held-back content mirror (a byte-exact mirror of {@code src/main/resources},
+     * outside every Gradle resource root): always present in a checkout, and decoded with the same
+     * rigor as the shipped set so a later restore ships pre-verified.
+     */
+    private static final Path HELD_ROOT = Path.of("unreleased", "Server", "RpgStations");
+
+    /**
      * The companion pack's assets, scanned only when that repo is checked out beside this one (the
      * same "cover it when it is there" rule the comment-hygiene sweeps use): a standalone clone of
      * this mod still runs a full green build.
      */
     private static final List<Path> OPTIONAL_ROOTS = List.of(
+            HELD_ROOT,
             Path.of("..", "..", "content-packs", "skill-stations-pack", "Server", "RpgStations"),
             Path.of("..", "..", "content-packs", "skill-stations-pack", "unreleased", "Server", "RpgStations"));
 

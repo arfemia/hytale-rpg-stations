@@ -8,7 +8,7 @@
 #   .\unreleased\restore.ps1 -Only CookingFire        # restore one group
 #   .\unreleased\restore.ps1 -Only CuttingBoard,CookingFire
 #
-# Groups: CookingFire, CuttingBoard, MountSpike, PerformerSpike, All (default)
+# Groups: CookingFire, CuttingBoard, MountSpike, PerformerSpike, CookingPit, All (default)
 #
 # After restoring PerformerSpike, also re-add the npcSpike field, the "npcspike" dispatch case,
 # and the npcspike(CommandContext) method to command/RpgStationsCommand.java (see git history;
@@ -44,6 +44,14 @@ $groups = @{
     )
     PerformerSpike = @(
         'Server/NPC/Roles/RPG_Performer_Spike.json'
+    )
+    CookingPit     = @(
+        'Server/RpgStations/Patterns/CookingPit.json',
+        'Server/RpgStations/Stations/CookingPit.json',
+        'Server/Item/Items/RPG_Station_CookingPit.json',
+        'Server/Item/Items/RPG_Station_Cooking_Pot.json',
+        'Server/Item/Items/RPG_Food_Hearty_Stew.json',
+        'Server/Item/RootInteractions/RPG_Station_CookingPit_Use.json'
     )
 }
 
@@ -99,5 +107,8 @@ Write-Host ""
 Write-Host "Restored $restored file(s); $missing already absent."
 if ($wanted -contains 'PerformerSpike' -and -not $WhatIfPreference) {
     Write-Host "PerformerSpike: also re-wire the npcspike subcommand in command/RpgStationsCommand.java." -ForegroundColor Yellow
+}
+if ($wanted -contains 'CookingPit' -and -not $WhatIfPreference) {
+    Write-Host "CookingPit: also re-point station/HeldCookingPitPatternTest's RESOURCES root back to src/main/resources (and rename it back to a shipped-content gate if you like)." -ForegroundColor Yellow
 }
 Write-Host "Next: .\build.ps1   (and bump the version if this is going into a release)"

@@ -44,18 +44,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * The cooking-pit SHIPPED-CONTENT parity gate: decodes the pattern and station this jar actually
- * ships through their real codecs, compiles the pattern exactly the way the runtime catalog does
- * (the shipped station's own Block-socket offsets as the HOLD exclusion set), and walks the
+ * The cooking-pit HELD-CONTENT parity gate: the cooking-pit family lives under the tracked
+ * {@code unreleased/} mirror (held back from the shipped jar, restorable by a move), and this test
+ * decodes those held files through the exact codecs the server would read them with, compiles the pattern exactly the way the runtime catalog does
+ * (the station's own Block-socket offsets as the HOLD exclusion set), and walks the
  * compiled forms over a stub world - so a content edit that breaks activation, the pot's
  * headroom, the break re-walk, the vessel gate or the ruled recipe-row order can never leave the
- * build green. Identity resolvers are fixture maps; no assertion reads a tuning number (paces,
+ * build green, and a later restore ships the family pre-verified. Identity resolvers are fixture maps; no assertion reads a tuning number (paces,
  * windows and quantities are exercised through the rows' own decoded values, never repeated
  * here).
  */
-class ShippedCookingPitPatternTest {
+class HeldCookingPitPatternTest {
 
-    private static final Path RESOURCES = Path.of("src", "main", "resources");
+    /** The tracked held-content mirror; its layout is byte-exact with src/main/resources. */
+    private static final Path RESOURCES = Path.of("unreleased");
     private static final Path PATTERN_JSON = RESOURCES.resolve(
             Path.of("Server", "RpgStations", "Patterns", "CookingPit.json"));
     private static final Path STATION_JSON = RESOURCES.resolve(
@@ -377,8 +379,8 @@ class ShippedCookingPitPatternTest {
     // ==================== cross-file wiring ====================
 
     @Test
-    void theShippedFiles_referenceEachOther_byTheIdsTheyActuallyShip() throws IOException {
-        // The vessel socket wants exactly the pot block this jar ships.
+    void theHeldFiles_referenceEachOther_byTheIdsTheyActuallyAuthor() throws IOException {
+        // The vessel socket wants exactly the pot block held beside it.
         List<Custody.ResolvedSocket> stewSockets =
                 ActionResolver.resolve(station, "Stew", NO_REFS).getCustody().effectiveSockets();
         Custody.ResolvedSocket vessel = stewSockets.stream()
@@ -387,7 +389,7 @@ class ShippedCookingPitPatternTest {
         assertEquals(POT_BLOCK, vessel.match().getItemId());
         assertTrue(Files.exists(ITEMS_DIR.resolve(POT_BLOCK + ".json")));
 
-        // The station block ships, names its Use chain, and defines every state the actions map.
+        // The station block is present, names its Use chain, and defines every state the actions map.
         Path pitItem = ITEMS_DIR.resolve(STATION_BLOCK + ".json");
         assertTrue(Files.exists(pitItem));
         String pitBody = Files.readString(pitItem, StandardCharsets.UTF_8);
@@ -410,7 +412,7 @@ class ShippedCookingPitPatternTest {
                 StandardCharsets.UTF_8);
         assertTrue(useBody.contains("\"Station\": \"cookingpit\""));
 
-        // The match-all row's meal ships beside them.
+        // The match-all row's meal sits beside them in the mirror.
         assertTrue(Files.exists(ITEMS_DIR.resolve("RPG_Food_Hearty_Stew.json")));
     }
 }

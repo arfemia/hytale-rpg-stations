@@ -5,9 +5,9 @@ and friends). It depends on `ziggfreed-common` ONLY; any other mod reaches the e
 soft extension surface (native events + the `api` artifact, both live), never a hard dependency in
 either direction. The standalone mod is RICH, not a husk: with RpgStations alone installed, its own
 jar-shipped Sawmill runs the full diegetic work loop plus a generic reward layer (conditional
-lootables over native `ItemDropList`s, command rewards), and its jar-shipped Cooking Pit exercises
-the multiblock/socket/unattended/doneness stack end to end (build a stone ring around a campfire,
-grill on the bare pit, mount the craftable pot and stew) - and needs nothing else. Package root
+lootables over native `ItemDropList`s, command rewards) - and needs nothing else. The buildable
+Cooking Pit exemplar (the multiblock/socket/unattended/doneness stack end to end) is finished but
+HELD under `unreleased/` for a later release; see the "0.1.0 release scope" section. Package root
 `com.ziggfreed.rpgstations`. **Status:
 phase 1 legs 0-6 landed** (scaffold, common lift, engine, lootables, api
 artifact, consumer bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
@@ -209,23 +209,29 @@ adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-20
 adopted fixes binding). Origin plan: `../../.claude/plans/interactive-stations.md` +
 `../../.claude/plans/work-stations-mod-extraction-prompt.md`.
 
-## 0.1.0 release scope (maintainer ruling, 2026-08-06; amended by ruling 7 of the 2026-09-01 multiplacement round) - READ BEFORE TOUCHING SHIPPED CONTENT
+## 0.1.0 release scope (maintainer ruling, 2026-08-06; re-affirmed 2026-09-02, superseding the ruling-7 amendment of the 2026-09-01 multiplacement round) - READ BEFORE TOUCHING SHIPPED CONTENT
 
-**The first public release is `0.1.0`, not `1.0.0`, and ships TWO stations: the Sawmill and the
-Cooking Pit family** (the original 2026-08-06 ruling narrowed the set to the Sawmill alone; the
-2026-09-01 round's ruling 7 added the jar-shipped, standalone-rich cooking-pit exemplar - the
-`Patterns/CookingPit.json` structure, `Stations/CookingPit.json` with its Grill/Stew layering
-over `rpgstations:socket_filled`, the `RPG_Station_CookingPit` + `RPG_Station_Cooking_Pot`
-blocks, and `RPG_Food_Hearty_Stew`; `station/ShippedCookingPitPatternTest` is its parity gate).
-The ENGINE is unchanged and complete; only the shipped default CONTENT set was narrowed.
+**The first public release is `0.1.0`, not `1.0.0`, and ships the SAWMILL ONLY** (the original
+2026-08-06 ruling; the 2026-09-01 round's ruling 7 briefly widened the set to include the
+cooking-pit exemplar, and the 2026-09-02 ruling supersedes that amendment and returns the release
+to Sawmill-only). The ENGINE is unchanged and complete - multiblock structure patterns, custody
+sockets, custody persistence, doneness, unattended processing and the api all ship in code; only
+the shipped default CONTENT set is narrowed.
 
 - **Held back, not deleted:** `Stations/CookingFire.json`, `Stations/CuttingBoard.json` (+
-  `Actions/PrepFish.json`, `Emote/RPG_Emote_Knife.json`), `Stations/MountSpike.json`, and
-  `NPC/Roles/RPG_Performer_Spike.json`, each with its own Item + RootInteraction, all moved with
-  `git mv` into **`unreleased/`** (a byte-exact mirror of `src/main/resources`, outside every
-  Gradle resource root). `unreleased/restore.ps1` moves any group or all of it back in one command;
+  `Actions/PrepFish.json`, `Emote/RPG_Emote_Knife.json`), `Stations/MountSpike.json`,
+  `NPC/Roles/RPG_Performer_Spike.json`, and (2026-09-02) the whole cooking-pit family - the
+  `Patterns/CookingPit.json` structure, `Stations/CookingPit.json` with its Grill/Stew layering
+  over `rpgstations:socket_filled`, the `RPG_Station_CookingPit` + `RPG_Station_Cooking_Pot`
+  blocks, `RPG_Food_Hearty_Stew`, and `RPG_Station_CookingPit_Use` - each station with its own
+  Item + RootInteraction, all moved into **`unreleased/`** (a byte-exact mirror of
+  `src/main/resources`, outside every Gradle resource root). `unreleased/restore.ps1` moves any
+  group or all of it back in one command;
   `unreleased/README.md` is the full inventory + rationale. **Do not re-create any of this content
-  from scratch - restore it.**
+  from scratch - restore it.** The cooking-pit family keeps its full parity gate while held:
+  `station/HeldCookingPitPatternTest` decodes the held files directly (and
+  `asset/ShippedAssetDecodeTest` scans the `unreleased/` mirror too), so a restore ships
+  pre-verified.
 - **Every `.lang` key STAYED shipped** in all 9 locales (an unreferenced key is invisible at
   runtime, and holding them back would have risked translation work). `i18n/RpgStationsLangKeys`
   and `LangFileIntegrityTest` therefore needed no change in either direction.
@@ -277,9 +283,9 @@ src/main/resources/
                                                         the six Pattern A asset stores this mod registers
   Server/ZiggfreedCommon/Lootables/                      the Sawmill's loot tables (the SHARED library's store)
   Server/Item/{Items,RootInteractions}/                 the jar's OWN default blocks + their RootInteractions: the Sawmill
-                                                        (+ its trophy hatchet) and the cooking-pit family
-                                                        (RPG_Station_CookingPit, the RPG_Station_Cooking_Pot vessel,
-                                                        the RPG_Food_Hearty_Stew meal)
+                                                        (+ its trophy hatchet) and the shared RPG_Station_Retrieve
+                                                        (the cooking-pit family's blocks and Use chain are held
+                                                        under unreleased/)
   Server/Drops/                                         the standalone Sawmill's native-namespace drop tables
   Server/Entity/Effects/RPG/                             RPG_Station_Hold.json (the effect-mode movement-lock effect)
   Server/Languages/<bcp47>/                             rpgstations.lang (all 9 locales) + native items.lang/avatarCustomization.lang
