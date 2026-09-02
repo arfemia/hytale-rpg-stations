@@ -128,6 +128,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `PerCycleContributions` | array of [Contribution](#field-actionasset-work-percyclecontributions-item) | `null` | Amounts posted on every completed cycle, forwarded verbatim on the cycle-completed event; the engine never interprets a channel itself. On an IDLE cycle each Amount is pre-scaled by Work.Idle.Fraction. Contrast Roll.Grants.Contributions, which is one-shot and never scaled. |
 | `Idle` | [Idle](#field-actionasset-work-idle) | `null` | Opt-in no-material idle practice mode: authoring this group at all turns it on; absent = off (a NO_INPUTS start is denied). |
 | `Looping` | `boolean` | `null` | Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape). |
+| `Unattended` | [Unattended](#field-actionasset-work-unattended) | `null` | Opt-in unattended processing over placed custody: authoring this group at all turns it on (absent = attended-only). While nobody works the station, its recipe conversions keep settling against the placed piles on world game time - the transform happens immediately, and the loot rolls and contribution posts it would have earned accrue on the output pile and pay out to whoever gathers it. |
 
 <a id="field-actionasset-anchors-item"></a>
 ### ActionAsset.Anchors[]
@@ -230,6 +231,15 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Enabled` | `boolean` | `null` | Whether no-material idle practice applies when no conversion is runnable. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's Idle group with practice switched off. |
 | `CycleMs` | `long` | `null` | Milliseconds per idle cycle. Reader-defaults to 3x the effective Work.CycleMs, floored at 2x it. |
 | `Fraction` | `double` | `null` | The fraction of a normal cycle's Work.PerCycleContributions amounts an idle cycle posts (no conversion, no loot). Reader-defaults to 0.1, clamped to [0,1]. |
+
+<a id="field-actionasset-work-unattended"></a>
+#### ActionAsset.Work.Unattended
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Enabled` | `boolean` | `null` | Whether unattended settling applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's Unattended group with settling switched off. |
+| `MaxCycles` | `integer` | `null` | One ceiling, both ends: the most cycles a single unattended settle may commit, and the most accrued cycles a single gather pays out. Reader-defaults to 24; time and accrual beyond it are forfeited, never banked. |
+| `CatchUpMaxMs` | `long` | `null` | The most elapsed world game time one settle may consume, in milliseconds. Reader-defaults to 86400000 (24 hours); elapsed time beyond it is forfeited. |
 
 <a id="field-actionasset-contributionscale-floors-item"></a>
 #### ActionAsset.ContributionScale.Floors[]
@@ -378,6 +388,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `PerCycleContributions` | array of [Contribution](#field-actiondef-work-percyclecontributions-item) | `null` | Amounts posted on every completed cycle, forwarded verbatim on the cycle-completed event; the engine never interprets a channel itself. On an IDLE cycle each Amount is pre-scaled by Work.Idle.Fraction. Contrast Roll.Grants.Contributions, which is one-shot and never scaled. |
 | `Idle` | [Idle](#field-actiondef-work-idle) | `null` | Opt-in no-material idle practice mode: authoring this group at all turns it on; absent = off (a NO_INPUTS start is denied). |
 | `Looping` | `boolean` | `null` | Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape). |
+| `Unattended` | [Unattended](#field-actiondef-work-unattended) | `null` | Opt-in unattended processing over placed custody: authoring this group at all turns it on (absent = attended-only). While nobody works the station, its recipe conversions keep settling against the placed piles on world game time - the transform happens immediately, and the loot rolls and contribution posts it would have earned accrue on the output pile and pay out to whoever gathers it. |
 
 <a id="field-actiondef-anchors-item"></a>
 ### ActionDef.Anchors[]
@@ -480,6 +491,15 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Enabled` | `boolean` | `null` | Whether no-material idle practice applies when no conversion is runnable. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's Idle group with practice switched off. |
 | `CycleMs` | `long` | `null` | Milliseconds per idle cycle. Reader-defaults to 3x the effective Work.CycleMs, floored at 2x it. |
 | `Fraction` | `double` | `null` | The fraction of a normal cycle's Work.PerCycleContributions amounts an idle cycle posts (no conversion, no loot). Reader-defaults to 0.1, clamped to [0,1]. |
+
+<a id="field-actiondef-work-unattended"></a>
+#### ActionDef.Work.Unattended
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Enabled` | `boolean` | `null` | Whether unattended settling applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's Unattended group with settling switched off. |
+| `MaxCycles` | `integer` | `null` | One ceiling, both ends: the most cycles a single unattended settle may commit, and the most accrued cycles a single gather pays out. Reader-defaults to 24; time and accrual beyond it are forfeited, never banked. |
+| `CatchUpMaxMs` | `long` | `null` | The most elapsed world game time one settle may consume, in milliseconds. Reader-defaults to 86400000 (24 hours); elapsed time beyond it is forfeited. |
 
 <a id="field-actiondef-contributionscale-floors-item"></a>
 #### ActionDef.ContributionScale.Floors[]
@@ -1402,7 +1422,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Name` | `string` | `null` | Ignored - the settings asset id is always the fixed 'settings' id, not this key. Kept as a schema field for editor display only. |
 | `Enabled` | `boolean` | `null` | The engine master switch; false disables the whole RpgStations engine at the SettingsCatalog check. Reader-defaults to true. |
 | `SummaryHud` | [SummaryHud](#field-settingsasset-summaryhud) | `null` | The end-of-session summary panel's layout and lifetime. |
-| `Limits` | [Limits](#field-settingsasset-limits) | `null` | Ceilings a server owner can set on what this engine is allowed to have live at once (sessions and puppets per world, placed-input stashes per chunk section). Absent, or any leaf left null, means unlimited. |
+| `Limits` | [Limits](#field-settingsasset-limits) | `null` | Ceilings a server owner can set on what this engine is allowed to have live at once (sessions and puppets per world, placed-input stashes per chunk section), plus the unattended pass's per-world visit interval. Absent, or any ceiling leaf left null, means unlimited; the interval defaults to 1000ms. |
 
 <a id="field-settingsasset-summaryhud"></a>
 ### SettingsAsset.SummaryHud
@@ -1423,5 +1443,6 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `MaxSessionsPerWorld` | `integer` | `null` | The most work sessions that may run at once in ONE world. A press that would exceed it is denied with a localized toast, and the station is left untouched. Null (the default) means unlimited. |
 | `MaxPuppetsPerWorld` | `integer` | `null` | The most live puppets (an action's Puppet group: the spawned, network-replicated figure that performs the work in the player's place) that may exist at once in ONE world. Past it a session still starts and runs normally, it simply performs in the player's own body instead of spawning a puppet - the same graceful fallback a failed spawn already takes. Null (the default) means unlimited. |
 | `MaxStashesPerSection` | `integer` | `null` | The most blocks in ONE chunk section (a 16x16x16 cube) that may hold placed station input at once. Placing into a station that already holds material always works (it tops the existing store up); only a placement that would CREATE a new one past the ceiling is denied, with a localized toast. Null (the default) means unlimited. |
+| `UnattendedIntervalMs` | `long` | `null` | How often, in milliseconds, ONE world's unattended pass runs (visiting placed-input stations whose action authors Work.Unattended and settling any cycles world game time has earned them). Null (the default) means 1000. Raising it makes unattended stations settle in coarser bursts; the math is the same either way. |
 | `MaxCustodyClaimsPerWorld` | `integer` | `null` | Retired and ignored. Placed input is stored on the block's own chunk section, so the bound is per section: author MaxStashesPerSection instead. A value here logs a warning naming that replacement and changes nothing. |
 

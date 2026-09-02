@@ -338,9 +338,41 @@ public class StationAssetCodecTest {
     @Test
     void work_carriesNoExclusiveLeaf() {
         assertEquals(java.util.Set.of("CycleMs", "MaxDurationMs", "MaxMoveMeters",
-                        "PerCycleContributions", "Idle", "Looping"),
+                        "PerCycleContributions", "Idle", "Looping", "Unattended"),
                 StationAsset.Work.CODEC.getEntries().keySet(),
                 "one worker per placed block is a Block property, not a Work one");
+    }
+
+    @Test
+    void work_decodesUnattendedKnobs() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Work\": {"
+                + " \"Unattended\": { \"MaxCycles\": 12, \"CatchUpMaxMs\": 3600000 } } } ] }");
+        StationAsset.Work.Unattended u = a.getActions()[0].getWork().getUnattended();
+        assertTrue(u.effectiveEnabled(), "an authored Unattended group means settling is on");
+        assertEquals(12, u.getMaxCycles());
+        assertEquals(12, u.effectiveMaxCycles());
+        assertEquals(3600000L, u.getCatchUpMaxMs());
+        assertEquals(3600000L, u.effectiveCatchUpMaxMs());
+    }
+
+    @Test
+    void work_unattendedEmptyGroup_isTheOptInWithReaderDefaults() throws Exception {
+        // The fixture-standard opt-in shape: {} - Enabled reads true, both ceilings read their
+        // documented defaults (24 cycles / 24 hours).
+        StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Work\": {"
+                + " \"Unattended\": {} } } ] }");
+        StationAsset.Work.Unattended u = a.getActions()[0].getWork().getUnattended();
+        assertTrue(u.effectiveEnabled());
+        assertEquals(24, u.effectiveMaxCycles());
+        assertEquals(86_400_000L, u.effectiveCatchUpMaxMs());
+    }
+
+    @Test
+    void work_unattendedAbsent_meansAttendedOnly() throws Exception {
+        StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Work\": {"
+                + " \"CycleMs\": 5000 } } ] }");
+        assertNull(a.getActions()[0].getWork().getUnattended(),
+                "no Unattended group = the attended-only station every action was before the knob");
     }
 
     @Test

@@ -21,8 +21,8 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
  * on the block's persisted stash ({@link StationCustodyClaim}'s doneness accessors: the stash-level
  * {@code ProgressGameTime} leaf is the window start, and the windowed pile carries
  * {@link #BATCHES_KEY} in its {@code PendingCycles} map); the impure settle orchestration is
- * {@code StationService#settleDoneness}, the ONE function every touch point (and a future
- * unattended pass) calls.
+ * {@code StationService#settleDoneness}, the ONE function every touch point (the
+ * unattended pass included) calls.
  *
  * <p><b>The clock is game time, never wall clock</b>: game time stands still while the server is
  * down, so an outage advances a window by exactly zero - a batch mid-window at shutdown is exactly
@@ -56,8 +56,8 @@ final class StationDoneness {
 
     /**
      * The whole {@code PendingCycles} key namespace this window record reserves. Any OTHER
-     * consumer-defined accrual key (a future unattended pass's per-conversion counts) must live
-     * outside this prefix.
+     * accrual key (the unattended pass's per-conversion counts,
+     * {@link StationUnattended#ACCRUAL_KEY_PREFIX}) lives outside this prefix.
      */
     static final String RESERVED_KEY_PREFIX = "doneness:";
 

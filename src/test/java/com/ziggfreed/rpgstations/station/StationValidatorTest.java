@@ -1266,4 +1266,90 @@ public class StationValidatorTest {
                                 StationStep.Produce.TO_CUSTODY))}));
         assertFalse(codes(validate(a)).contains("DONENESS_WITHOUT_PRODUCE_SOCKET"));
     }
+
+    // ==================== Unattended (decision 90) ====================
+
+    /** A work group opting into unattended settling (the group's presence is the opt-in). */
+    private static StationAsset.Work unattendedWork() {
+        return StationAsset.Work.of(5000L, null, null, null)
+                .withUnattended(StationAsset.Work.Unattended.of(null, null, null));
+    }
+
+    @Test
+    void unattendedWithoutCustody_flagged() {
+        StationAsset a = station("headlessmill", ActionDef.of("Mill")
+                .withRecipe(trunkRecipe())
+                .withWork(unattendedWork()));
+        assertTrue(codes(validate(a)).contains("UNATTENDED_WITHOUT_CUSTODY"),
+                "unattended settling works over placed piles - with no Custody it can never run");
+    }
+
+    @Test
+    void unattendedOverCustody_cleanFixture_notFlagged() {
+        StationAsset a = station("pitlike", ActionDef.of("Stew")
+                .withRecipe(trunkRecipe())
+                .withCustody(Custody.of(100, null, null))
+                .withWork(unattendedWork()));
+        Set<String> codes = codes(validate(a));
+        assertFalse(codes.contains("UNATTENDED_WITHOUT_CUSTODY"));
+        assertFalse(codes.contains("UNATTENDED_WITH_STEPS"));
+        assertFalse(codes.contains("UNATTENDED_WITH_ANCHORS"));
+    }
+
+    @Test
+    void unattendedWithSteps_flagged_attendedOnlyProgram() {
+        StationAsset a = station("steppedpit", ActionDef.of("Ritual")
+                .withCustody(Custody.of(100, null, null))
+                .withWork(unattendedWork())
+                .withSteps(new StationStep[] {StationStep.of("cook")
+                        .withProduce(StationStep.Produce.of(
+                                new Ingredient[] {Ingredient.item("Fixture_Stew", 1)},
+                                StationStep.Produce.TO_CUSTODY))}));
+        assertTrue(codes(validate(a)).contains("UNATTENDED_WITH_STEPS"),
+                "authored steps run attended-only; only the implicit transform settles unattended");
+    }
+
+    @Test
+    void unattendedWithAnchors_flagged_walksRunAttendedOnly() {
+        StationAsset a = station("walkingpit", ActionDef.of("Stew")
+                .withRecipe(trunkRecipe())
+                .withCustody(Custody.of(100, null, null))
+                .withWork(unattendedWork())
+                .withAnchors(Map.of("fire", ActionDef.Anchor.of("fixturefire", 8.0))));
+        assertTrue(codes(validate(a)).contains("UNATTENDED_WITH_ANCHORS"));
+    }
+
+    @Test
+    void unattendedDisabledLeaf_suppressesTheUnattendedChecks() {
+        // Enabled:false (a Parent child flipping settling off) means nothing settles, so none of
+        // the unattended advisories apply.
+        StationAsset a = station("attendedafterall", ActionDef.of("Mill")
+                .withRecipe(trunkRecipe())
+                .withWork(StationAsset.Work.of(5000L, null, null, null)
+                        .withUnattended(StationAsset.Work.Unattended.of(false, null, null))));
+        assertFalse(codes(validate(a)).contains("UNATTENDED_WITHOUT_CUSTODY"));
+    }
+
+    @Test
+    void donenessWindow_unattendedExemption_noProduceSocketWarn() {
+        // The Unattended exemption: an unattended settle lands produce in custody piles itself,
+        // so a ready window on such an action CAN open with no Produce.To:"Custody" step.
+        StationAsset a = station("unattendedwindow", ActionDef.of("Stew")
+                .withRecipe(donenessRecipe(StationAsset.Doneness.of(60000L,
+                        new Ingredient[] {Ingredient.item("Fixture_Charcoal", 1)}), null))
+                .withCustody(Custody.of(100, null, null))
+                .withWork(unattendedWork()));
+        assertFalse(codes(validate(a)).contains("DONENESS_WITHOUT_PRODUCE_SOCKET"),
+                "the unattended settle is what opens this window - the warn would be wrong");
+    }
+
+    @Test
+    void donenessWindow_withoutUnattended_theProduceSocketWarnStays() {
+        // The exemption is scoped: the same window WITHOUT unattended keeps the standing warn.
+        StationAsset a = station("attendedwindow", ActionDef.of("Stew")
+                .withRecipe(donenessRecipe(StationAsset.Doneness.of(60000L,
+                        new Ingredient[] {Ingredient.item("Fixture_Charcoal", 1)}), null))
+                .withCustody(Custody.of(100, null, null)));
+        assertTrue(codes(validate(a)).contains("DONENESS_WITHOUT_PRODUCE_SOCKET"));
+    }
 }

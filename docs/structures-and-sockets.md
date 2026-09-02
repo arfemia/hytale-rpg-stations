@@ -141,4 +141,4 @@ unrelated mod updated. To VARY a shape, author a new pattern (native `Parent` sh
 
 ---
 
-Previous: [Custody & Placed Display](custody-and-placed-display.md) · Next: [Puppet & Performers](puppet-presentation.md)
+Previous: [Unattended Work](unattended-work.md) · Next: [Puppet & Performers](puppet-presentation.md)

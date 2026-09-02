@@ -14,10 +14,29 @@ there is no prior public release to diff against, so every entry is additive by 
   single-item placement keeps its full metadata (durability, enhancement rolls) across a restart
   too. A session stop while the player is present (re-press, walk-off, damage, death, running out
   of inputs) still hands materials back to the inventory; disconnecting leaves them placed, and
-  breaking the block still drops them at the block once. Caveats: the floating placed-item display
-  reappears the first time anyone uses the station after a restart (the materials themselves are
-  there the whole time), and the live in-game chunk save/load round trip plus the enhanced-item
+  breaking the block still drops them at the block once. The floating placed-item display respawns
+  from the persisted contents shortly after the chunk loads (the unattended pass's hydrate walk,
+  budgeted to a handful of prop spawns per world per tick), with the first interaction as the
+  immediate fallback. Caveat: the live in-game chunk save/load round trip plus the enhanced-item
   metadata survival are verified in play rather than by the build's tests.
+- **Unattended work: stations that keep working while nobody stands at them.** An action
+  authoring `Work.Unattended` (the group's presence is the opt-in; `MaxCycles` and `CatchUpMaxMs`
+  bound one settle burst at 24 cycles and 24 hours of catch-up by default) keeps settling its
+  recipe conversions against the block's placed custody piles on world GAME time - load the pot,
+  walk away, and the ingredients keep becoming stew, in loaded chunks, with an outage cooking and
+  owing nothing. The transform is immediate (inputs drain, outputs land in their piles, the
+  doneness window opens and can burn exactly as an attended batch would); the loot rolls and
+  contribution posts those cycles would have earned ACCRUE on the output pile and pay out to
+  whoever GATHERS it - evaluated as if attended with the gatherer as the worker, at the idle
+  contribution rate, capped by the same `MaxCycles` ceiling - and the new
+  `StationUnattendedGatheredEvent` carries the batch (gatherer, cycle count, already-scaled
+  contributions) to any listening mod. A live session always wins (the pass skips a block being
+  worked); authored `Steps`/`Anchors` programs stay attended-only (the validator says so);
+  `Limits.UnattendedIntervalMs` paces each world's pass. The same pass doubles as the
+  chunk-load hydrate walk that rebuilds missing placed-item displays and block states. Caveats:
+  the live loaded-section walk, the in-game prop respawn timing, and a real multi-hour catch-up
+  are verified in play rather than by the build's tests (the settle math, clamps, accrual
+  namespace and gather payout are unit-pinned).
 - **Custody sockets: named placement slots with their own piles, owners and displays.** A station's
   `Custody` group can author a `Sockets` map - a stew pot's meat rack beside its herb basket beside
   its output shelf - each slot with its own acceptance matcher, capacity (the smaller of its own cap

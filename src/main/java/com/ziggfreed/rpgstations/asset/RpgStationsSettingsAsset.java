@@ -69,7 +69,7 @@ public final class RpgStationsSettingsAsset
             .metadata(new UIEditorSectionStart("Summary HUD")).add()
             .appendInherited(new KeyedCodec<>("Limits", Limits.CODEC, false),
                     (a, v) -> a.limits = v, a -> a.limits, (a, parent) -> a.limits = parent.limits)
-            .documentation("Ceilings a server owner can set on what this engine is allowed to have live at once (sessions and puppets per world, placed-input stashes per chunk section). Absent, or any leaf left null, means unlimited.")
+            .documentation("Ceilings a server owner can set on what this engine is allowed to have live at once (sessions and puppets per world, placed-input stashes per chunk section), plus the unattended pass's per-world visit interval. Absent, or any ceiling leaf left null, means unlimited; the interval defaults to 1000ms.")
             .metadata(new UIEditorSectionStart("Limits")).add()
             .build();
 
@@ -131,9 +131,11 @@ public final class RpgStationsSettingsAsset
     }
 
     /**
-     * Ceilings on what the engine may have live at once - three INDEPENDENT knobs, each nullable
-     * and each meaning "unlimited" when absent, so an owner can cap one thing without implying
-     * anything about the others.
+     * Ceilings on what the engine may have live at once - INDEPENDENT knobs, each nullable and
+     * each meaning "unlimited" when absent, so an owner can cap one thing without implying
+     * anything about the others - plus the unattended pass's per-world visit interval
+     * ({@link #unattendedIntervalMs}, a pace knob rather than a ceiling, defaulting to
+     * {@value #DEFAULT_UNATTENDED_INTERVAL_MS}ms when absent).
      *
      * <p>The session and puppet caps are scoped PER WORLD: the cost they protect against (session
      * ticking, replicated performer entities) is paid by the players and the tick loop of one
@@ -147,9 +149,14 @@ public final class RpgStationsSettingsAsset
      * degrades to the in-body route the engine already falls back to whenever a spawn fails.
      */
     public static final class Limits {
+
+        /** The {@link #unattendedIntervalMs} reader default: one unattended visit pass per world per second. */
+        public static final long DEFAULT_UNATTENDED_INTERVAL_MS = 1000L;
+
         @Nullable protected Integer maxSessionsPerWorld;
         @Nullable protected Integer maxPuppetsPerWorld;
         @Nullable protected Integer maxStashesPerSection;
+        @Nullable protected Long unattendedIntervalMs;
         @Nullable protected Integer retiredMaxCustodyClaimsPerWorld;
 
         public static final BuilderCodec<Limits> CODEC = BuilderCodec.builder(Limits.class, Limits::new)
@@ -168,6 +175,11 @@ public final class RpgStationsSettingsAsset
                         (o, p) -> o.maxStashesPerSection = p.maxStashesPerSection)
                 .documentation("The most blocks in ONE chunk section (a 16x16x16 cube) that may hold placed station input at once. Placing into a station that already holds material always works (it tops the existing store up); only a placement that would CREATE a new one past the ceiling is denied, with a localized toast. Null (the default) means unlimited.")
                 .addValidator(CodecWarnValidators.positive("Limits.MaxStashesPerSection should be positive.")).add()
+                .appendInherited(new KeyedCodec<>("UnattendedIntervalMs", Codec.LONG, false),
+                        (o, v) -> o.unattendedIntervalMs = v, o -> o.unattendedIntervalMs,
+                        (o, p) -> o.unattendedIntervalMs = p.unattendedIntervalMs)
+                .documentation("How often, in milliseconds, ONE world's unattended pass runs (visiting placed-input stations whose action authors Work.Unattended and settling any cycles world game time has earned them). Null (the default) means 1000. Raising it makes unattended stations settle in coarser bursts; the math is the same either way.")
+                .addValidator(CodecWarnValidators.positive("Limits.UnattendedIntervalMs should be positive.")).add()
                 .appendInherited(new KeyedCodec<>("MaxCustodyClaimsPerWorld", Codec.INTEGER, false),
                         (o, v) -> o.retiredMaxCustodyClaimsPerWorld = v, o -> o.retiredMaxCustodyClaimsPerWorld,
                         (o, p) -> o.retiredMaxCustodyClaimsPerWorld = p.retiredMaxCustodyClaimsPerWorld)
@@ -178,10 +190,17 @@ public final class RpgStationsSettingsAsset
         @Nonnull
         public static Limits of(@Nullable Integer maxSessionsPerWorld, @Nullable Integer maxPuppetsPerWorld,
                 @Nullable Integer maxStashesPerSection) {
+            return of(maxSessionsPerWorld, maxPuppetsPerWorld, maxStashesPerSection, null);
+        }
+
+        @Nonnull
+        public static Limits of(@Nullable Integer maxSessionsPerWorld, @Nullable Integer maxPuppetsPerWorld,
+                @Nullable Integer maxStashesPerSection, @Nullable Long unattendedIntervalMs) {
             Limits l = new Limits();
             l.maxSessionsPerWorld = maxSessionsPerWorld;
             l.maxPuppetsPerWorld = maxPuppetsPerWorld;
             l.maxStashesPerSection = maxStashesPerSection;
+            l.unattendedIntervalMs = unattendedIntervalMs;
             return l;
         }
 
@@ -199,6 +218,18 @@ public final class RpgStationsSettingsAsset
         @Nullable
         public Integer getMaxStashesPerSection() {
             return maxStashesPerSection;
+        }
+
+        /** The per-world unattended-pass interval in ms, or null for the reader default. */
+        @Nullable
+        public Long getUnattendedIntervalMs() {
+            return unattendedIntervalMs;
+        }
+
+        /** {@link #unattendedIntervalMs} with the {@value #DEFAULT_UNATTENDED_INTERVAL_MS}ms reader default (a non-positive authored value reads as the default too). */
+        public long effectiveUnattendedIntervalMs() {
+            return unattendedIntervalMs != null && unattendedIntervalMs > 0
+                    ? unattendedIntervalMs : DEFAULT_UNATTENDED_INTERVAL_MS;
         }
 
         /**

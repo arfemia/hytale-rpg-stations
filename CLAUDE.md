@@ -174,8 +174,13 @@ in the world (`StationService#custodyReturnsAtStop` - the old disconnect claim s
 EVICTION drops only volatile state and never touches stashes; a foreign stash refuses an anchor
 claim across restarts; a Loaded block with a NON-EMPTY stash is CORRECT after a restart (the
 self-heal resets to Empty only when the stash is truly empty), and the volatile display prop
-respawns from the persisted contents on the block's first interaction
-(`StationService#respawnDisplayIfMissing`; a hydrate-on-section-load reconciler is a later leg).
+respawns from the persisted contents shortly after the section loads (the unattended pass's
+hydrate walk over loaded chunk sections, budgeted per tick) with the first-interaction call kept
+as belt and braces (`StationService#respawnDisplayIfMissing`). The same pass drives UNATTENDED
+processing (decision 90, `Work.Unattended`): a custody-loaded station keeps settling its
+conversions on world game time with nobody engaged, and the accrued cycles' rolls/contributions
+pay out at gather to the gathering player (`StationUnattendedGatheredEvent`); see
+`station/CLAUDE.md`'s unattended section.
 The display prop's ref + `NetworkId` live in the volatile `displayByBlock` side map (a NetworkId
 is per-world, never boot-stable). `StationCustodyBreakSystem` gained a nested `Environment`
 sibling over `EnvironmentBreakBlockEvent` (fired INSTEAD of `BreakBlockEvent` for fire/physics/
@@ -423,7 +428,7 @@ Package `com.ziggfreed.rpgstations.api` (+ `.api.event`), the freeze-at-1.0.0 (s
 between this engine and any mod that wants to hook it. Split by shape, per the native-events rule:
 **observe-only moments are native Hytale events** (`StationSessionStartedEvent`/
 `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`/
-`StationEnhanceCompletedEvent`, POJOs
+`StationEnhanceCompletedEvent`/`StationUnattendedGatheredEvent`, POJOs
 `implements IEvent<Void>`, dispatched `HytaleServer.get().getEventBus().dispatchFor(...)` +
 `hasListener()` on the world thread, fired from `station.StationEvents`); **request/response
 points are typed registries** on the static `RpgStationsApi` holder (`FactorRegistry` - the one

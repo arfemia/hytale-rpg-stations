@@ -25,9 +25,11 @@ import javax.annotation.Nullable;
 import org.joml.Vector3d;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
+import com.hypixel.hytale.component.ArchetypeChunk;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.protocol.AnimationSlot;
 import com.hypixel.hytale.protocol.InteractionType;
 import com.hypixel.hytale.protocol.ItemResourceType;
@@ -61,6 +63,7 @@ import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.ParticleUtil;
 import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.chunk.section.ChunkSection;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.core.util.NotificationUtil;
@@ -367,10 +370,30 @@ public final class StationService {
     private record PendingSelection(@Nonnull String blockKey, @Nonnull String category) {
     }
 
+    /**
+     * The unattended pass's volatile index (decision 90): which blocks carry an
+     * unattended-capable stash, plus the hydrate walk's visited-section markers. Fed from three
+     * sources - a live stash write at an action authoring {@code Work.Unattended}, the per-world
+     * hydrate walk over LOADED chunk sections, and lazy eviction when a visit finds the section
+     * unloaded or the stash gone. The stashes themselves are chunk-persisted; this index is only
+     * where the pass looks, rebuilt every boot by the hydrate walk.
+     */
+    private final UnattendedIndex unattendedIndex = new UnattendedIndex();
+
+    /** Per-world next-run throttle for the unattended pass ({@code Limits.UnattendedIntervalMs}); world-keyed, evicted with the world. */
+    private final ConcurrentHashMap<World, Long> unattendedNextRunAtMs = new ConcurrentHashMap<>();
+
+    /** How many NOT-yet-hydrated sections one unattended pass may walk (an engine constant, not a knob). */
+    static final int UNATTENDED_HYDRATE_SECTION_BUDGET = 64;
+
+    /** How many missing display props one unattended pass may spawn per world (the hydrate prop budget). */
+    static final int UNATTENDED_PROP_SPAWN_BUDGET = 32;
+
     private StationService() {
         // The counter map shadows pendingMomentsByWorld, which self-registers its own evictor, so it
         // needs the matching registration to drop an unloaded world's entry at the same moment.
         WorldEvictors.registerEvictor(pendingMomentCounts::remove);
+        WorldEvictors.registerEvictor(unattendedNextRunAtMs::remove);
     }
 
     @Nonnull
@@ -575,6 +598,9 @@ public final class StationService {
                     if (!loadedBefore) {
                         flipCustodyState(world, blockX, blockY, blockZ, custody, true);
                     }
+                    // Unattended (decision 90): a live stash write at an action authoring
+                    // Work.Unattended indexes the block for the sessionless pass.
+                    registerUnattendedIfEnabled(blockKey, action);
                     toast(playerRef, RpgMsg.tr(loadedBefore
                             ? "ui.station.custody.topped_up" : "ui.station.custody.placed"));
                     return;
@@ -971,6 +997,10 @@ public final class StationService {
         // completion moment is emitted from inside stop(), so its cue routinely outlives both its
         // own session and, when it was the world's last one, the whole session queue.
         drainPendingMoments(world, store);
+        // The unattended pass (decision 90) rides the same per-world drain, ALSO outside the
+        // session-empty early return - its whole point is stations working while nobody holds a
+        // session. Throttled per world inside.
+        tickUnattended(world, commandBuffer);
         ConcurrentLinkedQueue<StationSession> sessions = sessionsByWorld.peek(world);
         if (sessions == null || sessions.isEmpty()) {
             return;
@@ -3204,6 +3234,9 @@ public final class StationService {
         byBlock.keySet().removeIf(keyMatches);
         knownStationBlocks.keySet().removeIf(keyMatches);
         pendingByPlayer.values().removeIf(p -> keyMatches.test(p.blockKey()));
+        // The unattended index's block keys AND hydrated-section markers carry the same world-uuid
+        // prefix, so the one predicate sweeps both (the stashes themselves ride the chunks).
+        unattendedIndex.dropMatching(keyMatches);
         return handles;
     }
 
@@ -4283,14 +4316,14 @@ public final class StationService {
      * {@link StationCustodyClaim#uniqueStack(String)} when set, else a one-quantity stack of
      * {@code visualItemId}.
      */
-    private void spawnDisplayIfAbsent(@Nonnull String blockKey, @Nonnull String socketId,
+    private boolean spawnDisplayIfAbsent(@Nonnull String blockKey, @Nonnull String socketId,
             @Nullable Custody.Display displayGroup, @Nonnull StationCustodyClaim claim,
             @Nullable String visualItemId, @Nonnull CommandBuffer<EntityStore> commandBuffer,
             int x, int y, int z) {
         String displayKey = StationCustodyRetrieval.displayKey(blockKey, socketId);
         if (displayGroup == null || visualItemId == null || visualItemId.isBlank()
                 || displayByBlock.containsKey(displayKey)) {
-            return;
+            return false;
         }
         ItemStack unique = claim.uniqueStack(socketId);
         ItemStack visualStack = unique != null ? unique : new ItemStack(visualItemId, 1);
@@ -4300,40 +4333,46 @@ public final class StationService {
             // Both halves land together: the ref AND the network id the prop was built with, so
             // press-F retrieval never has to read a live NetworkId component back off the entity.
             displayByBlock.put(displayKey, new DisplayHandle(spawned.ref(), spawned.networkId()));
+            return true;
         }
+        return false;
     }
 
     /**
-     * The first-touch display self-heal: a stash that survived a restart (or a chunk reload) has
-     * its volatile props respawned from the persisted contents the first time anyone touches the
-     * station - EVERY socket with a {@code Display} group and a non-empty pile gets its own. The
-     * display knobs come from the CLAIM's own station/action (not the presser's selection), so
-     * the props always render the vocabulary of whoever loaded the block. The full
-     * hydrate-on-section-load reconciler is deliberately not here - until it exists, the props
-     * reappear at the first interaction rather than at chunk load, and that caveat is documented
-     * player-facing.
+     * The display self-heal: a stash that survived a restart (or a chunk reload) has its volatile
+     * props respawned from the persisted contents - EVERY socket with a {@code Display} group and
+     * a non-empty pile gets its own. The display knobs come from the CLAIM's own station/action
+     * (not the presser's selection), so the props always render the vocabulary of whoever loaded
+     * the block. Reached from BOTH the unattended pass's hydrate walk (props reappear within one
+     * pass of the section loading, under its per-pass spawn budget) and the first-touch paths
+     * (belt and braces - a world with the unattended pass throttled far out still heals on
+     * touch). Returns how many props actually spawned, for the hydrate pass's budget.
      */
-    private void respawnDisplayIfMissing(@Nonnull StationCustodyClaim claim, @Nonnull String blockKey,
+    private int respawnDisplayIfMissing(@Nonnull StationCustodyClaim claim, @Nonnull String blockKey,
             @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        int spawned = 0;
         try {
             StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
             Custody custody = asset != null
                     ? ActionResolver.resolve(asset, claim.actionId).getCustody() : null;
             if (custody == null) {
-                return;
+                return 0;
             }
             for (Custody.ResolvedSocket socket : custody.effectiveSockets()) {
                 if (socket.display() == null
                         || (claim.isEmpty(socket.id()) && claim.uniqueStack(socket.id()) == null)) {
                     continue;
                 }
-                spawnDisplayIfAbsent(blockKey, socket.id(), socket.display(), claim,
+                if (spawnDisplayIfAbsent(blockKey, socket.id(), socket.display(), claim,
                         oldestPlacedItemId(claim, socket.id()),
-                        commandBuffer, claim.blockX, claim.blockY, claim.blockZ);
+                        commandBuffer, claim.blockX, claim.blockY, claim.blockZ)) {
+                    spawned++;
+                }
             }
         } catch (Throwable t) {
             Log.fine("STATION display respawn failed at " + blockKey + ": " + t.getMessage());
         }
+        return spawned;
     }
 
     /** One socket pile's oldest-placed item id (each tally is insertion-ordered), or {@code null} when empty. */
@@ -4823,6 +4862,10 @@ public final class StationService {
         }
         claim.addTo(socketId, s.playerUuid, itemId, quantity);
         claim.markDirty();
+        // Unattended (decision 90): a produce landing in custody is a stash write too - index the
+        // block when ITS committed action is unattended-capable (the claim's, not necessarily the
+        // running session's - a program can produce into another station's anchor).
+        registerUnattendedIfCapable(blockKey, claim);
         // Display spawn: the SOCKET's own Display, from the anchor station's custody when it
         // carries one for this socket, else the running action's (design 2.2). Only when that
         // socket has no live display yet.
@@ -4977,6 +5020,10 @@ public final class StationService {
                 String windowedSocket = claim.donenessWindowStart() != null
                         ? claim.donenessWindowSocketId() : null;
                 if (windowedSocket == null) {
+                    // The whole-claim hand-back is a gather of every pile: accrued unattended
+                    // cycles pay out to the stopping player first (decision 90).
+                    grantAccruedAtGather(world, claim, claim.pileIds(), ownerStore, s.ref,
+                            s.playerRef, commandBuffer);
                     removeOrDemoteStashAt(world, coords[0], coords[1], coords[2]);
                     despawnDisplay(blockKey, commandBuffer);
                     giveClaimToOwner(commandBuffer, ownerStore, s.ref, claim,
@@ -4985,8 +5032,11 @@ public final class StationService {
                     // Doneness (the D38 window case, anchor form): the pile under the OPEN ready
                     // window stays standing with its window running; every OTHER pile this player
                     // owns hands back exactly as before.
+                    List<String> handedBack = pilesToHandBack(claim, s.playerUuid);
+                    grantAccruedAtGather(world, claim, handedBack, ownerStore, s.ref,
+                            s.playerRef, commandBuffer);
                     List<ItemStack> stacks = new ArrayList<>();
-                    for (String socketId : pilesToHandBack(claim, s.playerUuid)) {
+                    for (String socketId : handedBack) {
                         stacks.addAll(claim.toItemStacks(socketId));
                         claim.removePile(socketId);
                         despawnDisplay(blockKey, socketId, commandBuffer);
@@ -5555,6 +5605,9 @@ public final class StationService {
                 ownerStore = null;
             }
         }
+        // A hand-back is a gather too: any unattended accrual on the piles this player is taking
+        // pays out to them here (decision 90), before the piles leave the stash.
+        grantAccruedAtGather(world, claim, ownedPiles, ownerStore, s.ref, s.playerRef, commandBuffer);
         List<ItemStack> stacks = new ArrayList<>();
         for (String socketId : ownedPiles) {
             stacks.addAll(claim.toItemStacks(socketId));
@@ -5755,6 +5808,10 @@ public final class StationService {
                 // fired BEFORE the give-back so the animation set still reflects what they were
                 // holding when they reached for it, not whatever the retrieved stack just became.
                 playCollectAnimation(store, ref);
+                // Unattended accrual pays out to the GATHERER (decision 90), BEFORE the pile
+                // leaves the stash - the presser earned the gather (Share.Reclaim already gated
+                // who may), so the accrued cycles' rolls and contributions are theirs.
+                grantAccruedAtGather(world, claim, List.of(socketId), store, ref, playerRef, commandBuffer);
                 List<ItemStack> pileStacks = claim.toItemStacks(socketId);
                 // Gathering the WINDOWED pile before expiry clears its ready window (the batches
                 // key leaves with the pile; the start stamp is cleared here) - the block then
@@ -5899,8 +5956,11 @@ public final class StationService {
      */
     void onCustodyBlockBroken(@Nonnull Store<EntityStore> store, @Nonnull CommandBuffer<EntityStore> commandBuffer,
             @Nonnull String blockKey, int x, int y, int z) {
-        // The broken block is no longer a discoverable station block (scope-2 wave 3, gate m4).
+        // The broken block is no longer a discoverable station block (scope-2 wave 3, gate m4),
+        // nor an unattended-capable one - a destroyed station's accrual is forfeit with its stash,
+        // like its doneness window.
         knownStationBlocks.remove(blockKey);
+        unattendedIndex.evictBlock(blockKey);
         // FIRST: drop the broken block's OWN custody at the block (design 2.6's "broken block's
         // custody drops at that block"), removing the stash so a following ANCHOR_LOST stop's
         // anchor sweep does not also try to return it to inventory (mutually exclusive by removal).
@@ -6108,8 +6168,9 @@ public final class StationService {
     // ready window per stash, recorded on persisted GAME-TIME leaves (see StationCustodyClaim's
     // doneness accessors), and every touch point that already reads the stash settles it LAZILY
     // through the ONE settleDoneness core below: the toggle/placement first touch, press-F
-    // retrieval, the engaged session's throttled heartbeat, and any future sessionless pass. Game
-    // time stands still while the server is down, so an outage cooks and burns nothing.
+    // retrieval, the engaged session's throttled heartbeat, and the unattended pass's per-block
+    // settle. Game time stands still while the server is down, so an outage cooks and burns
+    // nothing.
 
     /** How often an ENGAGED session's heartbeat re-checks its primary block's open window (wall-clock throttle). */
     static final long DONENESS_SETTLE_MS = 1000L;
@@ -6292,8 +6353,8 @@ public final class StationService {
 
     /**
      * The ONE lazy window-settle core (decision 87): every touch point that reads a stash calls
-     * this (directly or via {@link #settleDonenessAt}) BEFORE acting on the contents, and a future
-     * sessionless pass calls the same function with its own resolved fold. Cheap when nothing is
+     * this (directly or via {@link #settleDonenessAt}) BEFORE acting on the contents, and the
+     * unattended pass calls the same function with its own resolved fold. Cheap when nothing is
      * open (one persisted-leaf read). When the open window's game-time elapsed has reached the
      * resolved {@code ReadyMs} (boundary-exact: {@code elapsed >= ReadyMs} settles), the windowed
      * pile's whole counted tally collapses to the authored {@code Overdone} entries scaled by the
@@ -6369,6 +6430,528 @@ public final class StationService {
             toast(toucher, RpgMsg.tr("ui.station.output_overdone"));
         }
         return true;
+    }
+
+    // ==================== Unattended processing (decision 90) ====================
+    //
+    // A custody-loaded station whose committed action authors Work.Unattended keeps settling its
+    // conversions while nobody is engaged: the throttled per-world pass below visits every indexed
+    // stash block, analytically settles floor(min(elapsedGameTime, CatchUpMaxMs) / cycleMs) cycles
+    // clamped by inputs, custody room and MaxCycles - TRANSFORM ONLY (Consume+Produce through the
+    // pure cores; no rolls, no commands, no moments beyond block-state flips and the doneness
+    // stamping) - and accrues the settled count on the produce pile. Whoever GATHERS that pile is
+    // paid the accrued cycles' rolls and contributions with every factor resolved against THEM
+    // (grantAccruedAtGather), and StationUnattendedGatheredEvent carries the batch to consumers.
+    // The math lives in StationUnattended (pure); the index in UnattendedIndex (volatile,
+    // hydrate-rebuilt); this section is the impure orchestration only.
+
+    /**
+     * The per-world unattended pass, riding the frame drain OUTSIDE the session early-return
+     * (its whole point is stations working with no session live). Throttled to
+     * {@code Limits.UnattendedIntervalMs} (default 1000ms) per world; each run first HYDRATES
+     * (walks loaded chunk sections the index has not visited, seeding the block index, the
+     * display props and the resting block states from the persisted stashes - the walk that
+     * retires the old first-touch-only prop respawn), then VISITS every indexed block and settles
+     * it. Never throws into the drain.
+     */
+    private void tickUnattended(@Nonnull World world, @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        try {
+            long now = System.currentTimeMillis();
+            Long next = unattendedNextRunAtMs.get(world);
+            if (next != null && now < next) {
+                return;
+            }
+            RpgStationsSettingsAsset.Limits l = limits();
+            long interval = l != null ? l.effectiveUnattendedIntervalMs()
+                    : RpgStationsSettingsAsset.Limits.DEFAULT_UNATTENDED_INTERVAL_MS;
+            unattendedNextRunAtMs.put(world, now + interval);
+            String worldUuid = worldUuidTextOf(world);
+            if (worldUuid == null) {
+                return;
+            }
+            String worldPrefix = StationAnchors.worldPrefix(worldUuid);
+            hydrateLoadedSections(world, worldPrefix, commandBuffer);
+            visitUnattendedBlocks(world, worldPrefix, commandBuffer);
+        } catch (Throwable t) {
+            Log.warn("STATION unattended pass failed: " + t.getMessage());
+        }
+    }
+
+    /** One stash block the hydrate walk found: its section marker plus its world coordinates. */
+    private record HydratedStashBlock(@Nonnull String sectionKey, int x, int y, int z) {
+    }
+
+    /**
+     * The bounded, incremental hydrate walk (the ruled fix for restart-orphaned state): iterate
+     * this world's LOADED chunk sections through the first-party surface
+     * ({@code Store#forEachChunk} over {@code ChunkSection.getComponentType()}, the exact
+     * iteration the engine's own {@code SectionUnloadingSystem} runs), skip sections the index
+     * already visited, and for each new one seed THREE things from its persisted stashes: the
+     * unattended block index, the missing display props (under the per-pass
+     * {@value #UNATTENDED_PROP_SPAWN_BUDGET} spawn budget), and the resting block states. At most
+     * {@value #UNATTENDED_HYDRATE_SECTION_BUDGET} new sections per pass, so a freshly booted
+     * server with thousands of loaded sections hydrates over a few passes instead of stalling
+     * one. A section whose blocks could not all be processed (the prop budget ran out) is
+     * re-armed for the next pass rather than marked done.
+     *
+     * <p>Stash discovery happens INSIDE the iteration but every block's processing is DEFERRED
+     * until after it, so nothing mutates chunk components while the archetype walk runs.
+     */
+    private void hydrateLoadedSections(@Nonnull World world, @Nonnull String worldPrefix,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        if (!BlockStashes.isRegistered()) {
+            return;
+        }
+        ChunkStore chunkStore = world.getChunkStore();
+        Store<ChunkStore> accessor = chunkStore.getStore();
+        List<HydratedStashBlock> found = new ArrayList<>();
+        int[] sectionBudget = {UNATTENDED_HYDRATE_SECTION_BUDGET};
+        accessor.forEachChunk(ChunkSection.getComponentType(), (archetypeChunk, chunkCommands) -> {
+            for (int i = 0; i < archetypeChunk.size() && sectionBudget[0] > 0; i++) {
+                ChunkSection section = archetypeChunk.getComponent(i, ChunkSection.getComponentType());
+                if (section == null) {
+                    continue;
+                }
+                int baseX = ChunkUtil.worldCoordFromLocalCoord(section.getX(), 0);
+                int baseY = ChunkUtil.worldCoordFromLocalCoord(section.getY(), 0);
+                int baseZ = ChunkUtil.worldCoordFromLocalCoord(section.getZ(), 0);
+                String sectionKey = UnattendedIndex.sectionKey(worldPrefix, baseX, baseY, baseZ, ChunkUtil.BITS);
+                if (unattendedIndex.isHydrated(sectionKey)) {
+                    continue;
+                }
+                unattendedIndex.markHydrated(sectionKey);
+                sectionBudget[0]--;
+                Ref<ChunkStore> sectionRef = archetypeChunk.getReferenceTo(i);
+                BlockStashes.forEachInSection(accessor, sectionRef, (lx, ly, lz, stash) ->
+                        found.add(new HydratedStashBlock(sectionKey,
+                                ChunkUtil.worldCoordFromLocalCoord(section.getX(), lx),
+                                ChunkUtil.worldCoordFromLocalCoord(section.getY(), ly),
+                                ChunkUtil.worldCoordFromLocalCoord(section.getZ(), lz))));
+            }
+        });
+        int propBudget = UNATTENDED_PROP_SPAWN_BUDGET;
+        for (int i = 0; i < found.size(); i++) {
+            HydratedStashBlock block = found.get(i);
+            if (propBudget <= 0) {
+                // Out of prop budget: re-arm the remaining blocks' sections so the next pass
+                // finishes what this one could not (belt-and-braces: a first touch still heals).
+                for (int j = i; j < found.size(); j++) {
+                    unattendedIndex.dropSection(found.get(j).sectionKey());
+                }
+                return;
+            }
+            propBudget -= hydrateStashBlock(world, worldPrefix, block, commandBuffer);
+        }
+    }
+
+    /**
+     * Seeds ONE hydrated stash block: index it when its committed action is unattended-capable,
+     * respawn its missing display props from the persisted contents (returning how many spawned,
+     * for the pass budget), and settle its resting block state. A stash that is not this mod's
+     * (or records no claimable identity) seeds nothing.
+     */
+    private int hydrateStashBlock(@Nonnull World world, @Nonnull String worldPrefix,
+            @Nonnull HydratedStashBlock block, @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        StationCustodyClaim claim = custodyClaimAt(world, block.x(), block.y(), block.z());
+        if (claim == null) {
+            return 0;
+        }
+        String blockKey = worldPrefix + block.x() + ":" + block.y() + ":" + block.z();
+        registerUnattendedIfCapable(blockKey, claim);
+        int spawned = respawnDisplayIfMissing(claim, blockKey, commandBuffer);
+        healRestingState(world, claim, blockKey);
+        return spawned;
+    }
+
+    /**
+     * The hydrate-time resting-state self-heal: a reloaded block wears the look its surviving
+     * stash says it should (Loaded / Ready / Overdone / Empty), settled through the SAME
+     * {@link StationDoneness#restingStateName} precedence every other resting flip uses. Skipped
+     * while a live session works the block (the Working look wins) and for a claim whose action
+     * authors no {@code Custody.States}. Never throws.
+     */
+    private void healRestingState(@Nonnull World world, @Nonnull StationCustodyClaim claim,
+            @Nonnull String blockKey) {
+        try {
+            if (sessionWorkingAt(blockKey) || blockHeldWorking(blockKey)) {
+                return;
+            }
+            Custody custody = custodyOfClaim(claim);
+            if (custody == null || custody.getStates() == null) {
+                return;
+            }
+            setBlockState(world, claim.blockX, claim.blockY, claim.blockZ,
+                    StationDoneness.restingStateName(custody.getStates(), claim.totalQuantity() > 0,
+                            claim.donenessWindowStart() != null && claim.donenessWindowSocketId() != null,
+                            claim.anyDonenessOverdoneMarked()));
+        } catch (Throwable t) {
+            Log.fine("STATION resting-state heal failed at " + blockKey + ": " + t.getMessage());
+        }
+    }
+
+    /**
+     * The visit half of the pass: every indexed block in this world resolves its claim live and
+     * settles. Lazy eviction is the unload story - the engine's section-unload teardown offers no
+     * per-section event this mod can listen on for the common column-bound sections (only cubic
+     * sections dispatch {@code SectionUnloadEvent}), so a visit that finds the section UNLOADED
+     * evicts the block and re-arms the hydrate marker for its section: a later reload re-seeds
+     * both. A visit that finds the section loaded but the stash GONE (gathered, broken) just
+     * evicts. A block with a LIVE session is skipped whole - attended is the authority.
+     */
+    private void visitUnattendedBlocks(@Nonnull World world, @Nonnull String worldPrefix,
+            @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        List<String> blocks = unattendedIndex.blocksInWorld(worldPrefix);
+        if (blocks.isEmpty()) {
+            return;
+        }
+        ChunkStore chunkStore = world.getChunkStore();
+        for (String blockKey : blocks) {
+            int[] coords = StationAnchors.parseCoords(blockKey);
+            if (coords == null) {
+                unattendedIndex.evictBlock(blockKey);
+                continue;
+            }
+            Ref<ChunkStore> sectionRef;
+            try {
+                sectionRef = chunkStore.getChunkSectionReferenceAtBlock(coords[0], coords[1], coords[2]);
+            } catch (Throwable t) {
+                sectionRef = null;
+            }
+            if (sectionRef == null || !sectionRef.isValid()) {
+                unattendedIndex.evictBlock(blockKey);
+                unattendedIndex.dropSection(UnattendedIndex.sectionKey(worldPrefix,
+                        coords[0], coords[1], coords[2], ChunkUtil.BITS));
+                continue;
+            }
+            StationCustodyClaim claim = custodyClaimAt(world, coords[0], coords[1], coords[2]);
+            if (claim == null) {
+                unattendedIndex.evictBlock(blockKey);
+                continue;
+            }
+            if (!StationUnattended.shouldVisit(true, sessionWorkingAt(blockKey))) {
+                continue;
+            }
+            settleUnattendedAt(world, blockKey, claim, commandBuffer);
+        }
+    }
+
+    /**
+     * ONE block's unattended settle: resolve the claim's committed action, verify it is still
+     * unattended-capable (content can change under the index - then evict), run the analytic
+     * transform through {@link StationUnattended#settle}, and finish the impure edges the pure
+     * core cannot touch - the doneness settle and stamping (through the CONVERSION-level fold,
+     * decision 87's conversion-over-recipe precedence), the display refresh, the resting/Ready
+     * block state, and the one dirty mark. TRANSFORM ONLY: no rolls, no commands, no worker
+     * moments - those accrue and pay at gather.
+     */
+    private void settleUnattendedAt(@Nonnull World world, @Nonnull String blockKey,
+            @Nonnull StationCustodyClaim claim, @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        try {
+            StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
+            if (asset == null) {
+                unattendedIndex.evictBlock(blockKey);
+                return;
+            }
+            ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, claim.actionId);
+            StationAsset.Work work = action.getWork();
+            StationAsset.Work.Unattended unattended = work != null ? work.getUnattended() : null;
+            Custody custody = action.getCustody();
+            if (unattended == null || !unattended.effectiveEnabled() || custody == null) {
+                unattendedIndex.evictBlock(blockKey);
+                return;
+            }
+            Long nowGame = gameTimeMs(world);
+            if (nowGame == null) {
+                return;
+            }
+            // An action with authored Steps or Anchors runs those attended-only (the ruled
+            // posture; the validator says so at authoring time): only the implicit
+            // recipe-conversion transform settles unattended.
+            StationAsset.Recipe recipe = action.getRecipe();
+            StationAsset.Conversion[] conversions = null;
+            boolean implicitOnly = effectiveProgramSteps(asset, action).isEmpty();
+            if (recipe != null && implicitOnly) {
+                conversions = StationCatalog.getInstance()
+                        .resolvedConversions(asset, action.getActionId(), recipe);
+            }
+
+            // Doneness settles FIRST, against the CONVERSION-level fold of whichever row opened
+            // the window (recorded by the windowed pile's own accrual key), so an expired window
+            // collapses before the scan reads pile contents; with no recorded row the
+            // recipe-level fold applies like any other touch.
+            settleDoneness(world, claim, donenessFoldFor(claim, recipe, conversions),
+                    commandBuffer, null, null);
+
+            long workCycleMs = work.getCycleMs() != null && work.getCycleMs() > 0
+                    ? work.getCycleMs() : DEFAULT_CYCLE_MS;
+            StationUnattended.Settle settle = StationUnattended.settle(claim,
+                    custody.effectiveSockets(), conversions, recipe != null ? recipe.getYield() : null,
+                    custody.effectiveMaxQuantity(), unattended, workCycleMs, nowGame,
+                    StationService::liveResourceTypeIdsOf, StationService::liveRawTagsOf);
+            if (settle.transformed()) {
+                // The settled row's own doneness fold (conversion over recipe) opens/re-stamps
+                // the ready window - one batch per settled cycle, exactly what an attended
+                // produce phase per cycle would have stamped.
+                StationAsset.Conversion row = conversions != null
+                        && settle.conversionIndex() >= 0 && settle.conversionIndex() < conversions.length
+                        ? conversions[settle.conversionIndex()] : null;
+                StationAsset.Doneness fold = row != null
+                        ? StationAsset.Doneness.resolve(row.getDoneness(),
+                                recipe != null ? recipe.getDoneness() : null)
+                        : null;
+                if (fold != null && fold.hasReadyWindow() && settle.produceSocketId() != null) {
+                    boolean freshWindow = false;
+                    for (int i = 0; i < settle.settledCycles(); i++) {
+                        freshWindow |= claim.noteDonenessBatch(settle.produceSocketId(), nowGame) == 1;
+                    }
+                    Custody.States states = custody.getStates();
+                    if (freshWindow && states != null && states.getReady() != null
+                            && !states.getReady().isBlank() && !blockHeldWorking(blockKey)) {
+                        setBlockState(world, claim.blockX, claim.blockY, claim.blockZ, states.getReady());
+                    }
+                }
+                respawnDisplayIfMissing(claim, blockKey, commandBuffer);
+                healRestingState(world, claim, blockKey);
+            }
+            // ONE dirty mark, and only for a TRANSFORM. A clock-only stamp (the first anchor, or
+            // a forfeited no-work backlog) stays best-effort in the loaded section instead: it is
+            // re-derived safely after an unsaved unload (a fresh anchor owes nothing; a lost
+            // forfeit costs at most one MaxCycles-capped burst), while marking it would flag the
+            // chunk for a save EVERY pass for every input-starved station on the server.
+            if (settle.transformed()) {
+                claim.markDirty();
+            }
+        } catch (Throwable t) {
+            Log.warn("STATION unattended settle failed at " + blockKey + ": " + t.getMessage());
+        }
+    }
+
+    /**
+     * The doneness fold an unattended touch settles against: the CONVERSION-level resolve of the
+     * row whose accrual key the windowed pile carries (the row that opened the window), falling
+     * back to the recipe-level fold when no row is recorded or it no longer resolves - the same
+     * fold every generic touch point uses.
+     */
+    @Nullable
+    private static StationAsset.Doneness donenessFoldFor(@Nonnull StationCustodyClaim claim,
+            @Nullable StationAsset.Recipe recipe, @Nullable StationAsset.Conversion[] conversions) {
+        StationAsset.Doneness recipeLevel = recipe != null ? recipe.getDoneness() : null;
+        String windowedSocket = claim.donenessWindowSocketId();
+        if (windowedSocket != null && conversions != null) {
+            for (String key : claim.pendingCycles(windowedSocket).keySet()) {
+                int index = StationUnattended.parseAccrualIndex(key);
+                if (index >= 0 && index < conversions.length && conversions[index] != null) {
+                    return StationAsset.Doneness.resolve(conversions[index].getDoneness(), recipeLevel);
+                }
+            }
+        }
+        return StationAsset.Doneness.resolve(null, recipeLevel);
+    }
+
+    /** Indexes {@code blockKey} when {@code action} authors an enabled {@code Work.Unattended} over a Custody group. */
+    private void registerUnattendedIfEnabled(@Nonnull String blockKey,
+            @Nonnull ActionResolver.ResolvedAction action) {
+        StationAsset.Work work = action.getWork();
+        StationAsset.Work.Unattended unattended = work != null ? work.getUnattended() : null;
+        if (unattended != null && unattended.effectiveEnabled() && action.getCustody() != null) {
+            unattendedIndex.register(blockKey);
+        }
+    }
+
+    /** {@link #registerUnattendedIfEnabled} resolved from a claim's own committed station/action. */
+    private void registerUnattendedIfCapable(@Nonnull String blockKey, @Nonnull StationCustodyClaim claim) {
+        StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
+        if (asset != null) {
+            registerUnattendedIfEnabled(blockKey, ActionResolver.resolve(asset, claim.actionId));
+        }
+    }
+
+    /**
+     * Decision 90's payout half: pays the GATHERING player everything the given piles' accrued
+     * unattended cycles are owed, then fires {@code StationUnattendedGatheredEvent}. Called at
+     * every present-player path that takes a pile out of the world (press-F retrieval, the stop
+     * hand-back, the anchor sweep) BEFORE the pile is removed; the pile's owner does NOT gate the
+     * grant - the Share rules already gated who can gather, and the gatherer earns it.
+     *
+     * <ul>
+     *   <li><b>Contributions</b>: the action's {@code Work.PerCycleContributions}
+     *       (extension-merged), each at the IDLE rate ({@code Work.Idle.Fraction}'s reader
+     *       default when unauthored - the same fraction an idle cycle pays) times the
+     *       {@code ContributionScale} ladder resolved against the GATHERER, times the granted
+     *       cycles - forwarded on the event, never interpreted here.</li>
+     *   <li><b>Rolls</b>: the action's effective {@code Bonus}, replayed ONE PASS PER GRANTED
+     *       CYCLE against one gatherer snapshot - "as if attended", per-cycle chance independence
+     *       and per-cycle pool draws included (the ceiling keeps this at most
+     *       {@code MaxCycles} passes, so no batched Repeat approximation is needed). Items,
+     *       droplists, commands and effects land on the gatherer; earned cues play sessionless at
+     *       the block; {@code OutputItems} pays extra units of the accrued conversion's own
+     *       primary output.</li>
+     *   <li><b>The documented boundary</b>: a replayed roll's one-shot
+     *       {@code rpgstations:contribution} grants do NOT fire - they are completion-shaped
+     *       posts with no cycle event to ride at a gather, exactly the case
+     *       {@code StationRewardKinds.Sink#acceptsCycleGrants} exists for. Only per-cycle
+     *       contributions and per-cycle rolls accrue.</li>
+     * </ul>
+     */
+    private void grantAccruedAtGather(@Nonnull World world, @Nonnull StationCustodyClaim claim,
+            @Nonnull List<String> socketIds, @Nullable Store<EntityStore> store,
+            @Nullable Ref<EntityStore> ref, @Nullable PlayerRef playerRef,
+            @Nullable CommandBuffer<EntityStore> commandBuffer) {
+        try {
+            if (store == null || ref == null || !ref.isValid() || playerRef == null
+                    || !claim.carriesAccruedCycles(socketIds)) {
+                return;
+            }
+            UUID gathererId = playerRef.getUuid();
+            UUID worldUuid = playerRef.getWorldUuid();
+            Player player = store.getComponent(ref, Player.getComponentType());
+            StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
+            if (gathererId == null || worldUuid == null || player == null || asset == null) {
+                return;
+            }
+            ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, claim.actionId);
+            StationAsset.Work work = action.getWork();
+            StationAsset.Work.Unattended unattended = work != null ? work.getUnattended() : null;
+            int maxCycles = unattended != null ? unattended.effectiveMaxCycles()
+                    : StationAsset.Work.Unattended.DEFAULT_MAX_CYCLES;
+            Map<String, Integer> accrued = claim.drainAccruedCycles(socketIds);
+            if (accrued.isEmpty()) {
+                return;
+            }
+            claim.markDirty();
+            StationUnattended.GatherPlan plan = StationUnattended.gatherPlan(accrued, maxCycles);
+            if (!plan.anythingOwed()) {
+                return;
+            }
+
+            // ONE gatherer snapshot for the whole batch - every factor (tool, stat, whatever a
+            // consumer registered) resolves against the GATHERING player, decision 90's rule.
+            String actionTarget = ActionResolver.actionTargetId(asset, action.getActionId());
+            FactorLookup snapshot = FactorRegistryImpl.getInstance().snapshotFor(
+                    buildGatherFactorContext(store, playerRef, gathererId, claim.stationId, actionTarget,
+                            action, player, plan.grantCycles()));
+
+            Contribution[] merged = work != null ? work.getPerCycleContributions() : null;
+            if (actionTarget != null) {
+                merged = ExtensionCatalog.getInstance()
+                        .applyToActionContributions(claim.stationId, actionTarget, merged);
+            }
+            double idleFraction = StationToolScaling.resolvedIdleFraction(
+                    work != null && work.getIdle() != null ? work.getIdle().getFraction() : null);
+            double scale = ContributionScaling.multiplier(action.getContributionScale(), snapshot::resolve);
+            List<StationContribution> contributions = StationUnattended.scaledByCycles(
+                    contributionsFrom(merged, true, idleFraction, scale), plan.grantCycles());
+
+            LootEngine.Resolved resolvedBonus = StationLootEngine.resolve(effectiveBonus(asset, action));
+            if (!resolvedBonus.rolls().isEmpty() || !resolvedBonus.pools().isEmpty()) {
+                int cycleIndex = 0;
+                for (Map.Entry<Integer, Integer> alloc : plan.cyclesByConversionIndex().entrySet()) {
+                    String outputItemId = accruedPrimaryOutputId(asset, action, alloc.getKey());
+                    for (int i = 0; i < alloc.getValue(); i++) {
+                        StationLootEngine.GrantResult result = StationLootEngine.rollAndGrant(resolvedBonus,
+                                StationLootEngine.TRIGGER_CYCLE, snapshot, player, playerRef,
+                                claim.stationId, action.getActionId(), ++cycleIndex, commandBuffer, store,
+                                claim.blockX, claim.blockY, claim.blockZ);
+                        applyGatherGrantResult(world, claim, store, ref, playerRef, commandBuffer,
+                                player, result, outputItemId);
+                    }
+                }
+            }
+
+            StationEvents.fireUnattendedGathered(store, playerRef, gathererId, ref, worldUuid,
+                    claim.blockX, claim.blockY, claim.blockZ,
+                    claim.stationId, action.getActionId(), plan.grantCycles(), contributions);
+        } catch (Throwable t) {
+            Log.warn("STATION unattended gather grant failed: " + t.getMessage(), t);
+        }
+    }
+
+    /**
+     * The sessionless twin of {@link #applyGrantResult}, for a gather's replayed roll pass: item
+     * notifications fire directly (there is no session ledger to fold into), earned cues play
+     * through the sessionless block playback against the claim's own action moments, effects
+     * apply on the gatherer and live out their own duration (completion-shaped - no session
+     * exists to track and strip them), and {@code OutputItems} resolves once per pass and pays
+     * extra units of the accrued conversion's primary output. A replayed roll's one-shot
+     * contribution grants are deliberately dropped (see {@link #grantAccruedAtGather}).
+     */
+    private void applyGatherGrantResult(@Nonnull World world, @Nonnull StationCustodyClaim claim,
+            @Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref, @Nonnull PlayerRef playerRef,
+            @Nullable CommandBuffer<EntityStore> commandBuffer, @Nonnull Player player,
+            @Nonnull StationLootEngine.GrantResult result, @Nullable String outputItemId) {
+        if (!result.anyGranted()) {
+            return;
+        }
+        int resolved = OutputItemResolver.resolve(result.getOutputItems(),
+                () -> ThreadLocalRandom.current().nextDouble());
+        if (resolved > 0 && outputItemId != null) {
+            boolean landed = ItemGrantUtil.grantOrDrop(player, new ItemStack(outputItemId, resolved),
+                    commandBuffer, store, claim.blockX, claim.blockY, claim.blockZ);
+            if (landed) {
+                notifyItemGain(playerRef, outputItemId, resolved, false);
+            }
+        }
+        for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
+            notifyItemGain(playerRef, e.getKey(), e.getValue(), true);
+        }
+        for (String cue : result.getCues()) {
+            playPresentationAt(world, playerRef, ref, claimActionMoment(claim, cue),
+                    claim.blockX, claim.blockY, claim.blockZ);
+        }
+        for (EffectRef effect : result.getEffectGrants()) {
+            if (effect == null || !effect.hasId()) {
+                continue;
+            }
+            try {
+                Long durMs = effect.getDurationMs();
+                if (durMs != null && durMs > 0) {
+                    NativeEffectUtil.applyFor(store, ref, effect.getId(), durMs / 1000f,
+                            OverlapBehavior.OVERWRITE);
+                } else {
+                    NativeEffectUtil.apply(store, ref, effect.getId());
+                }
+            } catch (Throwable t) {
+                Log.fine("STATION gather effect grant failed: " + t.getMessage());
+            }
+        }
+    }
+
+    /** The accrued conversion's primary-output item id ({@code null} when the index no longer resolves one). */
+    @Nullable
+    private static String accruedPrimaryOutputId(@Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action, @Nullable Integer conversionIndex) {
+        if (conversionIndex == null || conversionIndex < 0) {
+            return null;
+        }
+        StationAsset.Conversion[] all = allConversionsFor(asset, action);
+        if (conversionIndex >= all.length || all[conversionIndex] == null) {
+            return null;
+        }
+        Ingredient primary = all[conversionIndex].primaryOutput();
+        return primary != null ? primary.getItemId() : null;
+    }
+
+    /** {@code buildFactorContext}'s gatherer twin: no session, so session seconds read 0 and the cycle index is the granted batch size. */
+    @Nonnull
+    private static FactorContext buildGatherFactorContext(@Nonnull Store<EntityStore> store,
+            @Nonnull PlayerRef playerRef, @Nonnull UUID playerId, @Nonnull String stationId,
+            @Nullable String actionTarget, @Nonnull ActionResolver.ResolvedAction action,
+            @Nonnull Player player, int cycleIndex) {
+        return FactorContext.builder()
+                .store(store)
+                .playerRef(playerRef)
+                .playerId(playerId)
+                .stationId(stationId)
+                .actionId(action.getActionId())
+                .sessionSeconds(0L)
+                .cycleIndex(cycleIndex)
+                .toolPower(resolveHeldToolPower(player, action.getTool()))
+                .toolDurabilityPercent(resolveHeldToolDurabilityPercent(player))
+                .toolPowers(resolveHeldToolPowers(player))
+                .toolQuality(resolveHeldToolQuality(player))
+                .toolItemLevel(resolveHeldToolItemLevel(player))
+                .contributions(contributionParams(stationId, actionTarget, action.getWork()))
+                .build();
     }
 
     /**

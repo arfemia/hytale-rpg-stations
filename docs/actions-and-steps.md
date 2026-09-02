@@ -127,8 +127,9 @@ stew row on the next tier.
 
 ## Doneness: the ready window on produced output
 
-When a step lands its output in a [custody pile](custody-and-placed-display.md) (a `Produce` phase
-with `To: "Custody"`), an optional `Doneness` group gives that batch ONE unambiguous window: it
+When a batch lands in a [custody pile](custody-and-placed-display.md) (a `Produce` phase with
+`To: "Custody"`, or an [unattended settle](unattended-work.md)'s output), an optional `Doneness`
+group gives that batch ONE unambiguous window: it
 sits **Ready** to collect for `ReadyMs`, then - if nobody gathered it - collapses once to the
 authored `Overdone` items.
 
@@ -149,7 +150,8 @@ authored `Overdone` items.
   seconds from done at the next boot.
 - **The window is lazy.** Nothing ticks it; it settles at the moments someone (or something)
   already touches the stash - a press at the station, a press-F retrieval, the working session's
-  own heartbeat. Expiry is boundary-exact: elapsed equal to `ReadyMs` settles.
+  own heartbeat, or the [unattended pass](unattended-work.md)'s visit. Expiry is boundary-exact:
+  elapsed equal to `ReadyMs` settles.
 - **Each batch re-stamps the clock.** Every committed custody produce counts one batch and restarts
   the window ("stirring the pot"), so an actively producing session never burns its own pile
   mid-work; the window runs out only once production stops for `ReadyMs`.

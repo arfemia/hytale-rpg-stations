@@ -319,6 +319,7 @@ public final class StationAsset
         @Nullable protected Contribution[] perCycleContributions;
         @Nullable protected Idle idle;
         @Nullable protected Boolean looping;
+        @Nullable protected Unattended unattended;
 
         public static final BuilderCodec<Work> CODEC = BuilderCodec.builder(Work.class, Work::new)
                 .appendInherited(new KeyedCodec<>("CycleMs", Codec.LONG, false),
@@ -350,6 +351,9 @@ public final class StationAsset
                         (o, v) -> o.looping = v, o -> o.looping, (o, p) -> o.looping = p.looping)
                 .metadata(EditorSchema.defaultValue(true))
                 .documentation("Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape).").add()
+                .appendInherited(new KeyedCodec<>("Unattended", Unattended.CODEC, false),
+                        (o, v) -> o.unattended = v, o -> o.unattended, (o, p) -> o.unattended = p.unattended)
+                .documentation("Opt-in unattended processing over placed custody: authoring this group at all turns it on (absent = attended-only). While nobody works the station, its recipe conversions keep settling against the placed piles on world game time - the transform happens immediately, and the loot rolls and contribution posts it would have earned accrue on the output pile and pay out to whoever gathers it.").add()
                 .build();
 
         @Nonnull
@@ -375,6 +379,13 @@ public final class StationAsset
         @Nonnull
         public Work withLooping(@Nullable Boolean looping) {
             this.looping = looping;
+            return this;
+        }
+
+        /** Java-side test/fixture helper for the unattended group; not part of any codec fold. */
+        @Nonnull
+        public Work withUnattended(@Nullable Unattended unattended) {
+            this.unattended = unattended;
             return this;
         }
 
@@ -428,6 +439,12 @@ public final class StationAsset
         /** {@link #looping}, reader-defaulted to {@code true} (the classic loop) when null. */
         public boolean effectiveLooping() {
             return looping == null || looping;
+        }
+
+        /** The unattended-processing opt-in group, or {@code null} when the action is attended-only. */
+        @Nullable
+        public Unattended getUnattended() {
+            return unattended;
         }
 
         /**
@@ -492,6 +509,95 @@ public final class StationAsset
             @Nullable
             public Double getFraction() {
                 return fraction;
+            }
+        }
+
+        /**
+         * Opt-in unattended processing: AUTHORING THIS GROUP AT ALL OPTS IN ({@link #enabled}
+         * reader-defaults to {@code true}, the same group-presence-means-on idiom {@link Idle}
+         * uses; the leaf survives so a native {@code Parent} child can flip it off while
+         * inheriting the rest). While no session works the station, the engine's throttled
+         * unattended pass settles the action's recipe conversions against the block's PLACED
+         * custody piles on WORLD GAME TIME (an outage settles nothing): inputs drain, outputs
+         * land in their custody piles immediately, and the loot rolls plus contribution posts
+         * those cycles would have earned ACCRUE on the output pile, paid out to whoever gathers
+         * it - at the idle contribution rate ({@code Work.Idle.Fraction}), with every factor
+         * resolved against the gatherer.
+         *
+         * <p>{@link #maxCycles} is ONE ceiling wearing both hats: the most cycles a single
+         * catch-up settle may commit AND the most accrued cycles a single gather pays out.
+         * Reader-defaults to {@value #DEFAULT_MAX_CYCLES} - at the default 5000ms cycle that
+         * bounds a settle burst to about two minutes of work and keeps an overnight pot's payout
+         * at a stack-scale number rather than thousands. {@link #catchUpMaxMs} caps how much
+         * elapsed game time one settle may consume (reader default
+         * {@value #DEFAULT_CATCH_UP_MAX_MS}ms = 24 hours, the native processing bench's own
+         * catch-up ceiling); time beyond either ceiling is forfeited, never banked.
+         */
+        public static final class Unattended {
+
+            /** The {@link #maxCycles} reader default: one settle burst, and one gather's payout, of at most this many cycles. */
+            public static final int DEFAULT_MAX_CYCLES = 24;
+
+            /** The {@link #catchUpMaxMs} reader default: 24 hours, the native processing bench's catch-up ceiling. */
+            public static final long DEFAULT_CATCH_UP_MAX_MS = 86_400_000L;
+
+            @Nullable protected Boolean enabled;
+            @Nullable protected Integer maxCycles;
+            @Nullable protected Long catchUpMaxMs;
+
+            public static final BuilderCodec<Unattended> CODEC = BuilderCodec.builder(Unattended.class, Unattended::new)
+                    .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
+                            (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled)
+                    .metadata(EditorSchema.defaultValue(true))
+                    .documentation("Whether unattended settling applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's Unattended group with settling switched off.").add()
+                    .appendInherited(new KeyedCodec<>("MaxCycles", Codec.INTEGER, false),
+                            (o, v) -> o.maxCycles = v, o -> o.maxCycles, (o, p) -> o.maxCycles = p.maxCycles)
+                    .documentation("One ceiling, both ends: the most cycles a single unattended settle may commit, and the most accrued cycles a single gather pays out. Reader-defaults to 24; time and accrual beyond it are forfeited, never banked.")
+                    .addValidator(CodecWarnValidators.positive("Work.Unattended.MaxCycles should be positive.")).add()
+                    .appendInherited(new KeyedCodec<>("CatchUpMaxMs", Codec.LONG, false),
+                            (o, v) -> o.catchUpMaxMs = v, o -> o.catchUpMaxMs, (o, p) -> o.catchUpMaxMs = p.catchUpMaxMs)
+                    .documentation("The most elapsed world game time one settle may consume, in milliseconds. Reader-defaults to 86400000 (24 hours); elapsed time beyond it is forfeited.")
+                    .addValidator(CodecWarnValidators.positive("Work.Unattended.CatchUpMaxMs should be positive.")).add()
+                    .build();
+
+            @Nonnull
+            public static Unattended of(@Nullable Boolean enabled, @Nullable Integer maxCycles,
+                    @Nullable Long catchUpMaxMs) {
+                Unattended u = new Unattended();
+                u.enabled = enabled;
+                u.maxCycles = maxCycles;
+                u.catchUpMaxMs = catchUpMaxMs;
+                return u;
+            }
+
+            @Nullable
+            public Boolean getEnabled() {
+                return enabled;
+            }
+
+            /** {@link #enabled}, reader-defaulted to {@code true} when null (an authored group means on). */
+            public boolean effectiveEnabled() {
+                return enabled == null || enabled;
+            }
+
+            @Nullable
+            public Integer getMaxCycles() {
+                return maxCycles;
+            }
+
+            /** {@link #maxCycles} with the {@value #DEFAULT_MAX_CYCLES} reader default (a non-positive authored value reads as the default too). */
+            public int effectiveMaxCycles() {
+                return maxCycles != null && maxCycles > 0 ? maxCycles : DEFAULT_MAX_CYCLES;
+            }
+
+            @Nullable
+            public Long getCatchUpMaxMs() {
+                return catchUpMaxMs;
+            }
+
+            /** {@link #catchUpMaxMs} with the {@value #DEFAULT_CATCH_UP_MAX_MS}ms (24h) reader default. */
+            public long effectiveCatchUpMaxMs() {
+                return catchUpMaxMs != null && catchUpMaxMs > 0 ? catchUpMaxMs : DEFAULT_CATCH_UP_MAX_MS;
             }
         }
     }

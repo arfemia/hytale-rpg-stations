@@ -44,9 +44,11 @@ rendering the placed item at the station's block-top anchor - the same point eve
 find presentation moment already targets. Block-shaped custody items (the Sawmill's placed logs)
 render as the real block model; everything else (the Anvil's placed weapon or bar) renders as the
 generic dropped-item prop shape. The display entity itself is never persisted - it despawns on
-return or block break, and after a restart the prop reappears the first time anyone uses the
-station (the placed contents are there the whole time; only the visual waits for that first
-interaction).
+return or block break, and after a restart or a chunk reload the prop respawns from the persisted
+contents within moments of the chunk loading (the engine's background pass walks freshly loaded
+chunks and rebuilds every missing prop, a handful per second per world so a big load never
+stutters); using the station rebuilds it immediately either way. The placed contents are there the
+whole time - only the visual is ever rebuilt.
 
 ```json
 "Display": {
@@ -152,4 +154,4 @@ server restart.
 
 ---
 
-Previous: [Multi-Station Programs](multi-station-programs.md) · Next: [Structures & Sockets](structures-and-sockets.md)
+Previous: [Multi-Station Programs](multi-station-programs.md) · Next: [Unattended Work](unattended-work.md)

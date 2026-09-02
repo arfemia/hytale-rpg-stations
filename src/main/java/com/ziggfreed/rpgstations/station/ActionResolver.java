@@ -283,6 +283,23 @@ public final class ActionResolver {
         return null;
     }
 
+    /**
+     * The effective {@code Work} group for a {@code def} (its own when it authors the group, else
+     * its {@code Ref} base's) - {@link #effectiveStepsOf}'s sibling, for callers that hold only
+     * the entry (the validator's unattended checks). {@code null} when neither authors one.
+     */
+    @Nullable
+    public static StationAsset.Work effectiveWorkOf(@Nonnull ActionDef def) {
+        if (def.getWork() != null) {
+            return def.getWork();
+        }
+        if (def.hasRef()) {
+            ActionDef base = catalogBody(def.getRef());
+            return base != null ? base.getWork() : null;
+        }
+        return null;
+    }
+
     /** The effective {@link ActionInput} for a {@code def} (its own, else its {@code Ref} base's). */
     @Nullable
     private static ActionInput effectiveSelectOf(@Nonnull ActionDef def) {

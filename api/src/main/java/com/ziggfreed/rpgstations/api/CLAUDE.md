@@ -181,9 +181,9 @@ is the exact inverse of a permanently-opaque channel.
   `hytale:tool_*` FACTORS directly. **A listener MUST filter both by `StationContribution#channel()`**:
   both lists carry every channel the action authored, so consuming an entry you did not declare is
   reading another mod's vocabulary.
-- **`event/`** - the five `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
+- **`event/`** - the six `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
   `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`/
-  `StationEnhanceCompletedEvent`), immutable,
+  `StationEnhanceCompletedEvent`/`StationUnattendedGatheredEvent`), immutable,
   dispatched via `HytaleServer.get().getEventBus().dispatchFor(...)` + `hasListener()` on the
   owning world thread - see `../../station/CLAUDE.md` for the concrete firing rules and
   `com.ziggfreed.rpgstations.station.StationEvents` (the implementation). Each event's javadoc
@@ -194,7 +194,14 @@ is the exact inverse of a permanently-opaque channel.
   shapes without this engine learning any stat vocabulary: the provider's own opaque
   `List<EnhanceLine>` metadata report AND immutable `before`/`after` `ItemStack` copies (the engine
   snapshots them around the apply, so a consumer diffs/inspects them itself), plus the native
-  `durabilityAdded` delta.
+  `durabilityAdded` delta. **`StationUnattendedGatheredEvent`** (decision 90) fires when a player
+  GATHERS a custody pile that accrued unattended work cycles, AFTER the engine's own item/loot
+  grants for the batch landed on them: the gatherer (`Ref` + `PlayerRef` + uuid, NEVER null - it
+  fires only at a live gather, so no listener ever handles an absent worker), the station block's
+  world uuid and position, the station/action ids, the granted cycle count (already capped by
+  `Work.Unattended.MaxCycles`), and `contributions()` ALREADY SCALED (idle rate x the
+  gatherer-resolved `ContributionScale` x the cycle count) - grant each verbatim, filtered by
+  channel exactly as on `StationCycleCompletedEvent`.
 
 api `compileOnly` deps: the Hytale server jar (`IEvent`, `Store`/`Ref`/`CommandBuffer`,
 `UICommandBuilder`, `Message`, `ItemStack`) + the `ziggfreed-common` jar (`SummaryRow`). jsr305
@@ -222,10 +229,11 @@ exists specifically so a consumer can detect which additive members are present 
 reflection: bump it by exactly one integer per addition batch that lands under this policy (not
 per individual method - a coordinated wave of additions is one bump), never on its own.
 `apiVersion()` itself is exempt from "default-bodied only" since it shipped before the freeze; it
-will never change again once RpgStations reaches 1.0.0. Current value is **3**: the `stationCount()`
-default-bodied addition bumped it from 2. **The api ARTIFACT's semver tracks this integer:
+will never change again once RpgStations reaches 1.0.0. Current value is **4**: the
+`StationUnattendedGatheredEvent` event class bumped it from 3 (which the `stationCount()`
+default-bodied addition had reached). **The api ARTIFACT's semver tracks this integer:
 `apiVersion()` N ships as artifact `0.N.0`** (`gradle.properties` `api_version`, currently
-`0.3.0`), so the number a consumer branches on and the number on the jar they compile against can
+`0.4.0`), so the number a consumer branches on and the number on the jar they compile against can
 never disagree; a bump of one is a bump of the other, in the same change.
 
 `RpgStationsApi.isAvailable()`/`find()` (added the same round) are convenience, not a way around

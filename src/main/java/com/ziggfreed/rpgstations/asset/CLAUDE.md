@@ -216,9 +216,15 @@ resolution section for the engine half.
     `Tool` (the held-tool gate, checked at engage and every heartbeat).
   - **What it makes**: `Recipe` - the ONE transform this action performs (below).
   - **How the loop runs**: `Work` (cycle cadence, duration/exit bounds, `PerCycleContributions[]`,
-    the `Looping` flag, optional `Idle` practice mode - the SAME group `StationAsset.Work` used to
-    be, now reached only through an action), `Custody` (placed-input custody, chunk-persisted; see
-    [`Custody`](Custody.java) below).
+    the `Looping` flag, optional `Idle` practice mode, optional `Unattended` group - the SAME group
+    `StationAsset.Work` used to be, now reached only through an action), `Custody` (placed-input
+    custody, chunk-persisted; see [`Custody`](Custody.java) below). **`Work.Unattended`**
+    (decision 90) opts the action into settling its conversions over placed custody with nobody
+    engaged - group presence is the opt-in (`{}` suffices), `Enabled` exists so a native `Parent`
+    child can author `false`, `MaxCycles` (reader default 24) is ONE ceiling capping a settle
+    burst AND a gather's payout, and `CatchUpMaxMs` (reader default 86400000 = 24h, the native
+    processing-bench ceiling) caps the elapsed game time one settle may consume. Every leaf
+    `appendInherited`; the engine half lives in `station/CLAUDE.md`'s unattended section.
   - **Where it runs**: `Anchors` (named multi-station anchor declarations), `Steps` (an authored
     [`StationStep`](StationStep.java) program; absent = "build the implicit program from
     `Recipe`").
@@ -755,7 +761,7 @@ resolution section for the engine half.
 - **[`RpgStationsSettingsAsset`](RpgStationsSettingsAsset.java)** - `Server/RpgStations/Settings/
   Settings.json`, a single id (`settings`), jar default + pack-overridable: `{Enabled,
   SummaryHud:{Enabled, Position, OffsetX, OffsetY, TtlMs}, Limits:{MaxSessionsPerWorld,
-  MaxPuppetsPerWorld, MaxStashesPerSection}}`. `Position` is a shared-library
+  MaxPuppetsPerWorld, MaxStashesPerSection, UnattendedIntervalMs}}`. `Position` is a shared-library
   `HudPosition` preset id, authored PascalCase like every other id in this schema (e.g.
   `"TopCenter"`); the legacy SCREAMING_SNAKE spelling (`"TOP_CENTER"`) still resolves since
   matching is case- and underscore-insensitive. `OffsetX` is `OffsetY`'s horizontal sibling.
@@ -769,7 +775,9 @@ resolution section for the engine half.
   and `MaxStashesPerSection` are all-or-nothing (a new session, or a NEW stash - topping up an
   existing one never counts - is denied with a localized toast); `MaxPuppetsPerWorld` gates
   pure presentation, so a session past it simply performs in the player's own body, the same
-  graceful degrade a failed puppet spawn already takes. The retired `MaxCustodyClaimsPerWorld`
+  graceful degrade a failed puppet spawn already takes. `UnattendedIntervalMs` is the one NON-ceiling leaf in the group: the
+  per-world pace of the unattended pass (reader default 1000ms; a non-positive value reads as the
+  default), a pure pace knob rather than a cap. The retired `MaxCustodyClaimsPerWorld`
   leaf still decodes into a warn-only slot (the settings fold names the replacement; never a parse
   failure) and enforces nothing. The one shared predicate,
   `Limits.atCapacity(max, currentCount)`, treats a non-positive `max` as unlimited too (a ceiling of

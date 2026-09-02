@@ -7,6 +7,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.hypixel.hytale.component.CommandBuffer;
+import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.event.IEventDispatcher;
 import com.hypixel.hytale.server.core.HytaleServer;
@@ -18,15 +19,16 @@ import com.ziggfreed.rpgstations.api.event.StationEnhanceCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationSessionCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationSessionStartedEvent;
 import com.ziggfreed.rpgstations.api.event.StationToolBrokeEvent;
+import com.ziggfreed.rpgstations.api.event.StationUnattendedGatheredEvent;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * Fires the api artifact's four {@code IEvent<Void>} POJOs on the shared Hytale event bus
+ * Fires the api artifact's {@code IEvent<Void>} POJOs on the shared Hytale event bus
  * (design section 3.1, the kweebec {@code event.RoundEvents} recipe -
  * {@code additional-mods/kweebec-nightmare/.../event/RoundEvents.java}): resolve the dispatcher,
  * guard on {@code hasListener()} (silent no-op with zero listeners), dispatch synchronously on
  * the calling (world) thread, whole body try/catch(Throwable)-guarded to a warn log. {@link
- * StationService} is the only caller, all four firing points on the world thread per the design's
+ * StationService} is the only caller, every firing point on the world thread per the design's
  * firing rules (section 3.1).
  */
 final class StationEvents {
@@ -103,6 +105,28 @@ final class StationEvents {
             }
         } catch (Throwable t) {
             log("StationEnhanceCompleted", t);
+        }
+    }
+
+    /**
+     * Fires decision 90's payout event from {@code StationService#grantAccruedAtGather}, AFTER
+     * the engine's own item/loot grants for the batch landed on the gatherer. {@code gatherer} is
+     * never null by construction - the grant runs only for a live, present player.
+     */
+    static void fireUnattendedGathered(@Nonnull Store<EntityStore> store, @Nonnull PlayerRef playerRef,
+            @Nonnull UUID gathererId, @Nonnull Ref<EntityStore> gatherer, @Nonnull UUID worldUuid,
+            int blockX, int blockY, int blockZ, @Nonnull String stationId, @Nonnull String actionId,
+            int settledCycles, @Nonnull List<StationContribution> contributions) {
+        try {
+            IEventDispatcher<StationUnattendedGatheredEvent, StationUnattendedGatheredEvent> d =
+                    HytaleServer.get().getEventBus().dispatchFor(StationUnattendedGatheredEvent.class);
+            if (d.hasListener()) {
+                d.dispatch(new StationUnattendedGatheredEvent(store, playerRef, gatherer, gathererId,
+                        worldUuid, blockX, blockY, blockZ, stationId, actionId, settledCycles,
+                        contributions));
+            }
+        } catch (Throwable t) {
+            log("StationUnattendedGathered", t);
         }
     }
 

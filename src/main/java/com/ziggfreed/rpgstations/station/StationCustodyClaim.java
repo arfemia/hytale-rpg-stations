@@ -1,6 +1,7 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -555,6 +556,89 @@ final class StationCustodyClaim {
         pending.remove(StationDoneness.BATCHES_KEY);
         pending.put(StationDoneness.OVERDONE_KEY, 1);
         stash.setProgressGameTime(null);
+    }
+
+    // ==================== the unattended record (decision 90) ====================
+    //
+    // The stash-level LastGameTime leaf is the unattended pass's catch-up clock (when this block
+    // was last settled, in WORLD GAME TIME), and the produce pile's PendingCycles carries the
+    // accrued settled-cycle counts under StationUnattended.ACCRUAL_KEY_PREFIX - deliberately
+    // outside the reserved "doneness:" namespace, so the two records share a pile without ever
+    // sharing a key. Whoever mutates, marks (the standing dirty contract).
+
+    /** The unattended catch-up clock in world game-time ms (stash {@code LastGameTime}), or null before the first stamp. */
+    @Nullable
+    Long unattendedLastGameTime() {
+        return stash.getLastGameTime();
+    }
+
+    /** (Re)stamps the unattended catch-up clock; null clears it. The caller marks dirty. */
+    void setUnattendedLastGameTime(@Nullable Long gameTimeMs) {
+        stash.setLastGameTime(gameTimeMs);
+    }
+
+    /**
+     * The socket pile's live {@code PendingCycles} map (a socket with no pile answers a fresh
+     * empty map - reading never mints a pile in the persisted stash, mirroring {@link #items}).
+     */
+    @Nonnull
+    Map<String, Integer> pendingCycles(@Nonnull String socketId) {
+        StashPile pile = stash.pile(socketId);
+        return pile != null ? pile.pendingCyclesMutable() : new LinkedHashMap<>();
+    }
+
+    /** Accrues {@code count} onto {@code key} in the socket pile's {@code PendingCycles} (creating the pile on first use). */
+    void accruePendingCycles(@Nonnull String socketId, @Nonnull String key, int count) {
+        if (count <= 0) {
+            return;
+        }
+        stash.ensurePile(socketId).pendingCyclesMutable().merge(key, count, Integer::sum);
+    }
+
+    /**
+     * Takes EVERY unattended accrual key off the given sockets' piles, answering the removed
+     * key-to-count map in pile-then-key insertion order - the gather's one consume-the-record
+     * read. Doneness keys (and any other namespace) stay untouched. The caller marks dirty when
+     * the answer is non-empty.
+     */
+    @Nonnull
+    Map<String, Integer> drainAccruedCycles(@Nonnull List<String> socketIds) {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        for (String socketId : socketIds) {
+            StashPile pile = stash.pile(socketId);
+            Map<String, Integer> pending = pile != null ? pile.getPendingCycles() : null;
+            if (pending == null || pending.isEmpty()) {
+                continue;
+            }
+            Iterator<Map.Entry<String, Integer>> it = pending.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<String, Integer> e = it.next();
+                if (StationUnattended.isAccrualKey(e.getKey())) {
+                    if (e.getValue() != null && e.getValue() > 0) {
+                        out.merge(e.getKey(), e.getValue(), Integer::sum);
+                    }
+                    it.remove();
+                }
+            }
+        }
+        return out;
+    }
+
+    /** True when any of the given sockets' piles carries an unattended accrual key. */
+    boolean carriesAccruedCycles(@Nonnull List<String> socketIds) {
+        for (String socketId : socketIds) {
+            StashPile pile = stash.pile(socketId);
+            Map<String, Integer> pending = pile != null ? pile.getPendingCycles() : null;
+            if (pending == null) {
+                continue;
+            }
+            for (Map.Entry<String, Integer> e : pending.entrySet()) {
+                if (StationUnattended.isAccrualKey(e.getKey()) && e.getValue() != null && e.getValue() > 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     // ==================== the degenerate (main-pile) view ====================

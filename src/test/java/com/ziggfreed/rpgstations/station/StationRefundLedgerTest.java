@@ -11,6 +11,10 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
+import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.rpgstations.asset.Ingredient;
+import com.ziggfreed.rpgstations.asset.StationAsset;
+
 /**
  * The iteration refund ledger (scope-2 wave 3, design 2.5, gate M1's single rule) + the
  * repeat-while-inputs stop reason (design 2.4), verified without a live server on the pure
@@ -317,5 +321,39 @@ class StationRefundLedgerTest {
         assertEquals(42_000L, claim.donenessWindowStart());
         assertEquals("output", claim.donenessWindowSocketId());
         assertEquals(1, claim.totalQuantity("output"), "the batch stays in the pile, exactly once");
+    }
+
+    @Test
+    void unattendedSettle_writesNoRefundLedgerEntry_theD38Invariant() {
+        // An unattended settle (decision 90) has NO session, no in-flight iteration and no worker
+        // to refund to: the whole transform commits analytically on the claim alone. A session
+        // that exists elsewhere on the server must find both of its refund-ledger halves exactly
+        // as empty after the settle as before it - the settle can never queue anything a later
+        // stop would re-grant.
+        StationSession s = session();
+        StationCustodyClaim claim = new StationCustodyClaim(
+                UUID.randomUUID(), "cookingpit", "stew", 0, 64, 0);
+        claim.addTo("ingredients", claim.ownerId, "Food_Meat_Raw", 4);
+        claim.setUnattendedLastGameTime(0L);
+
+        StationUnattended.Settle settle = StationUnattended.settle(claim,
+                List.of(new Custody.ResolvedSocket("ingredients",
+                                true, null, null, null, 100, false, false, null, false, false, false, null),
+                        new Custody.ResolvedSocket("output",
+                                true, null, null, null, 100, false, false, null, false, false, false, null)),
+                new StationAsset.Conversion[] {
+                        StationAsset.Conversion.of(
+                                Ingredient.of("Food_Meat_Raw", null, 2, "ingredients"),
+                                Ingredient.of("Food_Stew", null, 1, "output"))},
+                null, 100,
+                StationAsset.Work.Unattended.of(null, null, null),
+                5_000L, 10_000L, id -> new String[0], id -> Map.of());
+
+        assertTrue(settle.transformed(), "the transform itself committed");
+        assertTrue(s.iterationConsumed.isEmpty(),
+                "an unattended settle writes NO player-refund ledger entry");
+        assertTrue(s.iterationConsumedCustody.isEmpty(),
+                "an unattended settle writes NO custody-refund ledger entry");
+        assertEquals(2, claim.totalQuantity("output"), "the transform lives on the claim alone");
     }
 }

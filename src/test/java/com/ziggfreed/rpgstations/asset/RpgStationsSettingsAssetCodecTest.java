@@ -102,6 +102,18 @@ public class RpgStationsSettingsAssetCodecTest {
     }
 
     @Test
+    void limits_unattendedIntervalMs_decodesAndReaderDefaults() throws Exception {
+        RpgStationsSettingsAsset a = decodeAsset("{ \"Limits\": { \"UnattendedIntervalMs\": 2500 } }");
+        assertEquals(2500L, a.getLimits().getUnattendedIntervalMs());
+        assertEquals(2500L, a.getLimits().effectiveUnattendedIntervalMs());
+
+        RpgStationsSettingsAsset bare = decodeAsset("{ \"Limits\": { \"MaxPuppetsPerWorld\": 3 } }");
+        assertNull(bare.getLimits().getUnattendedIntervalMs());
+        assertEquals(1000L, bare.getLimits().effectiveUnattendedIntervalMs(),
+                "the unattended pass paces at 1000ms unless the owner says otherwise");
+    }
+
+    @Test
     void limits_retiredMaxCustodyClaimsPerWorld_decodesWithoutFailingAndFillsNothingLive() throws Exception {
         // The retired leaf is warn-only, never a parse failure: an owner file still authoring it
         // decodes cleanly, its value lands ONLY in the retired slot the settings fold warns on,

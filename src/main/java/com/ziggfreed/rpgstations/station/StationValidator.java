@@ -2566,13 +2566,16 @@ public final class StationValidator {
      *   <li>{@code DONENESS_WITHOUT_PRODUCE_SOCKET}: a resolved ready window on an action whose
      *       effective program never lands produce in a custody pile (no step authoring
      *       {@code Produce.To:"Custody"}) - the window has no pile to sit on, so it can never
-     *       open.</li>
+     *       open. EXEMPT when the action authors an enabled {@code Work.Unattended}: the
+     *       unattended settle lands its produce in custody piles itself, so the window opens
+     *       whenever the station works alone.</li>
      * </ul>
      * Malformed {@code Overdone} ENTRIES (route-less / family / tags) are the codec's own
      * decode-time warn; deeper editor metadata stays with the validator wave.
      */
     private static void checkDoneness(@Nullable StationAsset.Recipe recipe, @Nullable StationStep[] effectiveSteps,
-            @Nonnull String actionLabel, @Nonnull String id, @Nonnull List<Finding> out) {
+            boolean unattendedSettles, @Nonnull String actionLabel, @Nonnull String id,
+            @Nonnull List<Finding> out) {
         if (recipe == null) {
             return;
         }
@@ -2607,6 +2610,12 @@ public final class StationValidator {
         if (!anyWindow) {
             return;
         }
+        // The unattended exemption: an unattended settle produces INTO custody piles by
+        // construction, so an unattended-enabled action's window opens without any authored
+        // Produce.To:"Custody" step.
+        if (unattendedSettles) {
+            return;
+        }
         boolean landsInCustody = false;
         if (effectiveSteps != null) {
             for (StationStep step : effectiveSteps) {
@@ -2623,6 +2632,46 @@ public final class StationValidator {
                     actionLabel + " authors a Doneness ready window, but nothing in this action lands"
                             + " produce in a custody pile (no step authors Produce.To:'Custody'), so the"
                             + " window can never open", id));
+        }
+    }
+
+    /**
+     * The unattended coverage (decision 90), warn-only like everything else here:
+     * <ul>
+     *   <li>{@code UNATTENDED_WITHOUT_CUSTODY}: an enabled {@code Work.Unattended} on an action
+     *       with no {@code Custody} group of its own (a {@code Ref}'d entry may inherit one, so
+     *       {@code hasRef} counts as unknown and never warns) - unattended settling works over
+     *       PLACED piles, so with nothing placeable it can never run.</li>
+     *   <li>{@code UNATTENDED_WITH_STEPS}: the action's effective program authors {@code Steps} -
+     *       an authored program runs attended-only, so unattended settles only the implicit
+     *       recipe transform, which a Steps action does not have.</li>
+     *   <li>{@code UNATTENDED_WITH_ANCHORS}: the action authors {@code Anchors} - a multi-station
+     *       walk runs attended-only for the same reason.</li>
+     * </ul>
+     */
+    private static void checkUnattended(@Nonnull ActionDef def, boolean unattendedSettles,
+            @Nullable StationStep[] effectiveSteps, @Nonnull String actionLabel, @Nonnull String id,
+            @Nonnull List<Finding> out) {
+        if (!unattendedSettles) {
+            return;
+        }
+        if (def.getCustody() == null && !def.hasRef()) {
+            out.add(Finding.warning(DOMAIN, "UNATTENDED_WITHOUT_CUSTODY",
+                    actionLabel + " authors Work.Unattended but no Custody group - unattended settling"
+                            + " works over placed custody piles, so with nothing placeable it can never"
+                            + " run", id));
+        }
+        if (effectiveSteps != null && effectiveSteps.length > 0) {
+            out.add(Finding.warning(DOMAIN, "UNATTENDED_WITH_STEPS",
+                    actionLabel + " authors Work.Unattended AND a Steps program - authored steps run"
+                            + " attended-only, so only the implicit recipe transform (which a Steps"
+                            + " action does not run) would settle unattended", id));
+        }
+        if (def.getAnchors() != null && !def.getAnchors().isEmpty()) {
+            out.add(Finding.warning(DOMAIN, "UNATTENDED_WITH_ANCHORS",
+                    actionLabel + " authors Work.Unattended AND Anchors - multi-station walks run"
+                            + " attended-only; the unattended settle works this action's own block"
+                            + " alone", id));
         }
     }
 
@@ -3250,7 +3299,11 @@ public final class StationValidator {
         // Custody presence feeds the match-any-input advisory below; a Ref'd entry may inherit its
         // Custody from the base action, so hasRef counts as "custody unknown" and never warns.
         checkRecipe(def.getRecipe(), def.getCustody() != null || def.hasRef(), id, actionLabel, out);
-        checkDoneness(def.getRecipe(), effectiveSteps, actionLabel, id, out);
+        StationAsset.Work effectiveWork = ActionResolver.effectiveWorkOf(def);
+        StationAsset.Work.Unattended unattended = effectiveWork != null ? effectiveWork.getUnattended() : null;
+        boolean unattendedSettles = unattended != null && unattended.effectiveEnabled();
+        checkDoneness(def.getRecipe(), effectiveSteps, unattendedSettles, actionLabel, id, out);
+        checkUnattended(def, unattendedSettles, effectiveSteps, actionLabel, id, out);
         checkWork(def.getWork(), id, actionLabel, out);
         checkToolGroup(def.getTool(), id, actionLabel + " Tool", out);
         checkRequiresGroup(def.getRequires(), id, actionLabel + " Requires", factorKnown, out);

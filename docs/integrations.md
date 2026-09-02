@@ -46,6 +46,7 @@ answer:
 | `StationSessionCompletedEvent` | The session stops (for any reason); fires after summary enrichers run. |
 | `StationEnhanceCompletedEvent` | An enhancement Stamp commits; carries before/after item copies and the enhancement report. |
 | `StationToolBrokeEvent` | A tool the session was using breaks. |
+| `StationUnattendedGatheredEvent` | A player gathers a custody pile that accrued [unattended work](unattended-work.md) cycles; carries the gatherer (never null), the granted cycle count, and the batch's already-scaled contributions. |
 
 Each event's fields document which are plain data (safe to keep) and which are live world-thread
 context valid only during dispatch - a listener that defers work captures the plain fields and

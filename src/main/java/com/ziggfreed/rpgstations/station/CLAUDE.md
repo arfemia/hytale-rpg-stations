@@ -782,7 +782,8 @@ only ever be "no". The prior `Query.any()` on the damage system paid that cost f
 
 **Every one of this engine's VOLATILE block-keyed maps (`displayByBlock` - whose keys append a
 per-socket `#<socketId>` suffix - `byBlock`, `workingByPlayer`'s block-anchored entries,
-`knownStationBlocks`) is GLOBAL, keyed by a composite
+`knownStationBlocks`, and the `unattendedIndex`'s blocks + hydrated-section markers) is GLOBAL,
+keyed by a composite
 `"<worldUuid>:<x>:<y>:<z>"` string, rather than partitioned per world.** The world-uuid prefix the
 key already carries is the whole per-world sweep; without it a fleet that creates and destroys
 instance worlds would accumulate stale entries (and pinned display `Ref`s) for the whole uptime.
@@ -813,7 +814,9 @@ custody section below) and unloads/reloads with the chunks.
 
 ## Owner ceilings (`Settings.Limits`, `RpgStationsSettingsAsset.Limits`)
 
-Three INDEPENDENT ceilings (see `../asset/CLAUDE.md`'s `RpgStationsSettingsAsset` bullet), read
+Three INDEPENDENT ceilings plus the unattended pass's pace knob (`UnattendedIntervalMs`, reader
+default 1000ms, read live in `tickUnattended` - see the unattended section above; see
+`../asset/CLAUDE.md`'s `RpgStationsSettingsAsset` bullet), read
 live (never cached) so a settings reload takes effect on the next press. The shared predicate
 `RpgStationsSettingsAsset.Limits.atCapacity(max, currentCount)` treats null OR non-positive as
 unlimited, so a server that never authors `Limits` behaves exactly as it did before the group
@@ -870,9 +873,9 @@ DisplayHandle` side map - `StationCustodyRetrieval.displayKey/blockKeyOf/socketI
 composite-key helpers - with the reverse networkId walk press-F retrieval uses, resolving THE
 SOCKET first and then that pile's owner) - a NetworkId is per-world and not boot-stable, so it
 never rides the stash; `respawnDisplayIfMissing` rebuilds EVERY socket's prop from the persisted
-contents on the block's first interaction after a restart (the interim self-heal; a
-hydrate-on-section-load reconciler is not built yet, so until then the props wait for that first
-touch).
+contents - reached from the unattended pass's HYDRATE WALK within a pass or two of the section
+loading (see the unattended section below; budgeted spawns, so a big load never stutters), with the
+first-touch call kept as belt and braces.
 
 **SOCKETS (the multi-placement model - see `../asset/CLAUDE.md`'s `Custody` bullet for the
 schema).** `Custody.effectiveSockets()` is the ONE resolution (authored sockets folded with the
@@ -1131,9 +1134,10 @@ items. The pieces:
   stash-level `ProgressGameTime` leaf is the window's (re)start; the windowed pile carries
   `StationDoneness.BATCHES_KEY` (`"doneness:batches"`, the produced-batch count) in its
   `PendingCycles` map, and a collapsed pile wears `"doneness:overdone"`. The whole
-  `"doneness:"` `PendingCycles` prefix is RESERVED - any other accrual key (the unattended pass's
-  per-conversion counts) must live outside it. The stash-level `LastGameTime` leaf is deliberately
-  untouched: it is reserved as the unattended pass's last-settled catch-up clock.
+  `"doneness:"` `PendingCycles` prefix is RESERVED - the unattended pass's per-conversion accrual
+  keys (`StationUnattended.accrualKey`, `accrual:conversion:<resolvedIndex>`) live beside it in the
+  same map, never inside it. The stash-level `LastGameTime` leaf is deliberately untouched by
+  doneness: it is the unattended pass's last-settled catch-up clock.
 - **One window per stash, opened/re-stamped by `StationService#noteCustodyProduce`** - called ONCE
   per committed produce PHASE from `StationStepHandlers.producePhase` (never per item; a
   multi-socket phase's window sits on its FIRST produced socket). Every batch re-stamps the clock
@@ -1144,14 +1148,16 @@ items. The pieces:
   `settleDonenessAt` convenience resolves the claim's own recipe-level fold): called at the
   toggle/placement first touch (before anything reads the claim), press-F retrieval (before the
   decide, so an overdue gather retrieves the settled items), and the engaged session's heartbeat
-  (throttled by `DONENESS_SETTLE_MS`, guarded on the `s.doneness` engage snapshot); a future
-  sessionless pass calls the same function with its own conversion-resolved fold. Expiry is
+  (throttled by `DONENESS_SETTLE_MS`, guarded on the `s.doneness` engage snapshot); and the
+  UNATTENDED pass's per-block settle calls the same function with its CONVERSION-level fold
+  (`donenessFoldFor`: the row the windowed pile's own accrual key recorded, else the recipe-level
+  fold - the conversion-over-recipe precedence exercised sessionless). Expiry is
   boundary-exact (`StationDoneness.expired`: `elapsed >= ReadyMs`).
 - **The collapse rule ("one pot, one fate")**: the WHOLE windowed pile's counted tally is replaced
   by the valid `Overdone` entries (exact-`ItemId` only; others ignored) scaled by the batch count
   (`StationDoneness.overdoneReplacement`); the pile's owner and `Unique` stack are untouched, no
   other pile is touched (per-socket isolation), the window clears, `States.Overdone` flips, the
-  pile's display prop despawns (the standing first-touch respawn rebuilds it from the settled
+  pile's display prop despawns (the hydrate/first-touch respawn rebuilds it from the settled
   contents), the `overdone` moment fires - through an engaged session's cue queue when one works
   the block (`sessionAt`), else immediately at the block via `playPresentationAt` (the ONE
   sessionless playback core `StationStructures`' pattern moments also delegate to) - and the
@@ -1173,6 +1179,78 @@ resting-state pick), record ops on the claim, orchestration on `StationService`;
 `ready`/`overdone` are well-known (`StationFlairs.MOMENT_READY`/`MOMENT_OVERDONE`), so flairs
 overlay them like any cue.
 
+## Unattended processing (decision 90)
+
+A custody-loaded block whose committed action authors `Work.Unattended` (group presence = opt-in;
+`Enabled` exists for a Parent child to flip it off; `MaxCycles` default 24 caps ONE settle burst
+AND one gather's payout; `CatchUpMaxMs` default 24h mirrors the native processing bench) keeps
+settling its recipe conversions while nobody is engaged. Three classes, three altitudes:
+
+- **[`StationUnattended`](StationUnattended.java)** - the PURE core: the catch-up math over the
+  stash's `LastGameTime` clock (world GAME time - an outage settles zero; `usableElapsed` caps at
+  `CatchUpMaxMs`, `rawCycles` floors over the row's cycle pace), the bank-vs-forfeit clock rule
+  (`advancedLastGameTime`: an UNCLAMPED settle banks the sub-cycle remainder; a clamped one -
+  inputs, room, `MaxCycles`, or no runnable row - forfeits the backlog so a top-up never
+  burst-pays idle hours), the analytic `settle` (first runnable row by tier over per-pile
+  availability + `IsExactSet` + NET-FLOW custody room, drained/produced/Yield-applied as one
+  batch, the produce pile inheriting the FIRST-consumed socket's owner per decision 82), the
+  accrual namespace (`accrualKey` = `accrual:conversion:<resolvedIndex>` - the L7 picker row-key
+  channel, NEVER inside the reserved `doneness:` prefix), and the gather plan (`gatherPlan`
+  allocates the `MaxCycles` budget across accrued keys in pile order; `scaledByCycles` multiplies
+  the idle-scaled per-cycle contributions). Pinned by `UnattendedCatchUpTest` +
+  `UnattendedGatherTest`; the D38 no-refund-ledger invariant by `StationRefundLedgerTest`'s
+  appended case (a settle has no session - nothing can ever queue a refund).
+- **[`UnattendedIndex`](UnattendedIndex.java)** - the volatile per-boot index: unattended-capable
+  block keys plus hydrated-section markers, fed by (a) a LIVE stash write at an opting-in action
+  (`registerUnattendedIfEnabled` in `toggle`'s placement + `produceIntoCustody`), (b) the HYDRATE
+  walk, and (c) lazy eviction (a visit finding the section unloaded drops the block AND re-arms
+  its section marker so a reload re-seeds; a gone stash just evicts; a broken block evicts in
+  `onCustodyBlockBroken`; `forgetBlockKeyedState` sweeps it by the same world-prefix predicate as
+  every other volatile map).
+- **`StationService#tickUnattended`** - the impure orchestration, riding `tickFrameOnce` OUTSIDE
+  the session early-return, throttled per world to `Limits.UnattendedIntervalMs` (default
+  1000ms). Each pass: (1) `hydrateLoadedSections` - the first-party loaded-section iteration
+  (`chunkStore.getStore().forEachChunk(ChunkSection.getComponentType(), ...)`, the exact walk the
+  engine's own `SectionUnloadingSystem` runs; world coords via
+  `ChunkUtil.worldCoordFromLocalCoord`), at most `UNATTENDED_HYDRATE_SECTION_BUDGET` (64) NEW
+  sections a pass, discovery inside the walk and all processing DEFERRED after it; each found
+  stash seeds the index, respawns missing props under `UNATTENDED_PROP_SPAWN_BUDGET` (32,
+  re-arming unfinished sections), and heals the resting block state - this walk RETIRES the
+  first-touch-only display interim (the touch paths stay as belt and braces). (2)
+  `visitUnattendedBlocks` - per indexed block: live-session skip (`StationUnattended.shouldVisit`
+  - attended is the authority), then `settleUnattendedAt`: re-verify capability (evict when
+  content changed), doneness settle FIRST through the CONVERSION-level fold (`donenessFoldFor`
+  reads the windowed pile's accrual key), the pure settle, then the impure edges - doneness batch
+  stamping (one `noteDonenessBatch` per settled cycle; a fresh window flips `States.Ready`),
+  display refresh, resting-state flip, ONE `markDirty` for a TRANSFORM only (a clock-only stamp -
+  first anchor or forfeited backlog - stays best-effort in the loaded section rather than flagging
+  the chunk for a save every pass for every input-starved station; an unsaved unload costs at most
+  one MaxCycles-capped burst). TRANSFORM ONLY: no rolls, no commands, no
+  worker moments. Steps/Anchors actions run attended-only (`UNATTENDED_WITH_STEPS`/`_WITH_ANCHORS`
+  warn; `UNATTENDED_WITHOUT_CUSTODY` for the unplaceable case), and
+  `DONENESS_WITHOUT_PRODUCE_SOCKET` is EXEMPT for an unattended action (its settle produces into
+  custody by construction).
+- **The gather payout** (`grantAccruedAtGather`, called at press-F retrieval, `returnCustody`'s
+  hand-back and `releaseAnchorClaims`' both branches, BEFORE the piles leave the stash): drains
+  the accrual keys (`drainAccruedCycles` - doneness keys untouched), caps at `MaxCycles`, builds
+  ONE gatherer factor snapshot (`buildGatherFactorContext` - decision 90: factors resolve against
+  the GATHERING player; the pile owner does NOT gate, `Share.Reclaim` already did), forwards
+  `Work.PerCycleContributions` at the idle rate x the gatherer-resolved `ContributionScale` x the
+  granted cycles, replays the effective `Bonus` ONE `Cycle`-trigger pass per granted cycle (at
+  most 24 passes, so no batched-Repeat approximation is needed; `applyGatherGrantResult` is the
+  sessionless `applyGrantResult` twin - items/droplists/commands/effects land on the gatherer,
+  cues play via `playPresentationAt`, `OutputItems` pays the accrued conversion's primary output,
+  and a replayed roll's one-shot `rpgstations:contribution` grants are DROPPED, the documented
+  boundary), then fires `StationUnattendedGatheredEvent` (gatherer never null). Breaking the block
+  forfeits accrual with the stash, like the doneness window.
+
+**Sections have no listenable unload for this mod's purposes** (the engine's `SectionUnloadEvent`
+is dispatched only for cubic sections, not the common column-bound ones, and via a `ChunkStore` ECS
+invoke this mod registers no system for), which is why dehydrate is LAZY by design: an unloaded
+section answers no claim, the visit evicts and re-arms, and a reload re-hydrates. Smoke-owed: the
+live loaded-section walk, prop-respawn timing in game, a real long catch-up, and the gather flow
+end to end.
+
 ## The placed-input PLACED-AS-ENTITY visual
 
 [`StationCustodyDisplay`](StationCustodyDisplay.java) spawns a static, network-replicated,
@@ -1183,7 +1261,9 @@ renders nothing. Block-shaped items (the sawmill's placed logs) spawn a real `Bl
 everything else (the anvil's placed weapon) spawns a bare `ItemComponent` prop. Both routes
 `ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType())` - the PROP never survives
 a restart, and the persisted stash does, which is why `StationService#respawnDisplayIfMissing`
-rebuilds every socket's prop from the stored contents on the block's first interaction. Both the
+rebuilds every socket's prop from the stored contents - from the unattended pass's hydrate walk
+shortly after the section loads (budgeted, `UNATTENDED_PROP_SPAWN_BUDGET`), and from the
+first-touch paths as belt and braces. Both the
 ref AND the spawned entity's own `NetworkId` live in `StationService`'s VOLATILE `displayByBlock`
 side map, keyed `"<blockKey>#<socketId>"` (a `DisplayHandle` record, captured together at spawn
 via `spawnDisplayIfAbsent` - a NetworkId is per-world and not boot-stable, so neither may ride
@@ -1393,7 +1473,12 @@ are raw English by convention (an admin/log surface, not player-facing).
 
 The lang-key check (`langKeyKnownLive`) is a MERGED-view check: a miss against the jar's own
 `i18n.RpgStationsLangKeys` falls through to a LIVE `I18nModule.getMessage` query, so a pack's own
-additive `rpgstations.lang` overlay resolves correctly. **Multi-station/extension checks**:
+additive `rpgstations.lang` overlay resolves correctly. **Unattended checks (decision 90)**: `UNATTENDED_WITHOUT_CUSTODY` /
+`UNATTENDED_WITH_STEPS` / `UNATTENDED_WITH_ANCHORS` (all warn-only, on an effective
+`Work.Unattended` that is enabled - `ActionResolver.effectiveWorkOf` resolves a `Ref` entry's
+group), plus the `DONENESS_WITHOUT_PRODUCE_SOCKET` exemption (an unattended settle lands produce
+in custody itself, so that warn is suppressed for an unattended-enabled action).
+**Multi-station/extension checks**:
 `ACTION_REF_UNKNOWN`, `EXTENSION_TARGET_UNKNOWN`, `EXTENSION_PAYLOAD_MISMATCH`,
 `EXTENSION_KEY_COLLISION`, `EXTENSION_ANCHOR_MISSING`, `EXTENSION_STEP_MISSING_ID`,
 `ANCHOR_STATION_UNKNOWN`, `ANCHOR_STATION_NOT_DISCOVERABLE` (see the discovery-seed section
