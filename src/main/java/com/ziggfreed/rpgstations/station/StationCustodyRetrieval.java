@@ -79,21 +79,58 @@ final class StationCustodyRetrieval {
         return null;
     }
 
-    /** Pure: the retrieval eligibility decision, precedence order per {@link Outcome}'s own javadoc. */
+    /**
+     * Pure: the retrieval eligibility decision, precedence order per {@link Outcome}'s own
+     * javadoc. {@code mayReclaim} is the per-socket ownership answer: the presser owns the
+     * clicked socket's pile, or that socket authors {@code Share.Reclaim} (the owner-only rule
+     * relaxed per socket, never per block).
+     */
     @Nonnull
-    static Outcome decide(boolean claimFound, boolean hasActiveSessionAtBlock, boolean isOwner, boolean claimNonEmpty) {
+    static Outcome decide(boolean claimFound, boolean hasActiveSessionAtBlock, boolean mayReclaim,
+            boolean claimNonEmpty) {
         if (!claimFound) {
             return Outcome.UNKNOWN_TARGET;
         }
         if (hasActiveSessionAtBlock) {
             return Outcome.BUSY;
         }
-        if (!isOwner) {
+        if (!mayReclaim) {
             return Outcome.NOT_OWNER;
         }
         if (!claimNonEmpty) {
             return Outcome.NOTHING_TO_RETRIEVE;
         }
         return Outcome.RETRIEVE;
+    }
+
+    // ==================== the per-socket display key ====================
+
+    /**
+     * The separator between a block key and a socket id in the display side map's composite key.
+     * A block key is {@code "<worldUuid>:<x>:<y>:<z>"} (no {@code '#'} can appear in it), so the
+     * split-back is unambiguous, and the composite still STARTS with the block key - every
+     * world-prefix sweep and {@link #owns} world guard keeps working unchanged.
+     */
+    static final String SOCKET_KEY_SEPARATOR = "#";
+
+    /** The composite side-map key one socket's display prop lives under. */
+    @Nonnull
+    static String displayKey(@Nonnull String blockKey, @Nonnull String socketId) {
+        return blockKey + SOCKET_KEY_SEPARATOR + socketId;
+    }
+
+    /** The block-key half of a composite display key (the whole key when no separator is present). */
+    @Nonnull
+    static String blockKeyOf(@Nonnull String displayKey) {
+        int sep = displayKey.indexOf(SOCKET_KEY_SEPARATOR);
+        return sep >= 0 ? displayKey.substring(0, sep) : displayKey;
+    }
+
+    /** The socket-id half of a composite display key ({@link StationCustodyClaim#MAIN_PILE} when none is encoded). */
+    @Nonnull
+    static String socketIdOf(@Nonnull String displayKey) {
+        int sep = displayKey.indexOf(SOCKET_KEY_SEPARATOR);
+        return sep >= 0 && sep + 1 < displayKey.length()
+                ? displayKey.substring(sep + 1) : StationCustodyClaim.MAIN_PILE;
     }
 }

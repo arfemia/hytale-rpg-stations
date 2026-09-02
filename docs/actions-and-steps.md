@@ -89,9 +89,9 @@ every step regardless of which phases it authors.
 | `Puppet` | A per-step `{Clip?, Prop?}` override for the moment-to-moment animation/held item, played once at iteration entry. |
 | `Presentation` | A sound/particle/etc. cue played once at iteration entry. |
 | `Walk` | Move the puppet to a named anchor. See [Multi-Station Programs](multi-station-programs.md). |
-| `Consume` | `{Items: [Ingredient...], From: Inventory\|Custody}` - drain from the player's backpack or the block's placed-input claim; all-or-nothing across the whole `Items` list. |
+| `Consume` | `{Items: [Ingredient...], From: Inventory\|Custody, Socket?}` - drain from the player's backpack or the block's placed-input claim; all-or-nothing across the whole `Items` list. On a Custody route, `Socket` (and a per-entry `Socket` on any `Items` entry, which wins) names the [custody socket](custody-and-placed-display.md) to draw from; absent = the first Item socket. |
 | `Stamp` | The enhance-commit phase (reagents, durability, stat rolls). See [Enhancement & Stamp](enhancement-and-stamp.md). |
-| `Produce` | `{Items: [Ingredient...], To: Inventory\|Custody}` - grant to the backpack, or deposit into a custody claim (the primary station's or a claimed anchor's). |
+| `Produce` | `{Items: [Ingredient...], To: Inventory\|Custody, Socket?}` - grant to the backpack, or deposit into a custody claim (the primary station's or a claimed anchor's). On a Custody route, `Socket`/per-entry `Socket` names the receiving [custody socket](custody-and-placed-display.md); absent = the first Item socket, and the receiving pile belongs to whoever did the work. |
 | `Roll` | A `LootRef` - the same weighted loot vocabulary an action's own `Bonus` group uses. See [Loot & Factors](loot-and-factors.md). |
 | `Commands` | Console commands run with the usual placeholder substitutions. |
 | `IsWork` | Does this step count as WORK at its `At`-anchor block (driving that block's `Custody.States.Working` look)? Defaults to true for a `Consume`+`Produce` convert step, false otherwise - author it explicitly true on a pure beat that IS the work. |

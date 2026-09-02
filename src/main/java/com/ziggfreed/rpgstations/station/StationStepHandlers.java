@@ -505,11 +505,14 @@ final class StationStepHandlers {
     }
 
     /**
-     * Drains every {@code items} entry from the block's live claim, tallying the REAL drained item
-     * ids into the session ledger. Availability is PEEKED across every entry first (a short claim
-     * fails before any drain runs), so a multi-item custody consume is all-or-nothing too; a short
-     * drain fails {@code OUT_OF_INPUTS}/{@code INPUTS_EXHAUSTED}, the same reasons an empty custody
-     * station denies at engage.
+     * Drains every {@code items} entry from the block's live claim, each from the SOCKET pile it
+     * addresses (its own {@code Socket}, else the phase's group-level one, else the first Item
+     * socket - {@code "main"} for a degenerate custody), tallying the REAL drained item ids into
+     * the session ledger PER PILE (an interrupted iteration refunds to the originating pile, never
+     * merging piles). Availability is PEEKED across every entry first (a short claim fails before
+     * any drain runs), so a multi-item custody consume is all-or-nothing too; a short drain fails
+     * {@code OUT_OF_INPUTS}/{@code INPUTS_EXHAUSTED}, the same reasons an empty custody station
+     * denies at engage.
      */
     @Nullable
     private static StationStepResult consumeFromCustody(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
@@ -517,10 +520,15 @@ final class StationStepHandlers {
         // Custody drains from the step's At-anchor block (scope-2 wave 3, design 2.2) - the primary
         // block for a null/self At, a remote anchor's claim otherwise.
         StationCustodyClaim claim = StationService.getInstance().custodyClaimForAnchor(ctx.session, step.getAt());
+        StationStep.Consume consume = step.getConsume();
+        String groupSocket = consume != null ? consume.getSocket() : null;
+        List<Custody.ResolvedSocket> sockets = actionSockets(ctx);
         for (Ingredient item : items) {
             String ref = consumeRef(item);
             boolean isResource = isResourceRoute(item);
-            int have = StationCustody.available(claim, isResource ? null : ref, isResource ? ref : null,
+            String socketId = StationCustody.socketIdFor(item.getSocket(), groupSocket, sockets);
+            int have = StationCustody.availableInPile(claim != null ? claim.items(socketId) : null,
+                    isResource ? null : ref, isResource ? ref : null,
                     StationService::liveResourceTypeIdsOf);
             int need = item.effectiveQuantity();
             if (have < need) {
@@ -529,26 +537,42 @@ final class StationStepHandlers {
                 boolean repeating = ctx.action.getWork() != null && ctx.action.getWork().effectiveLooping();
                 return StationStepResult.fail(StationService.shortInputStopReason(repeating),
                         "Consume step '" + step.getId() + "' custody ran short ("
-                                + have + "/" + need + " of '" + ref + "')");
+                                + have + "/" + need + " of '" + ref + "' in socket '" + socketId + "')");
             }
         }
-        Map<String, Integer> drainedOut = new LinkedHashMap<>();
+        String anchorBlockKey = StationService.anchorBlockKeyFor(ctx.session, step.getAt());
         for (Ingredient item : items) {
             String ref = consumeRef(item);
             boolean isResource = isResourceRoute(item);
-            StationCustody.drain(claim, isResource ? null : ref, isResource ? ref : null,
+            String socketId = StationCustody.socketIdFor(item.getSocket(), groupSocket, sockets);
+            Map<String, Integer> drainedOut = new LinkedHashMap<>();
+            StationCustody.drainFromPile(claim != null ? claim.items(socketId) : null,
+                    isResource ? null : ref, isResource ? ref : null,
                     item.effectiveQuantity(), StationService::liveResourceTypeIdsOf, drainedOut);
+            for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
+                ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
+            }
+            if (anchorBlockKey != null) {
+                StationService.recordIterationConsumedCustody(ctx.session, anchorBlockKey, socketId, drainedOut);
+            } else {
+                // No resolvable pile address (an unresolved anchor) - the player hand-back half
+                // of the ledger still covers the refund.
+                StationService.recordIterationConsumedMap(ctx.session, drainedOut);
+            }
         }
         // One dirty mark for the whole drain batch: the claim is a view over the block's
         // chunk-persisted stash, and an unmarked mutation survives only until the section unloads.
         if (claim != null) {
             claim.markDirty();
         }
-        for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
-            ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
-        }
-        StationService.recordIterationConsumedMap(ctx.session, drainedOut);
         return null;
+    }
+
+    /** The running action's resolved custody sockets (the degenerate one-{@code main} list when socket-less). */
+    @Nonnull
+    private static List<Custody.ResolvedSocket> actionSockets(@Nonnull StationStepContext ctx) {
+        Custody custody = ctx.action.getCustody();
+        return custody != null ? custody.effectiveSockets() : List.of();
     }
 
     // ==================== Produce phase ====================
@@ -582,14 +606,18 @@ final class StationStepHandlers {
         String to = produce.effectiveTo();
 
         // To:"Custody" (scope-2 wave 3, design 2.2): store the outputs into the step's At-anchor
-        // custody claim (the primary block for a null/self At), then clear the iteration refund
-        // ledger (M1: the consumed inputs BECAME these custody items - refund + custody-return are
-        // mutually exclusive; returnCustody now hands the produced items back instead).
+        // custody claim (the primary block for a null/self At), each item into the SOCKET pile it
+        // addresses (its own Socket, else the phase's, else the first Item socket - a produce pile
+        // is owned by the session's worker), then clear the iteration refund ledger (M1: the
+        // consumed inputs BECAME these custody items - refund + custody-return are mutually
+        // exclusive; returnCustody now hands the produced items back instead).
         if (StationStep.Produce.TO_CUSTODY.equalsIgnoreCase(to)) {
             try {
+                List<Custody.ResolvedSocket> sockets = actionSockets(ctx);
                 for (Ingredient item : items) {
+                    String socketId = StationCustody.socketIdFor(item.getSocket(), produce.getSocket(), sockets);
                     boolean placed = StationService.getInstance().produceIntoCustody(ctx.session, ctx.commandBuffer,
-                            step.getAt(), item.getItemId(), item.effectiveQuantity());
+                            step.getAt(), socketId, item.getItemId(), item.effectiveQuantity());
                     if (!placed) {
                         return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
                                 "Produce step '" + step.getId() + "' could not resolve its To:Custody anchor '"

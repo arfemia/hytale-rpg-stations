@@ -80,6 +80,16 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.retrieve.busy",
             "rpgstations.ui.station.retrieve.done",
             "rpgstations.ui.station.retrieve.hint",
+            // The per-socket custody refusals: a socket with no room, a material no socket takes,
+            // a Required socket unfilled at engage (plus its Label-naming form), a Required block
+            // socket lost mid-session, and a Share-gated refusal (plus its Label-naming form).
+            "rpgstations.ui.station.socket_full",
+            "rpgstations.ui.station.socket_wrong_input",
+            "rpgstations.ui.station.socket_missing",
+            "rpgstations.ui.station.socket_missing_named",
+            "rpgstations.ui.station.socket_lost",
+            "rpgstations.ui.station.not_shared",
+            "rpgstations.ui.station.not_shared_named",
             "rpgstations.ui.station.inventory_full",
             "rpgstations.ui.station.wrong_tool",
             "rpgstations.ui.station.tool_worn",

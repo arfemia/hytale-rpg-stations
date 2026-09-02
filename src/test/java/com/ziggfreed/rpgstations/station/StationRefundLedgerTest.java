@@ -204,5 +204,76 @@ class StationRefundLedgerTest {
         assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.RITUAL_COMPLETE));
         assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.ANCHOR_LOST));
         assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.PATH_BLOCKED));
+        assertTrue(StationService.custodyReturnsAtStop(StationService.StopReason.SOCKET_LOST),
+                "a lost required socket block is a present-player stop - the same family as ANCHOR_LOST");
+    }
+
+    // ==================== the socket-aware custody ledger (refund to the ORIGINATING pile) ====================
+
+    @Test
+    void custodyDrains_recordPerOriginatingPile_neverMerged() {
+        // A Consume that drew meat from one socket and greens from another records each drain
+        // under ITS pile's key, so an interrupted iteration can put every item back exactly where
+        // it came from - never merging piles, never handing a foreign pile's contents to the
+        // consuming player.
+        StationSession s = session();
+        Map<String, Integer> meatDrain = new LinkedHashMap<>();
+        meatDrain.put("Food_Meat_Raw", 2);
+        Map<String, Integer> vegDrain = new LinkedHashMap<>();
+        vegDrain.put("Food_Carrot", 1);
+        StationService.recordIterationConsumedCustody(s, "w:1:64:2", "meat", meatDrain);
+        StationService.recordIterationConsumedCustody(s, "w:1:64:2", "veg", vegDrain);
+
+        assertEquals(2, s.iterationConsumedCustody.size(), "one entry per originating pile");
+        assertEquals(Map.of("Food_Meat_Raw", 2), s.iterationConsumedCustody.get("w:1:64:2#meat"));
+        assertEquals(Map.of("Food_Carrot", 1), s.iterationConsumedCustody.get("w:1:64:2#veg"));
+        assertTrue(s.iterationConsumed.isEmpty(),
+                "custody drains no longer ride the player-refund half of the ledger");
+    }
+
+    @Test
+    void committedProduce_clearsBothLedgerHalves() {
+        StationSession s = session();
+        StationService.recordIterationConsumedItem(s, "Ingredient_Salt", 1);
+        Map<String, Integer> drained = new LinkedHashMap<>();
+        drained.put("Food_Fish_Raw", 1);
+        StationService.recordIterationConsumedCustody(s, "w:0:64:0", "main", drained);
+
+        StationService.clearIterationLedgerOnCommittedProduce(s);
+
+        assertTrue(s.iterationConsumed.isEmpty());
+        assertTrue(s.iterationConsumedCustody.isEmpty(),
+                "the M1 rule clears the custody half too - refund and committed output stay exclusive");
+    }
+
+    @Test
+    void refundIntoTheOriginatingPile_restoresContentsWithoutReowning() {
+        // The application half of the socket-aware refund, over the detached claim view: the
+        // recorded amounts go back into each pile with a NULL adder, so a pile a shared session
+        // drained keeps its own owner and its restored contents.
+        UUID owner = UUID.randomUUID();
+        UUID worker = UUID.randomUUID();
+        StationCustodyClaim claim = new StationCustodyClaim(owner, "cookingpit", "stew", 0, 64, 0);
+        claim.addTo("meat", owner, "Food_Meat_Raw", 2);
+
+        Map<String, Integer> drainedOut = new LinkedHashMap<>();
+        StationCustody.drainFromPile(claim.items("meat"), "Food_Meat_Raw", null, 2,
+                id -> new String[0], drainedOut);
+        StationSession s = session();
+        s.playerUuid = worker;
+        StationService.recordIterationConsumedCustody(s, "w:0:64:0", "meat", drainedOut);
+        assertTrue(claim.isEmpty("meat"));
+
+        // What refundIterationLedger does per recorded pile: add back with adder null.
+        for (Map.Entry<String, Map<String, Integer>> pileEntry : s.iterationConsumedCustody.entrySet()) {
+            for (Map.Entry<String, Integer> e : pileEntry.getValue().entrySet()) {
+                claim.addTo(StationCustodyRetrieval.socketIdOf(pileEntry.getKey()), null,
+                        e.getKey(), e.getValue());
+            }
+        }
+
+        assertEquals(2, claim.totalQuantity("meat"), "the drained items return to their own pile");
+        assertEquals(owner, claim.pileOwner("meat"),
+                "the refund never re-owns the pile - the worker gets nothing of the owner's");
     }
 }

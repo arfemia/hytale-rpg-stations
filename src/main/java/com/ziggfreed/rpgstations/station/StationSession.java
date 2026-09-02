@@ -16,6 +16,7 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.effect.AppliedEffectTracker;
 import com.ziggfreed.common.entity.performer.StationPerformer;
 import com.ziggfreed.rpgstations.api.StationContribution;
+import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.StationAsset;
@@ -135,6 +136,15 @@ final class StationSession {
     boolean stepProgramAuthorsClip;
     /** The station's held-tool gate, re-checked each heartbeat (null = no requirement). */
     StationAsset.Tool toolReq;
+
+    /**
+     * The resolved action's {@code Required} BLOCK sockets, snapshotted at engage (the resolved
+     * config snapshot pattern - a mid-session catalog reload never half-changes a running loop):
+     * the heartbeat re-verifies each one's world block beside its block-gone check, and a
+     * vanished required block ends the session gracefully ({@code StopReason.SOCKET_LOST}).
+     * Empty for every station without one (every degenerate-custody station included).
+     */
+    List<Custody.ResolvedSocket> requiredBlockSockets = List.of();
 
     /**
      * The multi-output category the player chose at the picker (selection wave, decision 50/56), or
@@ -337,6 +347,17 @@ final class StationSession {
      * while the custody return hands back the raw fish.
      */
     final Map<String, Integer> iterationConsumed = new LinkedHashMap<>();
+
+    /**
+     * The CUSTODY half of the iteration refund ledger, keyed by the pile the drain came from
+     * ({@code "<blockKey>#<socketId>"}, the display side map's composite key shape): what a
+     * {@code Consume From:"Custody"} phase drained since the last commit boundary, per originating
+     * pile. An interrupted iteration refunds each entry back INTO its own pile (never to the
+     * player, never merging piles - a shared session may legitimately have consumed from a pile it
+     * does not own), while {@link #iterationConsumed} keeps the inventory-sourced half refunding
+     * to the player. Cleared by the SAME commit boundaries.
+     */
+    final Map<String, Map<String, Integer>> iterationConsumedCustody = new LinkedHashMap<>();
 
     // Item ledger (for the future standalone summary HUD, leg 3): consumedItems covers both
     // the exact-ItemId route AND the ResourceTypeId ("any log" family) route (tallying the

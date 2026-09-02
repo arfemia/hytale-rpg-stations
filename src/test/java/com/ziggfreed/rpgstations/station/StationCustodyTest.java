@@ -184,10 +184,12 @@ class StationCustodyTest {
     @Test
     void claimView_readsBackWhatAStashRecords() {
         // The view a fresh resolve materializes over a persisted stash: tag -> station/action,
-        // main-pile owner -> ownerId, the pile's tally live underneath.
+        // stash owner -> ownerId, the pile's tally live underneath. The stamp records the stash
+        // identity only; each pile is minted by its first placement (ensurePile here plays that
+        // first-placement role for the fixture).
         BlockStash stash = new BlockStash();
         StationCustodyClaim.stampNewStash(stash, OWNER, "sawmill", "work");
-        stash.pile(StationCustodyClaim.MAIN_PILE).itemsMutable().put("Wood_Oak_Log", 5);
+        stash.ensurePile(StationCustodyClaim.MAIN_PILE).itemsMutable().put("Wood_Oak_Log", 5);
 
         StationCustodyClaim claim = StationCustodyClaim.of(stash, 1, 64, 2, () -> { });
 

@@ -317,6 +317,21 @@ public final class StationStep {
                 && (commands == null || commands.length == 0) && stamp == null;
     }
 
+    /** True when the phase, or any of its entries, authors a custody socket address. */
+    private static boolean authorsAnySocket(@Nullable String groupSocket, @Nullable Ingredient[] items) {
+        if (groupSocket != null && !groupSocket.isBlank()) {
+            return true;
+        }
+        if (items != null) {
+            for (Ingredient item : items) {
+                if (item != null && item.getSocket() != null && !item.getSocket().isBlank()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
 
     /**
      * The branch/skip leaf (design 2.1): {@link #result} decides what a FAILING {@link #conditions}
@@ -567,6 +582,7 @@ public final class StationStep {
 
         @Nullable protected Ingredient[] items;
         @Nullable protected String from;
+        @Nullable protected String socket;
 
         public static final BuilderCodec<Consume> CODEC = BuilderCodec.builder(Consume.class, Consume::new)
                 .appendInherited(new KeyedCodec<>("Items", new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
@@ -578,13 +594,31 @@ public final class StationStep {
                 .documentation("The source for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the block's placed-input claim).")
                 .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:consume-from")))
                 .metadata(EditorSchema.defaultValue(FROM_INVENTORY)).add()
+                .appendInherited(new KeyedCodec<>("Socket", Codec.STRING, false),
+                        (o, v) -> o.socket = v, o -> o.socket, (o, p) -> o.socket = p.socket)
+                .documentation("The custody socket every entry of this phase drains from, unless an entry names its own Socket. Absent = the first Item socket. Only meaningful with From: 'Custody'.").add()
+                .afterDecode((Consume consume, ExtraInfo extraInfo) -> {
+                    if (!FROM_CUSTODY.equalsIgnoreCase(consume.effectiveFrom())
+                            && authorsAnySocket(consume.socket, consume.items)) {
+                        extraInfo.getValidationResults().warn(
+                                "StationStep.Consume authors a Socket but draws From the Inventory - the socket "
+                                        + "address is ignored there; author From: 'Custody' or drop the Socket.");
+                    }
+                })
                 .build();
 
         @Nonnull
         public static Consume of(@Nullable Ingredient[] items, @Nullable String from) {
+            return of(items, from, null);
+        }
+
+        /** As above, plus the group-level custody {@link #socket} address. */
+        @Nonnull
+        public static Consume of(@Nullable Ingredient[] items, @Nullable String from, @Nullable String socket) {
             Consume c = new Consume();
             c.items = items;
             c.from = from;
+            c.socket = socket;
             return c;
         }
 
@@ -604,6 +638,12 @@ public final class StationStep {
         @Nullable
         public String getFrom() {
             return from;
+        }
+
+        /** The group-level custody socket every entry drains from (an entry's own Socket wins), or null for the first Item socket. */
+        @Nullable
+        public String getSocket() {
+            return socket;
         }
 
         /** True when no item is authored (the phase does nothing). */
@@ -631,6 +671,7 @@ public final class StationStep {
 
         @Nullable protected Ingredient[] items;
         @Nullable protected String to;
+        @Nullable protected String socket;
 
         public static final BuilderCodec<Produce> CODEC = BuilderCodec.builder(Produce.class, Produce::new)
                 .appendInherited(new KeyedCodec<>("Items", new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
@@ -642,13 +683,31 @@ public final class StationStep {
                 .documentation("The destination for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the At-anchor's claim).")
                 .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:produce-to")))
                 .metadata(EditorSchema.defaultValue(TO_INVENTORY)).add()
+                .appendInherited(new KeyedCodec<>("Socket", Codec.STRING, false),
+                        (o, v) -> o.socket = v, o -> o.socket, (o, p) -> o.socket = p.socket)
+                .documentation("The custody socket every entry of this phase lands in, unless an entry names its own Socket. Absent = the first Item socket. Only meaningful with To: 'Custody'.").add()
+                .afterDecode((Produce produce, ExtraInfo extraInfo) -> {
+                    if (!TO_CUSTODY.equalsIgnoreCase(produce.effectiveTo())
+                            && authorsAnySocket(produce.socket, produce.items)) {
+                        extraInfo.getValidationResults().warn(
+                                "StationStep.Produce authors a Socket but writes To the Inventory - the socket "
+                                        + "address is ignored there; author To: 'Custody' or drop the Socket.");
+                    }
+                })
                 .build();
 
         @Nonnull
         public static Produce of(@Nullable Ingredient[] items, @Nullable String to) {
+            return of(items, to, null);
+        }
+
+        /** As above, plus the group-level custody {@link #socket} address. */
+        @Nonnull
+        public static Produce of(@Nullable Ingredient[] items, @Nullable String to, @Nullable String socket) {
             Produce p = new Produce();
             p.items = items;
             p.to = to;
+            p.socket = socket;
             return p;
         }
 
@@ -667,6 +726,12 @@ public final class StationStep {
         @Nullable
         public String getTo() {
             return to;
+        }
+
+        /** The group-level custody socket every entry lands in (an entry's own Socket wins), or null for the first Item socket. */
+        @Nullable
+        public String getSocket() {
+            return socket;
         }
 
         /** True when no item is authored (the phase does nothing). */

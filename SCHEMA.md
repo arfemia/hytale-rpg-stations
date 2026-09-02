@@ -594,6 +594,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Items` | array of [Ingredient](#type-ingredient) | `null` | The items this phase consumes, each an Ingredient (exactly one of ItemId \| ResourceTypeId, plus Quantity). All-or-nothing: a shortfall on any entry consumes none of them. |
 | `From` | `string` | `null` | The source for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the block's placed-input claim). |
+| `Socket` | `string` | `null` | The custody socket every entry of this phase drains from, unless an entry names its own Socket. Absent = the first Item socket. Only meaningful with From: 'Custody'. |
 
 <a id="field-stationstep-produce"></a>
 ### StationStep.Produce
@@ -602,6 +603,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Items` | array of [Ingredient](#type-ingredient) | `null` | The items this phase produces, each an exact-ItemId Ingredient plus Quantity (ResourceTypeId is an INPUT-only route). |
 | `To` | `string` | `null` | The destination for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the At-anchor's claim). |
+| `Socket` | `string` | `null` | The custody socket every entry of this phase lands in, unless an entry names its own Socket. Absent = the first Item socket. Only meaningful with To: 'Custody'. |
 
 <a id="field-stationstep-stamp"></a>
 ### StationStep.Stamp
@@ -644,6 +646,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ItemId` | `string` | `null` | Exact item id (exactly one of ItemId \| ResourceTypeId). An OUTPUT uses only ItemId. |
 | `ResourceTypeId` | `string` | `null` | A native Item.ResourceTypes family id (the 'any log' route); INPUT only. Exactly one of ItemId \| ResourceTypeId. |
 | `Quantity` | `integer` | `null` | The item count; reader-defaults to 1 when omitted or non-positive. |
+| `Socket` | `string` | `null` | The custody socket THIS entry draws from / lands in, overriding the phase's own Socket ('meat from the meat rack, greens from the basket' in one row). Absent = the phase's Socket, else the first Item socket. Only meaningful on a Custody-routed phase. |
 
 <a id="type-factorterm"></a>
 ## FactorTerm
@@ -755,6 +758,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Input` | [ActionInput](#field-custody-input) | `null` | The explicit placement-acceptance matcher; absent derives acceptance from the resolved action's Recipe.Conversions inputs. |
 | `States` | [States](#field-custody-states) | `null` | The block State.Definitions names custody flips between; null = no visual/hint flip. |
 | `Display` | [Display](#field-custody-display) | `null` | Opts the placed input into a placed-as-entity prop visual at the block-top anchor; null = no visual. |
+| `Share` | [Share](#field-custody-share) | `null` | Who besides an owner may place, work from, or take back placed materials here; every leaf defaults false (owner-only). A socket may override any leaf for its own pile. |
+| `Sockets` | map of [Socket](#field-custody-sockets-item) | `null` | Named placement slots by socket id (author ids lower-case; matching is case-insensitive), each holding its own independently owned pile. Merged per socket id under Parent inheritance, per leaf within a socket. Omit for the classic single-pile custody: the custody-level leaves above then act as the one implicit socket. |
 
 <a id="field-custody-input"></a>
 ### Custody.Input
@@ -784,6 +789,29 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Scale` | `double` | `null` | Uniform prop scale, a fraction of a real block for a block-shaped item; defaults to 1.0 (full block size) when absent or non-positive. |
 | `Rotation` | [Rotation](#field-custody-display-rotation) | `null` | Facing-relative rotation in degrees; the placed block's own facing is added into Yaw at spawn. |
 
+<a id="field-custody-share"></a>
+### Custody.Share
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Place` | `boolean` | `null` | May a non-owner start a pile here while it is EMPTY? The first contributor owns that pile until it drains empty again; a non-empty pile never accepts a second player's materials. Default false. |
+| `Use` | `boolean` | `null` | May a non-owner engage work that consumes from this pile? Default false (owner-only). |
+| `Reclaim` | `boolean` | `null` | May a non-owner take this pile back out of the station? Default false (owner-only). |
+
+<a id="field-custody-sockets-item"></a>
+### Custody.Sockets[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Item` | [ItemRoute](#field-custody-sockets-item-item) | `null` | The placed-ITEM route: this socket holds a pile of placed stacks. Exactly one of Item \| Block. |
+| `Block` | [BlockRoute](#field-custody-sockets-item-block) | `null` | The world-BLOCK route: this socket is satisfied by a real block standing at a facing-relative offset. Nothing is stored for it. Exactly one of Item \| Block. |
+| `MaxQuantity` | `integer` | `null` | This socket's own item cap; the effective capacity is the smaller of this and the custody-level MaxQuantity. Absent = the custody-level cap. |
+| `SingleFamily` | `boolean` | `null` | Locks THIS socket's pile to the first placed item's resource family. Absent = the custody-level SingleFamily. |
+| `Required` | `boolean` | `null` | Must this socket be satisfied before work can start? An Item socket needs a non-empty pile; a Block socket needs its matching world block (re-checked while working: a vanished required block ends the session). Default false. |
+| `Display` | [Display](#field-custody-sockets-item-display) | `null` | This socket's own placed-as-entity prop (same knobs as the custody-level Display); omit and this socket renders nothing. |
+| `Share` | [Share](#field-custody-sockets-item-share) | `null` | Per-socket share overrides; each leaf falls back to the custody-level Share, then to false. |
+| `Label` | `string` | `null` | A lang key naming this socket in player-facing refusals ('the meat rack', 'the pot'); omit and refusals stay generic. |
+
 <a id="field-custody-display-offset"></a>
 #### Custody.Display.Offset
 
@@ -795,6 +823,87 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 <a id="field-custody-display-rotation"></a>
 #### Custody.Display.Rotation
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Yaw` | `double` | `null` | Yaw in degrees (turns about the vertical axis). Default 0. |
+| `Pitch` | `double` | `null` | Pitch in degrees (tips forward/back - the 'lay it flat' axis). Default 0. |
+| `Roll` | `double` | `null` | Roll in degrees (tips sideways about the subject's own long axis). Default 0. |
+
+<a id="field-custody-sockets-item-item"></a>
+#### Custody.Sockets[].Item
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Match` | [ActionInput](#field-custody-sockets-item-item-match) | `null` | What this socket accepts (the ItemId/ResourceTypeId/Tags/Function routes). Absent derives acceptance from the action's Recipe.Conversions inputs, exactly like the custody-level Input. |
+| `PlacePerPress` | `integer` | `null` | How many items one press moves in; absent = the whole held stack (the classic press). Author 1 for one-at-a-time loading. |
+
+<a id="field-custody-sockets-item-block"></a>
+#### Custody.Sockets[].Block
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `At` | [Vec3i](#field-custody-sockets-item-block-at) | `null` | The whole-block offset from the station block, in its own facing frame (+Z = its front, +X = its right, Y vertical); rotates with the placed block. Absent means the station block's own cell. |
+| `Match` | [ActionInput](#field-custody-sockets-item-block-match) | `null` | What block satisfies this socket, matched against the block's base ITEM identity (id, resource families, tags). Absent accepts any non-air block. |
+
+<a id="field-custody-sockets-item-display"></a>
+#### Custody.Sockets[].Display
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Offset` | [Vec3](#field-custody-sockets-item-display-offset) | `null` | Facing-relative shift off the block-top anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical. |
+| `Scale` | `double` | `null` | Uniform prop scale, a fraction of a real block for a block-shaped item; defaults to 1.0 (full block size) when absent or non-positive. |
+| `Rotation` | [Rotation](#field-custody-sockets-item-display-rotation) | `null` | Facing-relative rotation in degrees; the placed block's own facing is added into Yaw at spawn. |
+
+<a id="field-custody-sockets-item-share"></a>
+#### Custody.Sockets[].Share
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Place` | `boolean` | `null` | May a non-owner start a pile here while it is EMPTY? The first contributor owns that pile until it drains empty again; a non-empty pile never accepts a second player's materials. Default false. |
+| `Use` | `boolean` | `null` | May a non-owner engage work that consumes from this pile? Default false (owner-only). |
+| `Reclaim` | `boolean` | `null` | May a non-owner take this pile back out of the station? Default false (owner-only). |
+
+<a id="field-custody-sockets-item-item-match"></a>
+##### Custody.Sockets[].Item.Match
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ItemId` | `string` | `null` | Match an exact held item id (one of several optional routes; match = ANY route satisfied). |
+| `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
+| `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
+| `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+
+<a id="field-custody-sockets-item-block-at"></a>
+##### Custody.Sockets[].Block.At
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `X` | `integer` | `null` | The X component in whole blocks; unauthored means 0 (each axis is independently optional). |
+| `Y` | `integer` | `null` | The Y component in whole blocks; unauthored means 0 (each axis is independently optional). |
+| `Z` | `integer` | `null` | The Z component in whole blocks; unauthored means 0 (each axis is independently optional). |
+
+<a id="field-custody-sockets-item-block-match"></a>
+##### Custody.Sockets[].Block.Match
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ItemId` | `string` | `null` | Match an exact held item id (one of several optional routes; match = ANY route satisfied). |
+| `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
+| `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
+| `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+
+<a id="field-custody-sockets-item-display-offset"></a>
+##### Custody.Sockets[].Display.Offset
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `X` | `double` | `null` | The X component; unauthored means 0 (each axis is independently optional). |
+| `Y` | `double` | `null` | The Y component; unauthored means 0 (each axis is independently optional). |
+| `Z` | `double` | `null` | The Z component; unauthored means 0 (each axis is independently optional). |
+
+<a id="field-custody-sockets-item-display-rotation"></a>
+##### Custody.Sockets[].Display.Rotation
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|

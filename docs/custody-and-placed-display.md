@@ -82,9 +82,65 @@ steps)?
 ## Press-F retrieval
 
 A placed-as-entity display is directly retrievable: pressing `F` on the display entity itself (not the
-block) hands the placed contents back to the owner and despawns the display, provided no session is
-actively working that block - a session actively working the station always wins over a retrieval
-attempt.
+block) hands that display's placed contents back and despawns it, provided no session is actively
+working that block - a session actively working the station always wins over a retrieval attempt. At a
+multi-socket station each socket's prop retrieves ITS OWN pile only, gated by that pile's own owner
+(or the socket's `Share.Reclaim`, below).
+
+## Sockets: named placement slots
+
+`Custody.Sockets` grows one claim into NAMED, independently addressed slots - a stew pot's meat rack
+beside its herb basket beside its output shelf - each with its own pile, owner, matcher, capacity,
+display prop and share posture. Authored order is placement priority: a press offers the held stack to
+the sockets in the order the file writes them, and the first Item socket that accepts it (and has
+room) receives it. **Omit `Sockets` entirely and nothing changes**: the custody-level leaves act as
+ONE implicit socket (reserved id `main`) holding the whole claim, which is every classic station.
+
+```json
+"Custody": {
+  "MaxQuantity": 40,
+  "Sockets": {
+    "vessel": { "Block": { "At": { "Y": 1 }, "Match": { "ItemId": "RPG_Station_Cooking_Pot" } },
+                "Required": true, "Label": "yourpack.socket.pot" },
+    "ingredients": { "Item": { "PlacePerPress": 1 }, "MaxQuantity": 9, "Share": { "Place": true } },
+    "output": { "Item": { "Match": { "ResourceTypeId": "Food" } }, "Display": { "Offset": { "Y": 1.4 } } }
+  }
+}
+```
+
+| Field | What it does |
+|---|---|
+| `Item` / `Block` | The socket's route - exactly one of the two. `Item` holds a pile of placed stacks (`Match` = what it accepts, absent derives from the recipe like the custody-level `Input`; `PlacePerPress` = how much one press moves, absent = the whole held stack, `1` = one at a time). `Block` is a REAL world block at `At` (a whole-block offset in the station block's own facing frame, the `Display` convention - it rotates with the placed block) whose base item identity satisfies `Match` (absent = any block); nothing is stored for it, and caps/shares/displays are meaningless on one. A socket authoring both routes, or neither, is ignored with a warning. |
+| `MaxQuantity` | This socket's own cap; the effective capacity is the SMALLER of it and the custody-level `MaxQuantity`, and the custody-level cap also bounds the block's TOTAL across every socket. |
+| `SingleFamily` | Locks THIS socket's pile to its first-placed family; absent inherits the custody-level value. |
+| `Required` | Gates engage: an Item socket needs a non-empty pile, a Block socket its matching world block - and a required block is re-checked while working, so breaking the pot off the fire ends the session gracefully. |
+| `Display` | This socket's own prop (same knobs as the custody-level `Display`); a socket without one renders nothing. |
+| `Share` | Per-socket overrides of the custody-level `Share` (below). |
+| `Label` | A lang key naming the socket in refusals ("the pot"); omit for the generic wording. |
+
+Author socket ids lower-case; they are matched case-insensitively, and `main` is reserved for the
+implicit socket. A step program addresses sockets by id: a `Consume`/`Produce` phase carries a
+group-level `Socket`, and any single `Items` entry can name its own - so one recipe row draws meat
+from the meat rack and greens from the basket. An entry naming no socket draws from the first
+authored Item socket.
+
+## Sharing placed materials (`Share`)
+
+Every pile belongs to exactly ONE player - whoever put the first item in it (a produced pile belongs
+to whoever did the work). `Share` is three independent booleans, authorable at the custody level (the
+default for every socket) and per socket, all defaulting false (owner-only, the classic behavior):
+
+| Leaf | What `true` opens |
+|---|---|
+| `Place` | A non-owner may START a pile in that socket while it is EMPTY - the first contributor then owns it until it drains empty again. It never opens a non-empty pile: materials never co-mingle, a communal station is several sockets with several owners, not several owners in one pile. |
+| `Use` | A non-owner may engage work that consumes from that socket's pile. |
+| `Reclaim` | A non-owner may take that socket's pile back out (press-F on its prop). |
+
+A stop that hands materials back returns only the piles the stopping player OWNS; someone else's
+piles stay standing in the world. An interrupted work iteration refunds what it consumed back into
+each originating pile, so a shared worker's interruption never walks off with the owner's materials.
+
+## Acceptance precedence at a claimed block
 
 ## Acceptance precedence at a claimed block
 

@@ -184,6 +184,60 @@ public class ExtensionOverlayTest {
         assertEquals(2.0, d(merged.getDisplay().getScale()), "an unauthored Display leaf survives");
     }
 
+    // ==================== Custody.Sockets: per-id merge (overlay is not extension) ====================
+
+    @Test
+    void socketsOverlay_reTunesAnExistingIdPerLeaf_andAppendsANewOne() throws Exception {
+        // The one KEYED collection inside an overlayable group: an id the base authors deep-merges
+        // per leaf (the re-tuning face), a new id appends (the additive face), and the base's
+        // authored order - which is placement priority - is never disturbed.
+        Custody base = ext("fixture_base", "{ \"Target\": { \"Action\": \"Mill\" }, \"Custody\": {"
+                + " \"Sockets\": {"
+                + "   \"meat\": { \"Item\": { \"Match\": { \"ResourceTypeId\": \"Fixture_Meat\" },"
+                + "                           \"PlacePerPress\": 1 },"
+                + "               \"MaxQuantity\": 4, \"Label\": \"fixture.socket.meat\" },"
+                + "   \"veg\": { \"Item\": {} }"
+                + " } } }").getCustody();
+        ExtensionAsset skin = ext("fixture_skin", "{ \"Target\": { \"Action\": \"Mill\" }, \"Custody\": {"
+                + " \"Sockets\": {"
+                + "   \"meat\": { \"Display\": { \"Scale\": 3.0 }, \"Share\": { \"Use\": true } },"
+                + "   \"garnish\": { \"Item\": {}, \"MaxQuantity\": 2 }"
+                + " } } }");
+
+        Custody merged = ExtensionCatalog.overlayCustody(base, skin.getCustody());
+
+        assertEquals(List.of("meat", "veg", "garnish"), List.copyOf(merged.getSockets().keySet()),
+                "base order survives; the new id appends at the end");
+        Custody.Socket meat = merged.getSockets().get("meat");
+        assertEquals(3.0, d(meat.getDisplay().getScale()), "the overlay's authored leaf lands");
+        assertEquals(Boolean.TRUE, meat.getShare().getUse());
+        assertEquals("Fixture_Meat", meat.getItem().getMatch().getResourceTypeId(),
+                "the base's Match survives a Display-only socket overlay");
+        assertEquals(Integer.valueOf(1), meat.getItem().getPlacePerPress());
+        assertEquals(Integer.valueOf(4), meat.getMaxQuantity());
+        assertEquals("fixture.socket.meat", meat.getLabel());
+        assertNotNull(merged.getSockets().get("veg"), "an untouched base socket survives whole");
+        assertEquals(Integer.valueOf(2), merged.getSockets().get("garnish").getMaxQuantity(),
+                "the appended socket arrives with its own leaves");
+    }
+
+    @Test
+    void socketOverlay_authoringARoute_commitsToIt() throws Exception {
+        // The one leaf-walk exception: an overlay authoring a route group commits the socket to
+        // that route, so a merged socket can never end up invalid with both routes live.
+        Custody base = ext("fixture_base", "{ \"Target\": { \"Action\": \"Mill\" }, \"Custody\": {"
+                + " \"Sockets\": { \"slot\": { \"Item\": { \"PlacePerPress\": 1 } } } } }").getCustody();
+        ExtensionAsset flip = ext("fixture_flip", "{ \"Target\": { \"Action\": \"Mill\" }, \"Custody\": {"
+                + " \"Sockets\": { \"slot\": { \"Block\": { \"At\": { \"Y\": 1 } } } } } }");
+
+        Custody.Socket merged = ExtensionCatalog.overlayCustody(base, flip.getCustody())
+                .getSockets().get("slot");
+
+        assertNull(merged.getItem(), "the base's other route drops when the overlay commits to one");
+        assertNotNull(merged.getBlock());
+        assertTrue(merged.hasExactlyOneRoute(), "a merged socket is never left with both routes live");
+    }
+
     // ==================== Puppet: the same rule, one group over ====================
 
     @Test

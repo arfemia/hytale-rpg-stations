@@ -18,6 +18,26 @@ there is no prior public release to diff against, so every entry is additive by 
   reappears the first time anyone uses the station after a restart (the materials themselves are
   there the whole time), and the live in-game chunk save/load round trip plus the enhanced-item
   metadata survival are verified in play rather than by the build's tests.
+- **Custody sockets: named placement slots with their own piles, owners and displays.** A station's
+  `Custody` group can author a `Sockets` map - a stew pot's meat rack beside its herb basket beside
+  its output shelf - each slot with its own acceptance matcher, capacity (the smaller of its own cap
+  and the custody-level one, which also caps the block's total across every slot), per-slot
+  `SingleFamily` lock, its own placed-item display prop, and one-at-a-time loading via
+  `PlacePerPress` (absent keeps the classic whole-stack press). A pressed stack routes to the first
+  accepting slot in authored order, refusals say exactly what stood in the way (no room, nothing
+  takes that material, a required slot unfilled), and a station authoring no sockets behaves exactly
+  as before through one implicit slot. A `Block` socket is a real world block beside the station
+  (the pot on the fire), matched by item identity at a facing-relative offset that rotates with the
+  placed station block, and re-checked while working: breaking it ends the session gracefully. Step
+  programs and recipe rows address slots by id (a phase-level `Socket` plus a per-entry one), so a
+  set recipe can draw meat from one slot and greens from another in a single row.
+- **Sharing placed materials.** Every placed pile belongs to exactly one player - whoever put the
+  first item in (a produced pile belongs to whoever did the work) - and three independent `Share`
+  knobs (per station or per socket, all default off) open it up deliberately: `Place` lets someone
+  else start a pile in an EMPTY slot (they own it until it drains empty again; materials never mix
+  inside one pile), `Use` lets them work from it, and `Reclaim` lets them take it back out. A
+  session stop hands back only the stopping player's own piles; an interrupted work cycle refunds
+  what it consumed into the pile it came from; everything else stays standing for its owner.
 - **An explosion or fire destroying a station block drops its placed materials.** Environmental
   breaks (fire, physics, unattributed explosions) run the same drop-once cleanup a player break
   does, so a destroyed block never strands stored materials.

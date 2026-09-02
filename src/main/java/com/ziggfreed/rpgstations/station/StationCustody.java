@@ -1,13 +1,18 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.util.Iterator;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.ziggfreed.rpgstations.asset.ActionInput;
+import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.common.codec.TagMatch;
@@ -37,17 +42,46 @@ final class StationCustody {
     }
 
     /**
-     * Peek: the total quantity in {@code claim} matching {@code itemId} (exact) or
-     * {@code resourceTypeId} (family, tested per tallied item id via {@code resourceTypesOf}),
-     * WITHOUT mutating. {@code claim} null (nothing placed yet) is 0.
+     * The SOCKET-aware placement quantity: how much of a {@code heldCount}-sized stack one press
+     * moves into a socket whose pile holds {@code pileTotal} while the whole block holds
+     * {@code blockTotal}. The result is the smallest of: the press size ({@code placePerPress},
+     * null = the whole held stack), the held count, the socket's remaining room
+     * ({@code socketMaxQuantity - pileTotal}, already the min-of-caps per
+     * {@link Custody.ResolvedSocket#maxQuantity()}), and the block's remaining room
+     * ({@code custodyMaxQuantity - blockTotal} - the per-block total the custody-level cap holds
+     * whatever the per-socket caps sum to). Never negative.
+     */
+    static int placeableQuantity(int pileTotal, int blockTotal, int heldCount,
+            int socketMaxQuantity, int custodyMaxQuantity, @Nullable Integer placePerPress) {
+        if (heldCount <= 0 || socketMaxQuantity <= 0 || custodyMaxQuantity <= 0) {
+            return 0;
+        }
+        int press = placePerPress != null && placePerPress > 0 ? Math.min(placePerPress, heldCount) : heldCount;
+        int socketRoom = socketMaxQuantity - pileTotal;
+        int blockRoom = custodyMaxQuantity - blockTotal;
+        return Math.max(0, Math.min(press, Math.min(socketRoom, blockRoom)));
+    }
+
+    /**
+     * Peek: the total quantity in {@code claim}'s {@value StationCustodyClaim#MAIN_PILE} pile
+     * matching {@code itemId} (exact) or {@code resourceTypeId} (family, tested per tallied item
+     * id via {@code resourceTypesOf}), WITHOUT mutating. {@code claim} null (nothing placed yet)
+     * is 0. The socket-addressed form is {@link #availableInPile} over
+     * {@code claim.items(socketId)}.
      */
     static int available(@Nullable StationCustodyClaim claim, @Nullable String itemId,
             @Nullable String resourceTypeId, @Nonnull Function<String, String[]> resourceTypesOf) {
-        if (claim == null) {
+        return availableInPile(claim != null ? claim.items() : null, itemId, resourceTypeId, resourceTypesOf);
+    }
+
+    /** {@link #available(StationCustodyClaim, String, String, Function)} over ONE pile's live tally. */
+    static int availableInPile(@Nullable Map<String, Integer> items, @Nullable String itemId,
+            @Nullable String resourceTypeId, @Nonnull Function<String, String[]> resourceTypesOf) {
+        if (items == null) {
             return 0;
         }
         int total = 0;
-        for (Map.Entry<String, Integer> e : claim.items().entrySet()) {
+        for (Map.Entry<String, Integer> e : items.entrySet()) {
             if (matchesEntry(e.getKey(), itemId, resourceTypeId, resourceTypesOf) && e.getValue() != null) {
                 total += e.getValue();
             }
@@ -56,23 +90,33 @@ final class StationCustody {
     }
 
     /**
-     * Drain up to {@code quantity} of {@code itemId}/{@code resourceTypeId} from {@code claim},
-     * oldest-placed-first ({@link StationCustodyClaim}'s insertion order); zeroed entries are
-     * removed (no dangling zero-quantity items). {@code drainedOut}, when non-null, accumulates
-     * the REAL item ids actually removed (for the session item ledger - mirrors
+     * Drain up to {@code quantity} of {@code itemId}/{@code resourceTypeId} from {@code claim}'s
+     * {@value StationCustodyClaim#MAIN_PILE} pile, oldest-placed-first
+     * ({@link StationCustodyClaim}'s insertion order); zeroed entries are removed (no dangling
+     * zero-quantity items). {@code drainedOut}, when non-null, accumulates the REAL item ids
+     * actually removed (for the session item ledger - mirrors
      * {@code StationService#tallyResourceConsumption}'s "tally the real drained ids" convention).
      * Returns the amount actually drained (0..quantity; less than {@code quantity} means the
      * claim ran short - the caller stops the session {@code OUT_OF_INPUTS}, never partial-consumes
-     * a cycle).
+     * a cycle). The socket-addressed form is {@link #drainFromPile} over {@code claim.items(socketId)} - one pile per call, so a drain can never cross a
+     * socket boundary.
      */
     static int drain(@Nullable StationCustodyClaim claim, @Nullable String itemId, @Nullable String resourceTypeId,
             int quantity, @Nonnull Function<String, String[]> resourceTypesOf,
             @Nullable Map<String, Integer> drainedOut) {
-        if (claim == null || quantity <= 0) {
+        return drainFromPile(claim != null ? claim.items() : null, itemId, resourceTypeId, quantity,
+                resourceTypesOf, drainedOut);
+    }
+
+    /** {@link #drain(StationCustodyClaim, String, String, int, Function, Map)} over ONE pile's live tally. */
+    static int drainFromPile(@Nullable Map<String, Integer> items, @Nullable String itemId, @Nullable String resourceTypeId,
+            int quantity, @Nonnull Function<String, String[]> resourceTypesOf,
+            @Nullable Map<String, Integer> drainedOut) {
+        if (items == null || quantity <= 0) {
             return 0;
         }
         int remaining = quantity;
-        Iterator<Map.Entry<String, Integer>> it = claim.items().entrySet().iterator();
+        Iterator<Map.Entry<String, Integer>> it = items.entrySet().iterator();
         while (it.hasNext() && remaining > 0) {
             Map.Entry<String, Integer> e = it.next();
             Integer have = e.getValue();
@@ -129,10 +173,23 @@ final class StationCustody {
     static boolean acceptsFamily(boolean singleFamily, @Nullable StationCustodyClaim claim,
             @Nullable String candidateItemId, @Nullable String[] candidateResourceTypeIds,
             @Nonnull Function<String, String[]> resourceTypesOf) {
-        if (!singleFamily || claim == null || claim.items().isEmpty()) {
+        return pileAcceptsFamily(singleFamily, claim != null ? claim.items() : null,
+                candidateItemId, candidateResourceTypeIds, resourceTypesOf);
+    }
+
+    /**
+     * {@link #acceptsFamily(boolean, StationCustodyClaim, String, String[], Function)} over ONE
+     * pile's tally - the per-socket form (decision 89: {@code SingleFamily} is scoped to a
+     * socket's own pile, so the meat rack locking to beef never stops the herb basket taking
+     * thyme).
+     */
+    static boolean pileAcceptsFamily(boolean singleFamily, @Nullable Map<String, Integer> items,
+            @Nullable String candidateItemId, @Nullable String[] candidateResourceTypeIds,
+            @Nonnull Function<String, String[]> resourceTypesOf) {
+        if (!singleFamily || items == null || items.isEmpty()) {
             return true;
         }
-        String lockedItemId = claim.items().keySet().iterator().next();
+        String lockedItemId = items.keySet().iterator().next();
         if (lockedItemId.equalsIgnoreCase(candidateItemId)) {
             return true;
         }
@@ -242,5 +299,196 @@ final class StationCustody {
         }
         String itemId = in.getItemId();
         return itemId != null && !itemId.isBlank() && itemId.equalsIgnoreCase(heldItemId);
+    }
+
+    // ==================== per-socket ownership + sharing (decision 82: one owner per pile) ====================
+
+    /**
+     * PURE: may {@code player} add material to a socket's pile? A NON-EMPTY pile belongs to
+     * exactly one player and only that player tops it up - {@code Share.Place} never opens
+     * co-mingling. An EMPTY (or absent) pile is open to the stash's own owner always, and to
+     * anyone else only under {@code Share.Place} (the first contributor then owns it until it
+     * drains empty again). A non-empty pile that recorded no owner of its own falls back to the
+     * stash owner; a stash with no owner at all (a fresh block) is open - placing is what creates
+     * it.
+     */
+    static boolean canPlace(boolean sharePlace, @Nullable UUID stashOwner, @Nullable UUID pileOwner,
+            boolean pileEmpty, @Nonnull UUID player) {
+        if (!pileEmpty) {
+            UUID owner = pileOwner != null ? pileOwner : stashOwner;
+            return owner == null || player.equals(owner);
+        }
+        if (stashOwner == null || player.equals(stashOwner)) {
+            return true;
+        }
+        return sharePlace;
+    }
+
+    /**
+     * PURE: may {@code player} engage work that would consume from a socket's pile?
+     * {@code owner} is the pile's EFFECTIVE owner (its own recorded one, else the stash's). An
+     * empty pile gates nothing (there is nothing foreign to consume); a foreign non-empty pile
+     * needs {@code Share.Use}.
+     */
+    static boolean canUse(boolean shareUse, @Nullable UUID owner, boolean pileEmpty, @Nonnull UUID player) {
+        return pileEmpty || owner == null || player.equals(owner) || shareUse;
+    }
+
+    /**
+     * PURE: may {@code player} take a socket's pile back out (press-F retrieval on its display
+     * prop)? {@code owner} is the pile's effective owner; {@code Share.Reclaim} relaxes the
+     * owner-only rule for that socket.
+     */
+    static boolean canReclaim(boolean shareReclaim, @Nullable UUID owner, @Nonnull UUID player) {
+        return owner == null || player.equals(owner) || shareReclaim;
+    }
+
+    // ==================== placement routing (authored socket order) ====================
+
+    /** Why a press placed nothing, most specific first - drives the keyed refusal toast. */
+    enum PlacementDenial {
+        /** A socket accepted the material but its pile belongs to someone else (or Share.Place denied a fresh pile). */
+        NOT_SHARED,
+        /** A socket accepted the material but has no room left (its own cap, or the block total). */
+        FULL,
+        /** No Item socket accepts this material at all. */
+        WRONG_INPUT
+    }
+
+    /** The routing answer: the receiving socket + quantity, or the most specific denial seen. */
+    record PlacementRoute(@Nullable Custody.ResolvedSocket socket, int quantity,
+            @Nullable PlacementDenial denial) {
+
+        boolean placed() {
+            return socket != null && quantity > 0;
+        }
+    }
+
+    /**
+     * PURE placement routing (decision 91/92): offer a held stack to {@code sockets} in AUTHORED
+     * ORDER and return the FIRST Item socket that (a) accepts the material ({@code matches} - the
+     * caller injects the live matcher: the socket's own {@code Match} when authored, else the
+     * derived-from-recipe acceptance), (b) passes its pile's single-family lock, (c) passes the
+     * per-pile ownership/share rule ({@link #canPlace}), and (d) has capacity left
+     * ({@link #placeableQuantity(int, int, int, int, int, Integer)}'s min of press size, socket
+     * room and block room). When nothing places, the returned denial is the most SPECIFIC reason
+     * any socket got close: a share refusal outranks a full socket outranks nothing-matched.
+     * Block-route sockets never receive placements and are skipped.
+     */
+    @Nonnull
+    static PlacementRoute routePlacement(@Nonnull List<Custody.ResolvedSocket> sockets,
+            @Nullable StationCustodyClaim claim, @Nonnull UUID player,
+            @Nullable String heldItemId, int heldCount, @Nullable String[] heldResourceTypeIds,
+            int custodyMaxQuantity,
+            @Nonnull Predicate<Custody.ResolvedSocket> matches,
+            @Nonnull Function<String, String[]> resourceTypesOf) {
+        PlacementDenial denial = null;
+        int blockTotal = claim != null ? claim.totalQuantity() : 0;
+        for (Custody.ResolvedSocket socket : sockets) {
+            if (!socket.itemRoute()) {
+                continue;
+            }
+            Map<String, Integer> pileItems = claim != null ? claim.items(socket.id()) : null;
+            if (!matches.test(socket)
+                    || !pileAcceptsFamily(socket.singleFamily(), pileItems, heldItemId, heldResourceTypeIds,
+                            resourceTypesOf)) {
+                denial = mostSpecific(denial, PlacementDenial.WRONG_INPUT);
+                continue;
+            }
+            UUID stashOwner = claim != null ? claim.ownerId : null;
+            UUID pileOwner = claim != null ? claim.pileOwner(socket.id()) : null;
+            boolean pileEmpty = pileItems == null || pileItems.isEmpty();
+            if (!canPlace(socket.sharePlace(), stashOwner, pileOwner, pileEmpty, player)) {
+                denial = mostSpecific(denial, PlacementDenial.NOT_SHARED);
+                continue;
+            }
+            int pileTotal = claim != null ? claim.totalQuantity(socket.id()) : 0;
+            int quantity = placeableQuantity(pileTotal, blockTotal, heldCount,
+                    socket.maxQuantity(), custodyMaxQuantity, socket.placePerPress());
+            if (quantity <= 0) {
+                denial = mostSpecific(denial, PlacementDenial.FULL);
+                continue;
+            }
+            return new PlacementRoute(socket, quantity, null);
+        }
+        return new PlacementRoute(null, 0, denial);
+    }
+
+    /** The more specific of two denial reasons (enum order IS the precedence order). */
+    @Nullable
+    private static PlacementDenial mostSpecific(@Nullable PlacementDenial current, @Nonnull PlacementDenial seen) {
+        if (current == null) {
+            return seen;
+        }
+        return seen.ordinal() < current.ordinal() ? seen : current;
+    }
+
+    // ==================== block sockets (the world block IS the state) ====================
+
+    /**
+     * PURE: the world position a Block socket's {@code At} offset addresses from the station block
+     * at {@code (x, y, z)}, composed with the station block's own facing exactly as
+     * {@code Custody.Display} offsets are ({@link StationBlockFacing#rotateOffset}: authored
+     * {@code +Z} = the block's front, {@code Y} vertical). Block yaw is a discrete quarter turn,
+     * so the rotated components round back onto exact cells.
+     */
+    @Nonnull
+    static int[] blockSocketTarget(int x, int y, int z, int atX, int atY, int atZ, double blockYawRadians) {
+        double[] rotated = StationBlockFacing.rotateOffset(atX, atY, atZ, blockYawRadians);
+        return new int[] {
+                x + (int) Math.round(rotated[0]),
+                y + (int) Math.round(rotated[1]),
+                z + (int) Math.round(rotated[2])};
+    }
+
+    /**
+     * PURE: does the block standing at a socket's target cell satisfy the socket's {@code Match}?
+     * {@code baseItemId} is the world block's BASE item id (a state variant already normalized to
+     * the block that authored the family); null, blank, or the engine's empty key means no block
+     * stands there and nothing matches - a catch-all {@code Match} still needs a real block. The
+     * identity resolvers are injected ({@code resourceTypesOf}/{@code tagsOf} answer for the base
+     * id) so this stays testable without a live asset map; the match itself is the SAME any-route
+     * {@link #matchesInput} every other {@code ActionInput} site uses (the Function route reads
+     * null - a block has no held-item function).
+     */
+    static boolean blockSocketMatches(@Nullable String baseItemId, @Nullable ActionInput match,
+            @Nonnull Function<String, String[]> resourceTypesOf,
+            @Nonnull Function<String, Map<String, String[]>> tagsOf) {
+        if (baseItemId == null || baseItemId.isBlank() || "Empty".equalsIgnoreCase(baseItemId)) {
+            return false;
+        }
+        if (match == null || match.isCatchAll()) {
+            return true;
+        }
+        return matchesInput(match, baseItemId, resourceTypesOf.apply(baseItemId), tagsOf.apply(baseItemId), null);
+    }
+
+    // ==================== socket addressing defaults ====================
+
+    /**
+     * PURE: the socket id a custody-routed Consume/Produce entry resolves to - the entry's own
+     * {@code Socket} when authored, else the phase's group-level one, else the FIRST authored Item
+     * socket ({@value StationCustodyClaim#MAIN_PILE} for a degenerate custody). Lowercased, the
+     * one socket-id case rule.
+     */
+    @Nonnull
+    static String socketIdFor(@Nullable String entrySocket, @Nullable String groupSocket,
+            @Nonnull List<Custody.ResolvedSocket> sockets) {
+        String authored = entrySocket != null && !entrySocket.isBlank() ? entrySocket : groupSocket;
+        if (authored != null && !authored.isBlank()) {
+            return authored.toLowerCase(Locale.ROOT);
+        }
+        return firstItemSocketId(sockets);
+    }
+
+    /** PURE: the first authored Item socket's id, else {@value StationCustodyClaim#MAIN_PILE}. */
+    @Nonnull
+    static String firstItemSocketId(@Nonnull List<Custody.ResolvedSocket> sockets) {
+        for (Custody.ResolvedSocket socket : sockets) {
+            if (socket.itemRoute()) {
+                return socket.id();
+            }
+        }
+        return StationCustodyClaim.MAIN_PILE;
     }
 }

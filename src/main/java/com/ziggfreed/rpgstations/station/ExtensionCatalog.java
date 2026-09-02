@@ -29,6 +29,7 @@ import com.ziggfreed.common.loot.stamp.StatRollEntry;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.common.codec.Vec3;
+import com.ziggfreed.common.codec.Vec3i;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -545,10 +546,14 @@ public final class ExtensionCatalog {
     /**
      * ONE per-leaf {@code Custody} overlay (PURE). THE load-bearing property: an overlay authoring
      * only {@code Display} carries null {@code MaxQuantity}/{@code SingleFamily}/{@code Input}/
-     * {@code States}, and a null leaf keeps the base's value - so re-skinning a station's
-     * placed-input visual can never silently disable its custody mechanics. A null {@code overlay}
-     * is the identity. NOTE for whoever adds the NEXT {@code Custody} leaf: add it to this factory
-     * call in the same change, or an overlay silently drops it.
+     * {@code States}/{@code Share}/{@code Sockets}, and a null leaf keeps the base's value - so
+     * re-skinning a station's placed-input visual can never silently disable its custody
+     * mechanics. {@code Sockets} is the one KEYED collection here and merges per socket id
+     * ({@link #overlaySockets}): a base socket's leaves survive everything the overlay does not
+     * explicitly author, and a NEW id is added - overlay is not extension for the leaves, additive
+     * for the ids. A null {@code overlay} is the identity. NOTE for whoever adds the NEXT
+     * {@code Custody} leaf: add it to this factory call in the same change, or an overlay
+     * silently drops it.
      */
     @Nullable
     static Custody overlayCustody(@Nullable Custody base, @Nullable Custody overlay) {
@@ -563,7 +568,124 @@ public final class ExtensionCatalog {
                 firstNonNull(overlay.getSingleFamily(), base.getSingleFamily()),
                 overlayInput(base.getInput(), overlay.getInput()),
                 overlayStates(base.getStates(), overlay.getStates()),
-                overlayDisplay(base.getDisplay(), overlay.getDisplay()));
+                overlayDisplay(base.getDisplay(), overlay.getDisplay()),
+                overlayShare(base.getShare(), overlay.getShare()),
+                overlaySockets(base.getSockets(), overlay.getSockets()));
+    }
+
+    /** Per-leaf {@code Custody.Share} overlay - three independent booleans, each on its own. */
+    @Nullable
+    private static Custody.Share overlayShare(@Nullable Custody.Share base, @Nullable Custody.Share overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Custody.Share.of(
+                firstNonNull(overlay.getPlace(), base.getPlace()),
+                firstNonNull(overlay.getUse(), base.getUse()),
+                firstNonNull(overlay.getReclaim(), base.getReclaim()));
+    }
+
+    /**
+     * The {@code Custody.Sockets} keyed-map merge: base sockets first (their authored order is
+     * placement priority and survives), then each overlay id - an id the base already has DEEP-
+     * MERGES per leaf ({@link #overlaySocket}, the re-tuning route), an id the base lacks is
+     * APPENDED (the additive route). The base's insertion order is never disturbed.
+     */
+    @Nullable
+    private static Map<String, Custody.Socket> overlaySockets(@Nullable Map<String, Custody.Socket> base,
+            @Nullable Map<String, Custody.Socket> overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        Map<String, Custody.Socket> out = new LinkedHashMap<>(base);
+        for (Map.Entry<String, Custody.Socket> e : overlay.entrySet()) {
+            Custody.Socket existing = out.get(e.getKey());
+            out.put(e.getKey(), existing != null ? overlaySocket(existing, e.getValue()) : e.getValue());
+        }
+        return out;
+    }
+
+    /**
+     * Per-leaf overlay of ONE socket. The route pair is the one place a leaf-by-leaf walk needs a
+     * rule of its own: an overlay authoring a route group commits to THAT route (its group merges
+     * per leaf over the base's same-route group, and the base's OTHER route is dropped - two live
+     * routes would make the socket invalid and silently ignored); an overlay authoring neither
+     * route keeps the base's untouched.
+     */
+    @Nullable
+    static Custody.Socket overlaySocket(@Nullable Custody.Socket base, @Nullable Custody.Socket overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        boolean overlayItem = overlay.getItem() != null;
+        boolean overlayBlock = overlay.getBlock() != null;
+        Custody.Socket.ItemRoute item = overlayItem
+                ? overlayItemRoute(base.getItem(), overlay.getItem())
+                : (overlayBlock ? null : base.getItem());
+        Custody.Socket.BlockRoute block = overlayBlock
+                ? overlayBlockRoute(base.getBlock(), overlay.getBlock())
+                : (overlayItem ? null : base.getBlock());
+        return Custody.Socket.of(item, block,
+                firstNonNull(overlay.getMaxQuantity(), base.getMaxQuantity()),
+                firstNonNull(overlay.getSingleFamily(), base.getSingleFamily()),
+                firstNonNull(overlay.getRequired(), base.getRequired()),
+                overlayDisplay(base.getDisplay(), overlay.getDisplay()),
+                overlayShare(base.getShare(), overlay.getShare()),
+                firstNonNull(overlay.getLabel(), base.getLabel()));
+    }
+
+    /** Per-leaf overlay of a socket's Item route ({@code Match} widens route by route, {@code PlacePerPress} on its own). */
+    @Nullable
+    private static Custody.Socket.ItemRoute overlayItemRoute(@Nullable Custody.Socket.ItemRoute base,
+            @Nullable Custody.Socket.ItemRoute overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Custody.Socket.ItemRoute.of(
+                overlayInput(base.getMatch(), overlay.getMatch()),
+                firstNonNull(overlay.getPlacePerPress(), base.getPlacePerPress()));
+    }
+
+    /** Per-leaf overlay of a socket's Block route ({@code At} per axis, {@code Match} route by route). */
+    @Nullable
+    private static Custody.Socket.BlockRoute overlayBlockRoute(@Nullable Custody.Socket.BlockRoute base,
+            @Nullable Custody.Socket.BlockRoute overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Custody.Socket.BlockRoute.of(
+                overlayVec3i(base.getAt(), overlay.getAt()),
+                overlayInput(base.getMatch(), overlay.getMatch()));
+    }
+
+    /** Per-leaf overlay of the ONE shared whole-block {@code Vec3i} group. */
+    @Nullable
+    private static Vec3i overlayVec3i(@Nullable Vec3i base, @Nullable Vec3i overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return Vec3i.of(
+                firstNonNull(overlay.getX(), base.getX()),
+                firstNonNull(overlay.getY(), base.getY()),
+                firstNonNull(overlay.getZ(), base.getZ()));
     }
 
     /**

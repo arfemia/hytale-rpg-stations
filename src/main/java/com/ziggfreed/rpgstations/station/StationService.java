@@ -67,6 +67,7 @@ import com.ziggfreed.common.cast.WorldKeyedQueues;
 import com.ziggfreed.common.cast.step.CastKernel;
 import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.common.codec.Vec3;
+import com.ziggfreed.common.codec.Vec3i;
 import com.ziggfreed.common.effect.AppliedEffectTracker;
 import com.ziggfreed.common.effect.NativeEffectUtil;
 import com.ziggfreed.common.entity.HeldItemUtil;
@@ -208,7 +209,15 @@ public final class StationService {
          * (scope-2 wave 3, design 2.3/2.6): mid-program the terrain/obstacles changed so the puppet
          * can no longer reach the anchor. A graceful localized stop, never a wedged program.
          */
-        PATH_BLOCKED
+        PATH_BLOCKED,
+        /**
+         * A {@code Required} BLOCK socket's world block vanished mid-session (the pot was broken
+         * off the fire): the heartbeat re-checks every required block socket beside its block-gone
+         * check and ends the session gracefully here - the same stop family as
+         * {@link #ANCHOR_LOST} (the in-flight iteration refunds, standing custody follows the
+         * normal hand-back/leave-it rule, block states reset through the one stop funnel).
+         */
+        SOCKET_LOST
     }
 
     private static final StationService INSTANCE = new StationService();
@@ -435,7 +444,8 @@ public final class StationService {
             // owner-private, so anyone's press re-materializes it.
             respawnDisplayIfMissing(preClaim, blockKey, commandBuffer);
         }
-        String selectedActionId = (preClaim != null && preClaim.ownerId.equals(playerUuid) && !preClaim.isEmpty())
+        String selectedActionId = (preClaim != null && !preClaim.isEmpty()
+                && mayCommitToClaim(asset, preClaim, playerUuid))
                 ? preClaim.actionId
                 : selectActionForHeld(asset, player);
         if (selectedActionId == null) {
@@ -474,10 +484,18 @@ public final class StationService {
         // 2.75) Placed-input custody (design section 9.4): a state-dependent F BEFORE the classic
         // engage flow - empty + a matching held stack places (or tops up); loaded + owner F falls
         // through to engage, sourcing the convert check from the claim instead of live inventory.
+        // With authored SOCKETS the press routes to the first accepting Item socket in authored
+        // order and each pile carries its own owner + share posture; without them the ONE
+        // synthesized 'main' socket reproduces the classic single-pile behavior exactly.
         Custody custody = action.getCustody();
+        List<Custody.ResolvedSocket> custodySockets =
+                custody != null ? custody.effectiveSockets() : List.of();
         if (custody != null) {
             StationCustodyClaim claim = preClaim;
-            if (claim != null && !claim.ownerId.equals(playerUuid)) {
+            boolean authoredSockets = custody.hasAuthoredSockets();
+            if (!authoredSockets && claim != null && !claim.ownerId.equals(playerUuid)) {
+                // The classic single-pile ownership gate, unchanged: a foreign claim denies even
+                // placement. With authored sockets the per-pile share rules below decide instead.
                 toast(playerRef, RpgMsg.tr("ui.station.occupied"));
                 return;
             }
@@ -490,12 +508,16 @@ public final class StationService {
                 flipCustodyState(world, blockX, blockY, blockZ, custody, false);
             }
             boolean roomLeft = claim == null || claim.totalQuantity() < custody.effectiveMaxQuantity();
+            StationCustody.PlacementDenial placeDenial = null;
             if (roomLeft) {
                 InventoryComponent.Hotbar hotbarComp =
                         store.getComponent(ref, InventoryComponent.Hotbar.getComponentType());
                 ItemStack heldForPlacement = hotbarComp != null ? hotbarComp.getActiveItem() : null;
                 int moved = 0;
-                if (custodyAccepts(custody, asset, action, heldForPlacement, claim)) {
+                StationCustody.PlacementRoute heldRoute = routeStack(custodySockets, claim, playerUuid,
+                        custody, asset, action, heldForPlacement);
+                placeDenial = heldRoute.denial();
+                if (heldRoute.placed()) {
                     // Owner ceiling on stashes per chunk section (Settings.Limits
                     // .MaxStashesPerSection - the bound a per-section store can enforce). Checked
                     // HERE, at the placement itself, rather than at the top of the branch: only a
@@ -510,15 +532,15 @@ public final class StationService {
                     }
                     moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
                             action.getActionId(), hotbarComp.getInventory(), hotbarComp.getActiveSlot(),
-                            heldForPlacement, custody, blockX, blockY, blockZ);
+                            heldForPlacement, custody, heldRoute.socket(), blockX, blockY, blockZ);
                 }
                 if (moved <= 0 && hotbarComp != null) {
                     // R3 fix (directive 5's held-else-inventory ruling): the held slot didn't
                     // match (or nothing is held) - scan the rest of the inventory before denying,
                     // so matching material sitting unheld in the backpack is no longer invisible
                     // to placement.
-                    InventoryMatch found = findFirstCustodyMatchInInventory(store, ref, custody, asset, action,
-                            hotbarComp.getActiveSlot(), claim);
+                    InventoryMatch found = findFirstCustodyMatchInInventory(store, ref, custody, custodySockets,
+                            asset, action, hotbarComp.getActiveSlot(), claim, playerUuid);
                     if (found != null) {
                         // Same ceiling, same reason, at the backpack-sourced placement site.
                         if (claim == null && atStashCap(world, blockX, blockY, blockZ)) {
@@ -527,7 +549,7 @@ public final class StationService {
                         }
                         moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
                                 action.getActionId(), found.container(), found.slot(), found.stack(), custody,
-                                blockX, blockY, blockZ);
+                                found.socket(), blockX, blockY, blockZ);
                     }
                 }
                 if (moved > 0) {
@@ -547,14 +569,36 @@ public final class StationService {
                     // real issue was an unacceptable material). A LOADED station still falls
                     // through (a denial further down really is about the tool), and an
                     // idle-capable classic station falls through too - empty-handed practice
-                    // is a legitimate engage there.
+                    // is a legitimate engage there. With authored sockets the routing's own
+                    // most-specific reason (share refusal > full socket > wrong input) replaces
+                    // the generic no-materials line.
                     boolean stepsAuthored = action.getSteps() != null && action.getSteps().length > 0;
                     StationAsset.Work workForIdle = action.getWork();
                     boolean idleCapable = !stepsAuthored && workForIdle != null && workForIdle.getIdle() != null;
                     if (!idleCapable) {
-                        toast(playerRef, RpgMsg.tr("ui.station.no_materials"));
+                        toast(playerRef, RpgMsg.tr(placementDenyKey(authoredSockets, placeDenial)));
                         return;
                     }
+                }
+            }
+            // ENGAGE-side socket gates (authored sockets only; the degenerate custody's ownership
+            // gate already ran above). A press that PLACED something returned already, so these
+            // only ever deny a press that is genuinely trying to start work.
+            if (authoredSockets) {
+                // Share.Use: work would consume from a foreign non-empty pile without that
+                // socket's Use grant - the classic occupied deny, relaxed per socket.
+                Custody.ResolvedSocket useDenied = firstUseDeniedSocket(claim, custodySockets, playerUuid);
+                if (useDenied != null) {
+                    toastSocketRefusal(playerRef, "ui.station.not_shared", useDenied);
+                    return;
+                }
+                // Required sockets gate ENGAGE: an Item socket needs a non-empty pile, a Block
+                // socket its matching world block.
+                Custody.ResolvedSocket missing = firstRequiredSocketUnsatisfied(world, custodySockets, claim,
+                        blockX, blockY, blockZ);
+                if (missing != null) {
+                    toastSocketRefusal(playerRef, "ui.station.socket_missing", missing);
+                    return;
                 }
             }
             // Loaded but nothing more placed (topped out, or the held item does not match), or
@@ -679,6 +723,9 @@ public final class StationService {
         // ONCE here and reused for the summary crest below - the raw id above is only the fallback
         // for a block with no containing Item at all.
         s.startBlockItemId = blockItemIdAt(world, blockX, blockY, blockZ);
+        // The Required BLOCK sockets the heartbeat re-verifies (snapshotted, like every other
+        // resolved config value). Empty for every socket-less action.
+        s.requiredBlockSockets = requiredBlockSocketsOf(custodySockets);
         StationAsset.Identity identity = asset.getIdentity();
         String authoredIcon = identity != null ? identity.getIcon() : null;
         s.stationIconItemId = authoredIcon != null && !authoredIcon.isBlank()
@@ -968,6 +1015,15 @@ public final class StationService {
                 s.startBlockTypeId, blockTypeIdAt(world, s.blockX, s.blockY, s.blockZ))) {
             stop(s, StopReason.STATION_GONE, store, commandBuffer);
             return false;
+        }
+        // Required BLOCK sockets, re-verified beside the block-gone check (the engage-time
+        // snapshot, so a mid-session catalog reload never half-changes the set): the pot broken
+        // off the fire ends the session gracefully, the same stop family as a lost anchor.
+        for (Custody.ResolvedSocket requiredSocket : s.requiredBlockSockets) {
+            if (!blockSocketSatisfied(world, s.blockX, s.blockY, s.blockZ, requiredSocket)) {
+                stop(s, StopReason.SOCKET_LOST, store, commandBuffer);
+                return false;
+            }
         }
         boolean mounted = s.seatMode || s.entityMountMode;
         if (seatModeShouldStop(mounted, StationMountController.isMounted(s.ref, store))) {
@@ -3237,8 +3293,10 @@ public final class StationService {
                 .resolvedConversions(asset, action.getActionId(), recipe);
         conversions = conversionsForCategory(conversions,
                 effectiveCategory(chosenCategory, recipe.getFromCrafting(), conversions));
+        Custody custody = action.getCustody();
         ConversionCheck check = fromCustody
-                ? firstRunnableConversionFromCustody(claim, player, conversions)
+                ? firstRunnableConversionFromCustody(claim, player, conversions,
+                        custody != null ? custody.effectiveSockets() : List.of())
                 : firstRunnableConversion(player, conversions);
         return check.state == ConversionState.RUNNABLE ? check.withRecipe(recipe) : check;
     }
@@ -3551,9 +3609,13 @@ public final class StationService {
     @Nullable
     private static String pickerPreviewInputItemId(@Nullable StationCustodyClaim claim, @Nonnull Player player) {
         if (claim != null && !claim.isEmpty()) {
-            for (String itemId : claim.items().keySet()) {
-                if (itemId != null && !itemId.isBlank()) {
-                    return itemId;
+            // Walk the piles in insertion order (the degenerate custody has just its 'main' pile,
+            // so this IS the classic oldest-placed read there) and preview the first item found.
+            for (String socketId : claim.pileIds()) {
+                for (String itemId : claim.items(socketId).keySet()) {
+                    if (itemId != null && !itemId.isBlank()) {
+                        return itemId;
+                    }
                 }
             }
         }
@@ -3757,14 +3819,18 @@ public final class StationService {
      * SAME action-resolved {@code conversions} scan, but availability reads {@code claim} (the
      * placed-input pouch) instead of the player's live inventory - output room is STILL checked
      * against the player's real inventory (only the input side moved into custody at placement;
-     * {@code Produce} always writes {@code To: Inventory}). A null/empty {@code claim} always
-     * yields {@code NO_INPUTS} (an empty custody station behaves exactly like an out-of-materials
-     * one, so the existing idle-practice fallback in {@link #toggle}/{@link #runCycle} applies
+     * {@code Produce} always writes {@code To: Inventory}). Each input is counted against the
+     * SOCKET pile it addresses (its own {@code Socket}, else the first Item socket -
+     * {@value StationCustodyClaim#MAIN_PILE} for a degenerate custody), so a set recipe drawing
+     * from two sockets needs each side in ITS OWN pile. A null/empty {@code claim} always yields
+     * {@code NO_INPUTS} (an empty custody station behaves exactly like an out-of-materials one,
+     * so the existing idle-practice fallback in {@link #toggle}/{@link #runCycle} applies
      * unchanged).
      */
     @Nonnull
     private ConversionCheck firstRunnableConversionFromCustody(@Nullable StationCustodyClaim claim,
-            @Nonnull Player player, @Nullable StationAsset.Conversion[] conversions) {
+            @Nonnull Player player, @Nullable StationAsset.Conversion[] conversions,
+            @Nonnull List<Custody.ResolvedSocket> sockets) {
         if (conversions == null || conversions.length == 0 || claim == null) {
             return new ConversionCheck(ConversionState.NO_INPUTS);
         }
@@ -3778,7 +3844,8 @@ public final class StationService {
                 for (Ingredient in : c.getInput()) {
                     String ref = ingredientRef(in);
                     boolean isResource = isResourceRoute(in);
-                    int have = StationCustody.available(claim, isResource ? null : ref,
+                    String socketId = StationCustody.socketIdFor(in.getSocket(), null, sockets);
+                    int have = StationCustody.availableInPile(claim.items(socketId), isResource ? null : ref,
                             isResource ? ref : null, StationService::liveResourceTypeIdsOf);
                     if (have < in.effectiveQuantity()) {
                         hasEveryInput = false;
@@ -3909,78 +3976,105 @@ public final class StationService {
     }
 
     /**
-     * Drops the block's volatile display handle and despawns its prop (a no-op when none stands).
-     * A {@code null} commandBuffer (a shutdown-adjacent path) leaves the entity behind; it is
-     * {@code NonSerialized}, so it cannot survive a restart regardless.
+     * Drops EVERY socket's volatile display handle at {@code blockKey} and despawns each prop (a
+     * no-op when none stands) - the whole-block form the break/removal paths use. A {@code null}
+     * commandBuffer (a shutdown-adjacent path) leaves the entities behind; they are
+     * {@code NonSerialized}, so they cannot survive a restart regardless.
      */
     private void despawnDisplay(@Nullable String blockKey, @Nullable CommandBuffer<EntityStore> commandBuffer) {
         if (blockKey == null) {
             return;
         }
-        DisplayHandle handle = displayByBlock.remove(blockKey);
+        String prefix = blockKey + StationCustodyRetrieval.SOCKET_KEY_SEPARATOR;
+        for (String key : new ArrayList<>(displayByBlock.keySet())) {
+            if (!key.startsWith(prefix)) {
+                continue;
+            }
+            DisplayHandle handle = displayByBlock.remove(key);
+            if (handle != null) {
+                StationCustodyDisplay.despawn(handle.ref(), commandBuffer);
+            }
+        }
+    }
+
+    /** Drops ONE socket's volatile display handle at {@code blockKey} and despawns its prop (retrieval's per-pile form). */
+    private void despawnDisplay(@Nullable String blockKey, @Nonnull String socketId,
+            @Nullable CommandBuffer<EntityStore> commandBuffer) {
+        if (blockKey == null) {
+            return;
+        }
+        DisplayHandle handle = displayByBlock.remove(StationCustodyRetrieval.displayKey(blockKey, socketId));
         if (handle != null) {
             StationCustodyDisplay.despawn(handle.ref(), commandBuffer);
         }
     }
 
     /**
-     * Spawns the placed-input display prop for {@code blockKey} when {@code displayGroup} is
-     * authored and no live prop stands there yet, recording the handle (ref + network id) in the
-     * volatile side map press-F retrieval matches against. The visual is the claim's
-     * metadata-bearing {@link StationCustodyClaim#uniqueStack()} when set, else a one-quantity
-     * stack of {@code visualItemId}.
+     * Spawns the placed-input display prop for ONE socket of {@code blockKey} when
+     * {@code displayGroup} is authored and no live prop stands for that socket yet, recording the
+     * handle (ref + network id) under the composite {@code (blockKey, socketId)} key press-F
+     * retrieval matches against - each socket renders its own prop, and a socket with no
+     * {@code Display} renders nothing. The visual is the pile's metadata-bearing
+     * {@link StationCustodyClaim#uniqueStack(String)} when set, else a one-quantity stack of
+     * {@code visualItemId}.
      */
-    private void spawnDisplayIfAbsent(@Nonnull String blockKey, @Nullable Custody.Display displayGroup,
-            @Nonnull StationCustodyClaim claim, @Nullable String visualItemId,
-            @Nonnull CommandBuffer<EntityStore> commandBuffer, int x, int y, int z) {
+    private void spawnDisplayIfAbsent(@Nonnull String blockKey, @Nonnull String socketId,
+            @Nullable Custody.Display displayGroup, @Nonnull StationCustodyClaim claim,
+            @Nullable String visualItemId, @Nonnull CommandBuffer<EntityStore> commandBuffer,
+            int x, int y, int z) {
+        String displayKey = StationCustodyRetrieval.displayKey(blockKey, socketId);
         if (displayGroup == null || visualItemId == null || visualItemId.isBlank()
-                || displayByBlock.containsKey(blockKey)) {
+                || displayByBlock.containsKey(displayKey)) {
             return;
         }
-        ItemStack visualStack = claim.uniqueStack() != null ? claim.uniqueStack()
-                : new ItemStack(visualItemId, 1);
+        ItemStack unique = claim.uniqueStack(socketId);
+        ItemStack visualStack = unique != null ? unique : new ItemStack(visualItemId, 1);
         StationCustodyDisplay.Spawned spawned = StationCustodyDisplay.spawn(commandBuffer, visualStack,
                 displayGroup, x, y, z);
         if (spawned != null) {
             // Both halves land together: the ref AND the network id the prop was built with, so
             // press-F retrieval never has to read a live NetworkId component back off the entity.
-            displayByBlock.put(blockKey, new DisplayHandle(spawned.ref(), spawned.networkId()));
+            displayByBlock.put(displayKey, new DisplayHandle(spawned.ref(), spawned.networkId()));
         }
     }
 
     /**
      * The first-touch display self-heal: a stash that survived a restart (or a chunk reload) has
-     * its volatile prop respawned from the persisted contents the first time anyone touches the
-     * station. The display knobs come from the CLAIM's own station/action (not the presser's
-     * selection), so the prop always renders the vocabulary of whoever loaded the block. The full
-     * hydrate-on-section-load reconciler is deliberately not here - until it exists, the prop
-     * reappears at the first interaction rather than at chunk load, and that caveat is documented
+     * its volatile props respawned from the persisted contents the first time anyone touches the
+     * station - EVERY socket with a {@code Display} group and a non-empty pile gets its own. The
+     * display knobs come from the CLAIM's own station/action (not the presser's selection), so
+     * the props always render the vocabulary of whoever loaded the block. The full
+     * hydrate-on-section-load reconciler is deliberately not here - until it exists, the props
+     * reappear at the first interaction rather than at chunk load, and that caveat is documented
      * player-facing.
      */
     private void respawnDisplayIfMissing(@Nonnull StationCustodyClaim claim, @Nonnull String blockKey,
             @Nonnull CommandBuffer<EntityStore> commandBuffer) {
-        if (displayByBlock.containsKey(blockKey)) {
-            return;
-        }
         try {
             StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
             Custody custody = asset != null
                     ? ActionResolver.resolve(asset, claim.actionId).getCustody() : null;
-            Custody.Display displayGroup = custody != null ? custody.getDisplay() : null;
-            if (displayGroup == null) {
+            if (custody == null) {
                 return;
             }
-            spawnDisplayIfAbsent(blockKey, displayGroup, claim, oldestPlacedItemId(claim),
-                    commandBuffer, claim.blockX, claim.blockY, claim.blockZ);
+            for (Custody.ResolvedSocket socket : custody.effectiveSockets()) {
+                if (socket.display() == null
+                        || (claim.isEmpty(socket.id()) && claim.uniqueStack(socket.id()) == null)) {
+                    continue;
+                }
+                spawnDisplayIfAbsent(blockKey, socket.id(), socket.display(), claim,
+                        oldestPlacedItemId(claim, socket.id()),
+                        commandBuffer, claim.blockX, claim.blockY, claim.blockZ);
+            }
         } catch (Throwable t) {
             Log.fine("STATION display respawn failed at " + blockKey + ": " + t.getMessage());
         }
     }
 
-    /** The claim's oldest-placed item id (its tally is insertion-ordered), or {@code null} when empty. */
+    /** One socket pile's oldest-placed item id (each tally is insertion-ordered), or {@code null} when empty. */
     @Nullable
-    private static String oldestPlacedItemId(@Nonnull StationCustodyClaim claim) {
-        for (String itemId : claim.items().keySet()) {
+    private static String oldestPlacedItemId(@Nonnull StationCustodyClaim claim, @Nonnull String socketId) {
+        for (String itemId : claim.items(socketId).keySet()) {
             if (itemId != null && !itemId.isBlank()) {
                 return itemId;
             }
@@ -4403,13 +4497,16 @@ public final class StationService {
 
     /**
      * {@code Produce.To:"Custody"} execution (scope-2 wave 3, design 2.2): stores {@code quantity}
-     * of {@code itemId} into the custody claim at the step's {@code At} anchor block (the primary
-     * block for {@code "self"}), creating the claim owned by this session's player when absent, and
-     * spawning the placed-as-entity display via the ANCHOR station's own {@code Custody.Display}
-     * when it authors one, else the running action's. Returns {@code true} when the produce landed.
+     * of {@code itemId} into the {@code socketId} pile of the custody claim at the step's
+     * {@code At} anchor block (the primary block for {@code "self"}), creating the claim when
+     * absent. The receiving pile is OWNED BY THE SESSION'S WORKER (a produce pile belongs to
+     * whoever did the work; topping up an existing pile leaves its owner alone), and the
+     * placed-as-entity display spawns from the SOCKET's own {@code Display} group - resolved off
+     * the ANCHOR station's custody when it carries one for that socket, else the running
+     * action's. Returns {@code true} when the produce landed.
      */
     boolean produceIntoCustody(@Nonnull StationSession s, @Nonnull CommandBuffer<EntityStore> commandBuffer,
-            @Nullable String anchorId, @Nonnull String itemId, int quantity) {
+            @Nullable String anchorId, @Nonnull String socketId, @Nonnull String itemId, int quantity) {
         String blockKey = anchorBlockKeyFor(s, anchorId);
         if (blockKey == null || itemId.isBlank() || quantity <= 0) {
             return false;
@@ -4427,14 +4524,38 @@ public final class StationService {
                 return false;
             }
         }
-        claim.add(itemId, quantity);
+        claim.addTo(socketId, s.playerUuid, itemId, quantity);
         claim.markDirty();
-        // Display spawn: the anchor station's own Custody.Display when it authors one, else the
-        // running action's (design 2.2). Only when the block has no live display yet.
-        Custody displayCustody = anchorCustody(s, anchorId, c -> c.getDisplay() != null, true);
-        spawnDisplayIfAbsent(blockKey, displayCustody != null ? displayCustody.getDisplay() : null,
+        // Display spawn: the SOCKET's own Display, from the anchor station's custody when it
+        // carries one for this socket, else the running action's (design 2.2). Only when that
+        // socket has no live display yet.
+        Custody displayCustody = anchorCustody(s, anchorId,
+                c -> socketDisplayOf(c, socketId) != null, true);
+        spawnDisplayIfAbsent(blockKey, socketId,
+                displayCustody != null ? socketDisplayOf(displayCustody, socketId) : null,
                 claim, itemId, commandBuffer, coords[0], coords[1], coords[2]);
         return true;
+    }
+
+    /** The {@code Display} group the custody's socket of this id carries, or null (an unknown socket renders nothing). */
+    @Nullable
+    private static Custody.Display socketDisplayOf(@Nonnull Custody custody, @Nonnull String socketId) {
+        for (Custody.ResolvedSocket socket : custody.effectiveSockets()) {
+            if (socket.id().equalsIgnoreCase(socketId)) {
+                return socket.display();
+            }
+        }
+        return null;
+    }
+
+    /** The effective {@code Share.Reclaim} of the custody's socket of this id; an unknown socket stays owner-only. */
+    private static boolean socketShareReclaim(@Nonnull Custody custody, @Nonnull String socketId) {
+        for (Custody.ResolvedSocket socket : custody.effectiveSockets()) {
+            if (socket.id().equalsIgnoreCase(socketId)) {
+                return socket.shareReclaim();
+            }
+        }
+        return false;
     }
 
     /**
@@ -4579,17 +4700,22 @@ public final class StationService {
     }
 
     /**
-     * Refunds the in-flight iteration's consumed inputs (design 2.5/M1, {@code stop()}'s teardown):
-     * grants whatever remains in {@link StationSession#iterationConsumed} back to the owner through
-     * the shared {@link #handBackToOwner} engine (hotbar-first, drop-at-block on overflow, and the
-     * same tick-safe {@code commandBuffer} contract), then clears it. Empty for
-     * every completed-cycle boundary (each {@code Produce.To:Custody} AND each completed program
-     * cycle clears the ledger), so an orderly stop between cycles refunds NOTHING - refund and
-     * custody-return stay mutually exclusive per iteration.
+     * Refunds the in-flight iteration's consumed inputs (design 2.5/M1, {@code stop()}'s teardown),
+     * each half to where it CAME FROM. The custody half
+     * ({@link StationSession#iterationConsumedCustody}) goes back INTO each originating pile
+     * (never merged, never handed to the consuming player - a shared session may have drained a
+     * pile it does not own, and the pile's owner keeps their material); a pile whose claim can no
+     * longer be resolved (the block broke mid-iteration) degrades to the player hand-back so the
+     * items are never lost. The inventory half ({@link StationSession#iterationConsumed}) grants
+     * back to the player through the shared {@link #handBackToOwner} engine (hotbar-first,
+     * drop-at-block on overflow, the same tick-safe {@code commandBuffer} contract). Both clear;
+     * both are empty at every completed-cycle boundary (each committed produce AND each completed
+     * program cycle clears the ledger), so an orderly stop between cycles refunds NOTHING -
+     * refund and custody-return stay mutually exclusive per iteration.
      */
     private void refundIterationLedger(@Nonnull StationSession s,
             @Nullable CommandBuffer<EntityStore> commandBuffer) {
-        if (s.iterationConsumed.isEmpty()) {
+        if (s.iterationConsumed.isEmpty() && s.iterationConsumedCustody.isEmpty()) {
             return;
         }
         Store<EntityStore> ownerStore = null;
@@ -4601,6 +4727,29 @@ public final class StationService {
             }
         }
         List<ItemStack> refund = new ArrayList<>(s.iterationConsumed.size());
+        // Custody-drained inputs return to their ORIGINATING piles; an unresolvable pile's items
+        // fold into the player hand-back below instead of vanishing.
+        World world = sessionWorld(s);
+        for (Map.Entry<String, Map<String, Integer>> pileEntry : s.iterationConsumedCustody.entrySet()) {
+            String blockKey = StationCustodyRetrieval.blockKeyOf(pileEntry.getKey());
+            String socketId = StationCustodyRetrieval.socketIdOf(pileEntry.getKey());
+            StationCustodyClaim claim = custodyClaimAt(world, blockKey);
+            for (Map.Entry<String, Integer> e : pileEntry.getValue().entrySet()) {
+                if (e.getKey() == null || e.getValue() == null || e.getValue() <= 0) {
+                    continue;
+                }
+                if (claim != null) {
+                    // adder null: a refund restores contents, it never re-owns the pile.
+                    claim.addTo(socketId, null, e.getKey(), e.getValue());
+                } else {
+                    refund.add(new ItemStack(e.getKey(), e.getValue()));
+                }
+            }
+            if (claim != null) {
+                claim.markDirty();
+            }
+        }
+        s.iterationConsumedCustody.clear();
         for (Map.Entry<String, Integer> e : s.iterationConsumed.entrySet()) {
             if (e.getKey() == null || e.getValue() == null || e.getValue() <= 0) {
                 continue;
@@ -4674,73 +4823,255 @@ public final class StationService {
     /**
      * The M1 single rule (design 2.5, extended for review minor m1): ANY committed produce - a
      * {@code Produce.To:"Custody"} OR a {@code Produce.To:"Inventory"} - clears the ENTIRE current
-     * iteration's consumed ledger. The consumed inputs BECAME the produced output (handed back by
-     * {@code returnCustody} for a custody produce, already in the player's inventory for an
-     * inventory produce), so refund and the committed output stay mutually exclusive per iteration.
-     * Without the inventory case a {@code Consume + Produce(To:Inventory) + Duration} step stopped
-     * mid-{@code Duration} would refund the consumed inputs while the produced item is already in
-     * the inventory - a double-grant.
+     * iteration's consumed ledger, BOTH halves (the inventory-sourced map and the per-pile custody
+     * map). The consumed inputs BECAME the produced output (handed back by {@code returnCustody}
+     * for a custody produce, already in the player's inventory for an inventory produce), so
+     * refund and the committed output stay mutually exclusive per iteration. Without the inventory
+     * case a {@code Consume + Produce(To:Inventory) + Duration} step stopped mid-{@code Duration}
+     * would refund the consumed inputs while the produced item is already in the inventory - a
+     * double-grant.
      */
     static void clearIterationLedgerOnCommittedProduce(@Nonnull StationSession s) {
         s.iterationConsumed.clear();
+        s.iterationConsumedCustody.clear();
     }
 
     /**
-     * True when {@code held} satisfies {@code action}'s custody placement matcher: an explicit
-     * {@link Custody#getInput()} when authored, else ANY of the RESOLVED action's
-     * {@code Recipe.Conversions} inputs (the sawmill's "logs by ResourceTypeId family" - zero
-     * extra authoring; an action with no {@code Recipe} at all must author an explicit
-     * {@link Custody#getInput()} instead).
+     * Records a custody drain into the CUSTODY half of the iteration refund ledger, keyed by the
+     * ORIGINATING pile ({@code blockKey} + {@code socketId}): an interrupted iteration refunds
+     * these back INTO that pile, never to the consuming player and never merged into another pile
+     * - a shared session may legitimately have consumed from a pile it does not own.
      */
-    private static boolean custodyAccepts(@Nonnull Custody custody, @Nonnull StationAsset asset,
-            @Nonnull ActionResolver.ResolvedAction action, @Nullable ItemStack held,
-            @Nullable StationCustodyClaim claim) {
+    static void recordIterationConsumedCustody(@Nonnull StationSession s, @Nonnull String blockKey,
+            @Nonnull String socketId, @Nonnull Map<String, Integer> realIds) {
+        if (realIds.isEmpty()) {
+            return;
+        }
+        Map<String, Integer> pileLedger = s.iterationConsumedCustody.computeIfAbsent(
+                StationCustodyRetrieval.displayKey(blockKey, socketId), k -> new LinkedHashMap<>());
+        for (Map.Entry<String, Integer> e : realIds.entrySet()) {
+            if (e.getKey() != null && e.getValue() != null && e.getValue() > 0) {
+                pileLedger.merge(e.getKey(), e.getValue(), Integer::sum);
+            }
+        }
+    }
+
+    /**
+     * Routes one candidate stack through the socket placement router
+     * ({@link StationCustody#routePlacement}): the FIRST Item socket, in authored order, that
+     * accepts the material, passes its pile's family lock + ownership/share rule, and has room.
+     * Acceptance per socket is the socket's own {@code Match} when authored, else ANY of the
+     * RESOLVED action's {@code Recipe.Conversions} inputs (the sawmill's "logs by ResourceTypeId
+     * family" - zero extra authoring; a socket-less action with no {@code Recipe} must author an
+     * explicit {@link Custody#getInput()} instead, which IS the degenerate socket's match).
+     */
+    @Nonnull
+    private static StationCustody.PlacementRoute routeStack(@Nonnull List<Custody.ResolvedSocket> sockets,
+            @Nullable StationCustodyClaim claim, @Nonnull UUID playerUuid, @Nonnull Custody custody,
+            @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action,
+            @Nullable ItemStack held) {
         if (held == null || held.isEmpty()) {
-            return false;
+            return new StationCustody.PlacementRoute(null, 0, null);
         }
         String heldItemId = held.getItemId();
         String[] heldResourceTypeIds = liveResourceTypeIdsOf(heldItemId);
-        // Decision 74: SingleFamily locks a non-empty claim to its first-placed material's family.
-        // Checked FIRST so it gates both acceptance routes below with one statement.
-        if (!StationCustody.acceptsFamily(custody.effectiveSingleFamily(), claim, heldItemId, heldResourceTypeIds,
-                StationService::liveResourceTypeIdsOf)) {
-            return false;
-        }
-        var matcher = custody.getInput();
+        Map<String, String[]> heldTags = liveRawTagsOf(heldItemId);
+        String heldFunction = liveFunctionOf(heldItemId);
+        return StationCustody.routePlacement(sockets, claim, playerUuid, heldItemId, held.getQuantity(),
+                heldResourceTypeIds, custody.effectiveMaxQuantity(),
+                socket -> socketAcceptsInput(socket, asset, action, heldItemId, heldResourceTypeIds,
+                        heldTags, heldFunction),
+                StationService::liveResourceTypeIdsOf);
+    }
+
+    /** One socket's acceptance matcher: its own {@code Match} when authored, else the derived-conversion route. */
+    private static boolean socketAcceptsInput(@Nonnull Custody.ResolvedSocket socket, @Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        var matcher = socket.match();
         if (matcher != null) {
-            return StationCustody.matchesInput(matcher, heldItemId, heldResourceTypeIds, liveRawTagsOf(heldItemId),
-                    liveFunctionOf(heldItemId));
+            return StationCustody.matchesInput(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
         }
         StationAsset.Conversion[] conversions = allConversionsFor(asset, action);
         return conversions.length > 0
                 && StationCustody.matchesAnyConversionInput(conversions, heldItemId, heldResourceTypeIds);
     }
 
-    /**
-     * One scanned inventory-fallback placement candidate (R3 fix - directive 5's held-else-
-     * inventory ruling): the source container the match lives in, its slot within THAT
-     * container, and the matched stack itself.
-     */
-    private record InventoryMatch(@Nonnull ItemContainer container, short slot, @Nonnull ItemStack stack) {
+    /** The refusal key a placement that moved nothing toasts: socket-specific with authored sockets, the classic generic line without. */
+    @Nonnull
+    private static String placementDenyKey(boolean authoredSockets,
+            @Nullable StationCustody.PlacementDenial denial) {
+        if (!authoredSockets || denial == null) {
+            return "ui.station.no_materials";
+        }
+        return switch (denial) {
+            case NOT_SHARED -> "ui.station.not_shared";
+            case FULL -> "ui.station.socket_full";
+            case WRONG_INPUT -> "ui.station.socket_wrong_input";
+        };
+    }
+
+    /** A socket refusal toast, naming the socket through its authored {@code Label} lang key when it has one. */
+    private static void toastSocketRefusal(@Nonnull PlayerRef playerRef, @Nonnull String baseKey,
+            @Nonnull Custody.ResolvedSocket socket) {
+        String label = socket.label();
+        if (label != null && !label.isBlank()) {
+            toast(playerRef, RpgMsg.tr(baseKey + "_named", Msg.key(label)));
+        } else {
+            toast(playerRef, RpgMsg.tr(baseKey));
+        }
     }
 
     /**
-     * R3 fix: when the player's held (active hotbar) stack does not satisfy {@code custody}'s
+     * The first Item socket whose NON-EMPTY pile belongs to someone else without a {@code
+     * Share.Use} grant - engaging would consume from a foreign pile, so the press denies (the
+     * classic occupied rule, relaxed per socket). Null = every non-empty pile is usable.
+     */
+    @Nullable
+    private static Custody.ResolvedSocket firstUseDeniedSocket(@Nullable StationCustodyClaim claim,
+            @Nonnull List<Custody.ResolvedSocket> sockets, @Nonnull UUID playerUuid) {
+        if (claim == null) {
+            return null;
+        }
+        for (Custody.ResolvedSocket socket : sockets) {
+            if (!socket.itemRoute()) {
+                continue;
+            }
+            boolean pileEmpty = claim.isEmpty(socket.id());
+            UUID owner = claim.pileOwner(socket.id());
+            if (!StationCustody.canUse(socket.shareUse(), owner, pileEmpty, playerUuid)) {
+                return socket;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The first {@code Required} socket the engage cannot satisfy: an Item socket with an empty
+     * pile, or a Block socket whose world block is absent or does not match. Null = every
+     * required socket is satisfied.
+     */
+    @Nullable
+    private static Custody.ResolvedSocket firstRequiredSocketUnsatisfied(@Nullable World world,
+            @Nonnull List<Custody.ResolvedSocket> sockets, @Nullable StationCustodyClaim claim,
+            int blockX, int blockY, int blockZ) {
+        for (Custody.ResolvedSocket socket : sockets) {
+            if (!socket.required()) {
+                continue;
+            }
+            if (socket.itemRoute()) {
+                if (claim == null || claim.isEmpty(socket.id())) {
+                    return socket;
+                }
+            } else if (!blockSocketSatisfied(world, blockX, blockY, blockZ, socket)) {
+                return socket;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Does a Block socket's world block stand and match? Composes the socket's {@code At} offset
+     * with the station block's own facing (the {@code Custody.Display} convention, quarter-turn
+     * exact), reads the block there, normalizes a state variant onto its BASE item id, and
+     * matches the socket's {@code Match} against that item's identity (id, resource families,
+     * tags). Fail-CLOSED on an unreadable section or any throw: a required socket that cannot be
+     * verified does not count as satisfied.
+     */
+    private static boolean blockSocketSatisfied(@Nullable World world, int blockX, int blockY, int blockZ,
+            @Nonnull Custody.ResolvedSocket socket) {
+        if (world == null) {
+            return false;
+        }
+        try {
+            Vec3i at = socket.blockAt();
+            double yaw = StationBlockFacing.yawRadians(world, blockX, blockY, blockZ);
+            int[] target = StationCustody.blockSocketTarget(blockX, blockY, blockZ,
+                    at != null ? at.effectiveX() : 0, at != null ? at.effectiveY() : 0,
+                    at != null ? at.effectiveZ() : 0, yaw);
+            String rawId = BlockOps.blockItemIdAt(world.getChunkStore(), target[0], target[1], target[2]);
+            String baseId = rawId != null ? BlockOps.baseItemIdOf(rawId) : null;
+            return StationCustody.blockSocketMatches(baseId, socket.match(),
+                    StationService::blockResourceTypeIdsOf, BlockOps::rawTagsOf);
+        } catch (Throwable t) {
+            Log.fine("STATION block-socket check failed at (" + blockX + ", " + blockY + ", " + blockZ
+                    + "): " + t.getMessage());
+            return false;
+        }
+    }
+
+    /** {@link BlockOps#resourceTypeIdsOf} adapted to the matcher's array shape (null stays null-safe as empty). */
+    @Nonnull
+    private static String[] blockResourceTypeIdsOf(@Nonnull String blockItemId) {
+        List<String> ids = BlockOps.resourceTypeIdsOf(blockItemId);
+        return ids != null ? ids.toArray(String[]::new) : new String[0];
+    }
+
+    /** The {@code Required} Block-route sockets of a resolved socket list (the heartbeat's re-check set). */
+    @Nonnull
+    private static List<Custody.ResolvedSocket> requiredBlockSocketsOf(
+            @Nonnull List<Custody.ResolvedSocket> sockets) {
+        List<Custody.ResolvedSocket> out = new ArrayList<>();
+        for (Custody.ResolvedSocket socket : sockets) {
+            if (socket.required() && socket.blockRoute()) {
+                out.add(socket);
+            }
+        }
+        return out.isEmpty() ? List.of() : List.copyOf(out);
+    }
+
+    /**
+     * May this presser COMMIT to the standing claim's own action (the "a loaded claim commits to
+     * ITS action" rule)? The owner always may; a non-owner may only when the claim's action
+     * authors sockets and every non-empty pile is usable by them ({@code Share.Use}) - the same
+     * rule the engage gate enforces, answered early so a shared user's press resolves the
+     * committed action instead of whatever they happen to hold.
+     */
+    private static boolean mayCommitToClaim(@Nonnull StationAsset asset, @Nonnull StationCustodyClaim claim,
+            @Nonnull UUID playerUuid) {
+        if (claim.ownerId.equals(playerUuid)) {
+            return true;
+        }
+        try {
+            Custody custody = ActionResolver.resolve(asset, claim.actionId).getCustody();
+            if (custody == null || !custody.hasAuthoredSockets()) {
+                return false;
+            }
+            return firstUseDeniedSocket(claim, custody.effectiveSockets(), playerUuid) == null;
+        } catch (Throwable t) {
+            Log.fine("STATION claim-commit check failed: " + t.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * One scanned inventory-fallback placement candidate (R3 fix - directive 5's held-else-
+     * inventory ruling): the source container the match lives in, its slot within THAT
+     * container, the matched stack itself, and the socket that accepted it.
+     */
+    private record InventoryMatch(@Nonnull ItemContainer container, short slot, @Nonnull ItemStack stack,
+            @Nonnull Custody.ResolvedSocket socket) {
+    }
+
+    /**
+     * R3 fix: when the player's held (active hotbar) stack does not satisfy any socket's
      * placement matcher, matching material sitting ELSEWHERE in the inventory (storage/backpack)
      * was previously invisible to placement - the station denied with the truthful-sounding but
      * misleading "no materials" toast even though the player was carrying the right item. Scans
      * the combined hotbar-storage-backpack view ({@link InventoryComponent#HOTBAR_STORAGE_BACKPACK},
      * the same priority order {@code Inventory}'s own combined accessors use) for the FIRST stack
-     * {@link #custodyAccepts} accepts, skipping {@code skipSlot} (the already-tried held slot -
+     * any socket's routing accepts, skipping {@code skipSlot} (the already-tried held slot -
      * numerically identical to this combined view's own slot indices, since the hotbar container
      * is first in {@code HOTBAR_STORAGE_BACKPACK}). Returns {@code null} when nothing else
      * matches; never throws (an empty/unresolvable inventory just yields no match).
      */
     @Nullable
     private static InventoryMatch findFirstCustodyMatchInInventory(@Nonnull Store<EntityStore> store,
-            @Nonnull Ref<EntityStore> ref, @Nonnull Custody custody, @Nonnull StationAsset asset,
+            @Nonnull Ref<EntityStore> ref, @Nonnull Custody custody,
+            @Nonnull List<Custody.ResolvedSocket> sockets, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, short skipSlot,
-            @Nullable StationCustodyClaim claim) {
+            @Nullable StationCustodyClaim claim, @Nonnull UUID playerUuid) {
         try {
             CombinedItemContainer combined =
                     InventoryComponent.getCombined(store, ref, InventoryComponent.HOTBAR_STORAGE_BACKPACK);
@@ -4753,8 +5084,10 @@ public final class StationService {
                 if (ItemStack.isEmpty(stack)) {
                     continue;
                 }
-                if (custodyAccepts(custody, asset, action, stack, claim)) {
-                    return new InventoryMatch(combined, slot, stack);
+                StationCustody.PlacementRoute route =
+                        routeStack(sockets, claim, playerUuid, custody, asset, action, stack);
+                if (route.placed()) {
+                    return new InventoryMatch(combined, slot, stack, route.socket());
                 }
             }
         } catch (Throwable t) {
@@ -4764,33 +5097,36 @@ public final class StationService {
     }
 
     /**
-     * Moves up to {@code custody.effectiveMaxQuantity() - currentTotal} of {@code matchedStack}'s
-     * source slot into the block's claim (minting its chunk-persisted stash, owned by
-     * {@code playerUuid}, on first placement), removing exactly that amount from
-     * {@code sourceContainer}'s {@code sourceSlot}. Returns the amount actually moved
-     * (0 = nothing eligible / no room / the stash could not be minted / the slot removal failed).
-     * Ends with ONE {@code markDirty}, so the tally (and any unique stack) is flagged for the
-     * chunk save the moment it lands.
+     * Moves the routed quantity of {@code matchedStack}'s source slot into {@code socket}'s pile
+     * of the block's claim (minting its chunk-persisted stash, owned by {@code playerUuid}, on
+     * first placement), removing exactly that amount from {@code sourceContainer}'s
+     * {@code sourceSlot}. The quantity is {@link StationCustody#placeableQuantity(int, int, int,
+     * int, int, Integer)}'s smallest-of: the socket's press size ({@code PlacePerPress}, absent =
+     * the whole held stack), the held count, the socket's remaining room (its min-of-caps
+     * capacity) and the block's remaining room (the custody-level cap over ALL piles). Returns
+     * the amount actually moved (0 = nothing eligible / no room / the stash could not be minted /
+     * the slot removal failed). Ends with ONE {@code markDirty}, so the tally (and any unique
+     * stack) is flagged for the chunk save the moment it lands.
      *
-     * <p><b>Metadata-preserving single-item placement</b>: when
-     * {@code custody.effectiveMaxQuantity() == 1} (the anvil's Enhance action - one specific
-     * weapon, not a fungible resource pile), the REAL removed {@link ItemStack}
-     * (durability/prior-enhancement metadata intact, via the removal transaction's
-     * {@code getOutput()}) is stashed on the claim ({@link StationCustodyClaim#setUniqueStack})
-     * alongside the count bookkeeping every custody claim keeps - {@code toItemStacks()} then
-     * returns THAT stack on hand-back instead of synthesizing a bare fresh one, the Stamp step
-     * reads/mutates it directly, and it persists with the stash through the engine's own item
-     * codec. The bulk fungible-resource case (the sawmill's logs, any {@code MaxQuantity > 1}
-     * station) is unaffected - only the count map matters there.
+     * <p><b>Metadata-preserving single-item placement</b>: when the socket's effective capacity
+     * is 1 (the anvil's Enhance action - one specific weapon, not a fungible resource pile), the
+     * REAL removed {@link ItemStack} (durability/prior-enhancement metadata intact, via the
+     * removal transaction's {@code getOutput()}) is stashed on that socket's pile
+     * ({@link StationCustodyClaim#setUniqueStack(String, ItemStack)}) alongside the count
+     * bookkeeping every pile keeps - {@code toItemStacks} then returns THAT stack on hand-back
+     * instead of synthesizing a bare fresh one, the Stamp step reads/mutates it directly, and it
+     * persists with the stash through the engine's own item codec. The bulk fungible-resource
+     * case (the sawmill's logs, any capacity above 1) is unaffected - only the count map matters
+     * there.
      *
      * <p><b>Display spawn</b>: {@link #spawnDisplayIfAbsent} - the placed-as-entity visual plus
-     * its volatile handle, spawned only when {@code custody} authors a {@code Display} group and
-     * no live prop stands at the block yet (true on first placement, a no-op guard on every
+     * its volatile handle, spawned only when the SOCKET carries a {@code Display} group and no
+     * live prop stands for that socket yet (true on first placement, a no-op guard on every
      * top-up). A failed spawn never blocks the placement, which already succeeded.
      *
      * <p>Takes an explicit {@code sourceContainer}/{@code sourceSlot}/{@code matchedStack} so
      * BOTH the held-item placement AND the {@link #findFirstCustodyMatchInInventory} fallback go
-     * through the IDENTICAL whole-stack + top-up + cap math, metadata-preserving single-item
+     * through the IDENTICAL press + top-up + cap math, metadata-preserving single-item
      * path, and display-spawn logic - one engine, two candidate sources. {@code commandBuffer}
      * (never {@code store}) feeds the display spawn: {@code store.addEntity} throws
      * {@code IllegalStateException} when called from an interaction handler (this call site runs
@@ -4800,15 +5136,17 @@ public final class StationService {
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull World world, @Nonnull String blockKey,
             @Nonnull UUID playerUuid, @Nonnull String stationId, @Nonnull String actionId,
             @Nonnull ItemContainer sourceContainer, short sourceSlot, @Nonnull ItemStack matchedStack,
-            @Nonnull Custody custody, int blockX, int blockY, int blockZ) {
+            @Nonnull Custody custody, @Nonnull Custody.ResolvedSocket socket,
+            int blockX, int blockY, int blockZ) {
         String itemId = matchedStack.getItemId();
         if (itemId == null || itemId.isBlank()) {
             return 0;
         }
         StationCustodyClaim claim = custodyClaimAt(world, blockX, blockY, blockZ);
-        int currentTotal = claim != null ? claim.totalQuantity() : 0;
-        int moveCount = StationCustody.placeableQuantity(currentTotal, matchedStack.getQuantity(),
-                custody.effectiveMaxQuantity());
+        int pileTotal = claim != null ? claim.totalQuantity(socket.id()) : 0;
+        int blockTotal = claim != null ? claim.totalQuantity() : 0;
+        int moveCount = StationCustody.placeableQuantity(pileTotal, blockTotal, matchedStack.getQuantity(),
+                socket.maxQuantity(), custody.effectiveMaxQuantity(), socket.placePerPress());
         if (moveCount <= 0) {
             return 0;
         }
@@ -4834,23 +5172,26 @@ public final class StationService {
             }
             return 0;
         }
-        claim.add(itemId, moveCount);
-        if (custody.effectiveMaxQuantity() == 1 && movedStack != null) {
-            claim.setUniqueStack(movedStack);
+        claim.addTo(socket.id(), playerUuid, itemId, moveCount);
+        if (socket.maxQuantity() == 1 && movedStack != null) {
+            claim.setUniqueStack(socket.id(), movedStack);
         }
         claim.markDirty();
-        spawnDisplayIfAbsent(blockKey, custody.getDisplay(), claim, itemId, commandBuffer,
+        spawnDisplayIfAbsent(blockKey, socket.id(), socket.display(), claim, itemId, commandBuffer,
                 blockX, blockY, blockZ);
         return moveCount;
     }
 
     /**
      * The primary block's custody hand-back, from {@link #stop} on every reason whose player is
-     * still present ({@link #custodyReturnsAtStop}): removes the block's stash (if a claim owned
-     * by THIS session's player stands there), returns its items to the owner hotbar-first then
-     * backpack storage (via {@link ItemGrantUtil}), else drops them at the block once, then flips
-     * the block back to its Empty custody state. A session whose world can no longer be resolved
-     * leaves the stash standing instead - it is chunk-persisted, so nothing is lost by leaving it.
+     * still present ({@link #custodyReturnsAtStop}): hands back the piles OWNED BY this session's
+     * player - to the owner hotbar-first then backpack storage (via {@link ItemGrantUtil}), else
+     * dropped at the block once - and removes each handed-back pile. A pile belonging to someone
+     * ELSE (a shared station another player contributed to) stays standing in the world stash,
+     * its display prop untouched; the stash itself is removed only once its last pile is gone,
+     * and the block flips back to its Empty custody state only once nothing is left in it. A
+     * session whose world can no longer be resolved leaves everything standing instead - the
+     * stash is chunk-persisted, so nothing is lost by leaving it.
      *
      * <p>{@code s.ref.getStore()} (not the {@code store} parameter {@link #stop} may have been
      * handed as {@code null}) is the store source for the give-back - a valid ref always knows its
@@ -4874,9 +5215,10 @@ public final class StationService {
         if (claim == null) {
             return;
         }
-        if (!claim.ownerId.equals(s.playerUuid)) {
-            // Not this session's claim to touch (should not happen - custody ownership gates
-            // session start - but never silently swallow another player's placed items).
+        List<String> ownedPiles = claim.pileIdsOwnedBy(s.playerUuid);
+        if (ownedPiles.isEmpty()) {
+            // Nothing of this session's player to touch - never silently swallow another
+            // player's placed items.
             return;
         }
         Store<EntityStore> ownerStore = null;
@@ -4887,27 +5229,37 @@ public final class StationService {
                 ownerStore = null;
             }
         }
-        removeStashAt(world, s.blockX, s.blockY, s.blockZ);
-        despawnDisplay(s.blockKey, commandBuffer);
-        giveClaimToOwner(commandBuffer, ownerStore, s.ref, claim, s.blockX, s.blockY, s.blockZ);
-        if (custody != null) {
+        List<ItemStack> stacks = new ArrayList<>();
+        for (String socketId : ownedPiles) {
+            stacks.addAll(claim.toItemStacks(socketId));
+            claim.removePile(socketId);
+            despawnDisplay(s.blockKey, socketId, commandBuffer);
+        }
+        boolean stashGone = !claim.hasAnyPile();
+        if (stashGone) {
+            removeStashAt(world, s.blockX, s.blockY, s.blockZ);
+            despawnDisplay(s.blockKey, commandBuffer);
+        } else {
+            claim.markDirty();
+        }
+        handBackToOwner(commandBuffer, ownerStore, s.ref, stacks, s.blockX, s.blockY, s.blockZ);
+        if (custody != null && claim.isEmpty()) {
             flipCustodyState(world, s.blockX, s.blockY, s.blockZ, custody, false);
         }
     }
 
     /**
-     * Hands {@code claim}'s contents to {@code ownerRef}'s owner - PER STACK, hotbar-first, then
-     * backpack storage, then dropped at the block (round-5 refinement 1, via {@link
-     * ItemGrantUtil} - supersedes this method's old ALL-OR-NOTHING batch-against-storage-only
-     * check: a claim holding several distinct item ids can now land some in the hotbar, some in
-     * the backpack, and only the genuine overflow on the ground, instead of dropping the WHOLE
-     * claim the moment one combined-batch room check failed). Extracted (DRY) so both
-     * {@link #returnCustody} (the hand-back session-stop exits) and {@link #retrieveCustody} (the
-     * press-F retrieval feature) share ONE give-back engine. Returns the stacks that actually landed IN
-     * INVENTORY (hotbar or backpack, excluding anything dropped) - {@link #retrieveCustody} uses
-     * this to fire a native-pickup-mimic notification only for what the player genuinely
-     * received (round-5 refinement 2); {@link #returnCustody} discards the return value. No-op
-     * (empty result) when {@code claim} is empty. Never throws.
+     * Hands the WHOLE claim's contents (every pile) to {@code ownerRef}'s owner - PER STACK,
+     * hotbar-first, then backpack storage, then dropped at the block (round-5 refinement 1, via
+     * {@link ItemGrantUtil} - supersedes this method's old ALL-OR-NOTHING
+     * batch-against-storage-only check: a claim holding several distinct item ids can land some
+     * in the hotbar, some in the backpack, and only the genuine overflow on the ground). The
+     * remote-anchor sweep's ({@link #releaseAnchorClaims}) whole-claim form; the primary-block
+     * stop ({@link #returnCustody}) and press-F retrieval ({@link #retrieveCustody}) hand back
+     * PER PILE through {@link #handBackToOwner} directly, since a shared station's foreign piles
+     * must stay standing. Returns the stacks that actually landed IN INVENTORY (hotbar or
+     * backpack, excluding anything dropped). No-op (empty result) when {@code claim} is empty.
+     * Never throws.
      *
      * <p>{@code commandBuffer} is the tick-safe entity accessor the ground-drop fallback needs -
      * see {@link #handBackToOwner}, which is where the whole hand-back actually happens.
@@ -4985,20 +5337,21 @@ public final class StationService {
      * Press-F custody retrieval: the target is the PLACED-AS-ENTITY display entity itself (design
      * section 9's visual, phase 2 leg G), pressed via its own registered {@code Interactions}
      * entry ({@code interaction.StationRetrieveInteraction}, set at spawn by {@link
-     * StationCustodyDisplay}). Resolves the clicked entity back to its owning block key by
-     * NETWORK ID (comparing {@code NetworkId} values rather than {@code Ref} identity keeps the
-     * matching decision core engine-free and unit-testable - see {@link StationCustodyRetrieval}),
-     * scoped to the PRESSER'S OWN WORLD because a network id is per-world and repeats across
-     * worlds ({@link StationCustodyRetrieval#owns}), then routes the eligibility decision through
-     * {@link StationCustodyRetrieval#decide}:
-     * owner-only (the SAME ownership gate {@link #toggle}'s custody-placement branch already
-     * enforces), and a NO-OP keyed toast while a session is ACTIVELY working that station - the
-     * session owns its own input for the whole duration of a program run; yanking materials out
-     * from under a running Consume step would either silently short a cycle or race the session's
-     * own auto-return on its next stop. On success: gives the claim's contents back to the presser
-     * via {@link #giveClaimToOwner} (the SAME inventory-first/drop-at-block engine {@link
-     * #returnCustody} uses), despawns the display, flips the block back to its Empty custody
-     * state, and removes the claim. Never throws.
+     * StationCustodyDisplay}). Resolves the clicked entity back to its owning (blockKey, SOCKET)
+     * pair by NETWORK ID over the composite display-key side map (comparing {@code NetworkId}
+     * values rather than {@code Ref} identity keeps the matching decision core engine-free and
+     * unit-testable - see {@link StationCustodyRetrieval}), scoped to the PRESSER'S OWN WORLD
+     * because a network id is per-world and repeats across worlds
+     * ({@link StationCustodyRetrieval#owns}), then routes the eligibility decision through
+     * {@link StationCustodyRetrieval#decide}: the clicked SOCKET's pile owner (relaxed by that
+     * socket's own {@code Share.Reclaim}), and a NO-OP keyed toast while a session is ACTIVELY
+     * working that station - the session owns its own input for the whole duration of a program
+     * run; yanking materials out from under a running Consume step would either silently short a
+     * cycle or race the session's own auto-return on its next stop. On success: hands THAT
+     * socket's pile back to the presser through {@link #handBackToOwner} (the same
+     * inventory-first/drop-at-block engine every give-back uses), despawns that socket's display,
+     * removes the pile (and the stash once its last pile is gone), and flips the block back to
+     * its Empty custody state once nothing is left in it. Never throws.
      */
     public void retrieveCustody(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull Ref<EntityStore> targetEntity) {
@@ -5024,13 +5377,18 @@ public final class StationService {
             // no components at all.
             String worldPrefix = StationAnchors.worldPrefix(worldUuid.toString());
             int targetId = targetNetworkId.getId();
-            String blockKey = null;
+            String displayKey = null;
             for (Map.Entry<String, DisplayHandle> e : displayByBlock.entrySet()) {
                 if (StationCustodyRetrieval.owns(e.getKey(), worldPrefix, e.getValue().networkId(), targetId)) {
-                    blockKey = e.getKey();
+                    displayKey = e.getKey();
                     break;
                 }
             }
+            // The composite key resolves THE SOCKET first (a prop is per socket), then the owner
+            // check below runs against exactly that socket's pile.
+            String blockKey = displayKey != null ? StationCustodyRetrieval.blockKeyOf(displayKey) : null;
+            String socketId = displayKey != null ? StationCustodyRetrieval.socketIdOf(displayKey)
+                    : StationCustodyClaim.MAIN_PILE;
             World world;
             try {
                 world = WorldEvictors.worldOf(ref);
@@ -5040,25 +5398,42 @@ public final class StationService {
             }
             StationCustodyClaim claim = custodyClaimAt(world, blockKey);
             boolean hasActiveSession = blockKey != null && sessionWorkingAt(blockKey);
-            boolean isOwner = claim != null && claim.ownerId.equals(playerUuid);
-            boolean claimNonEmpty = claim != null && !claim.isEmpty();
+            Custody claimCustody = null;
+            if (claim != null) {
+                StationAsset claimAsset = StationCatalog.getInstance().getStation(claim.stationId);
+                claimCustody = claimAsset != null
+                        ? ActionResolver.resolve(claimAsset, claim.actionId).getCustody() : null;
+            }
+            // Per-socket reclaim right: the pile's own owner, relaxed by that socket's
+            // Share.Reclaim (never by another socket's).
+            boolean shareReclaim = claimCustody != null && socketShareReclaim(claimCustody, socketId);
+            UUID pileOwner = claim != null ? claim.pileOwner(socketId) : null;
+            boolean mayReclaim = claim != null
+                    && StationCustody.canReclaim(shareReclaim,
+                            pileOwner != null ? pileOwner : claim.ownerId, playerUuid);
+            boolean pileNonEmpty = claim != null
+                    && (!claim.isEmpty(socketId) || claim.uniqueStack(socketId) != null);
             StationCustodyRetrieval.Outcome outcome =
-                    StationCustodyRetrieval.decide(claim != null, hasActiveSession, isOwner, claimNonEmpty);
+                    StationCustodyRetrieval.decide(claim != null, hasActiveSession, mayReclaim, pileNonEmpty);
             if (outcome == StationCustodyRetrieval.Outcome.RETRIEVE) {
                 // The presser's own collect/gather gesture (maintainer directive, round-3 smoke):
                 // fired BEFORE the give-back so the animation set still reflects what they were
                 // holding when they reached for it, not whatever the retrieved stack just became.
                 playCollectAnimation(store, ref);
-                removeStashAt(world, claim.blockX, claim.blockY, claim.blockZ);
-                despawnDisplay(blockKey, commandBuffer);
-                List<ItemStack> landed = giveClaimToOwner(commandBuffer, store, ref, claim,
+                List<ItemStack> pileStacks = claim.toItemStacks(socketId);
+                claim.removePile(socketId);
+                despawnDisplay(blockKey, socketId, commandBuffer);
+                if (!claim.hasAnyPile()) {
+                    removeStashAt(world, claim.blockX, claim.blockY, claim.blockZ);
+                    despawnDisplay(blockKey, commandBuffer);
+                } else {
+                    claim.markDirty();
+                }
+                List<ItemStack> landed = handBackToOwner(commandBuffer, store, ref, pileStacks,
                         claim.blockX, claim.blockY, claim.blockZ);
-                StationAsset asset = StationCatalog.getInstance().getStation(claim.stationId);
-                Custody custody = asset != null
-                        ? ActionResolver.resolve(asset, claim.actionId).getCustody() : null;
-                if (custody != null) {
+                if (claimCustody != null && claim.isEmpty()) {
                     try {
-                        flipCustodyState(world, claim.blockX, claim.blockY, claim.blockZ, custody, false);
+                        flipCustodyState(world, claim.blockX, claim.blockY, claim.blockZ, claimCustody, false);
                     } catch (Throwable t) {
                         Log.fine("STATION retrieve block-state flip failed: " + t.getMessage());
                     }
@@ -5688,6 +6063,7 @@ public final class StationService {
             case INPUTS_EXHAUSTED -> "ui.station.stop.inputs_exhausted";
             case ANCHOR_LOST -> "ui.station.stop.anchor_lost";
             case PATH_BLOCKED -> "ui.station.stop.path_blocked";
+            case SOCKET_LOST -> "ui.station.socket_lost";
             default -> null;
         };
     }

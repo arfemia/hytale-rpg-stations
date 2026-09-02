@@ -93,9 +93,9 @@ class CustodyPersistenceTest {
 
     @Test
     void anEmptiedClaimStillSurvivesASave() {
-        // A claim drained to zero keeps its owner + tag (stampNewStash records both precisely so
-        // the pile always carries a leaf and cannot be dropped by the save), so an
-        // empty-but-standing stash still resolves to a claim with its identity intact.
+        // A claim drained to zero keeps its identity (stampNewStash records the tag and the
+        // stash-level owner, both stash leaves the save always writes), so an empty-but-standing
+        // stash still resolves to a claim with its identity intact.
         BlockStash placed = new BlockStash();
         StationCustodyClaim.stampNewStash(placed, OWNER, "sawmill", "work");
 

@@ -344,9 +344,10 @@ resolution section for the engine half.
   inline `Actions[]` entry's `Ref` leaf (above). Supports native `Parent` between `ActionAsset`s
   for delta reuse. See the fish exemplar (`unreleased/Server/RpgStations/Actions/PrepFish.json`,
   held back with the CookingFire/CuttingBoard pair at 0.1.0) for the flagship authoring shape.
-- **[`Custody`](Custody.java)** - placed-input custody (chunk-persisted: the placed pile lives on
-  the block's own chunk section and survives restarts), opted into per-action:
-  `{MaxQuantity?, SingleFamily?, Input?, States?, Display?}`. `MaxQuantity` defaults to **100**.
+- **[`Custody`](Custody.java)** - placed-input custody (chunk-persisted: the placed piles live on
+  the block's own chunk section and survive restarts), opted into per-action:
+  `{MaxQuantity?, SingleFamily?, Input?, States?, Display?, Share?, Sockets?}`. `MaxQuantity`
+  defaults to **100**.
   `Input` (reusing [`ActionInput`](ActionInput.java)'s ItemId/ResourceTypeId/Tags/Function routes)
   is the explicit placement-acceptance matcher; absent derives acceptance from the resolved
   action's own `Recipe.Conversions` inputs instead (ANY of a multi-input conversion's materials is
@@ -369,6 +370,27 @@ resolution section for the engine half.
   mechanism. The jar's own `Stations/Sawmill.json` authors `Display {Offset{Y:-0.1}, Scale:0.46}`
   as the shipped standalone default; a pack re-tunes it through an `ExtensionAsset`'s `Custody`
   per-leaf overlay (rule 5 below) rather than a full-file station override.
+  **`Sockets` (the multi-placement model)** is an `InheritMapCodec` map keyed by socket id (author
+  ids lower-case; matched case-insensitively; merged per id under `Parent`, per leaf within a
+  socket; authored order = placement priority) of `Custody.Socket`: `{Item{Match?, PlacePerPress?}
+  XOR Block{At?: Vec3i, Match?}, MaxQuantity?, SingleFamily?, Required?, Display?, Share?, Label?}`
+  - two nullable sibling ROUTE groups, exactly-one-of enforced deny-nothing (a both/neither socket
+  warns at decode and is IGNORED at runtime, never a load failure; a future route is a third
+  sibling group, additive, zero reserved fields). Effective capacity is `min(socket.MaxQuantity,
+  Custody.MaxQuantity)` with the per-block TOTAL capped by the custody-level cap; `SingleFamily`
+  and every `Share` leaf fall back to the custody-level value; `PlacePerPress` absent = the classic
+  whole-held-stack press. A `Block` socket is a real world block at the facing-composed `At`
+  offset (the `Display` frame convention) - nothing is stored for it, and caps/shares/press knobs
+  are inert on one. **`Share` `{Place?, Use?, Reclaim?}`** - three orthogonal booleans, custody
+  level AND per socket, all reader-default false (owner-only): `Place` opens pile CREATION in an
+  empty socket (first contributor owns until drained; a non-empty pile never co-mingles), `Use`
+  opens engaging over a foreign pile, `Reclaim` opens press-F retrieval of one. **The DEGENERATE
+  socket**: `Custody.effectiveSockets()` with no authored `Sockets` synthesizes exactly ONE socket,
+  reserved id `main` (`MAIN_SOCKET_ID`), whose effective leaves ARE the custody-level values - the
+  parity contract `asset.SawmillSocketParityTest` gates (both shipped station shapes decode and
+  behave identically). `ResolvedSocket` is the flat per-socket view every runtime reader consumes;
+  `Ingredient.Socket` + the `Consume`/`Produce` group-level `Socket` leaves address sockets from a
+  recipe row / step phase (per-entry wins; absent = the first authored Item socket).
 - **[`ActionInput`](ActionInput.java)** - the diegetic action-selection matcher: `{ItemId?,
   ResourceTypeId?, Tags?, Function?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, resolved against
   the held item's live shape). `isCatchAll()` = no route authored. Live selection runs through
@@ -638,10 +660,16 @@ resolution section for the engine half.
        `Rotation` axis, and one carrying only `Rotation.Pitch` keeps the base's `Rotation.Yaw`/`.Roll`;
        a `ContributionScale` overlay authoring only `Floors` keeps the base action's own `Factors`.
        (Leaf-granularity note: a MAP-valued leaf - `Custody.Input.Tags` - replaces wholesale as
-       ONE leaf, never per tag family.)
+       ONE leaf, never per tag family. `Custody.Sockets` is the one KEYED collection inside an
+       overlay and merges per socket id - an id the base has deep-merges per leaf, a NEW id
+       appends, and the base's authored order is never disturbed; a socket's `Item`/`Block` route
+       pair is the one leaf-walk exception, where an overlay authoring a route commits the socket
+       to it and drops the base's other route. Standing docs wording: OVERLAY IS NOT EXTENSION -
+       `States` has no collection and can only be re-skinned, `Sockets` is a keyed collection and
+       IS additively extensible.)
        Overlays apply in `APPLY_ORDER`, so the LATER (higher-priority) extension wins a same-leaf
        contest. Engine-side cores + the load-bearing test: `station.ExtensionCatalog`'s
-       `overlayPuppet`/`overlayCustody`, `station.ExtensionOverlayTest`.
+       `overlayPuppet`/`overlayCustody`/`overlaySocket`, `station.ExtensionOverlayTest`.
   - **`APPLY_ORDER`** - the ONE apply-order tuple (`Priority` ascending so a HIGHER priority
     applies LATER and wins a tie, then extension id lexicographic) - a total order over distinct
     assets, so a stable sort fully determines the result on every server. `sortedForApply(...)`

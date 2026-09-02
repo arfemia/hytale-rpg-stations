@@ -70,6 +70,19 @@ one on that key - both of which apply on the scoped station - are reported.
 4. **Nested per-leaf overlay** (`Puppet`, `Custody`, `ContributionScale`) - recursively, at every
    nesting depth, an AUTHORED extension leaf wins and an unauthored one leaves the base's own value
    intact; among several extensions the later (higher-priority) one overlays on top.
+
+   **OVERLAY IS NOT EXTENSION.** An overlay RE-TUNES leaves of something the base already authored;
+   it never grows the base's closed vocabulary. `Custody.Sockets` is the one keyed collection inside
+   an overlayable group, and it composes with both faces at once: an overlay entry whose socket id
+   the base already authors deep-merges per leaf (the re-tuning face - retint one socket's `Display`
+   without touching its `Match` or capacity), while an id the base does not author is APPENDED as a
+   new socket (the additive face; the base's authored order, which is placement priority, is never
+   disturbed). Within one merged socket the base keeps every leaf the overlay does not explicitly
+   author - the base wins everything unsaid. A socket's `Item`/`Block` route pair is the one
+   leaf-walk exception: an overlay authoring a route group commits the socket to THAT route (its
+   group merges per leaf, the base's other route drops), and an overlay authoring neither keeps the
+   base's untouched. `Custody.States` stays the contrast case: it has no collection, so an overlay
+   may re-skin its state names per leaf and can never add a state the engine does not know.
 5. **Ordered step insertion** (`Steps`) - each insertion carries an `Anchor`, exactly one of
    `{After: "<stepId>"} | {Before: "<stepId>"} | {AtStart: true} | {AtEnd: true}`. A missing or
    dangling `After`/`Before` target degrades to `AtEnd` plus a content-audit note. Inserted steps

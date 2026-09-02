@@ -27,6 +27,7 @@ public final class Ingredient {
     @Nullable protected String itemId;
     @Nullable protected String resourceTypeId;
     @Nullable protected Integer quantity;
+    @Nullable protected String socket;
 
     public static final BuilderCodec<Ingredient> CODEC = BuilderCodec.builder(Ingredient.class, Ingredient::new)
             .appendInherited(new KeyedCodec<>("ItemId", Codec.STRING, false),
@@ -40,6 +41,9 @@ public final class Ingredient {
                     (o, v) -> o.quantity = v, o -> o.quantity, (o, p) -> o.quantity = p.quantity)
             .documentation("The item count; reader-defaults to 1 when omitted or non-positive.")
             .addValidator(CodecWarnValidators.positive("Ingredient.Quantity should be positive; it reader-defaults to 1 otherwise.")).add()
+            .appendInherited(new KeyedCodec<>("Socket", Codec.STRING, false),
+                    (o, v) -> o.socket = v, o -> o.socket, (o, p) -> o.socket = p.socket)
+            .documentation("The custody socket THIS entry draws from / lands in, overriding the phase's own Socket ('meat from the meat rack, greens from the basket' in one row). Absent = the phase's Socket, else the first Item socket. Only meaningful on a Custody-routed phase.").add()
             .afterDecode((Ingredient ingredient, ExtraInfo extraInfo) -> {
                 if (!ingredient.hasExactlyOneRoute()) {
                     extraInfo.getValidationResults().warn(
@@ -54,10 +58,18 @@ public final class Ingredient {
     @Nonnull
     public static Ingredient of(@Nullable String itemId, @Nullable String resourceTypeId,
             @Nullable Integer quantity) {
+        return of(itemId, resourceTypeId, quantity, null);
+    }
+
+    /** As above, plus the per-entry custody {@link #socket} address. */
+    @Nonnull
+    public static Ingredient of(@Nullable String itemId, @Nullable String resourceTypeId,
+            @Nullable Integer quantity, @Nullable String socket) {
         Ingredient i = new Ingredient();
         i.itemId = itemId;
         i.resourceTypeId = resourceTypeId;
         i.quantity = quantity;
+        i.socket = socket;
         return i;
     }
 
@@ -86,6 +98,12 @@ public final class Ingredient {
     @Nullable
     public Integer getQuantity() {
         return quantity;
+    }
+
+    /** The per-entry custody socket address (lowercased at use; only meaningful on a Custody-routed phase), or null for the phase default. */
+    @Nullable
+    public String getSocket() {
+        return socket;
     }
 
     /** {@link #quantity}, reader-defaulted to 1 when null/non-positive. */

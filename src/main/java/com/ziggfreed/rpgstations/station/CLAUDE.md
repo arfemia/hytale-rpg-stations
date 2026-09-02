@@ -752,8 +752,9 @@ only ever be "no". The prior `Query.any()` on the damage system paid that cost f
 
 ## World-unload teardown + the disconnect posture (`RemoveWorldEvent`)
 
-**Every one of this engine's VOLATILE block-keyed maps (`displayByBlock`, `byBlock`,
-`workingByPlayer`'s block-anchored entries, `knownStationBlocks`) is GLOBAL, keyed by a composite
+**Every one of this engine's VOLATILE block-keyed maps (`displayByBlock` - whose keys append a
+per-socket `#<socketId>` suffix - `byBlock`, `workingByPlayer`'s block-anchored entries,
+`knownStationBlocks`) is GLOBAL, keyed by a composite
 `"<worldUuid>:<x>:<y>:<z>"` string, rather than partitioned per world.** The world-uuid prefix the
 key already carries is the whole per-world sweep; without it a fleet that creates and destroys
 instance worlds would accumulate stale entries (and pinned display `Ref`s) for the whole uptime.
@@ -818,35 +819,77 @@ existed, and the check costs one null read until an owner sets a number.
 **Custody is chunk-persisted state, resolved live per touch.** The authority is ziggfreed-common's
 `BlockStashes` store (registry id `ZigBlockStash`, registered by the zc plugin at setup): one
 `BlockStash` per block on the block's own chunk section, saved and loaded with the chunk, holding
-ONE pile under the reserved `StationCustodyClaim.MAIN_PILE` id (`"main"`) - pile `Owner` = the
-placer uuid, `Items` = the insertion-ordered tally (oldest-first drain order), `Unique` = the
-metadata-preserving stack (the anvil's placed weapon, riding the engine's own item codec so it
-survives restarts), and the stash `Tag` = `rpgstations:<stationId>/<actionId>` (how a claim
-remembers its committed action across a restart, and how this mod's stashes are told apart from
-another consumer's - a foreign tag is never adopted or clobbered).
-[`StationCustodyClaim`](StationCustodyClaim.java) is a THIN VIEW over that pile, materialized
-fresh by `StationService#custodyClaimAt` per touch (NO authoritative write-through cache - the
+ONE PILE PER SOCKET keyed by socket id (a socket-less custody keeps its whole tally under the
+reserved `StationCustodyClaim.MAIN_PILE` id `"main"` - the degenerate one-socket case) - per pile
+`Owner` = the first contributor's uuid (a produce pile = the session worker's), `Items` = the
+insertion-ordered tally (oldest-first drain order), `Unique` = the metadata-preserving stack (the
+anvil's placed weapon, riding the engine's own item codec so it survives restarts); the stash
+`Tag` = `rpgstations:<stationId>/<actionId>` (how a claim remembers its committed action across a
+restart, and how this mod's stashes are told apart from another consumer's - a foreign tag is
+never adopted or clobbered) and the stash-level `Owner` = whoever stood it up.
+[`StationCustodyClaim`](StationCustodyClaim.java) is a THIN VIEW over those piles (per-socket
+accessors `pile`/`items`/`addTo`/`pileOwner`/`totalQuantity(socketId)`/`toItemStacks(socketId)`/
+`removePile`, plus the main-pile delegates the degenerate paths ride), materialized fresh by
+`StationService#custodyClaimAt` per touch (NO authoritative write-through cache - the
 `PlacedBlockLedger` posture; an unloaded section answers "no claim"); `ensureClaimAt` mints +
-stamps a new stash, `removeStashAt` deletes one. **Whoever mutates, marks**: every in-place
-mutation batch (a placement's adds, a Consume drain, the Stamp unique-stack write-back) ends with
-exactly one `claim.markDirty()` (zc's `Handle` dirty contract - nothing else flags the section
-for a save); `ensure`/`remove` mark themselves. The display prop's ref + NetworkId are VOLATILE
-(`displayByBlock`, a `blockKey -> DisplayHandle` side map with the reverse networkId walk press-F
-retrieval uses) - a NetworkId is per-world and not boot-stable, so it never rides the stash;
-`respawnDisplayIfMissing` rebuilds the prop from the persisted contents on the block's first
-interaction after a restart (the interim self-heal; a hydrate-on-section-load reconciler is not
-built yet, so until then the prop waits for that first touch).
+stamps a new stash (tag + stash owner; each PILE is minted by its first `addTo`, which is also
+what records the pile's own owner), `removeStashAt` deletes one. **Whoever mutates, marks**: every
+in-place mutation batch (a placement's adds, a Consume drain, a pile removal, the Stamp
+unique-stack write-back) ends with exactly one `claim.markDirty()` (zc's `Handle` dirty contract -
+nothing else flags the section for a save); `ensure`/`remove` mark themselves. The display props'
+refs + NetworkIds are VOLATILE and PER SOCKET (`displayByBlock`, a `"<blockKey>#<socketId>" ->
+DisplayHandle` side map - `StationCustodyRetrieval.displayKey/blockKeyOf/socketIdOf` are the
+composite-key helpers - with the reverse networkId walk press-F retrieval uses, resolving THE
+SOCKET first and then that pile's owner) - a NetworkId is per-world and not boot-stable, so it
+never rides the stash; `respawnDisplayIfMissing` rebuilds EVERY socket's prop from the persisted
+contents on the block's first interaction after a restart (the interim self-heal; a
+hydrate-on-section-load reconciler is not built yet, so until then the props wait for that first
+touch).
 
-[`StationCustody`](StationCustody.java) stays the PURE decision core (`placeableQuantity`,
-`available`/`drain`, `matchesInput`/`matchesAnyConversionInput`, `acceptsFamily`) - zero engine
-touch, operating on the claim view (whose detached test constructor wraps a real `StashPile`).
-`toggle` gates a `Custody`-governing action behind ONE state-dependent F: not-loaded + a matching
-held stack places/tops-up (`placeIntoCustody`); loaded + non-owner denies `ui.station.occupied`;
-otherwise falls through to the classic engage flow, sourcing viability from the claim
-(`firstRunnableConversionFromCustody`). The implicit program's `Consume` phase reads
-`From:"Custody"` whenever the resolved action authors `Custody` (`StationStepHandlers`'s Consume
-phase, family-matched over an injected `itemId -> resourceTypeId[]` resolver, same pattern as
-`StationToolScaling`).
+**SOCKETS (the multi-placement model - see `../asset/CLAUDE.md`'s `Custody` bullet for the
+schema).** `Custody.effectiveSockets()` is the ONE resolution (authored sockets folded with the
+custody-level defaults, or the synthesized degenerate `main` socket whose leaves ARE the
+custody-level values - `asset.SawmillSocketParityTest` is the parity gate). Placement routes
+through the pure `StationCustody.routePlacement` (authored order, first accepting Item socket
+with room; `PlacePerPress` absent = whole stack; quantity = min of press size / socket room /
+block room; the most SPECIFIC refusal survives: `NOT_SHARED` > `FULL` > `WRONG_INPUT`, toasted as
+`ui.station.not_shared`/`socket_full`/`socket_wrong_input` for authored sockets and the classic
+`no_materials` for the degenerate). Ownership + sharing are the pure `canPlace`/`canUse`/
+`canReclaim` cores (decision 82's empty-pile rule: `Share.Place` opens pile CREATION only,
+one owner per pile, first contributor owns until drained; `Use` relaxes the engage-over-foreign-
+pile deny - the degenerate custody keeps the classic whole-claim `occupied` gate verbatim;
+`Reclaim` relaxes retrieval's `NOT_OWNER` branch per socket). `Required` sockets gate ENGAGE
+(`firstRequiredSocketUnsatisfied` - an Item socket needs a non-empty pile, a Block socket its
+matching world block; deny `ui.station.socket_missing`, `_named` with the socket's `Label`), and
+the session snapshots its Required BLOCK sockets (`s.requiredBlockSockets`) for the heartbeat to
+re-verify beside `blockGone` - a vanished pot stops the session with `StopReason.SOCKET_LOST`
+(`ui.station.socket_lost`), a present-player graceful stop like `ANCHOR_LOST`. A Block socket is
+WORLD STATE: `blockSocketSatisfied` composes the `At` offset with the station block's facing
+(`StationCustody.blockSocketTarget` over `StationBlockFacing`, quarter-turn exact), reads the
+block via zc `BlockOps.blockItemIdAt`, normalizes a state variant onto its base
+(`baseItemIdOf`), and matches the item identity (`blockSocketMatches`, fail-closed on air/
+unreadable); nothing is stored or refunded for one. `Consume`/`Produce` address sockets by id
+(per-entry `Ingredient.Socket` wins over the phase's `Socket`, absent = the first authored Item
+socket via `StationCustody.socketIdFor`); the refund ledger's custody half
+(`StationSession.iterationConsumedCustody`, keyed `"<blockKey>#<socketId>"`) refunds an
+interrupted iteration's drains back INTO each ORIGINATING pile with a null adder (contents
+return, ownership never changes; the player-refund half keeps covering inventory-sourced
+consumes), and `returnCustody` hands back only the piles the stopping player OWNS - foreign piles
+stay standing with their props.
+
+[`StationCustody`](StationCustody.java) stays the PURE decision core (`placeableQuantity` incl.
+the socket-aware min-of-caps form, `available`/`drain` + the per-pile `availableInPile`/
+`drainFromPile`, `matchesInput`/`matchesAnyConversionInput`, `acceptsFamily`/`pileAcceptsFamily`
+(per-socket, decision 89), the share cores, the block-socket cores, `routePlacement`) - zero
+engine touch, operating on the claim view (whose detached test constructor wraps a real
+`BlockStash`). `toggle` gates a `Custody`-governing action behind ONE state-dependent F:
+not-loaded + a matching held stack places/tops-up (`placeIntoCustody`, socket-routed); a foreign
+claim denies (`ui.station.occupied` for the degenerate custody, the per-socket share gates for
+authored sockets); otherwise falls through to the classic engage flow, sourcing viability from
+the claim (`firstRunnableConversionFromCustody`, per-socket availability). The implicit program's
+`Consume` phase reads `From:"Custody"` whenever the resolved action authors `Custody`
+(`StationStepHandlers`'s Consume phase, family-matched over an injected
+`itemId -> resourceTypeId[]` resolver, same pattern as `StationToolScaling`).
 
 **Hand-back vs leave-it at stop** (`custodyReturnsAtStop`, pure + test-pinned): every stop whose
 player is still present hands custody back through `returnCustody` (room-checked, hotbar-first
@@ -867,12 +910,14 @@ persistence buys). **Precedence rule (gate m5)**: a block busy with its OWN sess
 non-empty custody claim REFUSES an incoming anchor claim - and because the claim read is the live
 stash resolve, a foreign claim placed before a restart still refuses it.
 
-**`Custody.SingleFamily`** (schema-review wave) locks a NON-EMPTY claim to the first-placed item's
-resource family, so a station holds 50 oak or 50 pine but never 100 mixed. The pure core is
-`StationCustody#acceptsFamily`, called from the ONE acceptance choke point, so both the held-item
-place route and the inventory-scan fallback honour it; an empty claim accepts anything again. It is
-orthogonal to `MaxQuantity` (a capacity of 1 already enforces exclusivity on its own, which is
-what `CUSTODY_SINGLE_FAMILY_REDUNDANT` warns about).
+**`Custody.SingleFamily`** (schema-review wave) locks a NON-EMPTY pile to the first-placed item's
+resource family, so a station holds 50 oak or 50 pine but never 100 mixed - SCOPED PER SOCKET
+(decision 89: the meat rack locking to beef never stops the herb basket; a socket's own leaf wins,
+absent inherits the custody-level one). The pure core is `StationCustody#pileAcceptsFamily`,
+called from the ONE placement router, so both the held-item place route and the inventory-scan
+fallback honour it; an empty pile accepts anything again. It is orthogonal to `MaxQuantity` (a
+capacity of 1 already enforces exclusivity on its own, which is what
+`CUSTODY_SINGLE_FAMILY_REDUNDANT` warns about).
 
 ## Anchor discovery: the DERIVED block-item seed (AV wave) + the two denial toasts
 
@@ -969,17 +1014,19 @@ author a ONE-SHOT SoundEvent there - a looping id fired as a one-shot never ends
 ## The placed-input PLACED-AS-ENTITY visual
 
 [`StationCustodyDisplay`](StationCustodyDisplay.java) spawns a static, network-replicated,
-pickup-immune, physics-free prop entity rendering the claim's placed item at the station's
-block-top anchor, gated on `asset.Custody.Display`. Block-shaped items (the sawmill's placed
-logs) spawn a real `BlockEntity`; everything else (the anvil's placed weapon) spawns a bare
-`ItemComponent` prop. Both routes `ensureComponent(EntityStore.REGISTRY
-.getNonSerializedComponentType())` - the PROP never survives a restart, and the persisted stash
-does, which is why `StationService#respawnDisplayIfMissing` rebuilds it from the stored contents
-on the block's first interaction. Both the ref AND the spawned entity's own `NetworkId` live in
-`StationService`'s VOLATILE `displayByBlock` side map (a `DisplayHandle` record, captured together
-at spawn via `spawnDisplayIfAbsent` - a NetworkId is per-world and not boot-stable, so neither may
-ride the stash); spawned once at first placement, despawned at whichever removal path fires first
-(hand-back, retrieval, block break).
+pickup-immune, physics-free prop entity rendering a pile's placed item at the station's
+block-top anchor, gated on the SOCKET's own `Display` group (the custody-level `Display` IS the
+degenerate socket's). Each socket with a `Display` renders its OWN prop; a socket without one
+renders nothing. Block-shaped items (the sawmill's placed logs) spawn a real `BlockEntity`;
+everything else (the anvil's placed weapon) spawns a bare `ItemComponent` prop. Both routes
+`ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType())` - the PROP never survives
+a restart, and the persisted stash does, which is why `StationService#respawnDisplayIfMissing`
+rebuilds every socket's prop from the stored contents on the block's first interaction. Both the
+ref AND the spawned entity's own `NetworkId` live in `StationService`'s VOLATILE `displayByBlock`
+side map, keyed `"<blockKey>#<socketId>"` (a `DisplayHandle` record, captured together at spawn
+via `spawnDisplayIfAbsent` - a NetworkId is per-world and not boot-stable, so neither may ride
+the stash); spawned once at first placement into that socket, despawned at whichever removal path
+fires first (hand-back, retrieval of that pile, block break).
 `Offset`/`Rotation` are FACING-RELATIVE to the placed block's own yaw (via the shared
 [`StationBlockFacing`](StationBlockFacing.java)`.yawRadians`, which reads
 the block's live `BlockSection#getRotationIndex` (via `World#getChunkStore()` ->
@@ -987,9 +1034,12 @@ the block's live `BlockSection#getRotationIndex` (via `World#getChunkStore()` ->
 the SAME one-reader helper the puppet engine composes against since the round-3 smoke) - see
 `../asset/CLAUDE.md`'s `Custody.Display` bullet for the full authoring convention. Press-F RETRIEVAL
 ([`StationCustodyRetrieval`](StationCustodyRetrieval.java)) resolves the clicked display entity's
-`NetworkId` back to its owning block key and routes eligibility through the pure `decide`
-(precedence: `UNKNOWN_TARGET` -> `BUSY` -> `NOT_OWNER` -> `NOTHING_TO_RETRIEVE` -> `RETRIEVE` -
-a session actively working the block always wins over ownership checks). The BUSY input comes from
+`NetworkId` back to its owning (blockKey, SOCKET) pair - the composite display key resolves THE
+SOCKET first, then the eligibility runs against exactly that socket's pile - and routes through the
+pure `decide` (precedence: `UNKNOWN_TARGET` -> `BUSY` -> `NOT_OWNER` (the pile's owner, relaxed by
+that socket's `Share.Reclaim`) -> `NOTHING_TO_RETRIEVE` -> `RETRIEVE` - a session actively working
+the block always wins over ownership checks); a `RETRIEVE` hands back THAT pile only, foreign piles
+stay standing. The BUSY input comes from
 `sessionWorkingAt(blockKey)`, NOT from `byBlock` alone: the engage claim only writes that map for an
 EXCLUSIVE station's primary block, so a `Block.Exclusive: false` bench had nothing standing between
 a press-F retrieval and the materials its own running session was mid-way through consuming. The

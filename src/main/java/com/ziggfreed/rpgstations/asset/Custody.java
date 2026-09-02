@@ -1,12 +1,21 @@
 package com.ziggfreed.rpgstations.asset;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.function.Function;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.hypixel.hytale.codec.Codec;
+import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
+import com.ziggfreed.common.codec.InheritMapCodec;
 import com.ziggfreed.common.codec.Vec3;
+import com.ziggfreed.common.codec.Vec3i;
 import com.ziggfreed.common.codec.Rotation;
 
 /**
@@ -53,11 +62,21 @@ public final class Custody {
     /** Maintainer decision (design decision log #5, 2026-07-21/22): whole-stack + top-up + this default. */
     public static final int DEFAULT_MAX_QUANTITY = 100;
 
+    /**
+     * The reserved socket id a custody group with no authored {@link #sockets} synthesizes: ONE
+     * degenerate socket whose effective leaves ARE the custody-level values, so every pre-socket
+     * station decodes and behaves identically with the socket machinery underneath. Socket ids are
+     * matched lowercase (the map key convention: author them lower-case-stable).
+     */
+    public static final String MAIN_SOCKET_ID = "main";
+
     @Nullable protected Integer maxQuantity;
     @Nullable protected Boolean singleFamily;
     @Nullable protected ActionInput input;
     @Nullable protected States states;
     @Nullable protected Display display;
+    @Nullable protected Share share;
+    @Nullable protected Map<String, Socket> sockets;
 
     public static final BuilderCodec<Custody> CODEC = BuilderCodec.builder(Custody.class, Custody::new)
             .appendInherited(new KeyedCodec<>("MaxQuantity", Codec.INTEGER, false),
@@ -76,6 +95,32 @@ public final class Custody {
             .appendInherited(new KeyedCodec<>("Display", Display.CODEC, false),
                     (o, v) -> o.display = v, o -> o.display, (o, p) -> o.display = p.display)
             .documentation("Opts the placed input into a placed-as-entity prop visual at the block-top anchor; null = no visual.").add()
+            .appendInherited(new KeyedCodec<>("Share", Share.CODEC, false),
+                    (o, v) -> o.share = v, o -> o.share, (o, p) -> o.share = p.share)
+            .documentation("Who besides an owner may place, work from, or take back placed materials here; every leaf defaults false (owner-only). A socket may override any leaf for its own pile.").add()
+            .appendInherited(new KeyedCodec<>("Sockets", new InheritMapCodec<>(Socket.CODEC), false),
+                    (o, v) -> o.sockets = v, o -> o.sockets, (o, p) -> o.sockets = p.sockets)
+            .documentation("Named placement slots by socket id (author ids lower-case; matching is case-insensitive), each holding its own independently owned pile. Merged per socket id under Parent inheritance, per leaf within a socket. Omit for the classic single-pile custody: the custody-level leaves above then act as the one implicit socket.").add()
+            .afterDecode((Custody custody, ExtraInfo extraInfo) -> {
+                if (custody.sockets == null) {
+                    return;
+                }
+                for (Map.Entry<String, Socket> e : custody.sockets.entrySet()) {
+                    Socket socket = e.getValue();
+                    if (socket == null) {
+                        continue;
+                    }
+                    if (!socket.hasExactlyOneRoute()) {
+                        extraInfo.getValidationResults().warn("Custody.Sockets['" + e.getKey()
+                                + "'] should author exactly one of Item | Block; a socket authoring both or neither is ignored at runtime.");
+                    }
+                    if (socket.maxQuantity != null && custody.maxQuantity != null
+                            && socket.maxQuantity > custody.maxQuantity) {
+                        extraInfo.getValidationResults().warn("Custody.Sockets['" + e.getKey()
+                                + "'].MaxQuantity exceeds the custody-level MaxQuantity; the effective capacity is the smaller of the two.");
+                    }
+                }
+            })
             .build();
 
     public Custody() {
@@ -94,16 +139,26 @@ public final class Custody {
         return of(maxQuantity, null, input, states, display);
     }
 
-    /** Java-side factory carrying every leaf incl. {@link #singleFamily}. */
+    /** Java-side factory carrying every pre-socket leaf incl. {@link #singleFamily}. */
     @Nonnull
     public static Custody of(@Nullable Integer maxQuantity, @Nullable Boolean singleFamily,
             @Nullable ActionInput input, @Nullable States states, @Nullable Display display) {
+        return of(maxQuantity, singleFamily, input, states, display, null, null);
+    }
+
+    /** Java-side factory carrying EVERY leaf ({@link #share} + {@link #sockets} included); sets the same fields the codec fills. */
+    @Nonnull
+    public static Custody of(@Nullable Integer maxQuantity, @Nullable Boolean singleFamily,
+            @Nullable ActionInput input, @Nullable States states, @Nullable Display display,
+            @Nullable Share share, @Nullable Map<String, Socket> sockets) {
         Custody c = new Custody();
         c.maxQuantity = maxQuantity;
         c.singleFamily = singleFamily;
         c.input = input;
         c.states = states;
         c.display = display;
+        c.share = share;
+        c.sockets = sockets;
         return c;
     }
 
@@ -147,6 +202,80 @@ public final class Custody {
     @Nullable
     public Display getDisplay() {
         return display;
+    }
+
+    /** The custody-level {@link Share} defaults every socket inherits per leaf; null = owner-only everywhere. */
+    @Nullable
+    public Share getShare() {
+        return share;
+    }
+
+    /** The authored socket map (by socket id, insertion order = placement priority), or null for the classic single-pile custody. */
+    @Nullable
+    public Map<String, Socket> getSockets() {
+        return sockets;
+    }
+
+    /** True when at least one socket is authored; false = the degenerate single-{@value #MAIN_SOCKET_ID}-socket custody. */
+    public boolean hasAuthoredSockets() {
+        return sockets != null && !sockets.isEmpty();
+    }
+
+    /**
+     * The EFFECTIVE socket list, in authored order (authored order is placement priority). With no
+     * authored {@link #sockets}, synthesizes exactly ONE degenerate {@link ResolvedSocket} with the
+     * reserved id {@value #MAIN_SOCKET_ID} whose leaves ARE the custody-level values (the Item
+     * route, whole-stack placement, {@link #getInput()} as the match, the custody cap /
+     * single-family / display / share), so every pre-socket station behaves identically. An
+     * authored socket resolves per leaf: its capacity is {@code min(socket.MaxQuantity,
+     * Custody.MaxQuantity)}, its {@code SingleFamily} and every {@code Share} leaf fall back to the
+     * custody-level value when unauthored, and its id is lowercased (socket ids match
+     * case-insensitively everywhere). A socket authoring both routes or neither is skipped here -
+     * ignored at runtime, warned about at decode and by the validator, never a load failure.
+     */
+    @Nonnull
+    public List<ResolvedSocket> effectiveSockets() {
+        if (!hasAuthoredSockets()) {
+            return List.of(new ResolvedSocket(MAIN_SOCKET_ID, true, input, null, null,
+                    effectiveMaxQuantity(), effectiveSingleFamily(), false, display,
+                    shareLeaf(null, Share::getPlace), shareLeaf(null, Share::getUse),
+                    shareLeaf(null, Share::getReclaim), null));
+        }
+        List<ResolvedSocket> out = new ArrayList<>(sockets.size());
+        for (Map.Entry<String, Socket> e : sockets.entrySet()) {
+            String rawId = e.getKey();
+            Socket socket = e.getValue();
+            if (rawId == null || rawId.isBlank() || socket == null || !socket.hasExactlyOneRoute()) {
+                continue;
+            }
+            String id = rawId.toLowerCase(Locale.ROOT);
+            boolean itemRoute = socket.getItem() != null;
+            ActionInput match = itemRoute ? socket.getItem().getMatch() : socket.getBlock().getMatch();
+            Integer placePerPress = itemRoute ? socket.getItem().getPlacePerPress() : null;
+            Vec3i blockAt = itemRoute ? null : socket.getBlock().getAt();
+            int custodyMax = effectiveMaxQuantity();
+            int socketMax = socket.getMaxQuantity() != null && socket.getMaxQuantity() > 0
+                    ? Math.min(socket.getMaxQuantity(), custodyMax) : custodyMax;
+            boolean single = socket.getSingleFamily() != null ? socket.getSingleFamily() : effectiveSingleFamily();
+            boolean required = socket.getRequired() != null && socket.getRequired();
+            out.add(new ResolvedSocket(id, itemRoute, match, placePerPress, blockAt,
+                    socketMax, single, required, socket.getDisplay(),
+                    shareLeaf(socket.getShare(), Share::getPlace),
+                    shareLeaf(socket.getShare(), Share::getUse),
+                    shareLeaf(socket.getShare(), Share::getReclaim),
+                    socket.getLabel()));
+        }
+        return out;
+    }
+
+    /** One Share leaf resolved socket-first: the socket's own value, else the custody-level one, else false. */
+    private boolean shareLeaf(@Nullable Share socketShare, @Nonnull Function<Share, Boolean> leaf) {
+        Boolean own = socketShare != null ? leaf.apply(socketShare) : null;
+        if (own != null) {
+            return own;
+        }
+        Boolean custodyLevel = share != null ? leaf.apply(share) : null;
+        return custodyLevel != null && custodyLevel;
     }
 
     /**
@@ -312,6 +441,276 @@ public final class Custody {
         /** {@link #scale}, reader-defaulted to {@code 1.0} when null/non-positive. */
         public double effectiveScale() {
             return scale != null && scale > 0 ? scale : 1.0;
+        }
+    }
+
+    /**
+     * Who besides the owner may touch placed materials - three ORTHOGONAL booleans, never a mode,
+     * each defaulting false (owner-only, the classic behavior). Authorable at the custody level
+     * (the default for every socket) AND per socket (each leaf overrides independently).
+     *
+     * <ul>
+     *   <li>{@link #place} - a non-owner may START a pile in this socket while it is EMPTY (the
+     *       first contributor then owns that pile until it drains empty again). It never opens a
+     *       NON-empty pile: a pile always has exactly one owner and materials never co-mingle.</li>
+     *   <li>{@link #use} - a non-owner may engage work that consumes from this socket's pile.</li>
+     *   <li>{@link #reclaim} - a non-owner may take this socket's pile back out (press-F
+     *       retrieval on its display prop).</li>
+     * </ul>
+     */
+    public static final class Share {
+        @Nullable protected Boolean place;
+        @Nullable protected Boolean use;
+        @Nullable protected Boolean reclaim;
+
+        public static final BuilderCodec<Share> CODEC = BuilderCodec.builder(Share.class, Share::new)
+                .appendInherited(new KeyedCodec<>("Place", Codec.BOOLEAN, false),
+                        (o, v) -> o.place = v, o -> o.place, (o, p) -> o.place = p.place)
+                .documentation("May a non-owner start a pile here while it is EMPTY? The first contributor owns that pile until it drains empty again; a non-empty pile never accepts a second player's materials. Default false.").add()
+                .appendInherited(new KeyedCodec<>("Use", Codec.BOOLEAN, false),
+                        (o, v) -> o.use = v, o -> o.use, (o, p) -> o.use = p.use)
+                .documentation("May a non-owner engage work that consumes from this pile? Default false (owner-only).").add()
+                .appendInherited(new KeyedCodec<>("Reclaim", Codec.BOOLEAN, false),
+                        (o, v) -> o.reclaim = v, o -> o.reclaim, (o, p) -> o.reclaim = p.reclaim)
+                .documentation("May a non-owner take this pile back out of the station? Default false (owner-only).").add()
+                .build();
+
+        /** Java-side factory; sets the same fields the codec fills. */
+        @Nonnull
+        public static Share of(@Nullable Boolean place, @Nullable Boolean use, @Nullable Boolean reclaim) {
+            Share s = new Share();
+            s.place = place;
+            s.use = use;
+            s.reclaim = reclaim;
+            return s;
+        }
+
+        @Nullable
+        public Boolean getPlace() {
+            return place;
+        }
+
+        @Nullable
+        public Boolean getUse() {
+            return use;
+        }
+
+        @Nullable
+        public Boolean getReclaim() {
+            return reclaim;
+        }
+    }
+
+    /**
+     * ONE named placement slot of a multi-socket custody: its own independently owned pile, its
+     * own acceptance matcher, capacity, display prop and share posture. Authored under
+     * {@code Custody.Sockets} keyed by socket id (author ids lower-case; matching is
+     * case-insensitive; authored order is placement priority).
+     *
+     * <p><b>Exactly one of {@link #item} | {@link #block}.</b> An {@code Item} socket holds placed
+     * item stacks in its own pile; a {@code Block} socket is a REAL WORLD BLOCK beside the station
+     * (a pot on the fire) - nothing is stored for it, the world block IS its state, and
+     * {@code MaxQuantity}/{@code SingleFamily}/{@code Share}/{@code Display} are meaningless on
+     * one. A socket authoring both routes or neither is ignored at runtime (warned, never a load
+     * failure). A future route would be a third sibling group beside these two - additive, no
+     * reserved fields.
+     */
+    public static final class Socket {
+        @Nullable protected ItemRoute item;
+        @Nullable protected BlockRoute block;
+        @Nullable protected Integer maxQuantity;
+        @Nullable protected Boolean singleFamily;
+        @Nullable protected Boolean required;
+        @Nullable protected Display display;
+        @Nullable protected Share share;
+        @Nullable protected String label;
+
+        public static final BuilderCodec<Socket> CODEC = BuilderCodec.builder(Socket.class, Socket::new)
+                .appendInherited(new KeyedCodec<>("Item", ItemRoute.CODEC, false),
+                        (o, v) -> o.item = v, o -> o.item, (o, p) -> o.item = p.item)
+                .documentation("The placed-ITEM route: this socket holds a pile of placed stacks. Exactly one of Item | Block.").add()
+                .appendInherited(new KeyedCodec<>("Block", BlockRoute.CODEC, false),
+                        (o, v) -> o.block = v, o -> o.block, (o, p) -> o.block = p.block)
+                .documentation("The world-BLOCK route: this socket is satisfied by a real block standing at a facing-relative offset. Nothing is stored for it. Exactly one of Item | Block.").add()
+                .appendInherited(new KeyedCodec<>("MaxQuantity", Codec.INTEGER, false),
+                        (o, v) -> o.maxQuantity = v, o -> o.maxQuantity, (o, p) -> o.maxQuantity = p.maxQuantity)
+                .documentation("This socket's own item cap; the effective capacity is the smaller of this and the custody-level MaxQuantity. Absent = the custody-level cap.")
+                .addValidator(CodecWarnValidators.positive("Socket.MaxQuantity should be positive; it falls back to the custody-level cap otherwise.")).add()
+                .appendInherited(new KeyedCodec<>("SingleFamily", Codec.BOOLEAN, false),
+                        (o, v) -> o.singleFamily = v, o -> o.singleFamily, (o, p) -> o.singleFamily = p.singleFamily)
+                .documentation("Locks THIS socket's pile to the first placed item's resource family. Absent = the custody-level SingleFamily.").add()
+                .appendInherited(new KeyedCodec<>("Required", Codec.BOOLEAN, false),
+                        (o, v) -> o.required = v, o -> o.required, (o, p) -> o.required = p.required)
+                .documentation("Must this socket be satisfied before work can start? An Item socket needs a non-empty pile; a Block socket needs its matching world block (re-checked while working: a vanished required block ends the session). Default false.").add()
+                .appendInherited(new KeyedCodec<>("Display", Display.CODEC, false),
+                        (o, v) -> o.display = v, o -> o.display, (o, p) -> o.display = p.display)
+                .documentation("This socket's own placed-as-entity prop (same knobs as the custody-level Display); omit and this socket renders nothing.").add()
+                .appendInherited(new KeyedCodec<>("Share", Share.CODEC, false),
+                        (o, v) -> o.share = v, o -> o.share, (o, p) -> o.share = p.share)
+                .documentation("Per-socket share overrides; each leaf falls back to the custody-level Share, then to false.").add()
+                .appendInherited(new KeyedCodec<>("Label", Codec.STRING, false),
+                        (o, v) -> o.label = v, o -> o.label, (o, p) -> o.label = p.label)
+                .documentation("A lang key naming this socket in player-facing refusals ('the meat rack', 'the pot'); omit and refusals stay generic.").add()
+                .build();
+
+        /** Java-side factory; sets the same fields the codec fills. */
+        @Nonnull
+        public static Socket of(@Nullable ItemRoute item, @Nullable BlockRoute block,
+                @Nullable Integer maxQuantity, @Nullable Boolean singleFamily, @Nullable Boolean required,
+                @Nullable Display display, @Nullable Share share, @Nullable String label) {
+            Socket s = new Socket();
+            s.item = item;
+            s.block = block;
+            s.maxQuantity = maxQuantity;
+            s.singleFamily = singleFamily;
+            s.required = required;
+            s.display = display;
+            s.share = share;
+            s.label = label;
+            return s;
+        }
+
+        @Nullable
+        public ItemRoute getItem() {
+            return item;
+        }
+
+        @Nullable
+        public BlockRoute getBlock() {
+            return block;
+        }
+
+        @Nullable
+        public Integer getMaxQuantity() {
+            return maxQuantity;
+        }
+
+        @Nullable
+        public Boolean getSingleFamily() {
+            return singleFamily;
+        }
+
+        @Nullable
+        public Boolean getRequired() {
+            return required;
+        }
+
+        @Nullable
+        public Display getDisplay() {
+            return display;
+        }
+
+        @Nullable
+        public Share getShare() {
+            return share;
+        }
+
+        @Nullable
+        public String getLabel() {
+            return label;
+        }
+
+        /** True when EXACTLY one of {@link #item}/{@link #block} is authored (the exactly-one-of contract). */
+        public boolean hasExactlyOneRoute() {
+            return (item != null) ^ (block != null);
+        }
+
+        /**
+         * The placed-ITEM route of one socket: what the socket accepts and how much of a held
+         * stack one press moves.
+         */
+        public static final class ItemRoute {
+            @Nullable protected ActionInput match;
+            @Nullable protected Integer placePerPress;
+
+            public static final BuilderCodec<ItemRoute> CODEC = BuilderCodec.builder(ItemRoute.class, ItemRoute::new)
+                    .appendInherited(new KeyedCodec<>("Match", ActionInput.CODEC, false),
+                            (o, v) -> o.match = v, o -> o.match, (o, p) -> o.match = p.match)
+                    .documentation("What this socket accepts (the ItemId/ResourceTypeId/Tags/Function routes). Absent derives acceptance from the action's Recipe.Conversions inputs, exactly like the custody-level Input.").add()
+                    .appendInherited(new KeyedCodec<>("PlacePerPress", Codec.INTEGER, false),
+                            (o, v) -> o.placePerPress = v, o -> o.placePerPress,
+                            (o, p) -> o.placePerPress = p.placePerPress)
+                    .documentation("How many items one press moves in; absent = the whole held stack (the classic press). Author 1 for one-at-a-time loading.")
+                    .addValidator(CodecWarnValidators.positive("Socket.Item.PlacePerPress should be positive; it falls back to the whole held stack otherwise.")).add()
+                    .build();
+
+            /** Java-side factory; sets the same fields the codec fills. */
+            @Nonnull
+            public static ItemRoute of(@Nullable ActionInput match, @Nullable Integer placePerPress) {
+                ItemRoute r = new ItemRoute();
+                r.match = match;
+                r.placePerPress = placePerPress;
+                return r;
+            }
+
+            @Nullable
+            public ActionInput getMatch() {
+                return match;
+            }
+
+            @Nullable
+            public Integer getPlacePerPress() {
+                return placePerPress;
+            }
+        }
+
+        /**
+         * The world-BLOCK route of one socket: satisfied by a real block standing at {@link #at}
+         * (a whole-block offset in the STATION block's own facing frame - {@code +Z} its front,
+         * {@code +X} its right, {@code Y} vertical, exactly the {@code Custody.Display} offset
+         * convention) whose base item identity satisfies {@link #match}. Nothing is stored for a
+         * block socket: the world block IS its state.
+         */
+        public static final class BlockRoute {
+            @Nullable protected Vec3i at;
+            @Nullable protected ActionInput match;
+
+            public static final BuilderCodec<BlockRoute> CODEC = BuilderCodec.builder(BlockRoute.class, BlockRoute::new)
+                    .appendInherited(new KeyedCodec<>("At", Vec3i.CODEC, false),
+                            (o, v) -> o.at = v, o -> o.at, (o, p) -> o.at = p.at)
+                    .documentation("The whole-block offset from the station block, in its own facing frame (+Z = its front, +X = its right, Y vertical); rotates with the placed block. Absent means the station block's own cell.").add()
+                    .appendInherited(new KeyedCodec<>("Match", ActionInput.CODEC, false),
+                            (o, v) -> o.match = v, o -> o.match, (o, p) -> o.match = p.match)
+                    .documentation("What block satisfies this socket, matched against the block's base ITEM identity (id, resource families, tags). Absent accepts any non-air block.").add()
+                    .build();
+
+            /** Java-side factory; sets the same fields the codec fills. */
+            @Nonnull
+            public static BlockRoute of(@Nullable Vec3i at, @Nullable ActionInput match) {
+                BlockRoute r = new BlockRoute();
+                r.at = at;
+                r.match = match;
+                return r;
+            }
+
+            @Nullable
+            public Vec3i getAt() {
+                return at;
+            }
+
+            @Nullable
+            public ActionInput getMatch() {
+                return match;
+            }
+        }
+    }
+
+    /**
+     * One socket RESOLVED for the engine: authored leaves folded with the custody-level defaults
+     * ({@link #effectiveSockets()}'s output), so runtime code reads one flat view and never
+     * re-derives a fallback. {@code maxQuantity} is already the min-of-caps; {@code singleFamily}
+     * and the three share leaves already fell back custody-first; {@code id} is lowercased.
+     * {@code match} may be null - acceptance then derives from the action's own
+     * {@code Recipe.Conversions} inputs (an Item socket) or any non-air block (a Block socket).
+     */
+    public record ResolvedSocket(@Nonnull String id, boolean itemRoute, @Nullable ActionInput match,
+            @Nullable Integer placePerPress, @Nullable Vec3i blockAt, int maxQuantity,
+            boolean singleFamily, boolean required, @Nullable Display display,
+            boolean sharePlace, boolean shareUse, boolean shareReclaim, @Nullable String label) {
+
+        /** True for the world-block route (nothing stored; the world block is the state). */
+        public boolean blockRoute() {
+            return !itemRoute;
         }
     }
 }
