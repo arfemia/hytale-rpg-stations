@@ -17,3 +17,13 @@ RPG_Station_CookingFire.hint.loaded = Pulsa [{key}] para trabajar
 
 RPG_Tool_Hatchet_Sawmiller.name = Hacha del Aserrador
 RPG_Tool_Hatchet_Sawmiller.description = Un hacha de mitril magistral, equilibrada por incontables horas en el aserradero. Más afilada y resistente que la original de forja.
+RPG_Station_CookingPit.name = Fogón de Cocina
+RPG_Station_CookingPit.description = Un fuego de campamento rodeado de piedra. Asa alimentos crudos sobre la llama o monta una olla encima para cocinar comidas completas. Pulsa usar para empezar a trabajar.
+RPG_Station_CookingPit.hint.empty = Pulsa [{key}] para cocinar
+RPG_Station_CookingPit.hint.loaded = Pulsa [{key}] para trabajar
+RPG_Station_CookingPit.hint.ready = Pulsa [{key}] para recoger
+RPG_Station_CookingPit.hint.overdone = Pulsa [{key}] para limpiar
+RPG_Station_Cooking_Pot.name = Olla de Cocina
+RPG_Station_Cooking_Pot.description = Una olla de hierro resistente. Colócala justo encima de un fogón de cocina para poder guisar.
+RPG_Food_Hearty_Stew.name = Guiso Sustancioso
+RPG_Food_Hearty_Stew.description = Un cuenco con todo lo que cayó en la olla, cocido a fuego lento hasta que combina. Restaura salud; una buena mezcla de carne y verduras fortalece la salud y el aguante a la vez.

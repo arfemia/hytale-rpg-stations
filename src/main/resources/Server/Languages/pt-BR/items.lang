@@ -17,3 +17,13 @@ RPG_Station_CookingFire.hint.loaded = Pressione [{key}] para trabalhar
 
 RPG_Tool_Hatchet_Sawmiller.name = Machado do Serrador
 RPG_Tool_Hatchet_Sawmiller.description = Um machado de mithril magistral, equilibrado por incontáveis horas na serraria. Mais afiado e resistente que o original da forja.
+RPG_Station_CookingPit.name = Fogueira de Cozinha
+RPG_Station_CookingPit.description = Uma fogueira cercada de pedra. Grelhe alimentos crus sobre a chama, ou monte uma panela em cima para cozinhar refeições completas. Pressione usar para começar a trabalhar.
+RPG_Station_CookingPit.hint.empty = Pressione [{key}] para cozinhar
+RPG_Station_CookingPit.hint.loaded = Pressione [{key}] para trabalhar
+RPG_Station_CookingPit.hint.ready = Pressione [{key}] para coletar
+RPG_Station_CookingPit.hint.overdone = Pressione [{key}] para limpar
+RPG_Station_Cooking_Pot.name = Panela
+RPG_Station_Cooking_Pot.description = Uma panela de ferro resistente. Coloque-a logo acima de uma fogueira de cozinha para poder ensopar.
+RPG_Food_Hearty_Stew.name = Ensopado Robusto
+RPG_Food_Hearty_Stew.description = Uma tigela de tudo o que caiu na panela, cozido em fogo brando até combinar. Restaura saúde; uma boa mistura de carne e verduras fortalece a saúde e o fôlego ao mesmo tempo.

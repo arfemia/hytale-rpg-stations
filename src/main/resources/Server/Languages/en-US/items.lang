@@ -14,6 +14,16 @@ RPG_Station_CookingFire.name = Cooking Fire
 RPG_Station_CookingFire.description = A campfire that grills raw fish. Press use to start working.
 RPG_Station_CookingFire.hint.empty = Press [{key}] to load raw fish
 RPG_Station_CookingFire.hint.loaded = Press [{key}] to work
+RPG_Station_CookingPit.name = Cooking Pit
+RPG_Station_CookingPit.description = A campfire ringed with stone. Grill raw food over the open flame, or mount a cooking pot above it to cook whole meals. Press use to start working.
+RPG_Station_CookingPit.hint.empty = Press [{key}] to cook
+RPG_Station_CookingPit.hint.loaded = Press [{key}] to work
+RPG_Station_CookingPit.hint.ready = Press [{key}] to collect
+RPG_Station_CookingPit.hint.overdone = Press [{key}] to clear
+RPG_Station_Cooking_Pot.name = Cooking Pot
+RPG_Station_Cooking_Pot.description = A sturdy iron pot. Place it directly above a cooking pit to unlock stewing.
+RPG_Food_Hearty_Stew.name = Hearty Stew
+RPG_Food_Hearty_Stew.description = A bowl of whatever went into the pot, simmered until it all agrees. Restores health, and a proper mix of meat and greens fortifies both health and stamina.
 
 RPG_Tool_Hatchet_Sawmiller.name = Sawmiller's Hatchet
 RPG_Tool_Hatchet_Sawmiller.description = A masterwork mithril hatchet, balanced by countless hours at the sawmill. Keener and sturdier than the forge original.

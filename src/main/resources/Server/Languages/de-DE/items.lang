@@ -17,3 +17,13 @@ RPG_Station_CookingFire.hint.loaded = Drücke [{key}] zum Arbeiten
 
 RPG_Tool_Hatchet_Sawmiller.name = Sägewerker-Axt
 RPG_Tool_Hatchet_Sawmiller.description = Eine meisterhafte Mithril-Axt, ausbalanciert durch ungezählte Stunden am Sägewerk. Schärfer und robuster als das Original aus der Schmiede.
+RPG_Station_CookingPit.name = Kochgrube
+RPG_Station_CookingPit.description = Ein steinumringtes Lagerfeuer. Grille rohe Speisen über der offenen Flamme oder setze einen Kochtopf darüber, um ganze Mahlzeiten zu kochen. Drücke die Benutzen-Taste, um zu arbeiten.
+RPG_Station_CookingPit.hint.empty = Drücke [{key}] zum Kochen
+RPG_Station_CookingPit.hint.loaded = Drücke [{key}] zum Arbeiten
+RPG_Station_CookingPit.hint.ready = Drücke [{key}] zum Einsammeln
+RPG_Station_CookingPit.hint.overdone = Drücke [{key}] zum Abräumen
+RPG_Station_Cooking_Pot.name = Kochtopf
+RPG_Station_Cooking_Pot.description = Ein robuster Eisentopf. Setze ihn direkt über eine Kochgrube, um Eintöpfe zu kochen.
+RPG_Food_Hearty_Stew.name = Deftiger Eintopf
+RPG_Food_Hearty_Stew.description = Eine Schüssel mit allem, was im Topf gelandet ist, geköchelt bis es sich verträgt. Stellt Gesundheit wieder her; eine richtige Mischung aus Fleisch und Gemüse stärkt Gesundheit und Ausdauer zugleich.

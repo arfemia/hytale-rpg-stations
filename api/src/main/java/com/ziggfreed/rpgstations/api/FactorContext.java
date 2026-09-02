@@ -24,7 +24,7 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
  * <p><b>Plain data</b> ({@link #playerId()}, {@link #stationId()}, {@link #actionId()},
  * {@link #sessionSeconds()}, {@link #cycleIndex()}, {@link #toolPower()},
  * {@link #toolDurabilityPercent()}, {@link #contributionChannels()},
- * {@link #contributionParams(String)}) is always safe to retain. <b>Live world-thread context</b>
+ * {@link #contributionParams(String)}, {@link #socketFilled(String)}) is always safe to retain. <b>Live world-thread context</b>
  * ({@link #store()}, {@link #playerRef()}) is valid ONLY synchronously during the resolve call; a
  * provider that defers work must capture the plain fields and re-resolve.
  */
@@ -43,6 +43,7 @@ public final class FactorContext {
     private final double toolQuality;
     private final double toolItemLevel;
     @Nonnull private final Map<String, List<String>> contributionParams;
+    @Nonnull private final Map<String, Boolean> socketsFilled;
 
     private FactorContext(@Nonnull Builder b) {
         this.store = b.store;
@@ -58,6 +59,7 @@ public final class FactorContext {
         this.toolQuality = b.toolQuality;
         this.toolItemLevel = b.toolItemLevel;
         this.contributionParams = copyChannelMap(b.contributionParams);
+        this.socketsFilled = copyFilledMap(b.socketsFilled);
     }
 
     @Nonnull
@@ -67,6 +69,21 @@ public final class FactorContext {
         }
         Map<String, Double> out = new LinkedHashMap<>(src.size());
         for (Map.Entry<String, Double> e : src.entrySet()) {
+            if (e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
+                continue;
+            }
+            out.put(e.getKey().toLowerCase(Locale.ROOT), e.getValue());
+        }
+        return Collections.unmodifiableMap(out);
+    }
+
+    @Nonnull
+    private static Map<String, Boolean> copyFilledMap(@Nullable Map<String, Boolean> src) {
+        if (src == null || src.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Boolean> out = new LinkedHashMap<>(src.size());
+        for (Map.Entry<String, Boolean> e : src.entrySet()) {
             if (e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
                 continue;
             }
@@ -232,6 +249,30 @@ public final class FactorContext {
         return params == null ? List.of() : params;
     }
 
+    /**
+     * Whether the station's custody socket {@code socketId} is satisfied at the evaluated block
+     * ({@code rpgstations:socket_filled} with the socket id as its {@code Param}): {@code 1.0}
+     * when satisfied (an Item socket's pile holds something; a Block socket's world block stands
+     * and matches), {@code 0.0} when the socket exists but is unsatisfied, and {@code null} when
+     * this context carries no reading for that id - an unknown socket id, or an evaluation site
+     * that never resolved sockets at all (a pattern-activation gate, a context built by a
+     * consumer's own code). Null keeps the shared vocabulary's rule intact: a gate on an
+     * unanswerable reading stays shut.
+     *
+     * <p>Socket ids compare case-insensitively, matching every other socket-id surface. The
+     * readings span EVERY action of the evaluated station, not only the resolved action's own -
+     * a Block socket is world state at the block, so "is the vessel mounted" is answerable (and
+     * worth gating on) from a sibling action too.
+     */
+    @Nullable
+    public Double socketFilled(@Nullable String socketId) {
+        if (socketId == null || socketId.isBlank()) {
+            return null;
+        }
+        Boolean filled = socketsFilled.get(socketId.toLowerCase(Locale.ROOT));
+        return filled == null ? null : (filled ? 1.0 : 0.0);
+    }
+
     @Nonnull
     public static Builder builder() {
         return new Builder();
@@ -252,6 +293,7 @@ public final class FactorContext {
         private double toolQuality;
         private double toolItemLevel;
         @Nullable private Map<String, List<String>> contributionParams;
+        @Nullable private Map<String, Boolean> socketsFilled;
 
         private Builder() {
         }
@@ -342,6 +384,18 @@ public final class FactorContext {
         @Nonnull
         public Builder contributions(@Nullable Map<String, List<String>> contributionParams) {
             this.contributionParams = contributionParams;
+            return this;
+        }
+
+        /**
+         * The engine-computed socket-satisfaction readings backing
+         * {@link FactorContext#socketFilled(String)}, keyed by socket id (lowercased on copy; a
+         * blank key or null value is dropped). Null/empty is fine - every read then answers null
+         * (fail-closed), which is what a site that never resolved sockets should hand a gate.
+         */
+        @Nonnull
+        public Builder socketsFilled(@Nullable Map<String, Boolean> socketsFilled) {
+            this.socketsFilled = socketsFilled;
             return this;
         }
 

@@ -1,0 +1,117 @@
+{
+  "$Comment": "The cooking pit station block. NEVER CRAFTED and deliberately authors no Recipe: building the CookingPit structure pattern creates it - lay a ring of stone-family blocks around an unlit campfire (Deco_Campfire_Off) and the campfire becomes this block; breaking the ring turns it back. Model/texture/hitbox reuse the vanilla unlit campfire so the default look is the campfire the player just placed, and Interactions.Use carries this mod's own rpg_station_use RootInteraction (RPG_Station_CookingPit_Use) rather than any bench auto-open. Five states, one per custody phase the station asset names (Server/RpgStations/Stations/CookingPit.json): Default = unlit and empty; Loaded = unlit with food waiting (raw food on a cold pit does not burn - the floating display prop is the has-food signal); Lit = actively cooking, the burning campfire model with the animated flame, warm light, looping crackle ambient and the flame-plus-smoke particles, all starting and stopping natively on the state flip; Ready = the flame burnt down to glowing embers with cooked food waiting to collect (the lit model and light, no flame particles or crackle); Smoking = the food sat too long and charred, the unlit model under a heavy black smoke plume. The Lit field set is the same vanilla campfire pairing Furniture_Crude_Brazier uses (Campfire.blockymodel + Fire_Burn + Campfire_New_Cartoon at brazier scale). VariantRotation NESW is the station-block placement convention so socket offsets and display props rotate with the block's facing.",
+  "TranslationProperties": {
+    "Name": "items.RPG_Station_CookingPit.name",
+    "Description": "items.RPG_Station_CookingPit.description"
+  },
+  "PlayerAnimationsId": "Block",
+  "Categories": ["Blocks.Deco"],
+  "Icon": "Icons/ItemsGenerated/Deco_Campfire_Off.png",
+  "MaxStack": 1,
+  "Interactions": {
+    "Primary": "Block_Primary",
+    "Secondary": "Block_Secondary"
+  },
+
+  "BlockType": {
+    "BlockParticleSetId": "Wood",
+    "BlockSoundSetId": "Wood",
+    "PhysicalMaterialId": "Wood",
+    "CustomModel": "Blocks/Benches/Campfire_Off.blockymodel",
+    "CustomModelTexture": [
+      {
+        "Texture": "Blocks/Benches/Campfire_Off_Texture.png",
+        "Weight": 1
+      }
+    ],
+    "DrawType": "Model",
+    "Flags": {},
+    "Gathering": {
+      "Soft": {
+        "IsWeaponBreakable": false
+      }
+    },
+    "HitboxType": "Brazier_Small",
+    "Material": "Solid",
+    "Opacity": "Transparent",
+    "Support": {
+      "Down": [
+        {
+          "FaceType": "Full"
+        }
+      ]
+    },
+    "VariantRotation": "NESW",
+    "InteractionHint": "items.RPG_Station_CookingPit.hint.empty",
+    "Interactions": {
+      "Use": "RPG_Station_CookingPit_Use"
+    },
+    "State": {
+      "Definitions": {
+        "Default": {
+          "InteractionHint": "items.RPG_Station_CookingPit.hint.empty"
+        },
+        "Loaded": {
+          "InteractionHint": "items.RPG_Station_CookingPit.hint.loaded"
+        },
+        "Lit": {
+          "InteractionHint": "items.RPG_Station_CookingPit.hint.loaded",
+          "CustomModel": "Blocks/Benches/Campfire.blockymodel",
+          "CustomModelTexture": [
+            {
+              "Texture": "Blocks/Benches/Campfire_Texture.png",
+              "Weight": 1
+            }
+          ],
+          "CustomModelAnimation": "Blocks/Animations/Fire/Fire_Burn.blockyanim",
+          "Looping": true,
+          "BlockSoundSetId": "Campfire",
+          "Light": {
+            "Color": "#ecb"
+          },
+          "AmbientSoundEventId": "SFX_Campfire_Default_Loop",
+          "Particles": [
+            {
+              "SystemId": "Campfire_New_Cartoon",
+              "Scale": 0.9,
+              "PositionOffset": {
+                "Y": 0.25
+              }
+            },
+            {
+              "SystemId": "Smoke_Black",
+              "Scale": 1
+            }
+          ]
+        },
+        "Ready": {
+          "InteractionHint": "items.RPG_Station_CookingPit.hint.ready",
+          "CustomModel": "Blocks/Benches/Campfire.blockymodel",
+          "CustomModelTexture": [
+            {
+              "Texture": "Blocks/Benches/Campfire_Texture.png",
+              "Weight": 1
+            }
+          ],
+          "Light": {
+            "Color": "#ecb"
+          }
+        },
+        "Smoking": {
+          "InteractionHint": "items.RPG_Station_CookingPit.hint.overdone",
+          "Particles": [
+            {
+              "SystemId": "Smoke_Black",
+              "Scale": 1.5
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Tags": {
+    "Type": ["Deco"],
+    "Family": ["RpgStations"]
+  },
+  "ItemSoundSetId": "ISS_Blocks_Wood"
+}

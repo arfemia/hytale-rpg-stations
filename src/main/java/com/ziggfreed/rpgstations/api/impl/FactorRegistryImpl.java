@@ -92,6 +92,13 @@ public final class FactorRegistryImpl implements FactorRegistry {
      * <ul>
      *   <li>{@code rpgstations:session_seconds} / {@code rpgstations:cycle_count} - concepts that
      *       exist only because a station SESSION exists. Genuinely this mod's vocabulary.</li>
+     *   <li>{@code rpgstations:socket_filled} - is the custody socket named by {@code Param}
+     *       satisfied at the evaluated block (1 = an Item socket's pile holds something / a Block
+     *       socket's world block stands and matches, 0 = the socket exists but is unsatisfied,
+     *       unresolvable = no reading for that id - fail closed)? A station-shaped world fact only
+     *       this engine can compute, which is exactly why it registers it; the readings are
+     *       pre-resolved into the {@link FactorContext} at the engage gate, so the provider is a
+     *       plain-data read.</li>
      *   <li>{@code hytale:tool_power} / {@code hytale:tool_quality} /
      *       {@code hytale:tool_item_level} / {@code hytale:tool_durability_percent} - straight reads
      *       of native item data ({@code ItemToolSpec} power for a native {@code GatherType},
@@ -115,6 +122,14 @@ public final class FactorRegistryImpl implements FactorRegistry {
     public void registerBuiltins() {
         register("rpgstations:session_seconds", OWNER, (ctx, param) -> (double) ctx.sessionSeconds());
         register("rpgstations:cycle_count", OWNER, (ctx, param) -> (double) ctx.cycleIndex());
+        // socket_filled goes through the NULLABLE core seam for the same reason tool_power does:
+        // a socket id this context carries no reading for (a typo, or a site that never resolved
+        // sockets - a pattern-activation gate, a consumer-built context) must answer "cannot
+        // tell" so the gate stays shut, never a substituted 0 a Max-bounded condition would open
+        // on. Param is the socket id; the engine computes the readings at the engage gate over
+        // EVERY action's sockets, since a Block socket is world state at the block.
+        core.register("rpgstations:socket_filled", OWNER, CoreFactorVocabulary.wrap((payload, param) ->
+                payload instanceof FactorContext station ? station.socketFilled(param) : null));
         // tool_power goes through the NULLABLE core seam rather than the primitive station-provider
         // one, so a gather type the held tool has no spec for answers "cannot tell" instead of 0 -
         // which is what keeps a bounds-less gate on it shut. The no-Param form deliberately stays

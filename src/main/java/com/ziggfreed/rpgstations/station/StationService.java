@@ -486,10 +486,15 @@ public final class StationService {
             // owner-private, so anyone's press re-materializes it.
             respawnDisplayIfMissing(preClaim, blockKey, commandBuffer);
         }
+        // The block's socket-satisfaction readings (rpgstations:socket_filled), computed ONCE per
+        // press over EVERY action's sockets: a Block socket is world state at this block, so a
+        // sibling action may honestly gate on it too (the cooking pit's Grill yields to Stew the
+        // moment the pot is mounted). Selection and the engage gate below read the same snapshot.
+        Map<String, Boolean> socketsFilled = socketsFilledAt(world, blockX, blockY, blockZ, asset, preClaim);
         String selectedActionId = (preClaim != null && !preClaim.isEmpty()
                 && mayCommitToClaim(asset, preClaim, playerUuid))
                 ? preClaim.actionId
-                : selectActionForHeld(asset, player);
+                : selectActionForHeld(asset, player, playerRef, socketsFilled);
         if (selectedActionId == null) {
             // Neither the claim nor the held item matched - before denying, recover the action
             // from the block's OWN persisted interaction-state name, so a Loaded block whose
@@ -506,9 +511,11 @@ public final class StationService {
 
         // 2.5) Requires gate (Permission + factor Conditions), ANDed: the STATION's own entry gate
         // AND the selected action's own. Neither defaults the other - an action that authors none is
-        // gated by the station's alone, and vice versa.
-        if (!checkRequires(asset.getRequires(), playerRef, asset, action)
-                || !checkRequires(action.getRequires(), playerRef, asset, action)) {
+        // gated by the station's alone, and vice versa. Selection above already preferred a
+        // matching action whose own gate passes; this re-check is what actually DENIES (the
+        // claim-commit path bypasses selection, and the station-level gate is only checked here).
+        if (!checkRequires(asset.getRequires(), playerRef, asset, action, socketsFilled)
+                || !checkRequires(action.getRequires(), playerRef, asset, action, socketsFilled)) {
             toast(playerRef, RpgMsg.tr("ui.station.locked"));
             return;
         }
@@ -5373,6 +5380,22 @@ public final class StationService {
         return ids != null ? ids.toArray(String[]::new) : new String[0];
     }
 
+    /**
+     * Do EVERY {@code Required} Block-route socket's world blocks stand and match at the claim's
+     * block - the unattended settle's analogue of the attended heartbeat's {@code SOCKET_LOST}
+     * re-check. True when none exists.
+     */
+    private static boolean requiredBlockSocketsStand(@Nullable World world,
+            @Nonnull StationCustodyClaim claim, @Nonnull List<Custody.ResolvedSocket> sockets) {
+        for (Custody.ResolvedSocket socket : sockets) {
+            if (socket.required() && socket.blockRoute()
+                    && !blockSocketSatisfied(world, claim.blockX, claim.blockY, claim.blockZ, socket)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** The {@code Required} Block-route sockets of a resolved socket list (the heartbeat's re-check set). */
     @Nonnull
     private static List<Custody.ResolvedSocket> requiredBlockSocketsOf(
@@ -6666,11 +6689,18 @@ public final class StationService {
             }
             // An action with authored Steps or Anchors runs those attended-only (the ruled
             // posture; the validator says so at authoring time): only the implicit
-            // recipe-conversion transform settles unattended.
+            // recipe-conversion transform settles unattended. A Required BLOCK socket is world
+            // state the settle depends on exactly as the attended heartbeat does (SOCKET_LOST):
+            // with the pot gone the pit cooks nothing, expressed by handing the settle no
+            // conversions - the clock then stamps forward and the backlog FORFEITS, the same
+            // no-runnable-row posture an input-starved station gets, so re-mounting the block
+            // never burst-pays. The doneness settle above already ran: a batch standing in its
+            // pile keeps aging whatever happened to the socket block.
             StationAsset.Recipe recipe = action.getRecipe();
             StationAsset.Conversion[] conversions = null;
             boolean implicitOnly = effectiveProgramSteps(asset, action).isEmpty();
-            if (recipe != null && implicitOnly) {
+            if (recipe != null && implicitOnly
+                    && requiredBlockSocketsStand(world, claim, custody.effectiveSockets())) {
                 conversions = StationCatalog.getInstance()
                         .resolvedConversions(asset, action.getActionId(), recipe);
             }
@@ -7058,15 +7088,75 @@ public final class StationService {
      * The action-selection choke point: walks {@code asset}'s ORDERED {@code Actions} list and
      * returns the first action whose {@code Select} is absent or matches the player's CURRENTLY HELD
      * active-hotbar stack (item id, EVERY resolved resource-type family, native raw tags, and the
-     * functional route - {@link #liveFunctionOf}). {@code null} when nothing matches, or when the
-     * station authors no actions at all.
+     * functional route - {@link #liveFunctionOf}) AND whose own {@code Requires} gate passes -
+     * {@code Requires} is a "when it applies" concern beside {@code Select}, so a matching action
+     * whose gate is shut yields to the next matching one (the cooking pit's Grill yields to Stew
+     * while the pot covers the flame). When EVERY matching action's gate is shut, the FIRST match
+     * is returned anyway so the engage gate below denies it with the honest requirements-unmet
+     * toast - a single-action station therefore selects and denies byte-identically to the
+     * pre-gate walk. {@code null} when nothing matches, or when the station authors no actions.
      */
     @Nullable
-    private static String selectActionForHeld(@Nonnull StationAsset asset, @Nonnull Player player) {
+    private static String selectActionForHeld(@Nonnull StationAsset asset, @Nonnull Player player,
+            @Nonnull PlayerRef playerRef, @Nonnull Map<String, Boolean> socketsFilled) {
         ItemStack held = PlayerAccess.activeHotbarItem(player);
         String heldItemId = held != null ? held.getItemId() : null;
-        return ActionResolver.selectActionByFamily(asset, heldItemId, liveResourceTypeIdsOf(heldItemId),
-                liveRawTagsOf(heldItemId), liveFunctionOf(heldItemId));
+        List<String> candidates = ActionResolver.selectActionsByFamily(asset, heldItemId,
+                liveResourceTypeIdsOf(heldItemId), liveRawTagsOf(heldItemId), liveFunctionOf(heldItemId));
+        for (String actionId : candidates) {
+            ActionResolver.ResolvedAction candidate = ActionResolver.resolve(asset, actionId);
+            if (checkRequires(candidate.getRequires(), playerRef, asset, candidate, socketsFilled)) {
+                return actionId;
+            }
+        }
+        return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    /**
+     * The {@code rpgstations:socket_filled} readings for one block, keyed by socket id: the UNION
+     * over EVERY action's effective sockets (a Block socket is world state at the block, so a
+     * sibling action may gate on it; the first action's reading wins a duplicate id), each
+     * answered by {@link #socketsFilledInto}'s rule - an Item socket by its pile, a Block socket
+     * by its world block. Computed once per press and shared by selection and the engage gate.
+     */
+    @Nonnull
+    private static Map<String, Boolean> socketsFilledAt(@Nullable World world, int blockX, int blockY,
+            int blockZ, @Nonnull StationAsset asset, @Nullable StationCustodyClaim claim) {
+        Map<String, Boolean> out = new LinkedHashMap<>();
+        try {
+            for (String actionId : ActionResolver.actionIds(asset)) {
+                Custody custody = ActionResolver.resolve(asset, actionId).getCustody();
+                if (custody == null) {
+                    continue;
+                }
+                socketsFilledInto(out, custody.effectiveSockets(), claim,
+                        socket -> blockSocketSatisfied(world, blockX, blockY, blockZ, socket));
+            }
+        } catch (Throwable t) {
+            Log.fine("STATION socket-filled readings failed at (" + blockX + ", " + blockY + ", "
+                    + blockZ + "): " + t.getMessage());
+        }
+        return out;
+    }
+
+    /**
+     * PURE core of {@link #socketsFilledAt}: folds one resolved socket list into {@code out}
+     * (existing ids keep their reading - first writer wins), answering each socket by the
+     * {@code socket_filled} rule: an Item socket is filled while its pile holds anything, a Block
+     * socket while {@code blockSatisfied} says its world block stands and matches.
+     */
+    static void socketsFilledInto(@Nonnull Map<String, Boolean> out,
+            @Nonnull List<Custody.ResolvedSocket> sockets, @Nullable StationCustodyClaim claim,
+            @Nonnull Predicate<Custody.ResolvedSocket> blockSatisfied) {
+        for (Custody.ResolvedSocket socket : sockets) {
+            if (out.containsKey(socket.id())) {
+                continue;
+            }
+            boolean filled = socket.itemRoute()
+                    ? claim != null && !claim.isEmpty(socket.id())
+                    : blockSatisfied.test(socket);
+            out.put(socket.id(), filled);
+        }
     }
 
     /**
@@ -7107,13 +7197,16 @@ public final class StationService {
      * not read here since no shipped station authors a tool-power gate condition; a player-standing
      * condition needs only {@code playerId}). A null {@code reqs} always passes.
      *
-     * <p>Called TWICE at engage - once with the station's own entry gate and once with the selected
-     * action's - because the two are ANDed and neither defaults the other. {@code action} anchors the
-     * context either way: the running action owns the contribution channels a condition may read,
-     * extension-appended entries included.
+     * <p>Called at engage with the station's own entry gate and the selected action's (the two are
+     * ANDed and neither defaults the other), and per CANDIDATE inside the gate-aware
+     * {@link #selectActionForHeld} walk. {@code action} anchors the context either way: the
+     * running action owns the contribution channels a condition may read, extension-appended
+     * entries included. {@code socketsFilled} is the press's one socket-satisfaction snapshot
+     * ({@link #socketsFilledAt}), backing {@code rpgstations:socket_filled}.
      */
     private static boolean checkRequires(@Nullable Requires reqs, @Nonnull PlayerRef playerRef,
-            @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action) {
+            @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action,
+            @Nonnull Map<String, Boolean> socketsFilled) {
         if (reqs == null || reqs.isEmpty()) {
             return true;
         }
@@ -7138,6 +7231,7 @@ public final class StationService {
                 .cycleIndex(0)
                 .contributions(contributionParams(asset.getId(),
                         ActionResolver.actionTargetId(asset, action.getActionId()), action.getWork()))
+                .socketsFilled(socketsFilled)
                 .build();
         String failed = FactorRegistryImpl.getInstance().firstFailedCondition(conditions, ctx);
         if (failed != null) {

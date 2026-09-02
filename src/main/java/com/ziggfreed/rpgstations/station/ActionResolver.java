@@ -348,10 +348,30 @@ public final class ActionResolver {
     public static String selectActionByFamily(@Nonnull StationAsset asset, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
             @Nullable String heldFunction) {
+        List<String> matches = selectActionsByFamily(asset, heldItemId, heldResourceTypeIds,
+                heldTags, heldFunction);
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    /**
+     * EVERY action whose effective {@code Select} is absent, catch-all, or matches the held
+     * identity, in AUTHORED ORDER - the candidate list behind {@link #selectActionByFamily}
+     * (whose answer is simply the first entry). The engage path walks this list with each
+     * candidate's own {@code Requires} gate: the first candidate whose gate passes wins, and when
+     * none passes the FIRST candidate is engaged anyway so its gate denies with the honest
+     * requirements-unmet toast instead of a wrong "nothing to work with" - a single-action
+     * station therefore behaves byte-identically to the pre-gate selection. Empty when nothing
+     * matches or the station authors no actions.
+     */
+    @Nonnull
+    public static List<String> selectActionsByFamily(@Nonnull StationAsset asset, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
         ActionDef[] actions = effectiveActions(asset);
         if (actions == null) {
-            return null;
+            return List.of();
         }
+        List<String> matches = new ArrayList<>(actions.length);
         for (int i = 0; i < actions.length; i++) {
             ActionDef def = actions[i];
             if (def == null) {
@@ -360,10 +380,10 @@ public final class ActionResolver {
             ActionInput select = effectiveSelectOf(def);
             if (select == null || select.isCatchAll()
                     || matchesAnyResourceType(select, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
-                return effectiveActionId(def, i);
+                matches.add(effectiveActionId(def, i));
             }
         }
-        return null;
+        return matches;
     }
 
     /**

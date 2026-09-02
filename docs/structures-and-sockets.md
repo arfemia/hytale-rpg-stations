@@ -131,6 +131,37 @@ pot onto the pit (or taking it off) must never read as the structure breaking. T
 socket target cell should be authored `Empty` only when the pattern truly requires it clear AT
 BUILD TIME - after activation the socket machinery owns that cell.
 
+## The shipped Cooking Pit, end to end
+
+The jar ships a complete worked example of everything above:
+`Server/RpgStations/Patterns/CookingPit.json` (the shape),
+`Server/RpgStations/Stations/CookingPit.json` (the two-action station), the
+`RPG_Station_CookingPit` block it activates into, the craftable `RPG_Station_Cooking_Pot` vessel
+block, and the `RPG_Food_Hearty_Stew` meal. Read the three JSON files side by side - each carries
+`$Comment`s explaining its own knobs - and play the loop like this:
+
+1. **Build the pit.** Place an unlit campfire (`Deco_Campfire_Off`) and ring it with any
+   stone-family blocks (`ResourceTypeId: "Rock"` cells - cobblestone, stone, bricks and marble mix
+   freely), keeping the cell above the fire open (`Empty: true`). The campfire becomes the
+   `RPG_Station_CookingPit` station on the last stone, in any of the four orientations.
+2. **Grill on the bare pit.** Press use holding raw meat, a raw vegetable or a raw fish piece: the
+   `Grill` action derives its recipes from the engine's own Campfire processing recipes
+   (`FromCrafting`), accepts those same raw foods into the classic single pile, and cooks
+   unattended. Its recipe-level `Doneness` chars uncollected food into charcoal.
+3. **Mount the pot.** Craft the pot (three iron bars at any workbench) and place it in the open
+   cell. That cell is the `Stew` action's `vessel` Block socket - and because the standing-build
+   re-check excludes Block-socket cells, mounting or removing the pot never breaks the pit.
+4. **Stew.** The two actions gate on the same `rpgstations:socket_filled` factor in opposite
+   directions (`Max: 0` on Grill, `Min: 1` on Stew), so the same press grills on a bare pit and
+   feeds the pot once it stands. Ingredients go in one per press (`PlacePerPress: 1`, up to six);
+   the three recipe rows demonstrate the ruled ordering - exact-set rows first (meats plus
+   vegetables to a kebab, vegetables alone to a salad), the route-less match-all row last (three of
+   anything to the stew).
+5. **Walk away, come back.** Both actions author `Work.Unattended`, so loaded piles keep settling
+   on world game time; the kebab and the stew carry per-row `Doneness` windows and collapse to
+   charcoal when ignored, while the salad (no window) waits forever. The block's five states
+   (`Default`/`Loaded`/`Lit`/`Ready`/`Smoking`) narrate the whole cycle from across the camp.
+
 ## Not extensible, by design
 
 `StructurePatternAsset` is NOT an `ExtensionAsset` target, and this is deliberate: the cell list IS

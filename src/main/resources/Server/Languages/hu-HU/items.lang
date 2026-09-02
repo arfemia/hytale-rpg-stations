@@ -17,3 +17,13 @@ RPG_Station_CookingFire.hint.loaded = Nyomd meg a [{key}] gombot a munkához
 
 RPG_Tool_Hatchet_Sawmiller.name = Fűrészmalmi balta
 RPG_Tool_Hatchet_Sawmiller.description = Mesteri mithril balta, számtalan fűrészmalmi óra csiszolta egyensúlyát. Élesebb és strapabíróbb, mint a kovácsolt eredeti.
+RPG_Station_CookingPit.name = Főzőgödör
+RPG_Station_CookingPit.description = Kővel körberakott tábortűz. Süss nyers ételt a nyílt láng felett, vagy tegyél fölé fazekat, és főzz teljes fogásokat. Nyomd meg a használat gombot a munka megkezdéséhez.
+RPG_Station_CookingPit.hint.empty = Nyomd meg a [{key}] gombot a főzéshez
+RPG_Station_CookingPit.hint.loaded = Nyomd meg a [{key}] gombot a munkához
+RPG_Station_CookingPit.hint.ready = Nyomd meg a [{key}] gombot a begyűjtéshez
+RPG_Station_CookingPit.hint.overdone = Nyomd meg a [{key}] gombot a letakarításhoz
+RPG_Station_Cooking_Pot.name = Fazék
+RPG_Station_Cooking_Pot.description = Erős vasfazék. Helyezd közvetlenül egy főzőgödör fölé, hogy ragut főzhess.
+RPG_Food_Hearty_Stew.name = Kiadós Ragu
+RPG_Food_Hearty_Stew.description = Egy tál mindabból, ami a fazékba került, addig főzve, míg összeér. Életerőt állít vissza; a hús és zöldség igazi keveréke egyszerre erősíti az életerőt és az állóképességet.

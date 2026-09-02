@@ -149,6 +149,18 @@ public final class RpgStationsLangKeys {
             "rpgstations.station.cuttingboard.desc",
             "rpgstations.station.cookingfire.name",
             "rpgstations.station.cookingfire.desc",
+            // The cooking pit family: the station's identity, the structure pattern's identity
+            // (the pattern/structure toasts name it), the two action labels, and the three
+            // socket Labels the *_named refusals speak.
+            "rpgstations.station.cookingpit.name",
+            "rpgstations.station.cookingpit.desc",
+            "rpgstations.structure.cookingpit.name",
+            "rpgstations.structure.cookingpit.desc",
+            "rpgstations.action.grill.label",
+            "rpgstations.action.stew.label",
+            "rpgstations.socket.cookingpit.vessel",
+            "rpgstations.socket.cookingpit.ingredients",
+            "rpgstations.socket.cookingpit.output",
             "rpgstations.action.prepfish.label",
             "rpgstations.command.desc",
             "rpgstations.command.arg.sub",

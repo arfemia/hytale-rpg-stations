@@ -229,11 +229,13 @@ exists specifically so a consumer can detect which additive members are present 
 reflection: bump it by exactly one integer per addition batch that lands under this policy (not
 per individual method - a coordinated wave of additions is one bump), never on its own.
 `apiVersion()` itself is exempt from "default-bodied only" since it shipped before the freeze; it
-will never change again once RpgStations reaches 1.0.0. Current value is **4**: the
-`StationUnattendedGatheredEvent` event class bumped it from 3 (which the `stationCount()`
-default-bodied addition had reached). **The api ARTIFACT's semver tracks this integer:
+will never change again once RpgStations reaches 1.0.0. Current value is **5**: the
+`FactorContext.socketFilled(String)` additive accessor (with its `Builder.socketsFilled` leaf -
+the engine-computed plain-data readings behind the `rpgstations:socket_filled` built-in) bumped
+it from 4, which the `StationUnattendedGatheredEvent` event class had reached (from the
+`stationCount()` default-bodied addition's 3). **The api ARTIFACT's semver tracks this integer:
 `apiVersion()` N ships as artifact `0.N.0`** (`gradle.properties` `api_version`, currently
-`0.4.0`), so the number a consumer branches on and the number on the jar they compile against can
+`0.5.0`), so the number a consumer branches on and the number on the jar they compile against can
 never disagree; a bump of one is a bump of the other, in the same change.
 
 `RpgStationsApi.isAvailable()`/`find()` (added the same round) are convenience, not a way around

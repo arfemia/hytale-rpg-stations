@@ -1,0 +1,33 @@
+{
+  "$Comment": "The cooking pit: a buildable multiblock structure, no crafting bench involved. Lay any STONE-FAMILY blocks (cobblestone, plain stone, bricks, marble - every block whose item carries the Rock resource family) in a full ring on the ground and set an unlit campfire (Deco_Campfire_Off) in the middle; the moment the last block completes the shape, the campfire becomes the RPG_Station_CookingPit work station, keeping the rotation it was placed with. The cell directly above the campfire must be OPEN AIR when the shape completes - that is where the cooking pot (RPG_Station_Cooking_Pot) is placed later, and because that cell is also the station's own Vessel socket, mounting or removing the pot never counts as breaking the structure. Breaking any ring block or the station block itself reverts the centre to the plain unlit campfire, hands back anything a present player had placed, and drops the rest at the block. Yaw90 true recognizes the ring in all four compass orientations (this ring is symmetric, so that costs nothing and keeps the shape example-worthy); anyone may build it - no Requires gate. To re-tune the shape, override this file by id: the Cells array is replaced wholesale, so author the complete new cell list.",
+  "Identity": {
+    "NameKey": "rpgstations.structure.cookingpit.name",
+    "DescKey": "rpgstations.structure.cookingpit.desc"
+  },
+  "Rotate": { "Yaw90": true, "Mirror": false },
+  "Activate": {
+    "Block": "RPG_Station_CookingPit",
+    "RevertBlock": "Deco_Campfire_Off"
+  },
+  "Cells": [
+    { "Offset": { "X": 0, "Y": 0, "Z": 0 }, "Block": { "ItemId": "Deco_Campfire_Off" }, "IsAnchor": true },
+    { "Offset": { "X": 0, "Y": 1, "Z": 0 }, "Empty": true },
+    { "Offset": { "X": 1, "Y": 0, "Z": 0 }, "Block": { "ResourceTypeId": "Rock" } },
+    { "Offset": { "X": 1, "Y": 0, "Z": 1 }, "Block": { "ResourceTypeId": "Rock" } },
+    { "Offset": { "X": 0, "Y": 0, "Z": 1 }, "Block": { "ResourceTypeId": "Rock" } },
+    { "Offset": { "X": -1, "Y": 0, "Z": 1 }, "Block": { "ResourceTypeId": "Rock" } },
+    { "Offset": { "X": -1, "Y": 0, "Z": 0 }, "Block": { "ResourceTypeId": "Rock" } },
+    { "Offset": { "X": -1, "Y": 0, "Z": -1 }, "Block": { "ResourceTypeId": "Rock" } },
+    { "Offset": { "X": 0, "Y": 0, "Z": -1 }, "Block": { "ResourceTypeId": "Rock" } },
+    { "Offset": { "X": 1, "Y": 0, "Z": -1 }, "Block": { "ResourceTypeId": "Rock" } }
+  ],
+  "Moments": {
+    "activated": {
+      "Sounds": ["SFX_Flame_Ignite"],
+      "Particles": [ { "SystemId": "Block_Gem_Sparks" } ]
+    },
+    "broken": {
+      "Sounds": ["SFX_Campfire_Break"]
+    }
+  }
+}

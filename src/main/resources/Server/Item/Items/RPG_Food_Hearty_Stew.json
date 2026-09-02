@@ -1,0 +1,59 @@
+{
+  "$Comment": "Hearty stew: the cooking pit's own signature meal, made by the Stew action's catch-all recipe row - three of ANYTHING edible simmered in the mounted pot (Server/RpgStations/Stations/CookingPit.json). Built on the vanilla Template_Food shape so it eats, stacks and drops like any base-game meal, and every referenced asset is vanilla: the mushroom-salad bowl model and texture read as a chunky stew bowl, and the consume chain composes the tier-2 instant heal with the tier-2 health-regen check PLUS BOTH food-group buff checks - meat's max-health buff and the fruit-and-vegetable max-stamina buff - because a stew of everything at once is the one meal that earns both. That double buff is what sets it beside the kebab (meat buff only) and the caesar salad (vegetable buff only) as the pot's reward for not sorting your ingredients. No crafting Recipe on purpose: the pit's pot is the only place it comes from.",
+  "TranslationProperties": {
+    "Name": "items.RPG_Food_Hearty_Stew.name",
+    "Description": "items.RPG_Food_Hearty_Stew.description"
+  },
+  "Parent": "Template_Food",
+  "Interactions": {
+    "Secondary": "Root_Secondary_Consume_Food_T2"
+  },
+  "Quality": "Uncommon",
+  "Icon": "Icons/ItemsGenerated/Food_Salad_Mushroom.png",
+  "BlockType": {
+    "Material": "Empty",
+    "DrawType": "Model",
+    "CustomModel": "Items/Consumables/Food/Salad_Mushroom.blockymodel",
+    "CustomModelTexture": [
+      {
+        "Texture": "Items/Consumables/Food/Salad_Mushroom_Texture.png",
+        "Weight": 1
+      }
+    ],
+    "ParticleColor": "#b5793f",
+    "TextureComputedColor": "#8A5A33"
+  },
+  "InteractionVars": {
+    "Consume_Charge": {
+      "Interactions": [
+        {
+          "Parent": "Consume_Charge_Food_T1_Inner",
+          "Effects": {
+            "Particles": [
+              {
+                "SystemId": "Food_Eat",
+                "Color": "#B5793F",
+                "TargetNodeName": "Mouth",
+                "TargetEntityPart": "Entity"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "Effect": {
+      "Interactions": [
+        {
+          "Type": "ApplyEffect",
+          "EffectId": "Food_Instant_Heal_T2"
+        },
+        "HealthRegen_TierCheck_T2",
+        "Meat_TierCheck_T2",
+        "FruitVeggie_TierCheck_T2"
+      ]
+    }
+  },
+  "ItemLevel": 5,
+  "MaxStack": 25,
+  "DropOnDeath": true
+}

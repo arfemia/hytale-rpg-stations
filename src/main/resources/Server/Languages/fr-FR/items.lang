@@ -17,3 +17,13 @@ RPG_Station_CookingFire.hint.loaded = Appuyez sur [{key}] pour travailler
 
 RPG_Tool_Hatchet_Sawmiller.name = Hache du Scieur
 RPG_Tool_Hatchet_Sawmiller.description = Une hache en mithril d'exception, équilibrée par d'innombrables heures à la scierie. Plus affûtée et plus robuste que l'originale de forge.
+RPG_Station_CookingPit.name = Fosse de Cuisson
+RPG_Station_CookingPit.description = Un feu de camp cerclé de pierre. Grillez des aliments crus sur la flamme, ou montez une marmite au-dessus pour cuisiner des repas complets. Appuyez sur utiliser pour commencer à travailler.
+RPG_Station_CookingPit.hint.empty = Appuyez sur [{key}] pour cuisiner
+RPG_Station_CookingPit.hint.loaded = Appuyez sur [{key}] pour travailler
+RPG_Station_CookingPit.hint.ready = Appuyez sur [{key}] pour récupérer
+RPG_Station_CookingPit.hint.overdone = Appuyez sur [{key}] pour nettoyer
+RPG_Station_Cooking_Pot.name = Marmite
+RPG_Station_Cooking_Pot.description = Une solide marmite en fer. Placez-la juste au-dessus d'une fosse de cuisson pour pouvoir mijoter.
+RPG_Food_Hearty_Stew.name = Ragoût Copieux
+RPG_Food_Hearty_Stew.description = Un bol de tout ce qui est passé par la marmite, mijoté jusqu'à l'accord parfait. Restaure la santé ; un vrai mélange de viande et de légumes fortifie à la fois la santé et l'endurance.

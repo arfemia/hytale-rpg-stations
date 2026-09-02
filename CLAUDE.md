@@ -5,7 +5,9 @@ and friends). It depends on `ziggfreed-common` ONLY; any other mod reaches the e
 soft extension surface (native events + the `api` artifact, both live), never a hard dependency in
 either direction. The standalone mod is RICH, not a husk: with RpgStations alone installed, its own
 jar-shipped Sawmill runs the full diegetic work loop plus a generic reward layer (conditional
-lootables over native `ItemDropList`s, command rewards) and needs nothing else. Package root
+lootables over native `ItemDropList`s, command rewards), and its jar-shipped Cooking Pit exercises
+the multiblock/socket/unattended/doneness stack end to end (build a stone ring around a campfire,
+grill on the bare pit, mount the craftable pot and stew) - and needs nothing else. Package root
 `com.ziggfreed.rpgstations`. **Status:
 phase 1 legs 0-6 landed** (scaffold, common lift, engine, lootables, api
 artifact, consumer bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
@@ -205,9 +207,14 @@ adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-20
 adopted fixes binding). Origin plan: `../../.claude/plans/interactive-stations.md` +
 `../../.claude/plans/work-stations-mod-extraction-prompt.md`.
 
-## 0.1.0 release scope (maintainer ruling, 2026-08-06) - READ BEFORE TOUCHING SHIPPED CONTENT
+## 0.1.0 release scope (maintainer ruling, 2026-08-06; amended by ruling 7 of the 2026-09-01 multiplacement round) - READ BEFORE TOUCHING SHIPPED CONTENT
 
-**The first public release is `0.1.0`, not `1.0.0`, and ships exactly ONE station: the Sawmill.**
+**The first public release is `0.1.0`, not `1.0.0`, and ships TWO stations: the Sawmill and the
+Cooking Pit family** (the original 2026-08-06 ruling narrowed the set to the Sawmill alone; the
+2026-09-01 round's ruling 7 added the jar-shipped, standalone-rich cooking-pit exemplar - the
+`Patterns/CookingPit.json` structure, `Stations/CookingPit.json` with its Grill/Stew layering
+over `rpgstations:socket_filled`, the `RPG_Station_CookingPit` + `RPG_Station_Cooking_Pot`
+blocks, and `RPG_Food_Hearty_Stew`; `station/ShippedCookingPitPatternTest` is its parity gate).
 The ENGINE is unchanged and complete; only the shipped default CONTENT set was narrowed.
 
 - **Held back, not deleted:** `Stations/CookingFire.json`, `Stations/CuttingBoard.json` (+
@@ -264,10 +271,13 @@ api/                                                   the extension-surface (fr
   src/main/java/com/ziggfreed/rpgstations/api/         see api/CLAUDE.md
 src/main/resources/
   manifest.json                                        Group Ziggfreed, IncludesAssetPack:true, ServerVersion >=0.6.0-pre.13 <0.7.0 (Update 6)
-  Server/RpgStations/{Stations,Actions,Flairs,Extensions,Settings}/
-                                                        the five Pattern A asset stores this mod registers
+  Server/RpgStations/{Stations,Actions,Patterns,Flairs,Extensions,Settings}/
+                                                        the six Pattern A asset stores this mod registers
   Server/ZiggfreedCommon/Lootables/                      the Sawmill's loot tables (the SHARED library's store)
-  Server/Item/{Items,RootInteractions}/                 the jar's OWN default Sawmill block + its RootInteraction
+  Server/Item/{Items,RootInteractions}/                 the jar's OWN default blocks + their RootInteractions: the Sawmill
+                                                        (+ its trophy hatchet) and the cooking-pit family
+                                                        (RPG_Station_CookingPit, the RPG_Station_Cooking_Pot vessel,
+                                                        the RPG_Food_Hearty_Stew meal)
   Server/Drops/                                         the standalone Sawmill's native-namespace drop tables
   Server/Entity/Effects/RPG/                             RPG_Station_Hold.json (the effect-mode movement-lock effect)
   Server/Languages/<bcp47>/                             rpgstations.lang (all 9 locales) + native items.lang/avatarCustomization.lang

@@ -1,0 +1,66 @@
+{
+  "$Comment": "The cooking pot: a plain placeable block whose whole job is to be mounted on a cooking pit. Place it in the open cell directly above an active RPG_Station_CookingPit and the pit's Stew action unlocks (the pot fills the station's Vessel socket; the structure pattern deliberately keeps that cell open, so mounting or removing the pot never breaks the standing pit). It has no station identity, no bench identity and no Use interaction of its own - pressing use on the PIT is how cooking starts - and it works as ordinary decoration anywhere else. Model, texture, hitbox and the gentle bubbling ambient are the vanilla cauldron's (Alchemy_Cauldron), so it reads instantly as cookware; the bubbling plays whenever the block is placed, which is also the stew's soundtrack since no per-cycle cue could loop. The recipe keeps it cheap and early: three iron bars at any Workbench's crafting tab.",
+  "TranslationProperties": {
+    "Name": "items.RPG_Station_Cooking_Pot.name",
+    "Description": "items.RPG_Station_Cooking_Pot.description"
+  },
+  "Recipe": {
+    "Input": [
+      { "ItemId": "Ingredient_Bar_Iron", "Quantity": 3 }
+    ],
+    "BenchRequirement": [
+      {
+        "Type": "Crafting",
+        "Id": "Workbench",
+        "Categories": ["Workbench_Crafting"]
+      }
+    ]
+  },
+  "PlayerAnimationsId": "Block",
+  "Categories": ["Blocks.Deco"],
+  "Icon": "Icons/ItemsGenerated/Deco_Cauldron.png",
+  "MaxStack": 1,
+  "Interactions": {
+    "Primary": "Block_Primary",
+    "Secondary": "Block_Secondary"
+  },
+
+  "BlockType": {
+    "BlockParticleSetId": "Grass",
+    "BlockSoundSetId": "Metal",
+    "PhysicalMaterialId": "Metal",
+    "CustomModel": "Blocks/Miscellaneous/Cauldron.blockymodel",
+    "CustomModelTexture": [
+      {
+        "Texture": "Blocks/Miscellaneous/Cauldron_Texture.png",
+        "Weight": 1
+      }
+    ],
+    "CustomModelScale": 1,
+    "DrawType": "Model",
+    "Flags": {},
+    "Gathering": {
+      "Soft": {
+        "IsWeaponBreakable": false
+      }
+    },
+    "HitboxType": "Block_Seven_Eighth",
+    "Material": "Solid",
+    "Opacity": "Transparent",
+    "AmbientSoundEventId": "SFX_Cauldron_Bubbling_Small",
+    "Looping": true,
+    "Support": {
+      "Down": [
+        {
+          "FaceType": "Full"
+        }
+      ]
+    },
+    "VariantRotation": "NESW"
+  },
+  "Tags": {
+    "Type": ["Deco"],
+    "Family": ["RpgStations"]
+  },
+  "ItemSoundSetId": "ISS_Blocks_Stone"
+}

@@ -17,3 +17,13 @@ RPG_Station_CookingFire.hint.loaded = Premi [{key}] per lavorare
 
 RPG_Tool_Hatchet_Sawmiller.name = Ascia del Segantino
 RPG_Tool_Hatchet_Sawmiller.description = Un'ascia di mithril magistrale, bilanciata da innumerevoli ore alla segheria. Più affilata e robusta dell'originale di forgia.
+RPG_Station_CookingPit.name = Fossa di Cottura
+RPG_Station_CookingPit.description = Un fuoco da campo cerchiato di pietra. Griglia cibi crudi sulla fiamma viva, o monta una pentola sopra per cucinare pasti completi. Premi uso per iniziare a lavorare.
+RPG_Station_CookingPit.hint.empty = Premi [{key}] per cucinare
+RPG_Station_CookingPit.hint.loaded = Premi [{key}] per lavorare
+RPG_Station_CookingPit.hint.ready = Premi [{key}] per raccogliere
+RPG_Station_CookingPit.hint.overdone = Premi [{key}] per ripulire
+RPG_Station_Cooking_Pot.name = Pentola
+RPG_Station_Cooking_Pot.description = Una robusta pentola di ferro. Piazzala subito sopra una fossa di cottura per poter stufare.
+RPG_Food_Hearty_Stew.name = Stufato Sostanzioso
+RPG_Food_Hearty_Stew.description = Una ciotola di tutto quello che è finito in pentola, sobbollito finché non lega. Ripristina salute; un vero misto di carne e verdure rinforza insieme salute e resistenza.

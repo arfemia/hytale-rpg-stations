@@ -642,7 +642,13 @@ resolution section for the engine half.
   moment surface uses ($-keys legal); its cues play AT ONCE at the anchor (no session exists to
   queue a `DelayMs`, documented at the leaf). Compiled by `station.PatternCatalog` into DETECT +
   HOLD walk forms over ziggfreed-common's `world.pattern` engine; runtime in
-  `station.StationStructures` - see `../station/CLAUDE.md`'s multiblock section.
+  `station.StationStructures` - see `../station/CLAUDE.md`'s multiblock section. **The shipped
+  worked example is the cooking pit** (`Patterns/CookingPit.json` + `Stations/CookingPit.json`: a
+  Rock-family ring around a `Deco_Campfire_Off` anchor, the vessel headroom cell authored `Empty`
+  AND excluded from HOLD by the Stew action's Block-socket `At`, the Grill/Stew layering over
+  `rpgstations:socket_filled`, exact-set rows above the match-all stew row);
+  `station.ShippedCookingPitPatternTest` decodes both through these codecs and walks the compiled
+  forms, so a content edit that breaks their semantics fails the build.
 - **[`FlairAsset`](FlairAsset.java)** - a standalone, ANY-mod-authorable cosmetic flair layer,
   `Server/RpgStations/Flairs/<Name>.json` (Pattern A, id = lowercased filename): `{Stations?[],
   Moments}`. `Stations` null/empty = applies to every station; `Moments` is an OPEN

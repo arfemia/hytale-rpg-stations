@@ -6,7 +6,9 @@ RPG Stations adds interactive work stations to your Hytale server. No menus, no 
 conversions - materials go in, your character (or a stand-in performer) visibly does the work over
 real time, and results come out.
 
-**0.1.0 ships one station, the Sawmill:** craft the bench at a tier 2 Workbench, load logs onto it,
+**0.1.0 ships two stations: the Sawmill and the Cooking Pit.**
+
+**The Sawmill:** craft the bench at a tier 2 Workbench, load logs onto it,
 press `F`, and your character saws them into that wood family's planks one cycle at a time, with a
 held-tool gate, a tool-scaling yield curve, and a session summary when you stop.
 
@@ -20,6 +22,18 @@ tier and concentrated essence at the deepest. And a few cycles into any session 
 1-in-2500 shot at the **Sawmiller's Hatchet** - a legendary masterwork that drops nowhere else, cannot
 be forged at any bench, and is the only tool in the game that reaches the top rung of the sawmill's
 own curve.
+
+**The Cooking Pit** you don't craft at all - you build it. Lay a ring of any stone blocks around an
+unlit campfire and the fire becomes a working cooking pit on the spot (break the ring and it turns
+back). Press `F` with raw meat, a vegetable or a raw fish piece and the pit grills it over the open
+flame, no tool needed. Then craft the iron Cooking Pot - three iron bars at any workbench - and set
+it above the flame, and the pit changes jobs: feed the pot up to six ingredients, one press each,
+and it decides the dish. Exactly meat and vegetables makes a kebab; exactly vegetables, a caesar
+salad; any other mix simmers down into a Hearty Stew, whose meat-and-greens body strengthens health
+and stamina at once. The pit keeps cooking after you walk away, and everything but the salad chars
+into charcoal if you leave it sitting too long past done - the pit smokes to warn you. It is also
+communal: friends can load different parts of the same pit, what each of you placed stays yours, and
+a finished meal can be lifted off by whoever passes by.
 
 Every number in all of that is an ordinary content leaf, so a server can retune what better tools are
 worth, change what the finds hand over, or key the whole thing off something else entirely.
@@ -51,11 +65,12 @@ gets the exact same authoring surface RPG Stations' own default content ships th
 
 ### Multi-action stations
 
-One station block can offer several distinct jobs, picked diegetically by what you're holding - no
-dropdown, no menu. Hold a raw material and the block converts it; hold a finished item and the same
-block can open an entirely different job instead. The shipped Sawmill uses the lighter form of this:
-sneak and press `F` to pick which cut you want from the log you're holding (planks, decorative, or
-ornate) if you do not want the default.
+One station block can offer several distinct jobs, picked diegetically by what you're holding and by
+what stands at the block - no dropdown, no menu. The shipped Cooking Pit is the full form: the same
+press grills on a bare pit and stews once the pot is mounted, because each job carries its own
+requirements and the press picks the first job whose requirements actually hold. The Sawmill uses
+the lighter form: sneak and press `F` to pick which cut you want from the log you're holding
+(planks, decorative, or ornate) if you do not want the default.
 
 ### Step programs and multi-station walks
 
@@ -177,6 +192,12 @@ base improvement, not a day-one freebie. Admins can `/give` the block directly
 (`RPG_Station_Sawmill`). A content pack that ships its own block under the same id replaces the
 jar's, so a pack that authors no recipe on its copy removes that craftability and owns acquisition
 its own way - a shop, a quest, whatever that pack's economy wants.
+
+**Getting the Cooking Pit in-game.** Nothing to craft: place an unlit campfire and surround it with
+a full ring of any stone-family blocks (cobblestone, stone, bricks, marble - they mix freely),
+leaving the cell above the fire open. The campfire becomes the pit the moment the ring completes.
+The Cooking Pot is crafted from three iron bars at any workbench and placed in that open cell when
+you want to stew instead of grill.
 
 ## Integrations
 

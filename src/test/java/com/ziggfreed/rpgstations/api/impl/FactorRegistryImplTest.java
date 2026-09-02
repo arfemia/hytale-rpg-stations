@@ -40,6 +40,7 @@ public class FactorRegistryImplTest {
         // rpgstations: = vocabulary this engine owns (it exists only because a session does).
         assertTrue(FactorRegistryImpl.getInstance().isKnown("rpgstations:session_seconds"));
         assertTrue(FactorRegistryImpl.getInstance().isKnown("rpgstations:cycle_count"));
+        assertTrue(FactorRegistryImpl.getInstance().isKnown("rpgstations:socket_filled"));
         // hytale: = straight native reads, portable across mods.
         assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:tool_power"));
         assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:tool_durability_percent"));
@@ -66,6 +67,28 @@ public class FactorRegistryImplTest {
         // a different answer from "does it badly", so a bounds-less gate on it stays shut and a
         // formula term contributes nothing rather than a substituted zero.
         assertNull(FactorRegistryImpl.getInstance().resolve("hytale:tool_power", "OreMithril", c));
+    }
+
+    @Test
+    void socketFilled_paramNamesTheSocket_caseInsensitively_andFailsClosedOnTheUnknown() {
+        FactorRegistryImpl.getInstance().registerBuiltins();
+        FactorContext c = FactorContext.builder()
+                .playerId(PLAYER)
+                .stationId("test_station")
+                .socketsFilled(Map.of("vessel", true, "ingredients", false))
+                .build();
+        assertEquals(1.0, FactorRegistryImpl.getInstance().resolve("rpgstations:socket_filled", "Vessel", c),
+                "a satisfied socket answers 1; ids compare case-insensitively");
+        assertEquals(0.0, FactorRegistryImpl.getInstance().resolve("rpgstations:socket_filled", "ingredients", c),
+                "an unsatisfied socket answers 0 - a Max-bounded 'only while empty' gate can open on it");
+        // A socket this context has no reading for FAILS CLOSED: "cannot tell" is a different
+        // answer from "empty", so neither a Min- nor a Max-bounded condition opens on it.
+        assertNull(FactorRegistryImpl.getInstance().resolve("rpgstations:socket_filled", "no_such_socket", c));
+        assertNull(FactorRegistryImpl.getInstance().resolve("rpgstations:socket_filled", null, c));
+        // A context built with no readings at all (a pattern gate, a consumer's own build site)
+        // answers nothing either.
+        assertNull(FactorRegistryImpl.getInstance().resolve("rpgstations:socket_filled", "vessel",
+                ctx(0L, 0, 0.0, 100.0)));
     }
 
     @Test

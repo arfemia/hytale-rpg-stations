@@ -3,12 +3,16 @@
 Diegetic interactive work stations for Hytale - place a block, press `F`, and watch your character
 (or a stand-in performer) do the work over real time instead of an instant menu conversion.
 
-A standalone server mod, package root `com.ziggfreed.rpgstations`. It ships one complete jar-default
-station - a Sawmill, craftable at a tier 2 Workbench, with a tool-scaling yield curve, a
-session-loyalty find ladder, and a rare trophy hatchet to chase - so it is playable with no content
-pack at all, and its engine underneath - multi-action stations, step programs, multi-station walks,
-placed-input custody and props, the puppet performer, conditional loot, and enhancement stamping - is
-the full thing, all driven from ordinary content assets a pack (or a server's own assets) can extend.
+A standalone server mod, package root `com.ziggfreed.rpgstations`. It ships two complete jar-default
+stations - a Sawmill, craftable at a tier 2 Workbench, with a tool-scaling yield curve, a
+session-loyalty find ladder, and a rare trophy hatchet to chase; and a Cooking Pit you BUILD rather
+than craft (a ring of stone around an unlit campfire), which grills raw food over the bare flame and
+cooks whole meals once its iron Cooking Pot is mounted, unattended, with dishes that burn if you
+forget them - so it is playable with no content pack at all, and its engine underneath -
+multi-action stations, step programs, multi-station walks, multiblock structure patterns,
+placed-input custody with sockets and props, unattended work, doneness windows, the puppet
+performer, conditional loot, and enhancement stamping - is the full thing, all driven from ordinary
+content assets a pack (or a server's own assets) can extend.
 
 RPG Stations carries no progression vocabulary of its own and depends on no other mod. A soft
 extension surface (native events plus a typed api artifact) lets another mod turn completed station

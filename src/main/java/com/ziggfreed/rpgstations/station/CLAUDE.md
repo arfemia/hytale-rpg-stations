@@ -220,21 +220,35 @@ The result is a flat [`ActionResolver.ResolvedAction`](ActionResolver.java) - ev
 inside it - they operate on the RAW `ActionDef`s in `effectiveActions`, choosing WHICH action id
 to resolve.
 
-**Ordered-array selection.** `StationAsset.Actions[]` is authored order, and authored order IS
-selection priority: `selectAction`/`selectActionByFamily` walk front to back and return the FIRST
-action whose effective `Select` (its own, or its `Ref` base's) is absent, catch-all, or matches
-the held/placed context. A station authoring no actions selects nothing and is inert
-(`STATION_NO_ACTIONS`). `StationService#toggle` runs action selection BEFORE the `Requires` check,
-so the right action's own gate is the one checked - a loaded custody claim already owned by the
-player commits to ITS OWN action first (re-pressing F with a different item held never switches a
-ritual already in progress); a restart-orphan recovery path
+**Ordered-array selection, gate-aware.** `StationAsset.Actions[]` is authored order, and authored
+order IS selection priority: `selectAction`/`selectActionByFamily` walk front to back and return
+the FIRST action whose effective `Select` (its own, or its `Ref` base's) is absent, catch-all, or
+matches the held/placed context. `ActionResolver.selectActionsByFamily` (the plural core; the
+single form answers its head) returns EVERY match in that order, and
+`StationService#selectActionForHeld` picks the first whose own `Requires` gate PASSES, falling
+back to the first match when none does - so the engage gate denies that one with the honest
+requirements-unmet toast, and a single-action station selects and denies byte-identically to the
+pre-gate walk. `Requires` is a "when it applies" concern beside `Select` (the `ActionDef` javadoc's
+own grouping), which is what lets the shipped cooking pit layer a vessel-gated Stew over an open
+Grill on one block. A station authoring no actions selects nothing and is inert
+(`STATION_NO_ACTIONS`). A loaded custody claim already owned by the
+player commits to ITS OWN action first, BYPASSING selection (re-pressing F with a different item
+held never switches a ritual already in progress; the engage gate still checks the committed
+action, which is how a loaded stew whose pot was removed denies instead of running); a
+restart-orphan recovery path
 (`ActionResolver.selectActionForBlockState`) falls back to matching the block's own persisted
 `Custody.States.Loaded` name when neither a live claim nor the held item resolves an action.
 
 **`Requires` ANDing.** `toggle()` checks `checkRequires(asset.getRequires(), ...)` AND
 `checkRequires(resolvedAction.getRequires(), ...)` - both must pass. Neither defaults the other:
 an action authoring no `Requires` is gated by the station's alone, and a station authoring none
-leaves the action's own gate as the only one.
+leaves the action's own gate as the only one. Both calls (and the per-candidate selection walk)
+share ONE `socketsFilledAt` snapshot per press - the `rpgstations:socket_filled` readings, the
+UNION over every action's effective sockets (an Item socket answers by its pile, a Block socket by
+`blockSocketSatisfied`'s world read; the first action wins a duplicate id; pure core
+`socketsFilledInto`) - carried into the api `FactorContext` as plain data, so the built-in
+provider never touches the world itself and every other build site simply omits the readings
+(the factor then fails closed there).
 
 **Per-action completion.** The session-end `completion` moment, and a
 `Roll{Trigger:"Completion"}` in the action's own `Bonus`, are both read off the RESOLVED action -
@@ -1115,10 +1129,14 @@ persisted stash (non-empty keeps Loaded correct, empty resets to Empty).
 `AmbientSoundEventId` (LOOPING+MONO validated, "a looping ambient sound event that emits from this
 block when placed") and per-state `Particles`; both start and STOP automatically with the
 `setBlockInteractionState` flip, which matters because nothing in the protocol can stop a playing
-sound or particle system. The held-back `RPG_Station_CookingFire` block (`unreleased/Server/Item/Items/`) copies vanilla
-`Furniture_Crude_Brazier` verbatim on its `Lit` state for this - the worked example to restore
-from, since the 0.1.0 jar ships the Sawmill alone. Corollary for step `Presentation.Sound`: only ever
-author a ONE-SHOT SoundEvent there - a looping id fired as a one-shot never ends.
+sound or particle system. The SHIPPED `RPG_Station_CookingPit` block copies vanilla
+`Furniture_Crude_Brazier` verbatim on its `Lit` state for this (the held-back
+`RPG_Station_CookingFire` under `unreleased/Server/Item/Items/` is the same pairing), and the
+shipped `RPG_Station_Cooking_Pot` block carries the vanilla cauldron's always-on bubbling ambient
+the same native way. Corollary for step `Presentation.Sound`: only ever
+author a ONE-SHOT SoundEvent there - a looping id fired as a one-shot never ends (both cauldron
+bubbling events loop, which is why the pit's Stew cycle cue is a one-shot slosh and the bubbling
+lives on the pot block).
 
 ## Doneness: the lazy ready window (decisions 87/88)
 
@@ -1229,7 +1247,12 @@ settling its recipe conversions while nobody is engaged. Three classes, three al
   worker moments. Steps/Anchors actions run attended-only (`UNATTENDED_WITH_STEPS`/`_WITH_ANCHORS`
   warn; `UNATTENDED_WITHOUT_CUSTODY` for the unplaceable case), and
   `DONENESS_WITHOUT_PRODUCE_SOCKET` is EXEMPT for an unattended action (its settle produces into
-  custody by construction).
+  custody by construction). **A Required BLOCK socket gates the settle** exactly as the attended
+  heartbeat's `SOCKET_LOST` re-check does: `requiredBlockSocketsStand` failing hands the settle NO
+  conversions, so the clock stamps forward and the backlog FORFEITS (the same no-runnable-row
+  posture as input starvation - re-mounting the pot never burst-pays), while the doneness settle
+  above still runs (a batch standing in its pile keeps aging whatever happened to the socket
+  block).
 - **The gather payout** (`grantAccruedAtGather`, called at press-F retrieval, `returnCustody`'s
   hand-back and `releaseAnchorClaims`' both branches, BEFORE the piles leave the stash): drains
   the accrual keys (`drainAccruedCycles` - doneness keys untouched), caps at `MaxCycles`, builds

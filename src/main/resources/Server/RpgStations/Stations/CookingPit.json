@@ -1,0 +1,209 @@
+{
+  "$Comment": "The cooking pit work station: the block a completed CookingPit structure pattern turns its campfire into (Server/RpgStations/Patterns/CookingPit.json builds it; the block is never crafted). TWO layered actions share the block, and the pot decides which one a press gets. GRILL is the bare-pit action: its Requires condition holds only while the Vessel socket is EMPTY (rpgstations:socket_filled, Max 0 - an open flame you can grill over), so with no pot mounted a press with raw meat, a raw vegetable, or a raw fish piece loads the pit and grills it through the campfire's own native processing recipes. STEW is the pot action: its Requires needs the Vessel socket FILLED (Min 1), so once a cooking pot block stands one cell above the pit, the same press routes ingredients into the pot instead - the pot covers the flame, which is also why Grill refuses while it is mounted. Both actions run unattended: load the pit or the pot, walk away, and cycles keep settling on world game time in loaded chunks, with the loot and contributions those cycles earn paid to whoever gathers the output. Both cook toward a doneness window - output left uncollected past its ReadyMs chars into charcoal (salads never burn; they author no window). Block.Exclusive false lets two players load different sockets of the communal pot at once; the custody-level Share opens placing and working to everyone while each pile still belongs to whoever started it, and the finished meals on the Output socket are collectable by anyone (its Reclaim override). Tune any number in place, or override this file by id from a pack.",
+  "Identity": {
+    "NameKey": "rpgstations.station.cookingpit.name",
+    "DescKey": "rpgstations.station.cookingpit.desc"
+  },
+  "Block": {
+    "$Comment": "Exclusive false: the pit is communal - a second player may press F to load their own socket while another works. Per-pile ownership and the Share knobs below keep materials from mixing.",
+    "Exclusive": false
+  },
+  "Actions": [
+    {
+      "$Comment": "The bare-pit grill. Select matches exactly what the campfire can cook raw: raw fish pieces by id, raw meats by the Meats family, crops by their Crop tag family. Custody authors no Input and no Sockets: acceptance derives from the recipe inputs into the one classic pile, capped at MaxQuantity. Recipe-level Doneness covers every derived row at once: cooked food left on the pit for a minute past done chars into charcoal, one per uncollected batch.",
+      "Id": "Grill",
+      "Label": "rpgstations.action.grill.label",
+      "Select": {
+        "ItemId": "Food_Fish_Raw",
+        "ResourceTypeId": "Meats",
+        "Tags": { "Family": ["Crop"] }
+      },
+      "Requires": {
+        "Conditions": [
+          { "Factor": "rpgstations:socket_filled", "Param": "Vessel", "Max": 0 }
+        ]
+      },
+      "Recipe": {
+        "FromCrafting": {
+          "$Comment": "Authors NO conversions of its own - this derives them from the engine's real Campfire processing recipes (raw meat to cooked wildmeat, raw fish to grilled fish, vegetables to roasted vegetables; a pack that adds a Campfire processing recipe widens this grill with zero edits here), paced by NativeTime as Scale x native seconds + OffsetMs. This pit needs no fuel because the native recipes it derives from name none; to make yours want fuel, author a Conversions row that also consumes the fuel item (e.g. an Ingredient_Charcoal input beside the food input) - a derived row never invents an input the native recipe does not have.",
+          "Benches": ["Campfire"],
+          "Types": ["Processing"],
+          "NativeTime": { "Scale": 1.0, "OffsetMs": 2000 }
+        },
+        "Doneness": {
+          "ReadyMs": 60000,
+          "Overdone": [ { "ItemId": "Ingredient_Charcoal", "Quantity": 1 } ]
+        }
+      },
+      "Work": {
+        "$Comment": "CycleMs is the fallback cadence; each derived recipe's own NativeTime pace outranks it. Authoring Unattended at all opts the grill into keep-cooking-while-away, at the default 24-cycle / 24-hour catch-up ceilings.",
+        "CycleMs": 6000,
+        "Unattended": {}
+      },
+      "Custody": {
+        "MaxQuantity": 40,
+        "States": { "Empty": "Default", "Loaded": "Loaded", "Working": "Lit", "Ready": "Ready", "Overdone": "Smoking" },
+        "Display": {
+          "Offset": { "Y": 0.4 },
+          "Scale": 0.6
+        }
+      },
+      "Worker": {
+        "Hold": {
+          "MovementLock": true,
+          "EffectId": "RPG_Station_Hold",
+          "InterruptOnDamage": true
+        },
+        "Camera": {
+          "Recipe": "LookRot"
+        },
+        "Puppet": {
+          "Enabled": true,
+          "Hide": { "Route": "Scale" },
+          "Look": { "Source": "PlayerClone" },
+          "Offset": { "X": 0.0, "Y": -0.45, "Z": 0.9 },
+          "Rotation": { "Yaw": 0.0 },
+          "Prop": { "Source": "MirrorHeld", "Slot": "Hotbar" }
+        }
+      },
+      "Moments": {
+        "Cycle": {
+          "$Comment": "One sizzle per finished grill cycle: a one-shot flame crackle plus a puff of smoke. The looping fire crackle and embers live on the block's own Lit state instead, starting and stopping with the state flip.",
+          "Sounds": ["SFX_Flame_Ignite"],
+          "Particles": [ { "SystemId": "Smoke_Black" } ]
+        },
+        "Ready": {
+          "Sounds": ["SFX_Campfire_Processing_End"]
+        },
+        "Overdone": {
+          "Sounds": ["SFX_Campfire_Processing_Failed"],
+          "Particles": [ { "SystemId": "Smoke_Black", "Scale": 1.5 } ]
+        }
+      }
+    },
+    {
+      "$Comment": "The pot action. Requires needs the Vessel socket filled: a RPG_Station_Cooking_Pot block standing one cell above the pit (the At offset; the structure pattern keeps that cell open for it, and mounting the pot never breaks the standing shape). Ingredients is the pot's mouth: one item per press (PlacePerPress 1), up to six things, anything edible - foods by their Food type tag, crops by their Crop family tag, whole caught fish by the Fish resource family. Output is where finished meals land, addressed by each recipe row's Socket leaf; its Match names only this jar's own stew because by-hand placement is all a Match ever gates - recipe rows land their outputs wherever they address. Rows are authored exact-set first: exactly meats plus vegetables in the pot makes a kebab, exactly vegetables makes a caesar salad, and ANYTHING else - the route-less match-any row - simmers three of whatever is in the pot into a hearty stew. Kebab and stew burn to charcoal if left past their ReadyMs; the salad authors no window and never spoils. The custody Share opens placing (into an empty pile) and working to every player while each pile keeps one owner; Output's Reclaim override lets anyone collect a finished meal.",
+      "Id": "Stew",
+      "Label": "rpgstations.action.stew.label",
+      "Select": {
+        "ResourceTypeId": "Fish",
+        "Tags": { "Type": ["Food"], "Family": ["Crop"] }
+      },
+      "Requires": {
+        "Conditions": [
+          { "Factor": "rpgstations:socket_filled", "Param": "Vessel", "Min": 1 }
+        ]
+      },
+      "Recipe": {
+        "Conversions": [
+          {
+            "Input": [
+              { "ResourceTypeId": "Meats", "Quantity": 2, "Socket": "ingredients" },
+              { "ResourceTypeId": "Vegetables", "Quantity": 1, "Socket": "ingredients" }
+            ],
+            "Output": [ { "ItemId": "Food_Kebab_Meat", "Quantity": 1, "Socket": "output" } ],
+            "DurationMs": 6000,
+            "IsExactSet": true,
+            "Doneness": {
+              "ReadyMs": 60000,
+              "Overdone": [ { "ItemId": "Ingredient_Charcoal", "Quantity": 1 } ]
+            }
+          },
+          {
+            "Input": [ { "ResourceTypeId": "Vegetables", "Quantity": 2, "Socket": "ingredients" } ],
+            "Output": [ { "ItemId": "Food_Salad_Caesar", "Quantity": 1, "Socket": "output" } ],
+            "DurationMs": 5000,
+            "IsExactSet": true
+          },
+          {
+            "Input": [ { "Quantity": 3, "Socket": "ingredients" } ],
+            "Output": [ { "ItemId": "RPG_Food_Hearty_Stew", "Quantity": 1, "Socket": "output" } ],
+            "DurationMs": 9000,
+            "Doneness": {
+              "ReadyMs": 90000,
+              "Overdone": [ { "ItemId": "Ingredient_Charcoal", "Quantity": 1 } ]
+            }
+          }
+        ]
+      },
+      "Work": {
+        "CycleMs": 6000,
+        "Unattended": { "MaxCycles": 24 }
+      },
+      "Custody": {
+        "$Comment": "MaxQuantity caps the whole block across every socket; each socket's own cap is the smaller of its MaxQuantity and this. Share here is the default every socket inherits per leaf: anyone may start a pile in an empty socket and work from loaded ones, but only a pile's owner takes it back - except finished meals, whose socket overrides Reclaim below.",
+        "MaxQuantity": 10,
+        "States": { "Empty": "Default", "Loaded": "Loaded", "Working": "Lit", "Ready": "Ready", "Overdone": "Smoking" },
+        "Share": { "Place": true, "Use": true, "Reclaim": false },
+        "Sockets": {
+          "vessel": {
+            "Block": {
+              "At": { "Y": 1 },
+              "Match": { "ItemId": "RPG_Station_Cooking_Pot" }
+            },
+            "Required": true,
+            "Label": "rpgstations.socket.cookingpit.vessel"
+          },
+          "ingredients": {
+            "Item": {
+              "Match": {
+                "ResourceTypeId": "Fish",
+                "Tags": { "Type": ["Food"], "Family": ["Crop"] }
+              },
+              "PlacePerPress": 1
+            },
+            "MaxQuantity": 6,
+            "Display": {
+              "Offset": { "Y": 1.15 },
+              "Scale": 0.3
+            },
+            "Label": "rpgstations.socket.cookingpit.ingredients"
+          },
+          "output": {
+            "Item": {
+              "Match": { "ItemId": "RPG_Food_Hearty_Stew" }
+            },
+            "MaxQuantity": 4,
+            "Display": {
+              "Offset": { "Y": 1.45 },
+              "Scale": 0.35
+            },
+            "Share": { "Reclaim": true },
+            "Label": "rpgstations.socket.cookingpit.output"
+          }
+        }
+      },
+      "Worker": {
+        "Hold": {
+          "MovementLock": true,
+          "EffectId": "RPG_Station_Hold",
+          "InterruptOnDamage": true
+        },
+        "Camera": {
+          "Recipe": "LookRot"
+        },
+        "Puppet": {
+          "Enabled": true,
+          "Hide": { "Route": "Scale" },
+          "Look": { "Source": "PlayerClone" },
+          "Offset": { "X": 0.0, "Y": -0.45, "Z": 0.9 },
+          "Rotation": { "Yaw": 0.0 },
+          "Prop": { "Source": "MirrorHeld", "Slot": "Hotbar" }
+        }
+      },
+      "Moments": {
+        "Cycle": {
+          "$Comment": "A wet slosh per stir of the pot; the constant bubbling is the pot block's own ambient sound, which plays while it is placed with no cue to author here.",
+          "Sounds": ["SFX_Water_MoveOut"]
+        },
+        "Ready": {
+          "Sounds": ["SFX_Furnace_Bench_Processing_Complete"]
+        },
+        "Overdone": {
+          "Sounds": ["SFX_Campfire_Processing_Failed"],
+          "Particles": [ { "SystemId": "Smoke_Black", "Scale": 1.5 } ]
+        }
+      }
+    }
+  ]
+}

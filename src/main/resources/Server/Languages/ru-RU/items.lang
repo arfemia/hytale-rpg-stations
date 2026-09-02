@@ -17,3 +17,13 @@ RPG_Station_CookingFire.hint.loaded = Нажмите [{key}], чтобы раб�
 
 RPG_Tool_Hatchet_Sawmiller.name = Топор лесопильщика
 RPG_Tool_Hatchet_Sawmiller.description = Мастерский мифриловый топор, отточенный бесчисленными часами на лесопилке. Острее и прочнее кузнечного оригинала.
+RPG_Station_CookingPit.name = Кухонный очаг
+RPG_Station_CookingPit.description = Костёр, обложенный камнем. Жарьте сырую еду над открытым огнём или установите сверху котелок, чтобы готовить полноценные блюда. Нажмите использование, чтобы начать работу.
+RPG_Station_CookingPit.hint.empty = Нажмите [{key}], чтобы готовить
+RPG_Station_CookingPit.hint.loaded = Нажмите [{key}], чтобы работать
+RPG_Station_CookingPit.hint.ready = Нажмите [{key}], чтобы забрать
+RPG_Station_CookingPit.hint.overdone = Нажмите [{key}], чтобы убрать нагар
+RPG_Station_Cooking_Pot.name = Котелок
+RPG_Station_Cooking_Pot.description = Прочный железный котелок. Поставьте его прямо над кухонным очагом, чтобы варить похлёбку.
+RPG_Food_Hearty_Stew.name = Сытная похлёбка
+RPG_Food_Hearty_Stew.description = Миска всего, что попало в котелок, томлёная до полного согласия. Восстанавливает здоровье; настоящая смесь мяса и овощей укрепляет и здоровье, и выносливость.

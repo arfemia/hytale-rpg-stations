@@ -204,6 +204,23 @@ public class ActionResolverTest {
     }
 
     @Test
+    void selectActionsByFamily_returnsEveryMatch_inAuthoredOrder_andTheSingleFormIsItsHead() {
+        ActionInput sameRoute = ActionInput.of(null, "Fixture_Family", null, null);
+        StationAsset a = station(
+                def("Alpha").withSelect(sameRoute),
+                def("Miss").withSelect(ActionInput.of("Fixture_Other", null, null, null)),
+                def("Beta").withSelect(sameRoute));
+
+        assertEquals(List.of("Alpha", "Beta"), ActionResolver.selectActionsByFamily(
+                        a, null, new String[] {"Fixture_Family"}, null, null),
+                "the candidate list is every matching action, authored order preserved, misses skipped"
+                        + " - what the engage walk filters with each candidate's own Requires gate");
+        assertEquals("Alpha", ActionResolver.selectActionByFamily(
+                a, null, new String[] {"Fixture_Family"}, null, null));
+        assertEquals(List.of(), ActionResolver.selectActionsByFamily(a, "Dirt", null, null, null));
+    }
+
+    @Test
     void selectAction_noActions_selectsNothing() {
         assertNull(ActionResolver.selectAction(new StationAsset(), "Anything", null, null, null));
         assertNull(ActionResolver.selectActionByFamily(new StationAsset(), "Anything",
