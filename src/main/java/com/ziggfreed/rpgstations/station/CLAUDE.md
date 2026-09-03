@@ -99,11 +99,15 @@ the WHOLE set executes:
   axes at the vanilla Mithril hatchet's own values (`tool_quality >= 4`, `tool_item_level >= 50`,
   `tool_power >= 0.5`) plus `cycle_count >= 5`, a visible `Chance.Base` of `0.04` (1 in 2500)
   with NO factors - deliberately the plainest possible curve, since a luck-scaled one reads channels
-  this mod knows nothing about - granting inline through its own top-level `Grants.Commands`
-  (`give {player} RPG_Tool_Hatchet_Sawmiller`) under its own top-level `Cue: "cue:trophy"`, the open
+  this mod knows nothing about - granting inline through its own top-level `Grants.Items` (one
+  `RPG_Tool_Hatchet_Sawmiller`: hotbar first, then the backpack, then the ground at the block when
+  the bag is full) under its own top-level `Cue: "cue:trophy"`, the open
   cue-namespace moment id the action's `Moments` map then dresses. It is the
-  shipped exemplar of the roll-level cue, and a command grant always counts as produced so the
-  fanfare can never fire dry. `RPG_Tool_Hatchet_Sawmiller` itself is a drop-only Legendary
+  shipped exemplar of the roll-level cue; an item grant counts as produced only when the stack
+  actually landed, so the fanfare never fires over an empty hand, and because it is an item grant
+  the hatchet rides the grant pass's `StationOutputProducedEvent` like any other stack (a
+  `Grants.Commands` payout would be invisible to every listener - the engine cannot know what a
+  command gave). `RPG_Tool_Hatchet_Sawmiller` itself is a drop-only Legendary
   masterwork Mithril copy (500 durability, Woods power `0.55`, explicit `Tags.Family: Hatchet`),
   authored with NO `Parent` and NO `Recipe` deliberately - a Parent off the vanilla Mithril hatchet
   would inherit its forge recipe and make the chase pointless.
@@ -187,12 +191,20 @@ a discriminator.
   iteration's consumed ledger, so refund and custody-return stay mutually exclusive per iteration.
   A `Walk` phase can split a `Consume`+`Produce` pair across a suspend, which is exactly why the
   `iterationConsumed` ledger refunds an in-flight iteration at `stop()`.
-- **A committed produce phase reports ONE api `StationOutputProducedEvent`** (both destinations;
-  the inventory route excludes a stack that reached neither the inventory nor the ground), through
+- **A committed produce phase reports ONE api `StationOutputProducedEvent`, and so does ONE
+  committed grant pass** (both destinations for a produce; the inventory route excludes a stack
+  that reached neither the inventory nor the ground), through the STATIC
   `StationService#fireOutputProduced` - the funnel that resolves where the batch landed (the
-  `At`-anchor block for custody, the primary block for inventory). Attended sessions only: the
-  unattended settle fires nothing, its output pays out at gather on
-  `StationUnattendedGatheredEvent`.
+  `At`-anchor block for custody, the primary block for inventory) and reads only session fields,
+  which is what lets the static `applyGrantResult` reach it. The grant pass reports
+  `[the bonus output, as the count that LANDED] + every Items/DropLists stack`
+  (`grantPassBatch`) with a null socket at the primary block, LAST (after the cues and the item
+  toasts), from all three routes into `applyGrantResult` (the step `Roll` phase, `rollCycleBonus`,
+  `rollCompletionLoot`); a pass that landed nothing fires nothing and a `Commands` payout is never
+  in the batch. Attended sessions only: the unattended settle fires nothing and
+  `applyGatherGrantResult` fires nothing either; that output pays out once, at gather, on
+  `StationUnattendedGatheredEvent`. The `progression/` producers turn both moments into
+  `STATION_OUTPUT` (and a real cycle into `WORK_STATION`) - see `../progression/CLAUDE.md`.
 
 ## Action resolution: Id lookup -> Ref overlay -> extension overlays
 
@@ -512,7 +524,8 @@ action's own `Bonus` (evaluated by `loot.StationLootEngine` over the shared roll
 consumers") tallies `Grants.OutputItems`, and `StationService#grantBonusOutputItems` hands out
 additional units of `s.cycleOutputItemId` (the cycle's own resolved primary output,
 captured right after `StationYield.applyToOutputs` runs) through the same `util.ItemGrantUtil`
-seam every other grant uses. **That tally is FRACTIONAL and resolves ONCE PER CYCLE**
+seam every other grant uses, and answers the count that LANDED (0 on every no-op), which is the
+count the grant pass's `StationOutputProducedEvent` carries. **That tally is FRACTIONAL and resolves ONCE PER CYCLE**
 (`loot.OutputItemResolver` with `ThreadLocalRandom`: the whole part always, plus one more at the
 leftover fraction's probability), so a `1.5` ladder floor pays one item always plus a second half
 the time, and two rolls paying `0.5` each average a whole item instead of rounding twice; the
@@ -1277,8 +1290,10 @@ settling its recipe conversions while nobody is engaged. Three classes, three al
   most 24 passes, so no batched-Repeat approximation is needed; `applyGatherGrantResult` is the
   sessionless `applyGrantResult` twin - items/droplists/commands/effects land on the gatherer,
   cues play via `playPresentationAt`, `OutputItems` pays the accrued conversion's primary output,
-  and a replayed roll's one-shot `rpgstations:contribution` grants are DROPPED, the documented
-  boundary), then fires `StationUnattendedGatheredEvent` (gatherer never null). Breaking the block
+  a replayed roll's one-shot `rpgstations:contribution` grants are DROPPED, the documented
+  boundary, and NO `StationOutputProducedEvent` fires for the batch), then fires
+  `StationUnattendedGatheredEvent` (gatherer never null) - the one place a gathered batch is
+  reported. Breaking the block
   forfeits accrual with the stash, like the doneness window.
 
 **Sections have no listenable unload for this mod's purposes** (the engine's `SectionUnloadEvent`

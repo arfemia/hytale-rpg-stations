@@ -40,6 +40,7 @@ import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
 import com.ziggfreed.rpgstations.command.RpgStationsCommand;
 import com.ziggfreed.rpgstations.interaction.StationRetrieveInteraction;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
+import com.ziggfreed.rpgstations.progression.StationProgressProducers;
 import com.ziggfreed.rpgstations.station.ActionCatalog;
 import com.ziggfreed.rpgstations.station.ExtensionCatalog;
 import com.ziggfreed.rpgstations.station.FlairCatalog;
@@ -78,7 +79,10 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@code StationService}/{@code StationFlairs}, seeding the flair union with its own
  * {@link ZigFlairUnlockProvider} (the shared per-player flair component read) so unlocks work with
  * no other mod installed - see
- * {@code .claude/research/raw/rpg-stations-unified-design-2026-07-21.md} section 3.
+ * {@code .claude/research/raw/rpg-stations-unified-design-2026-07-21.md} section 3. It also
+ * subscribes this engine's own two progression producers ({@link StationProgressProducers}: the
+ * {@code WORK_STATION} and {@code STATION_OUTPUT} objective kinds, fired into ziggfreed-common's
+ * shared runtime off the api events) so authored content advances from station play alone.
  *
  * <p>It also registers {@link RpgStationsCommand} ({@code /rpgstations camera <preset>|list},
  * {@code /rpgstations validate}), the design 4.1 command-group scope.
@@ -131,6 +135,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerStationSystems();
         registerTeardownHooks();
         registerWorldEviction();
+        registerProgressProducers();
         registerPostLoadAudit();
         registerSummaryHudInstall();
         registerPuppetSafetyNet();
@@ -264,6 +269,20 @@ public class RpgStationsPlugin extends JavaPlugin {
                 Log.warn("Station disconnect teardown failed: " + t.getMessage());
             }
         });
+    }
+
+    /**
+     * The two objective kinds this engine fires ({@link StationProgressProducers}), subscribed to
+     * its own api events so they see exactly what a consumer sees; the kinds themselves are
+     * described by the shipped {@code ObjectiveKinds} files, not registered here.
+     */
+    private void registerProgressProducers() {
+        try {
+            StationProgressProducers.register(getEventRegistry());
+        } catch (Throwable t) {
+            Log.warn("RpgStations could not subscribe its progression producers; station work will "
+                    + "advance no quest or achievement.", t);
+        }
     }
 
     /**

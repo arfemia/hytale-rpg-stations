@@ -679,7 +679,7 @@ final class StationStepHandlers {
                         step.getAt(), windowSocketId);
                 // ONE output-produced moment per committed phase (the attended custody commit
                 // route); the batch reports the socket its readiness window sits on.
-                StationService.getInstance().fireOutputProduced(ctx.session, ctx.store,
+                StationService.fireOutputProduced(ctx.session, ctx.store,
                         step.getAt(), windowSocketId, committed);
             } catch (Throwable t) {
                 Log.warn("STATION Produce To:Custody step failed for '" + ctx.session.stationId + "': "
@@ -725,7 +725,7 @@ final class StationStepHandlers {
             StationService.clearIterationLedgerOnCommittedProduce(ctx.session);
             // ONE output-produced moment per committed phase (the inventory route; a stack that
             // reached neither the inventory nor the ground is excluded - the player never got it).
-            StationService.getInstance().fireOutputProduced(ctx.session, ctx.store, null, null, committed);
+            StationService.fireOutputProduced(ctx.session, ctx.store, null, null, committed);
         } catch (Throwable t) {
             Log.warn("STATION Produce step failed for '" + ctx.session.stationId + "': " + t.getMessage());
             return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL, t.getMessage());

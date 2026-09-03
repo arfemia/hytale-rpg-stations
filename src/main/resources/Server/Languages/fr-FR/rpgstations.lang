@@ -110,3 +110,7 @@ action.stew.label = Ragoût
 socket.cookingpit.vessel = la marmite
 socket.cookingpit.ingredients = le mélange du ragoût
 socket.cookingpit.output = les plats terminés
+objective.text.work_station = Effectuez {0} cycles à {1}
+objective.text.work_station.any = Effectuez {0} cycles à n'importe quelle station
+objective.text.station_output = Récupérez {0} {1} d'une station de travail
+objective.text.station_output.any = Récupérez {0} objets d'une station de travail

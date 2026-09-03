@@ -110,3 +110,7 @@ action.stew.label = Похлёбка
 socket.cookingpit.vessel = котелка
 socket.cookingpit.ingredients = смеси для похлёбки
 socket.cookingpit.output = готовых блюдах
+objective.text.work_station = Отработайте {0} циклов на {1}
+objective.text.work_station.any = Отработайте {0} циклов на любой станции
+objective.text.station_output = Соберите {0} {1} с рабочей станции
+objective.text.station_output.any = Соберите {0} предметов с рабочей станции

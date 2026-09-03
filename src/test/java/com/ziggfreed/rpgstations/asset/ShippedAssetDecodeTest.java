@@ -16,6 +16,7 @@ import com.hypixel.hytale.assetstore.JsonAsset;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 import com.ziggfreed.common.loot.LootableAsset;
 import com.ziggfreed.common.loot.stamp.RollPoolAsset;
+import com.ziggfreed.common.progress.asset.ObjectiveKindAsset;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -38,7 +39,12 @@ import static org.junit.jupiter.api.Assertions.fail;
  * inside an object with named fields rather than directly inside an {@code Anchors} /
  * {@code PerStat} / {@code Tags} group - the list {@code asset/CLAUDE.md} keeps current.
  *
- * <p>An unmapped folder under a scanned {@code RpgStations} root FAILS rather than being skipped, so
+ * <p>Two jar roots are walked: this mod's own {@code Server/RpgStations} stores, and the files it
+ * ships into the SHARED library's {@code Server/ZiggfreedCommon} stores (its lootables and the two
+ * objective kinds it fires), decoded through the library's codecs the same way. A file is judged by
+ * the store folder directly under its root, so a store may group its files in a sub-folder (the
+ * objective kinds sit under {@code ObjectiveKinds/RpgStations/}) without that grouping reading as an
+ * unknown store. An unmapped store folder under a scanned root FAILS rather than being skipped, so
  * a new asset type is covered here the day it ships its first file; a mapped folder holding zero
  * files is legal (a registered store can be empty in a given release scope), because only files are
  * ever judged. The optional roots are not declared Gradle task inputs, so an edit touching only one
@@ -53,27 +59,31 @@ public class ShippedAssetDecodeTest {
         Object decode(String body, String assetKey) throws Exception;
     }
 
-    /** The asset-store folder name (under {@code Server/RpgStations}) -> its registered codec. */
-    private static final Map<String, AssetDecoder> DECODERS = Map.of(
+    /** The asset-store folder name (directly under a scanned root) -> its registered codec. */
+    private static final Map<String, AssetDecoder> DECODERS = Map.ofEntries(Map.entry(
             "Stations", (body, key) -> StationAsset.CODEC.decodeAndInheritJsonAsset(
-                    RawJsonReader.fromJsonString(body), null, info(StationAsset.class, key)),
-            "Actions", (body, key) -> ActionAsset.CODEC.decodeAndInheritJsonAsset(
-                    RawJsonReader.fromJsonString(body), null, info(ActionAsset.class, key)),
-            "Extensions", (body, key) -> ExtensionAsset.CODEC.decodeAndInheritJsonAsset(
-                    RawJsonReader.fromJsonString(body), null, info(ExtensionAsset.class, key)),
-            "Lootables", (body, key) -> LootableAsset.CODEC.decodeAndInheritJsonAsset(
-                    RawJsonReader.fromJsonString(body), null, info(LootableAsset.class, key)),
-            "RollPools", (body, key) -> RollPoolAsset.CODEC.decodeAndInheritJsonAsset(
-                    RawJsonReader.fromJsonString(body), null, info(RollPoolAsset.class, key)),
-            "Flairs", (body, key) -> FlairAsset.CODEC.decodeAndInheritJsonAsset(
-                    RawJsonReader.fromJsonString(body), null, info(FlairAsset.class, key)),
-            "Patterns", (body, key) -> StructurePatternAsset.CODEC.decodeAndInheritJsonAsset(
-                    RawJsonReader.fromJsonString(body), null, info(StructurePatternAsset.class, key)),
-            "Settings", (body, key) -> RpgStationsSettingsAsset.CODEC.decodeAndInheritJsonAsset(
-                    RawJsonReader.fromJsonString(body), null, info(RpgStationsSettingsAsset.class, key)));
+                    RawJsonReader.fromJsonString(body), null, info(StationAsset.class, key))),
+            Map.entry("Actions", (body, key) -> ActionAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(ActionAsset.class, key))),
+            Map.entry("Extensions", (body, key) -> ExtensionAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(ExtensionAsset.class, key))),
+            Map.entry("Lootables", (body, key) -> LootableAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(LootableAsset.class, key))),
+            Map.entry("RollPools", (body, key) -> RollPoolAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(RollPoolAsset.class, key))),
+            Map.entry("ObjectiveKinds", (body, key) -> ObjectiveKindAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(ObjectiveKindAsset.class, key))),
+            Map.entry("Flairs", (body, key) -> FlairAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(FlairAsset.class, key))),
+            Map.entry("Patterns", (body, key) -> StructurePatternAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(StructurePatternAsset.class, key))),
+            Map.entry("Settings", (body, key) -> RpgStationsSettingsAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(RpgStationsSettingsAsset.class, key))));
 
-    /** This jar's own shipped assets. */
-    private static final Path JAR_ROOT = Path.of("src", "main", "resources", "Server", "RpgStations");
+    /** This jar's own shipped assets: its own stores, and what it ships into the shared library's stores. */
+    private static final List<Path> JAR_ROOTS = List.of(
+            Path.of("src", "main", "resources", "Server", "RpgStations"),
+            Path.of("src", "main", "resources", "Server", "ZiggfreedCommon"));
 
     /**
      * This repo's own held-back content mirror (a byte-exact mirror of {@code src/main/resources},
@@ -99,8 +109,10 @@ public class ShippedAssetDecodeTest {
     @Test
     void everyShippedAsset_decodesThroughItsOwnCodec() throws IOException {
         List<String> failures = new ArrayList<>();
-        int decoded = decodeRoot(JAR_ROOT, failures);
-        assertTrue(decoded > 0, "no shipped RpgStations assets were found at " + JAR_ROOT.toAbsolutePath());
+        for (Path root : JAR_ROOTS) {
+            int decoded = decodeRoot(root, failures);
+            assertTrue(decoded > 0, "no shipped RpgStations assets were found at " + root.toAbsolutePath());
+        }
         for (Path root : OPTIONAL_ROOTS) {
             decodeRoot(root, failures);
         }
@@ -109,7 +121,11 @@ public class ShippedAssetDecodeTest {
         }
     }
 
-    /** Decodes every {@code .json} under {@code root}, appending one line per failure; returns the file count. */
+    /**
+     * Decodes every {@code .json} under {@code root}, appending one line per failure; returns the
+     * file count. The store is the folder directly under {@code root}, so a store grouping its
+     * files one level deeper is still judged by its own codec.
+     */
     private static int decodeRoot(Path root, List<String> failures) throws IOException {
         if (!Files.isDirectory(root)) {
             return 0;
@@ -121,7 +137,7 @@ public class ShippedAssetDecodeTest {
                     continue;
                 }
                 count++;
-                String folder = file.getParent().getFileName().toString();
+                String folder = root.relativize(file).getName(0).toString();
                 AssetDecoder decoder = DECODERS.get(folder);
                 if (decoder == null) {
                     failures.add(file + " sits in unmapped folder '" + folder

@@ -121,10 +121,25 @@ class StationCycleBonusTest {
         s.stationId = "fixtureritual";
         s.cycleOutputItemId = null;
 
-        StationService.grantBonusOutputItems(s, NULL_STORE, null, NULL_PLAYER, 3.0);
+        int landed = StationService.grantBonusOutputItems(s, NULL_STORE, null, NULL_PLAYER, 3.0);
 
+        assertEquals(0, landed, "nothing landed, so the grant pass has nothing to report");
         assertTrue(s.producedItems.isEmpty(), "nothing is produced when there is no cycle output");
         assertTrue(s.producedYield.isEmpty(), "and no yield-breakdown row is invented for it");
+    }
+
+    @Test
+    void grantPassBatch_withNothingLanded_isEmpty() {
+        // The output event fires only for a batch something landed from: no bonus units and no
+        // Items/DropLists stack means an empty batch, which the funnel then drops on its own
+        // emptiness check. A pass that paid only a command or an effect reports nothing.
+        StationSession s = new StationSession();
+        s.stationId = "fixtureritual";
+        s.cycleOutputItemId = "Plank_Oak";
+
+        assertTrue(StationService.grantPassBatch(s, 0, Map.of()).isEmpty());
+        assertTrue(StationService.grantPassBatch(s, 0, Map.of("Ingot_Iron", 0)).isEmpty(),
+                "a zero-count row is not a landed stack");
     }
 
     @Test

@@ -47,6 +47,14 @@ first; this one covers only what a STATION adds on top.
   ONE `emitMoment` funnel, where the action's own `Moments` map and every applicable flair get their
   say. Well-known ids plus `step:<actionId>:<stepId>` and the open author-defined `cue:<name>`
   namespace all pass the typo check (`StationFlairs.isKnownMomentId`).
+- **What a pass paid is REPORTED once, as station output.** After the cues and the item toasts,
+  `StationService.applyGrantResult` puts every stack the pass landed (the `OutputItems` bonus as
+  the count that landed, then every `Items`/`DropLists` stack, `getDropListItems()` folding both)
+  on ONE `StationOutputProducedEvent` with a null socket, which the `progression/` producers count
+  as `STATION_OUTPUT`. A `Commands` grant is the one kind nothing downstream can see - the engine
+  cannot know what a command gave - so a payout that must be countable (the trophy hatchet) is
+  authored as `Items`, never as a `give`. The unattended gather twin reports nothing; its batch
+  surfaces on `StationUnattendedGatheredEvent`.
 - **The three station kinds COLLECT, they do not act**, which is why they are a PER-PASS registry
   (`StationRewardKinds.forPass`, seeded from the process-wide vocabulary so a kind another mod
   registered still pays out here). An effect has to be tracked on the session that earned it, a

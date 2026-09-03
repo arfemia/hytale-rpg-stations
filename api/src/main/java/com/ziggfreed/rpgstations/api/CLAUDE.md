@@ -223,11 +223,20 @@ is the exact inverse of a permanently-opaque channel.
   gatherer-resolved `ContributionScale` x the cycle count) - grant each verbatim, filtered by
   channel exactly as on `StationCycleCompletedEvent`. **`StationOutputProducedEvent`** fires once
   per COMMITTED produce phase of an ATTENDED session (both destinations: placed custody, where
-  `socketId()` names the receiving pile, or the worker's inventory, where it is null), AFTER the
+  `socketId()` names the receiving pile, or the worker's inventory, where it is null) AND, since
+  apiVersion 8, once per COMMITTED grant pass (the cycle's `Grants.OutputItems` bonus as the count
+  that landed, every `Grants.Items` stack, every `Grants.DropLists` find; `socketId()` always
+  null, `actionId()` the paying action, the block the session's primary block; a pass that landed
+  nothing fires nothing, and a `Grants.Commands` payout is never reported because the engine
+  cannot know what a command gave), AFTER the
   whole batch landed, carrying the worker (`Ref` + `PlayerRef` + uuid, NEVER null - an unattended
-  settle deliberately does not fire it; that output surfaces on `StationUnattendedGatheredEvent`
+  settle deliberately does not fire it and neither does the gather that pays out its accrued
+  rolls; that output surfaces on `StationUnattendedGatheredEvent`
   at gather), the landing block, the station/action ids, and fresh immutable `ItemStack` copies
-  of what was committed. **`StationStructureChangedEvent`** fires when a multiblock pattern
+  of what landed. This engine's own `progression/` producers listen to it (and to the cycle
+  event) to fire the `STATION_OUTPUT` / `WORK_STATION` objective kinds into ziggfreed-common's
+  shared runtime, so a consumer counting output reads the same batches the engine's own content
+  advances on. **`StationStructureChangedEvent`** fires when a multiblock pattern
   changes standing state at its anchor - activation (`activated()` true, the actor is the placer)
   or revert (`false`, the actor is the breaker, null on an environment break) - AFTER the anchor
   swap and pattern bookkeeping committed, carrying the pattern id and the block item id now
@@ -259,7 +268,11 @@ exists specifically so a consumer can detect which additive members are present 
 reflection: bump it by exactly one integer per addition batch that lands under this policy (not
 per individual method - a coordinated wave of additions is one bump), never on its own.
 `apiVersion()` itself is exempt from "default-bodied only" since it shipped before the freeze; it
-will never change again once RpgStations reaches 1.0.0. Current value is **7**: the
+will never change again once RpgStations reaches 1.0.0. Current value is **8**: the
+`StationOutputProducedEvent` grant-pass contract (the event now also fires once per committed
+grant pass, carrying every stack a loot roll paid into the worker's hands - no member was added,
+but the moments an EXISTING event fires for grew, which a consumer branches on exactly like a new
+member, so it bumps the version) - from 7, the
 `StationCycleCompletedEvent.socketCounts()` additive getter (per-socket-id counts of the items a
 cycle's committed Produce landed in placed custody; the degenerate pile reports under `"main"`, a
 pure inventory-route cycle reports an empty map, never null) - from 6, one coordinated
@@ -271,7 +284,7 @@ the engine-computed plain-data readings behind the `rpgstations:socket_filled` b
 reached from 4, itself the `StationUnattendedGatheredEvent` event class's bump (from the
 `stationCount()` default-bodied addition's 3). **The api ARTIFACT's semver tracks this integer:
 `apiVersion()` N ships as artifact `0.N.0`** (`gradle.properties` `api_version`, currently
-`0.7.0`), so the number a consumer branches on and the number on the jar they compile against can
+`0.8.0`), so the number a consumer branches on and the number on the jar they compile against can
 never disagree; a bump of one is a bump of the other, in the same change.
 
 `RpgStationsApi.isAvailable()`/`find()` (added the same round) are convenience, not a way around

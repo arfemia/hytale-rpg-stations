@@ -110,3 +110,7 @@ action.stew.label = Ragu
 socket.cookingpit.vessel = a fazék
 socket.cookingpit.ingredients = a ragualap
 socket.cookingpit.output = a kész ételek
+objective.text.work_station = Dolgozz {0} ciklust itt: {1}
+objective.text.work_station.any = Dolgozz {0} ciklust bármelyik állomáson
+objective.text.station_output = Gyűjts {0} {1} egy munkaállomásról
+objective.text.station_output.any = Gyűjts {0} tárgyat egy munkaállomásról

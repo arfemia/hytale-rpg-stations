@@ -110,3 +110,7 @@ action.stew.label = Stufato
 socket.cookingpit.vessel = la pentola
 socket.cookingpit.ingredients = il misto per lo stufato
 socket.cookingpit.output = i piatti pronti
+objective.text.work_station = Lavora {0} cicli a {1}
+objective.text.work_station.any = Lavora {0} cicli a una stazione qualsiasi
+objective.text.station_output = Raccogli {0} {1} da una stazione di lavoro
+objective.text.station_output.any = Raccogli {0} oggetti da una stazione di lavoro

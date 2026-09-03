@@ -1,0 +1,14 @@
+{
+  "$Comment": "Collecting what a station hands a worker. The Target is the item id and the amount is the stack's quantity, counted the moment the stack lands in the worker's inventory (or on the ground at the station when the inventory is full). Every kind of station payout counts once: a produce phase's own yield, the extra units a tool ladder's OutputItems pays, an Items grant and every stack a DropLists table rolls. The Qualifier is the station id ('sawmill' for this jar's mill); name one to count only that station's output, leave it off to count the same item from any station. Two things never count here, by design: a Grants.Commands payout (a console command's result is invisible to the engine, so grant a countable item through Items instead) and unattended work (a pile that filled while nobody stood at the station pays out at gather and is not a worker's output). The Icon is the picture a step gets when its target has none of its own; a step naming an item is drawn with that item.",
+  "ValueBased": false,
+  "Producible": true,
+  "TargetNames": {
+    "Item": true
+  },
+  "Presentation": {
+    "TextKey": "objective.text.station_output",
+    "Icon": {
+      "ItemId": "RPG_Station_Sawmill"
+    }
+  }
+}

@@ -110,3 +110,7 @@ action.stew.label = Güveç
 socket.cookingpit.vessel = kazan
 socket.cookingpit.ingredients = güveç karışımı
 socket.cookingpit.output = hazır yemekler
+objective.text.work_station = {1} istasyonunda {0} döngü çalış
+objective.text.work_station.any = Herhangi bir istasyonda {0} döngü çalış
+objective.text.station_output = Bir iş istasyonundan {0} {1} topla
+objective.text.station_output.any = Bir iş istasyonundan {0} eşya topla

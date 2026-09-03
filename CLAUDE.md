@@ -282,6 +282,8 @@ src/main/resources/
   Server/RpgStations/{Stations,Actions,Patterns,Flairs,Extensions,Settings}/
                                                         the six Pattern A asset stores this mod registers
   Server/ZiggfreedCommon/Lootables/                      the Sawmill's loot tables (the SHARED library's store)
+  Server/ZiggfreedCommon/ObjectiveKinds/RpgStations/     the two objective kinds this engine fires (WORK_STATION /
+                                                        STATION_OUTPUT), in the SHARED library's store; see progression/
   Server/Item/{Items,RootInteractions}/                 the jar's OWN default blocks + their RootInteractions: the Sawmill
                                                         (+ its trophy hatchet) and the shared RPG_Station_Retrieve
                                                         (the cooking-pit family's blocks and Use chain are held
@@ -294,9 +296,12 @@ src/main/java/com/ziggfreed/rpgstations/
   RpgStationsPlugin.java     JavaPlugin entry: injects the api singleton, registers the built-in
                              rpgstations: factors, this mod's own asset stores + their catalog folds,
                              the rpg_station_use interaction, the frame-drain + damage-interrupt
-                             systems, the death/disconnect teardown hooks; shutdown() -> stopAll
+                             systems, the death/disconnect teardown hooks, the two progression
+                             producers (progression/); shutdown() -> stopAll
   api/impl/                  see api/impl/CLAUDE.md - the concrete registry/event-dispatch impl
   asset/                     see asset/CLAUDE.md - StationAsset/ActionAsset/ExtensionAsset/FlairAsset/RpgStationsSettingsAsset/Presentation/Requires/Conditions codecs
+  progression/               see progression/CLAUDE.md - the two objective kinds this engine fires (WORK_STATION /
+                             STATION_OUTPUT) into ziggfreed-common's shared runtime off its own api events
   station/                   see station/CLAUDE.md - the session engine (THE big package; the hard-won engine rules live here)
   loot/                      see loot/CLAUDE.md - StationLootEngine/StationRewardKinds/OutputItemResolver/CommandRewardExecutor
                               (the loot MODEL + evaluator + Lootable/RollPool stores are ziggfreed-common's)

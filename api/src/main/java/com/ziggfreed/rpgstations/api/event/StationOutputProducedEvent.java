@@ -14,26 +14,41 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
 /**
- * Fired synchronously on the shared Hytale event bus when ONE produce phase COMMITS during an
- * attended session - the moment a station action's outputs come into existence, whether they
- * landed in the block's placed custody (a stew batch standing in the pot's output slot) or went
- * straight to the worker's inventory (a milled plank). One event per committed produce phase,
- * never per item: a phase producing several stacks reports them together on {@link #outputs()}.
- * Fired on the world thread, AFTER the whole batch is committed (custody written and its display
- * spawned, or every inventory grant landed).
+ * Fired synchronously on the shared Hytale event bus when a batch of items comes into a worker's
+ * hands during an ATTENDED session - on the world thread, AFTER the whole batch landed. Two
+ * moments fire it:
  *
- * <p><b>The worker is never null.</b> This event fires only from an ATTENDED produce commit, so
+ * <ul>
+ *   <li><b>A committed produce phase</b> - the moment a station action's own outputs come into
+ *   existence, whether they landed in the block's placed custody (a stew batch standing in the
+ *   pot's output slot; {@link #socketId()} names the receiving pile) or went straight to the
+ *   worker's inventory (a milled plank; {@link #socketId()} is {@code null}). One event per
+ *   committed produce phase, never per item: a phase producing several stacks reports them
+ *   together on {@link #outputs()}, and a custody batch spanning several sockets reports the
+ *   FIRST produced socket (the one its readiness window sits on).
+ *   <li><b>A committed grant pass</b> - everything one loot pass paid INTO THE WORKER'S HANDS:
+ *   the additive bonus units of the cycle's own output ({@code Grants.OutputItems}, as the count
+ *   that actually landed) first, then one stack per distinct item id the pass paid through
+ *   {@code Grants.Items} and {@code Grants.DropLists}. {@link #socketId()} is always {@code null}
+ *   (a grant pass lands in the inventory, or on the ground at the station block when the
+ *   inventory is full), {@link #actionId()} is the paying action, and the block is the session's
+ *   own primary station block. The per-cycle {@code Roll} phase, an authored program's completed
+ *   pass and the session's completion pass all report this way; a pass that landed nothing fires
+ *   nothing.
+ * </ul>
+ *
+ * <p><b>What never appears here.</b> A {@code Grants.Commands} payout is invisible: the engine
+ * cannot know what a console command gave, so an item handed over by a command is never reported.
+ * An UNATTENDED settle fires nothing, and neither does the gather that pays out its accrued rolls;
+ * that output surfaces once, on {@link StationUnattendedGatheredEvent}, where the gatherer is the
+ * one paid. A stack that reached neither the inventory nor the ground is excluded on both moments,
+ * since the player never received it.
+ *
+ * <p><b>The worker is never null.</b> Both moments fire only from an attended session, so
  * {@link #worker()} always names the working player's live entity and {@link #workerId()} their
- * uuid. An UNATTENDED settle deliberately does not fire it - that output surfaces when a player
- * gathers the pile, on {@link StationUnattendedGatheredEvent}, where the gatherer is the one
- * paid.
+ * uuid.
  *
- * <p>{@link #outputs()} carries fresh, immutable {@link ItemStack} copies of what was committed
- * (an inventory grant that failed outright - no room and the ground drop failed too - is
- * excluded, since the player never received it). {@link #socketId()} names the custody socket
- * pile the batch landed in, or is {@code null} when the outputs went to the worker's inventory;
- * a custody batch spanning several sockets reports the FIRST produced socket (the one its
- * readiness window sits on).
+ * <p>{@link #outputs()} carries fresh, immutable {@link ItemStack} copies of what landed.
  *
  * <p><b>Plain data</b> ({@link #workerId()}, {@link #worldUuid()}, {@link #blockX()}/
  * {@link #blockY()}/{@link #blockZ()}, {@link #stationId()}, {@link #actionId()},
@@ -86,7 +101,7 @@ public final class StationOutputProducedEvent implements IEvent<Void> {
         return playerRef;
     }
 
-    /** The working player's entity ref - NEVER null (this event fires only from an attended produce). */
+    /** The working player's entity ref - NEVER null (this event fires only from an attended session). */
     @Nonnull
     public Ref<EntityStore> worker() {
         return worker;
@@ -104,7 +119,7 @@ public final class StationOutputProducedEvent implements IEvent<Void> {
 
     /**
      * The block the batch was committed at: the custody anchor for a placed-custody produce, or
-     * the session's own primary station block for an inventory produce.
+     * the session's own primary station block for an inventory produce and for a grant pass.
      */
     public int blockX() {
         return blockX;
@@ -130,14 +145,15 @@ public final class StationOutputProducedEvent implements IEvent<Void> {
 
     /**
      * The custody socket pile the batch landed in (the phase's first produced socket), or
-     * {@code null} when the outputs went to the worker's inventory.
+     * {@code null} when the outputs went to the worker's inventory - always {@code null} for a
+     * grant pass.
      */
     @Nullable
     public String socketId() {
         return socketId;
     }
 
-    /** The committed output stacks, as fresh immutable copies - safe to retain and inspect. */
+    /** The stacks that landed, as fresh immutable copies - safe to retain and inspect. */
     @Nonnull
     public List<ItemStack> outputs() {
         return outputs;

@@ -46,13 +46,34 @@ answer:
 | `StationSessionCompletedEvent` | The session stops (for any reason); fires after summary enrichers run. |
 | `StationEnhanceCompletedEvent` | An enhancement Stamp commits; carries before/after item copies and the enhancement report. |
 | `StationToolBrokeEvent` | A tool the session was using breaks. |
-| `StationOutputProducedEvent` | A produce phase of an ATTENDED session commits - into a placed custody pile (the receiving socket is named) or the worker's inventory; carries fresh immutable copies of the committed stacks. An unattended settle deliberately fires nothing here: that output surfaces at gather, on the event below. |
+| `StationOutputProducedEvent` | A batch of items lands in an ATTENDED worker's hands, on two moments: a produce phase commits (into a placed custody pile, the receiving socket named, or the worker's inventory), and a loot pass pays out (the cycle's bonus output as the count that landed, every `Items` stack and every `DropLists` find; no socket, the paying action). Carries fresh immutable copies of what landed. A `Commands` payout is never reported (the engine cannot know what a command gave), and an unattended settle or gather deliberately fires nothing here: that output surfaces at gather, on the event below. |
 | `StationUnattendedGatheredEvent` | A player gathers a custody pile that accrued [unattended work](unattended-work.md) cycles; carries the gatherer (never null), the granted cycle count, and the batch's already-scaled contributions. |
 | `StationStructureChangedEvent` | A [multiblock structure](structures-and-sockets.md) changes standing state at its anchor - a completed build activates, or a broken one reverts; names the pattern, the block now standing, and the acting player (absent on an environment break). |
 
 Each event's fields document which are plain data (safe to keep) and which are live world-thread
 context valid only during dispatch - a listener that defers work captures the plain fields and
 re-resolves the rest.
+
+## Objective kinds (progression content)
+
+RPG Stations fires two objective kinds into ziggfreed-common's shared progression runtime itself, so a
+quest or achievement authored against either advances from station play with nothing else installed.
+Both are described by kind files this jar ships (`Server/ZiggfreedCommon/ObjectiveKinds/RpgStations/`),
+and both ride the events above, so what content advances on is exactly what a listener sees:
+
+| Kind | Fires | Target | Qualifier | Amount |
+|---|---|---|---|---|
+| `WORK_STATION` | once per REAL completed cycle (idle practice counts for nothing) | the station id (`sawmill`) | none | 1 |
+| `STATION_OUTPUT` | once per stack `StationOutputProducedEvent` carries: a produce phase's yield, a loot pass's bonus units, item grants and drop-list finds | the item id | the station id, or none to count the item from any station | the stack's quantity |
+
+A `Commands` payout and unattended work never count (see the event table). A pack adding a station
+ships nothing for this: its cycles and output are counted by the same two kinds, and it may ship its
+own copy of either kind file to add a `TargetIcons` picture for its station. The step sentences
+(`objective.text.work_station` / `objective.text.station_output`, each with an `.any` form for a step
+naming no target) ship in `rpgstations.lang` in every locale; a consumer mod that renders steps through
+its own templates keeps its own copies. Each moment also carries a typed payload wrapping the api
+event it came off (`StationWorkPayload` / `StationOutputPayload`), for a listener keying per action,
+per cycle or per socket.
 
 ## Typed registries (request/response)
 

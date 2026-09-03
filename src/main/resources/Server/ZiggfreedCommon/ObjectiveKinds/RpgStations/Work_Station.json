@@ -1,0 +1,19 @@
+{
+  "$Comment": "Working at a station. One unit per REAL completed work cycle of an attended session; an idle-practice cycle (working with nothing to work on) does not count. The Target is a station id, the lower-cased filename of the station's own asset (this jar's mill is 'sawmill'), not the block's item id; leave the Target off to count cycles at any station. The Icon is the picture a step gets when its target has none of its own, and TargetIcons pairs a station id with the block it is worked at, so a step naming this jar's mill is drawn with the mill. A pack adding a station can ship its own copy of this file with one more TargetIcons row; the leaves merge over this one, nothing else needs restating.",
+  "ValueBased": false,
+  "Producible": true,
+  "TargetNames": {
+    "Item": true
+  },
+  "Presentation": {
+    "TextKey": "objective.text.work_station",
+    "Icon": {
+      "ItemId": "RPG_Station_Sawmill"
+    },
+    "TargetIcons": {
+      "sawmill": {
+        "ItemId": "RPG_Station_Sawmill"
+      }
+    }
+  }
+}

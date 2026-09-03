@@ -110,3 +110,7 @@ action.stew.label = Guiso
 socket.cookingpit.vessel = la olla
 socket.cookingpit.ingredients = la mezcla del guiso
 socket.cookingpit.output = las comidas listas
+objective.text.work_station = Trabaja {0} ciclos en {1}
+objective.text.work_station.any = Trabaja {0} ciclos en cualquier estación
+objective.text.station_output = Recoge {0} {1} de una estación de trabajo
+objective.text.station_output.any = Recoge {0} objetos de una estación de trabajo

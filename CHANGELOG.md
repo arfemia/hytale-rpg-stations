@@ -7,6 +7,37 @@ there is no prior public release to diff against, so every entry is additive by 
 
 ## 0.1.0 (first public release)
 
+- **The station objective kinds are this engine's own: `WORK_STATION` and `STATION_OUTPUT`.**
+  RPG Stations fires both into ziggfreed-common's shared progression runtime itself
+  (`progression/StationProgressProducers`, listening to its own api events so the moment content
+  advances on is exactly the moment a consumer sees): `WORK_STATION` once per real completed cycle
+  (target the station id, amount 1; an idle-practice cycle counts for nothing) and
+  `STATION_OUTPUT` once per stack a worker is handed (target the item id, qualifier the station id,
+  amount the stack's quantity). It ships the two kind files
+  (`Server/ZiggfreedCommon/ObjectiveKinds/RpgStations/{Work_Station,Station_Output}.json`, folded
+  into the library's kind registry from the file alone, each with a `TargetIcons` picture for the
+  mill) and the four `objective.text.*` step templates in all nine locales, so a quest or
+  achievement authored against either kind advances from station play with only ziggfreed-common
+  and this jar installed. A `Grants.Commands` payout and unattended work are invisible to
+  `STATION_OUTPUT` by design; each moment carries a typed payload (`StationWorkPayload` /
+  `StationOutputPayload`) wrapping the api event it came off.
+- **Every item a grant pass hands a worker is reported as station output (apiVersion 8, artifact
+  0.8.0).** `StationOutputProducedEvent` fires once per committed grant pass beside its once per
+  committed produce phase: the batch carries the cycle's `Grants.OutputItems` bonus units as the
+  count that landed, every `Grants.Items` stack and every `Grants.DropLists` find, with a null
+  socket and the paying action, from the per-cycle `Roll` phase, an authored program's completed
+  pass and the completion pass alike. A pass that landed nothing fires nothing, a command payout is
+  never reported (the engine cannot know what a command gave), and an unattended settle or gather
+  still fires nothing (that output surfaces on `StationUnattendedGatheredEvent`).
+  `StationService.grantBonusOutputItems` answers the landed count, and the output funnel is static
+  since it reads only session fields.
+- **The Sawmiller's Hatchet is an item grant.** `SawmillTrophy.json` pays the trophy through
+  `Grants.Items` (one `RPG_Tool_Hatchet_Sawmiller`: hotbar first, then the backpack, then the
+  ground at the station when the bag is full), so the win is countable station output and the
+  `cue:trophy` fanfare plays only when the hatchet actually landed.
+- `ShippedAssetDecodeTest` also decodes what the jar ships into the shared library's stores
+  (`Server/ZiggfreedCommon/Lootables` and `ObjectiveKinds`) through the library's own codecs, keyed
+  by the store folder directly under each root so a store may group its files one level deeper.
 - **Placed custody survives restarts, chunk unloads and logoffs.** Materials placed into a station
   are stored on the block's own chunk (the shared library's per-block stash store) and saved with
   it, exactly like a chest's contents: leave logs in the sawmill, restart the server, and they are

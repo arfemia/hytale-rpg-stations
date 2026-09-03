@@ -110,3 +110,7 @@ command.npcspike.prop_cleared = Prop attempt: cleared the performer's held item.
 command.npcspike.prop_unknown_item = Unknown item id '{0}'. The performer's hotbar was not changed.
 command.npcspike.clip_usage = Usage: /rpgstations npcspike clip <emoteId>. Try RPG_Emote_Hammer or RPG_Emote_Knife.
 command.npcspike.clip_attempted = Clip attempt: played '{0}' on the performer's Emote slot. Check whether it plays without fighting the walk gait.
+objective.text.work_station = Work {0} cycles at {1}
+objective.text.work_station.any = Work {0} cycles at any station
+objective.text.station_output = Collect {0} {1} from a work station
+objective.text.station_output.any = Collect {0} items from a work station

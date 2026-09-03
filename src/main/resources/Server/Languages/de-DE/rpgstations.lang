@@ -110,3 +110,7 @@ action.stew.label = Eintopf
 socket.cookingpit.vessel = den Kochtopf
 socket.cookingpit.ingredients = der Eintopfmischung
 socket.cookingpit.output = den fertigen Mahlzeiten
+objective.text.work_station = Arbeite {0} Zyklen an {1}
+objective.text.work_station.any = Arbeite {0} Zyklen an einer beliebigen Station
+objective.text.station_output = Sammle {0} {1} von einer Werkstation
+objective.text.station_output.any = Sammle {0} Gegenstände von einer Werkstation

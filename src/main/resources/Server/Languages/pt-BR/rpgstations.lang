@@ -110,3 +110,7 @@ action.stew.label = Ensopado
 socket.cookingpit.vessel = a panela
 socket.cookingpit.ingredients = a mistura do ensopado
 socket.cookingpit.output = as refeições prontas
+objective.text.work_station = Trabalhe {0} ciclos em {1}
+objective.text.work_station.any = Trabalhe {0} ciclos em qualquer estação
+objective.text.station_output = Colete {0} {1} de uma estação de trabalho
+objective.text.station_output.any = Colete {0} itens de uma estação de trabalho

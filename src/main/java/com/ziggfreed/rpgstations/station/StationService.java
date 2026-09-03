@@ -1846,6 +1846,15 @@ public final class StationService {
      * notification ({@link #notifyItemGain}, {@code lucky=true}) per distinct granted item id -
      * REPLACES the old generic {@code ui.station.lucky}/{@code ui.station.rare_find}
      * toasts (design 4.5.1), which no longer fire from here.
+     *
+     * <p><b>One api {@code StationOutputProducedEvent} per grant pass, LAST.</b> Every stack the
+     * pass put into the worker's hands (the bonus output as the count that landed, then every
+     * {@code Items}/{@code DropLists} stack) goes through {@link #fireOutputProduced} with a null
+     * socket, after the cues and the notifications, so a listener sees a batch the player has
+     * already been told about. All three routes into this method report that way (the per-cycle
+     * {@code Roll} phase, {@link #rollCycleBonus}, {@link #rollCompletionLoot}); a pass that
+     * landed nothing fires nothing, and a {@code Commands} payout is never in the batch because the
+     * engine cannot know what a command gave.
      */
     static void applyGrantResult(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nullable CommandBuffer<EntityStore> commandBuffer,
@@ -1853,7 +1862,7 @@ public final class StationService {
         if (!result.anyGranted()) {
             return;
         }
-        grantBonusOutputItems(s, store, commandBuffer, player, result.getOutputItems());
+        int bonusLanded = grantBonusOutputItems(s, store, commandBuffer, player, result.getOutputItems());
         for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
             s.luckItems.merge(e.getKey(), e.getValue(), Integer::sum);
         }
@@ -1901,6 +1910,39 @@ public final class StationService {
                             ? NativeEffectUtil.applyFor(store, s.ref, effectId, durMs / 1000f, OverlapBehavior.OVERWRITE)
                             : NativeEffectUtil.apply(store, s.ref, effectId));
         }
+        fireOutputProduced(s, store, null, null, grantPassBatch(s, bonusLanded, result.getDropListItems()));
+    }
+
+    /**
+     * The stacks one grant pass put into the worker's hands, as fresh copies for the output
+     * event: the cycle's own bonus output first (the LANDED count, under the cycle's primary
+     * output id), then one stack per distinct item id the pass paid through {@code Items} and
+     * {@code DropLists}, in the order the pass tallied them. Empty when nothing landed, which is
+     * what keeps the funnel silent for a pass that paid only a command or an effect.
+     */
+    @Nonnull
+    static List<ItemStack> grantPassBatch(@Nonnull StationSession s, int bonusLanded,
+            @Nonnull Map<String, Integer> paidItems) {
+        List<ItemStack> batch = new ArrayList<>();
+        if (bonusLanded > 0) {
+            addOutputStack(batch, s.cycleOutputItemId, bonusLanded);
+        }
+        for (Map.Entry<String, Integer> e : paidItems.entrySet()) {
+            addOutputStack(batch, e.getKey(), e.getValue() == null ? 0 : e.getValue());
+        }
+        return batch;
+    }
+
+    /** One stack into a grant-pass batch; a blank id, a non-positive count or an unknown item adds nothing. */
+    private static void addOutputStack(@Nonnull List<ItemStack> batch, @Nullable String itemId, int count) {
+        if (itemId == null || itemId.isBlank() || count <= 0) {
+            return;
+        }
+        try {
+            batch.add(new ItemStack(itemId, count));
+        } catch (Throwable t) {
+            Log.fine("STATION grant-pass output stack skipped for '" + itemId + "': " + t.getMessage());
+        }
     }
 
     /**
@@ -1927,17 +1969,20 @@ public final class StationService {
      * program's completed pass DOES run the action's {@code Cycle}-trigger Bonus rolls, so an
      * {@code OutputItems} amount genuinely reaches here with no item id to spend it on, and must
      * fail quietly instead of grabbing a stale one.
+     *
+     * @return the count that LANDED (inventory or ground), {@code 0} on every no-op and every
+     *         failure, so the caller can put exactly what the player received on the output event
      */
-    static void grantBonusOutputItems(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+    static int grantBonusOutputItems(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nullable CommandBuffer<EntityStore> commandBuffer, @Nullable Player player, double tally) {
         int count = OutputItemResolver.resolve(tally, () -> ThreadLocalRandom.current().nextDouble());
         if (count <= 0) {
-            return;
+            return 0;
         }
         String itemId = s.cycleOutputItemId;
         if (itemId == null || itemId.isBlank() || player == null) {
             Log.fine("STATION Bonus OutputItems had no cycle output to add to at station '" + s.stationId + "'");
-            return;
+            return 0;
         }
         int reported;
         try {
@@ -1949,13 +1994,13 @@ public final class StationService {
             reported = OutputItemResolver.reportable(count, landed);
         } catch (Throwable t) {
             Log.fine("STATION Bonus OutputItems grant failed: " + t.getMessage());
-            return;
+            return 0;
         }
         if (reported <= 0) {
             // Nowhere to put it and the ground drop failed too: the items do not exist, so
             // they must not be tallied into the session summary as produced.
             Log.warn("STATION bonus output lost - no inventory room and drop failed for '" + itemId + "'");
-            return;
+            return 0;
         }
         s.producedItems.merge(itemId, reported, Integer::sum);
         StationSession.YieldBreakdown breakdown = s.producedYield.get(itemId);
@@ -1970,6 +2015,7 @@ public final class StationService {
         if (s.playerRef != null) {
             notifyItemGain(s.playerRef, itemId, reported, false);
         }
+        return reported;
     }
 
     /**
@@ -4914,15 +4960,19 @@ public final class StationService {
     }
 
     /**
-     * The api's output-produced funnel ({@code StationStepHandlers.producePhase} reports through
-     * here): fires {@code StationOutputProducedEvent} for ONE committed produce phase, resolving
-     * where the batch landed - the {@code anchorId} custody anchor's block for a placed-custody
-     * produce ({@code socketId} names the receiving pile), the session's own primary block for an
-     * inventory produce ({@code anchorId} and {@code socketId} null). A batch nothing landed from
-     * fires nothing; a session whose live handles are already gone (teardown racing the phase)
-     * skips silently rather than reporting a moment nobody owns.
+     * The api's output-produced funnel: fires ONE {@code StationOutputProducedEvent} for a batch
+     * that landed in the worker's hands, resolving where it landed - the {@code anchorId} custody
+     * anchor's block for a placed-custody produce ({@code socketId} names the receiving pile), the
+     * session's own primary block for anything else ({@code anchorId} and {@code socketId} null).
+     * Two callers: {@code StationStepHandlers.producePhase} for a committed produce phase, and
+     * {@link #applyGrantResult} for a committed grant pass (always the primary block, never a
+     * socket). A batch nothing landed from fires nothing; a session whose live handles are already
+     * gone (teardown racing the phase) skips silently rather than reporting a moment nobody owns.
+     *
+     * <p>Static on purpose: it reads only the session's own fields and the static anchor helpers,
+     * so the static grant pass reaches it without a service instance.
      */
-    void fireOutputProduced(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+    static void fireOutputProduced(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
             @Nullable String anchorId, @Nullable String socketId, @Nonnull List<ItemStack> outputs) {
         try {
             if (outputs.isEmpty() || s.ref == null || s.playerRef == null || s.playerUuid == null) {
@@ -6972,6 +7022,10 @@ public final class StationService {
      * exists to track and strip them), and {@code OutputItems} resolves once per pass and pays
      * extra units of the accrued conversion's primary output. A replayed roll's one-shot
      * contribution grants are deliberately dropped (see {@link #grantAccruedAtGather}).
+     *
+     * <p>Fires NO {@code StationOutputProducedEvent}, unlike its attended twin: unattended output
+     * surfaces exactly once, on the {@code StationUnattendedGatheredEvent} the gather fires after
+     * this pass, so a listener counting a worker's output never sees a gathered batch twice.
      */
     private void applyGatherGrantResult(@Nonnull World world, @Nonnull StationCustodyClaim claim,
             @Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref, @Nonnull PlayerRef playerRef,
