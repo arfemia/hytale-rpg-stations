@@ -47,7 +47,7 @@ content type) lives in the mod's [GitHub repository](https://github.com/arfemia/
 
 ## Required dependency: ZiggfreedCommon
 
-RPG Stations has exactly **one hard dependency**: **ZiggfreedCommon `>=2.0.1`**. Install it first -
+RPG Stations has exactly **one hard dependency**: **ZiggfreedCommon `>=2.1.0`**. Install it first -
 the server loads it before RPG Stations. That is the whole list - **no other mod is required**. RPG
 Stations is a complete, standalone reward loop (conditional loot, command rewards, enhancement) on
 its own. See [Integrations](#integrations) below for how an add-on hooks it.
@@ -174,7 +174,7 @@ session-summary HUD tuning, layered like any other asset - there is no separate 
 
 ## Installation
 
-1. Install **ZiggfreedCommon** (`>=2.0.1`) - drop it into your server's `Mods/` folder.
+1. Install **ZiggfreedCommon** (`>=2.1.0`) - drop it into your server's `Mods/` folder.
 2. Drop the **RPG Stations** jar into the same `Mods/` folder.
 3. Optionally add a content pack that ships station catalog content.
 4. Restart the server. Confirm the boot log shows each loaded station id and no asset validation

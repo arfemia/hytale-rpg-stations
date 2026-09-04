@@ -7,6 +7,7 @@ there is no prior public release to diff against, so every entry is additive by 
 
 ## 0.1.0 (first public release)
 
+- **Requires ZiggfreedCommon 2.1.0 or newer.** The manifest floor and the compile pin move together with the library's 2.1.0 release, the version the whole mod family stands on; a 2.0.x jar fails this mod's load by name rather than mid-cycle.
 - **The station objective kinds are this engine's own: `WORK_STATION` and `STATION_OUTPUT`.**
   RPG Stations fires both into ziggfreed-common's shared progression runtime itself
   (`progression/StationProgressProducers`, listening to its own api events so the moment content

@@ -260,7 +260,7 @@ stack) drives this mod's own `build.ps1` alongside every other `additional-mods/
 dependency-ordered (`ziggfreed-common` first).
 
 **`ziggfreed-common` is the ONLY dependency** (`manifest.json` `Dependencies:
-{"Ziggfreed:ZiggfreedCommon": ">=2.0.1"}`; `build.gradle` `compileOnly` + `testImplementation`
+{"Ziggfreed:ZiggfreedCommon": ">=2.1.0"}`; `build.gradle` `compileOnly` + `testImplementation`
 against the sibling submodule's built jar, the sibling-relative path pattern -
 `${rootDir}/../ziggfreed-common/build/libs/ZiggfreedCommon-${ziggfreedCommonVersion}.jar`). **NO
 reference to any other mod's jar anywhere**, and that is load-bearing, not incidental: RpgStations
