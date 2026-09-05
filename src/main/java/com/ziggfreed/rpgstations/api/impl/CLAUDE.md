@@ -2,7 +2,7 @@
 
 Router for `api/impl/` (part of the MAIN module's source tree, package `com.ziggfreed.rpgstations.api.impl`
 - distinct from the `api/` Gradle submodule that defines the interfaces this package implements;
-see `../../../../../../api/CLAUDE.md` for the type contract). `RpgStationsPlugin#setup()` injects
+see `api/src/main/java/com/ziggfreed/rpgstations/api/CLAUDE.md` for the type contract). `RpgStationsPlugin#setup()` injects
 [`RpgStationsApiImpl`](RpgStationsApiImpl.java) via `RpgStationsApi.set(...)` before any registry
 is used.
 

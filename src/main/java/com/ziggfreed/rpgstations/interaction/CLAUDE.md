@@ -10,7 +10,13 @@ pack, the other backs every placed-input display entity's own press-F retrieval.
   `{ "Type": "rpg_station_use", "Station": "<id>" }`, so ONE Java interaction type backs any
   number of station blocks with zero extra Java per station (the first-party object-form-param
   pattern). Pressing F calls `station.StationService#toggle`: starts a
-  session (every denial a localized toast) or stops the player's running one. Every exit path sets
+  session (every denial a localized toast) or stops the player's running one. The press also
+  carries a SNEAK flag read at fire time (`#readSneaking`, the player's own
+  `MovementStatesComponent.crouching`, false on any read failure) as `toggle`'s last argument:
+  with no session running, a sneak+F press routes to the recipe picker
+  (`StationService#routeSneakSelection` -> `pages.RpgStationPickerPage`) instead of engaging work,
+  falling through to the plain engage when fewer than two picker rows resolve; over a RUNNING
+  session any press, sneak included, stops it. Every exit path sets
   `ctx.getState().state`; a user-initiated denial is `Finished`, never `Failed`.
 - **[`StationRetrieveInteraction`](StationRetrieveInteraction.java)** (new feature, 2026-07-22 fix
   round) - `extends SimpleInstantInteraction`, registered type name **`rpg_station_retrieve`**.
@@ -23,9 +29,13 @@ pack, the other backs every placed-input display entity's own press-F retrieval.
   before this class's `firstRun` even runs, and surviving into it because `UseEntityInteraction`
   pushes the registered RootInteraction onto the SAME context - see `StationRetrieveInteraction`'s
   own class javadoc for the exact shared-source chain) and calls
-  `station.StationService#retrieveCustody`: owner-only, a no-op
-  keyed toast while a session is actively working that station, otherwise hands the placed
-  contents back and despawns the display. See `station/CLAUDE.md`'s retrieval bullet for the
+  `station.StationService#retrieveCustody`: it resolves the clicked entity back to its owning
+  (blockKey, socket) pair by `NetworkId`, scoped to the presser's own world, then asks
+  `StationCustodyRetrieval#decide` - the clicked SOCKET's own pile owner (relaxed when that socket
+  authors `Share.Reclaim`), and a no-op keyed toast while a session is actively working that
+  station. On success it hands THAT socket's pile back, despawns that socket's display, removes
+  the pile (and the stash once its last pile is gone), and flips the block back to its Empty
+  custody state when nothing is left in it. See `station/CLAUDE.md`'s retrieval bullet for the
   engine-side detail (`StationCustodyRetrieval`'s pure eligibility decision).
 
 Both registered once each in `RpgStationsPlugin` (`#registerStationInteraction` /

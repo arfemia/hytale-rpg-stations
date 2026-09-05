@@ -380,7 +380,7 @@ which silently cost the second.
 
 `StationAsset.Tool`, checked at start AND per heartbeat -> `TOOL_CHANGED` stop
 (`heldToolMatches`): the player must HOLD a matching tool. Three NATIVE routes, match = ANY
-(null/no-live-route group = ungated): `Tags` = the shared `asset.TagMatch` item-tag object map
+(null/no-live-route group = ungated): `Tags` = ziggfreed-common's shared `codec.TagMatch` item-tag object map
 intersected case-insensitively with the held item's raw tags; `Gather` = the FUNCTIONAL test over
 the held item's `ItemToolSpec.getGatherType()/getPower()`; `Ids` = the FALLBACK for modded items, exact id
 OR case-insensitive underscore-segment match. Diegetic AND load-bearing for client stability: the
@@ -572,10 +572,13 @@ under an authored program is `Grants.OutputItems` - there is no single cycle out
 commands, effects, contributions, the reached floor's presentation) applies.
 
 `emitMoment(store, s, momentId, presentation, targetPos)` in `StationService` is the ONE
-presentation-playback funnel every station moment goes through (`StationFlairs.MOMENT_CYCLE`/
-`MOMENT_SWING`/`MOMENT_IMPACT`/`MOMENT_RARE_FIND`/`MOMENT_COMPLETION`, plus a per-step
+presentation-playback funnel every SESSION-scoped station moment goes through
+(`StationFlairs.MOMENT_CYCLE`/`MOMENT_SWING`/`MOMENT_IMPACT`/`MOMENT_RARE_FIND`/
+`MOMENT_COMPLETION`/`MOMENT_READY`/`MOMENT_OVERDONE`, plus a per-step
 `StationFlairs.stepMomentId(actionId, stepId)`) - it is ALSO the flair-resolution choke point
-(`StationFlairs.effective` against `FlairCatalog.effectiveFlairsFor`'s merged map).
+(`StationFlairs.effective` against `FlairCatalog.effectiveFlairsFor`'s merged map). A SESSIONLESS
+cue (a pattern `activated`/`broken` moment, an overdue window collapsing with nobody engaged)
+plays through `StationService.playPresentationAt` instead.
 
 **SPECIFICITY WINS, and this is the ONE place it is decided.** The `presentation` argument is
 whatever base the CALLER already holds for this emission (a step's own `Presentation`, a reached
@@ -1489,8 +1492,9 @@ engine; it stores no per-player fact). The plugin seeds that union with its own
 [`ZigFlairUnlockProvider`](ZigFlairUnlockProvider.java), a read of ziggfreed-common's persisted
 `ZigFlairComponent` unlocked-flair set, so unlocks resolve with this jar and the library alone;
 a mod with a genuinely foreign unlock store registers its provider beside it. The open STRING moment id vocabulary
-(`MOMENT_CYCLE`/`MOMENT_SWING`/`MOMENT_IMPACT`/`MOMENT_RARE_FIND`/`MOMENT_COMPLETION`, plus
-`stepMomentId(actionId, stepId)`) is unchanged. The flair map is the merge of TWO sources
+is `MOMENT_CYCLE`/`MOMENT_SWING`/`MOMENT_IMPACT`/`MOMENT_RARE_FIND`/`MOMENT_COMPLETION`/
+`MOMENT_READY`/`MOMENT_OVERDONE` (the seven `WELL_KNOWN_MOMENT_IDS` a typo check spell-checks),
+plus `stepMomentId(actionId, stepId)` and the open `cue:<name>` namespace. The flair map is the merge of TWO sources
 ([`FlairCatalog`](FlairCatalog.java)`.effectiveFlairsFor`): a station's own inline `Flairs`
 (`asset.StationAsset.Flair`, `{Moments}`) UNIONED with every folded `asset.FlairAsset` whose
 `Stations` list applies - a same-flair-id `FlairAsset` entry wins. `api.impl.StationViewImpl

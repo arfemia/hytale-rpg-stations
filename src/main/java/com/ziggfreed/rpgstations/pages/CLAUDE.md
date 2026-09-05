@@ -91,7 +91,8 @@ overlays only (`StationSummaryHud`, no player interaction).
     add a step to a path the page does not write.
   - **New `rpgstations.` keys**: `ui.station.picker.title`, `ui.station.picker.hint`,
     `ui.station.picker.locked` (1-arg, the required tool's display name),
-    `ui.station.picker.locked_generic` (the no-tool-name fallback), and (2026-07-28)
+    `ui.station.picker.locked_generic` (the no-tool-name fallback),
+    `ui.station.picker.selected` (the selection-confirm toast), and (2026-07-28)
     `ui.station.picker.cost` (4-arg, `"{0}x {1} -> {2}x {3}"`). Registered in
     `i18n.RpgStationsLangKeys.KEYS` and present in ALL NINE locale `rpgstations.lang` files (a
     wordless format string, identical in each locale - the quantities are `{N}` args and the item

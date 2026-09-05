@@ -338,13 +338,15 @@ resolution section for the engine half.
     leaves it did not mention. **SPECIFICITY WINS, resolved in exactly one place**
     (`station.StationService#emitMoment`): an entry here is the BASE for its moment id wherever the
     engine holds nothing more specific, and where it does - a `StationStep`'s own `Presentation`
-    for that step's moment, a `Ladder.Floor`'s cue for `rare_find` - the site-supplied presentation
-    plays and the map entry is not consulted for that emission. An unrecognized key is the same
-    warn-only typo finding a flair map gets (`UNKNOWN_MOMENT_ID`), never a block.
-    **`rare_find` is NOT action-authorable** (`RARE_FIND_MOMENT_NEVER_PLAYS` warns): that moment is
-    only ever emitted with the earning `Roll`/`Ladder.Floor` cue in hand, so a map entry could never
-    win. A FLAIR keyed `rare_find` is meaningful (it overlays the earning cue), which is why the
-    check lives on the action branch and not in the shared map walk.
+    for that step's moment - the site-supplied presentation plays and the map entry is not
+    consulted for that emission. An unrecognized key is the same warn-only typo finding a flair map
+    gets (`UNKNOWN_MOMENT_ID`), never a block.
+    **A loot `Cue` is the opposite case, and `rare_find` IS action-authorable.** A `Roll`/
+    `Ladder.Floor` `Cue` is a moment ID carrying no presentation, so
+    `StationService#applyGrantResult` emits it with a NULL base and THIS map decides what it sounds
+    like - which is exactly how the jar's Sawmill publishes its four-cue palette. (`StationValidator`'s
+    `RARE_FIND_MOMENT_NEVER_PLAYS` warn predates the shared-loot re-base and now fires on content
+    that works; retiring it is a maintainer call, not an edit to make here.)
     **Whether a `$Comment` (or any other `$`-key) may sit directly inside a map-shaped group
     depends on which map codec backs it.** A `BuilderCodec` always ignores the editorial `$` keys.
     A map codec has to opt in, because every key there is a map KEY whose value goes straight to the
@@ -805,8 +807,10 @@ resolution section for the engine half.
 Three cross-cutting layers ride the SAME `FieldBuilder` chain as the field declaration itself, so
 they land per-leaf and are never a parallel table that can drift from the codec:
 
-- **`.documentation("...")` on EVERY leaf.** Every `KeyedCodec` leaf reachable from the seven
-  Pattern A `CODEC` statics carries a description of what the leaf does plus its default/unit;
+- **`.documentation("...")` on EVERY leaf.** Every `KeyedCodec` leaf reachable from the eight
+  `CODEC` statics the coverage walk roots on (this mod's six own Pattern A types plus the shared
+  `LootableAsset`/`RollPoolAsset` this schema embeds) carries a description of what the leaf does
+  plus its default/unit;
   `AssetDocumentationCoverageTest` walks `BuilderCodec#getEntries()` (unwrapping array/map codecs
   down to nested `BuilderCodec`s, identity-deduped so a shared leaf like `Vec3`/`Conditions`/
   `Presentation` is checked once) and FAILS THE BUILD on a blank one. It also scans every
@@ -885,7 +889,7 @@ and re-folds for free, no owner-override precedence layer beyond `defaults < pac
 The `api` artifact carries a WRITTEN additive growth policy (its own router's "Additive growth
 policy" section, at the repo's `api/src/main/java/com/ziggfreed/rpgstations/api/CLAUDE.md`:
 default-bodied interface methods, new event classes, additive getters, never a signature change).
-This is its ASSET-SIDE twin, and it exists for the same reason: these seven codecs are a published
+This is its ASSET-SIDE twin, and it exists for the same reason: these six codecs are a published
 contract too. A pack author's JSON and a server owner's override files are written against them,
 live in repos this one cannot see, and outlive any release here. **`SCHEMA.md` is GENERATED from
 the codecs** ([`../docs/SchemaDocWriter`](../docs/SchemaDocWriter.java), `gradlew

@@ -158,7 +158,7 @@ is the exact inverse of a permanently-opaque channel.
   (registration order); the optional `decorate(ctx)` default method is a post-build hook over the
   summary panel's `UICommandBuilder` for theming (a consumer's own retint reach-in).
   Enrichers run in `station.StationService#stop()` BEFORE `StationSessionCompletedEvent` fires -
-  see `../../station/CLAUDE.md`'s exit-hooks bullet for the ordering guarantee.
+  see `src/main/java/com/ziggfreed/rpgstations/station/CLAUDE.md`'s exit-hooks bullet for the ordering guarantee.
 - **[`StationView`](StationView.java)** - read-only per-station projection (`id()`, `nameKey()`,
   `contributions()`, `contributionChannels()`, `contributionParams(channel)`, `flairIds()`) used by
   a consumer for target names / soft-warns without reaching into the live engine catalog.
@@ -178,7 +178,7 @@ is the exact inverse of a permanently-opaque channel.
   snapshot taken at query time.
 - **`StationCycleCompletedEvent`'s two lists (plus `contributionScale()`)** - `contributions()`
   carries the action's own `Work.PerCycleContributions` at their ALREADY-SCALED amounts: the
-  engine applies the action's own `ContributionScale` ladder (a `../asset/CLAUDE.md`
+  engine applies the action's own `ContributionScale` ladder (a `src/main/java/com/ziggfreed/rpgstations/asset/CLAUDE.md`
   `{Factors[], Floors[]}` group following the SAME weighted-sum-then-highest-floor rule
   `Roll.Ladder` does) BEFORE
   dispatch (and, on an idle cycle, the amounts are also pre-scaled by `Work.Idle.Fraction` on top
@@ -205,7 +205,7 @@ is the exact inverse of a permanently-opaque channel.
   `StationEnhanceCompletedEvent`/`StationUnattendedGatheredEvent`/`StationOutputProducedEvent`/
   `StationStructureChangedEvent`), immutable,
   dispatched via `HytaleServer.get().getEventBus().dispatchFor(...)` + `hasListener()` on the
-  owning world thread - see `../../station/CLAUDE.md` for the concrete firing rules and
+  owning world thread - see `src/main/java/com/ziggfreed/rpgstations/station/CLAUDE.md` for the concrete firing rules and
   `com.ziggfreed.rpgstations.station.StationEvents` (the implementation). Each event's javadoc
   states which fields are plain data (safe to retain) vs. live world-thread context (`Store`/`Ref`/
   `CommandBuffer` - valid ONLY synchronously during dispatch; a listener that defers work must
