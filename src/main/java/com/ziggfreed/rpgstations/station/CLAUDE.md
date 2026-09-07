@@ -534,7 +534,11 @@ also NOTIFIES that count** (`notifyItemGain`, not lucky-flagged): the Produce ph
 announces the recipe's own deterministic `Yield`, so a bonus that is not separately notified makes
 every toast under-report - a cycle paying one base plank plus four from the tool ladder announced a
 single plank, which reads in game as the bonus not working at all. **Any NEW grant path owes its own
-notification for the same reason.** An
+notification for the same reason.** Those notices are TAGGED (`gainTag`: the item id plus whether the
+line is a lucky one), so a long run grows ONE climbing entry per item on the corner feed instead of
+dropping a fresh line every cycle over whatever else the player needed to see; luck is part of the
+tag because a merged entry keeps the words of the notice that opened it, and a lucky find sharing
+the plain line's tag would land on it silently. An
 authored `Steps` program has no single "cycle output" for
 `OutputItems` to add to (`s.cycleOutputItemId` stays null, and `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT`
 warns on an action authoring `OutputItems` there - on its own `Bonus` or on a step's `Roll` phase

@@ -7495,10 +7495,24 @@ public final class StationService {
             // D-4: the value is now the bare item name ({0}); the quantity rides the item-slot count
             // badge, matching a native pickup exactly (the unused quantity arg above is harmless).
             // Routed through the shared item-keyed helper (identical packet shape) - leg A's lift.
-            Notify.itemKeyed(playerRef, line, null, itemId, quantity);
+            Notify.itemKeyed(playerRef, line, null, itemId, quantity, gainTag(itemId, lucky));
         } catch (Throwable t) {
             Log.fine("STATION item-gain notify failed: " + t.getMessage());
         }
+    }
+
+    /**
+     * What one item-gain notice is filed under, so a run of them GROWS a single entry rather than
+     * dropping a fresh one every cycle: a worker milling for a minute reads one climbing pile per
+     * item, and everything else the feed has to say stays visible beside it.
+     *
+     * <p>The luck flag is part of the tag because a merged entry keeps the wording of the notice
+     * that opened it and only its count climbs: sharing one tag would let a lucky find land silently
+     * on the plain line and lose the words that made it worth pointing out.
+     */
+    @Nonnull
+    private static String gainTag(@Nonnull String itemId, boolean lucky) {
+        return "rpgstations:gain|" + itemId + (lucky ? "|lucky" : "");
     }
 
     /**

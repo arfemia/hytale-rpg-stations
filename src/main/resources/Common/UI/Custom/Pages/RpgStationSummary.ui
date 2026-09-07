@@ -117,8 +117,11 @@ Group #RpgStationSummaryHudCanvas {
         }
 
         // Fixed ledger row slots (never appended); StationSummaryHud.renderLedger populates +
-        // shows/hides them. Capped at MAX_LEDGER_ROWS (6, #RpgStationSummaryItem0..5) plus one
-        // keyed "+N more" overflow row.
+        // shows/hides them. Twelve slots (#RpgStationSummaryItem0..11) is the hard ceiling
+        // StationSummaryHud.MAX_LEDGER_ROWS must keep matching, since a HUD update can only repaint
+        // a slot this document already declares; SummaryHud.MaxRows draws fewer, and whatever the
+        // cap in force cuts is reported on the one keyed "+N more" overflow row below. The panel is
+        // content-height sized, so it hugs however many are actually showing.
         //
         // ROW SHAPE: icon + a FlexWeight:1 vertical text column holding the headline #Name and an
         // optional smaller #Sub second line (the row's own Anchor therefore omits Height and sizes
@@ -197,6 +200,84 @@ Group #RpgStationSummaryHudCanvas {
             }
           }
           Group #RpgStationSummaryItem5 {
+            Anchor: (Top: 4, Width: 492);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
+          }
+          Group #RpgStationSummaryItem6 {
+            Anchor: (Top: 4, Width: 492);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
+          }
+          Group #RpgStationSummaryItem7 {
+            Anchor: (Top: 4, Width: 492);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
+          }
+          Group #RpgStationSummaryItem8 {
+            Anchor: (Top: 4, Width: 492);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
+          }
+          Group #RpgStationSummaryItem9 {
+            Anchor: (Top: 4, Width: 492);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
+          }
+          Group #RpgStationSummaryItem10 {
+            Anchor: (Top: 4, Width: 492);
+            LayoutMode: Left;
+            Visible: false;
+            ItemGrid #Icon { Anchor: (Width: 24, Height: 24); SlotsPerRow: 1; AreItemsDraggable: false; DisplayItemQuantity: false; Style: @LedgerIconGridStyle; }
+            Group { Anchor: (Width: 8); }
+            Group {
+              FlexWeight: 1;
+              LayoutMode: Top;
+              Label #Name { Text: ""; Style: @LedgerRowStyle; }
+              Label #Sub { Text: ""; Visible: false; Style: @LedgerSubStyle; }
+            }
+          }
+          Group #RpgStationSummaryItem11 {
             Anchor: (Top: 4, Width: 492);
             LayoutMode: Left;
             Visible: false;

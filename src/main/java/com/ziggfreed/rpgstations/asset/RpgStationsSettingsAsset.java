@@ -301,6 +301,7 @@ public final class RpgStationsSettingsAsset
         @Nullable protected Integer offsetX;
         @Nullable protected Integer offsetY;
         @Nullable protected Long ttlMs;
+        @Nullable protected Integer maxRows;
 
         public static final BuilderCodec<SummaryHud> CODEC = BuilderCodec.builder(SummaryHud.class, SummaryHud::new)
                 .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
@@ -321,6 +322,15 @@ public final class RpgStationsSettingsAsset
                         (o, v) -> o.ttlMs = v, o -> o.ttlMs, (o, p) -> o.ttlMs = p.ttlMs)
                 .documentation("How long the summary panel stays on screen, in milliseconds.")
                 .addValidator(CodecWarnValidators.positive("SummaryHud.TtlMs should be positive.")).add()
+                .appendInherited(new KeyedCodec<>("MaxRows", Codec.INTEGER, false),
+                        (o, v) -> o.maxRows = v, o -> o.maxRows, (o, p) -> o.maxRows = p.maxRows)
+                .documentation("How many ledger rows the panel may grow to before the rest fold into "
+                        + "a single '+N more' line. The panel sizes itself to whatever is showing, so "
+                        + "a quiet session still draws a short panel and this is only the ceiling a "
+                        + "busy one stops at; lower it to keep the panel small on a crowded screen. "
+                        + "The panel has a hard ceiling of its own that a larger number cannot pass, "
+                        + "and leaving this out uses it.")
+                .addValidator(CodecWarnValidators.positive("SummaryHud.MaxRows should be positive.")).add()
                 .build();
 
         @Nonnull
@@ -365,6 +375,16 @@ public final class RpgStationsSettingsAsset
         @Nullable
         public Long getTtlMs() {
             return ttlMs;
+        }
+
+        /**
+         * How many ledger rows the panel may grow to before the rest fold into one "+N more" line;
+         * null (or a number nobody could draw) leaves the panel on its own ceiling. The panel is
+         * what enforces it, since only the panel knows how many rows its own document declares.
+         */
+        @Nullable
+        public Integer getMaxRows() {
+            return maxRows == null || maxRows <= 0 ? null : maxRows;
         }
     }
 }

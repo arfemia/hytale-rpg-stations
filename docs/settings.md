@@ -13,7 +13,7 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
 ```json
 {
   "Enabled": true,
-  "SummaryHud": { "Enabled": true, "Position": "TopCenter", "OffsetY": 72, "TtlMs": 6000 },
+  "SummaryHud": { "Enabled": true, "Position": "TopCenter", "OffsetY": 72, "TtlMs": 6000, "MaxRows": 12 },
   "Limits": { "MaxSessionsPerWorld": 60, "MaxPuppetsPerWorld": 40, "MaxStashesPerSection": 8,
               "UnattendedIntervalMs": 1000, "MaxUnattendedGatherCycles": 12 }
 }
@@ -26,6 +26,7 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
 | `SummaryHud.Position` | none | A shared-library HudPosition preset id, authored PascalCase like every other id in this schema (e.g. `TopCenter`); the legacy `TOP_CENTER` spelling still resolves since matching is case- and underscore-insensitive. An unknown or omitted value falls back to the HUD's own built-in default. |
 | `SummaryHud.OffsetX` / `.OffsetY` | `0` / none | A pixel offset applied on top of the position preset. |
 | `SummaryHud.TtlMs` | none | How long the summary panel stays on screen before it auto-dismisses, in milliseconds. |
+| `SummaryHud.MaxRows` | `12` | How many ledger rows the panel may grow to before the rest fold into a single `+N more` line. The panel sizes itself to what is showing, so this is a ceiling rather than a height: a three-row session still draws a three-row panel. Twelve is also the hard ceiling the panel can draw at all, so a larger number changes nothing; lower it to keep the panel small on a crowded screen. |
 | `Limits.MaxSessionsPerWorld` | unlimited | The most work sessions that may run at once in ONE world; a press past it is denied with a localized toast, the station left untouched. |
 | `Limits.MaxPuppetsPerWorld` | unlimited | The most live puppets that may exist at once in ONE world; past it a session still starts and runs, it just performs in the player's own body instead of spawning a puppet - the same fallback a failed spawn already takes. |
 | `Limits.MaxStashesPerSection` | unlimited | The most blocks in ONE chunk section (a 32x32x32 cube) that may hold placed station input at once; topping up material already placed always works, only a placement that would open a NEW store past the ceiling is denied, and a [multiblock structure's](structures-and-sockets.md) own activation mark never counts against it. The retired `MaxCustodyClaimsPerWorld` spelling is ignored with a boot warning naming this leaf. |
@@ -47,6 +48,10 @@ enhancement outcome rows (durability gained, stats rolled - a bare Anvil with no
 still reports its durability gain), and whatever additional ledger rows a listening mod adds through a
 registered `SummaryEnricher`. See [Add-ons & Integrations](integrations.md) for that registry and the
 mods known to use it.
+
+A long session can outrun the panel: rows past `SummaryHud.MaxRows` fold into one `+N more` line at
+the bottom rather than pushing the panel off the screen. Raising the number is what makes a busy
+session list everything, and twelve rows is as far as the panel can go.
 
 ## Why an asset, not a config file
 

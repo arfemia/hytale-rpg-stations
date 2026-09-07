@@ -7,6 +7,22 @@ there is no prior public release to diff against, so every entry is additive by 
 
 ## 0.1.0 (first public release)
 
+- **The session summary grows to twelve ledger rows, and `SummaryHud.MaxRows` draws fewer.** A long
+  run fills the panel: two contribution rows from a listening mod, what it consumed, what it
+  produced and a lucky find each get a line, and the panel folded everything past six into
+  `+N more` with no way to read them. `Pages/RpgStationSummary.ui` declares twelve row slots
+  (`#RpgStationSummaryItem0..11`) and `StationSummaryHud.MAX_LEDGER_ROWS` matches; the panel is
+  content-height sized, so a quiet session still draws a short one and only a busy session grows.
+  `SummaryHud.MaxRows` is the authored cap, held to the slots the document declares, read per push
+  so a reload lands on the next summary. `StationSummaryHudTest` pins the slot run against the
+  constant, since a command written against a slot the document does not declare crashes the
+  client.
+- **A run's item-gain notices grow one entry per item instead of one per cycle.** `notifyItemGain`
+  fires roughly once a work cycle and sent every one untagged, so twenty cycles queued twenty
+  toasts and pushed everything else out of the feed. Each now carries a tag of the item id plus
+  whether the line is a lucky one, which is what the client merges on: the plain pile climbs on one
+  entry, a lucky find keeps its own gold line rather than landing silently on the plain one's
+  frozen words.
 - **Requires ZiggfreedCommon 2.1.0 or newer.** The manifest floor and the compile pin move together with the library's 2.1.0 release, the version the whole mod family stands on; a 2.0.x jar fails this mod's load by name rather than mid-cycle.
 - **The station objective kinds are this engine's own: `WORK_STATION` and `STATION_OUTPUT`.**
   RPG Stations fires both into ziggfreed-common's shared progression runtime itself

@@ -77,8 +77,14 @@ public final class StationSummaryHud extends KeyedCustomHud {
     private static final String ITEM_MORE_SEL = "#RpgStationSummaryItemMore";
     private static final String STATION_ICON_SEL = "#RpgStationSummaryStationIcon";
 
-    /** Row slots the {@code .ui} pre-declares ({@code #RpgStationSummaryItem0..5}); the rest overflow. */
-    private static final int MAX_LEDGER_ROWS = 6;
+    /**
+     * The hard ceiling on ledger rows: how many slots the {@code .ui} pre-declares
+     * ({@code #RpgStationSummaryItem0..11}). A HUD update can only repaint elements the document
+     * already declares, never add one, so this number and the {@code .ui} must move together;
+     * anything past it folds into the keyed "+N more" row. The panel is content-height sized, so a
+     * session with three rows still draws a three-row panel: this is the ceiling, not the size.
+     */
+    static final int MAX_LEDGER_ROWS = 12;
 
     /**
      * The smaller SECOND Label every row slot declares, painted from a row's optional {@code
@@ -241,8 +247,8 @@ public final class StationSummaryHud extends KeyedCustomHud {
 
     /**
      * Populate the fixed ledger row slots via the shared, mod-agnostic {@link SummaryRowRenderer}
-     * (hiding any unused slot), plus the keyed overflow row when the row count exceeds {@link
-     * #MAX_LEDGER_ROWS}. {@code extraRows} (a registered {@code SummaryEnricher}'s own rows,
+     * (hiding any unused slot), plus the keyed overflow row when the row count exceeds the
+     * {@link #ledgerRowCap() cap in force}. {@code extraRows} (a registered {@code SummaryEnricher}'s own rows,
      * design section 3.2) are PREPENDED before the engine's own item rows, in registration
      * order. Each row's color is baked into its {@link Message} via {@link Message#color} (never
      * a separate style command) - the rich-text convention every other ledger surface in this
@@ -262,13 +268,35 @@ public final class StationSummaryHud extends KeyedCustomHud {
         for (LedgerRow row : ledgerRows) {
             summaryRows.add(buildItemRow(row));
         }
-        int overflow = SummaryRowRenderer.render(cmd, "#RpgStationSummaryItem", MAX_LEDGER_ROWS, summaryRows,
-                SUB_LABEL_ID);
+        // The rows are cut to the configured cap FIRST, then handed to the renderer against every
+        // slot the document declares: every slot is addressed on every push that way, so a slot the
+        // cap no longer admits is hidden rather than left showing what a longer session painted in
+        // it. The renderer's own overflow count is therefore always zero and the rows the cap cut
+        // are what the "+N more" line reports.
+        int shown = Math.min(summaryRows.size(), ledgerRowCap());
+        SummaryRowRenderer.render(cmd, "#RpgStationSummaryItem", MAX_LEDGER_ROWS,
+                summaryRows.subList(0, shown), SUB_LABEL_ID);
+        int overflow = summaryRows.size() - shown;
         cmd.set(ITEM_MORE_SEL + ".Visible", overflow > 0);
         if (overflow > 0) {
             cmd.set(ITEM_MORE_SEL + ".TextSpans",
                     RpgMsg.tr("ui.station.summary.items_more", overflow));
         }
+    }
+
+    /**
+     * How many ledger rows this panel may draw right now: the authored {@code SummaryHud.MaxRows},
+     * held to the {@link #MAX_LEDGER_ROWS} the document actually declares, and falling back to that
+     * ceiling when nothing is authored. Read per push so a live settings reload takes effect on the
+     * next summary rather than the next restart.
+     */
+    static int ledgerRowCap() {
+        RpgStationsSettingsAsset.SummaryHud hud = SettingsCatalog.getInstance().current().getSummaryHud();
+        Integer authored = hud != null ? hud.getMaxRows() : null;
+        if (authored == null) {
+            return MAX_LEDGER_ROWS;
+        }
+        return Math.max(1, Math.min(authored, MAX_LEDGER_ROWS));
     }
 
     private static void renderStationIcon(@Nonnull UICommandBuilder cmd, @Nullable String stationIconItemId) {

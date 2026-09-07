@@ -11,7 +11,7 @@ Router for `ui/`.
   invocation, explicit Width on every `#Content` child (Hytale groups do not clip - an unwrapped
   label without a width cap grows the panel to its longest row), content-height sizing (hugs its
   title/text/ledger instead of a fixed box).
-- **Ledger rows are TWO-LINE capable.** Each `#RpgStationSummaryItem0..5` slot is an icon plus a
+- **Ledger rows are TWO-LINE capable.** Each `#RpgStationSummaryItem0..11` slot is an icon plus a
   `FlexWeight: 1` vertical text column holding the headline `#Name` (`@LedgerRowStyle`, 15) and a
   smaller `#Sub` (`@LedgerSubStyle`, 13) that ships `Visible: false`; the row's own `Anchor` omits
   Height so it sizes to content and collapses back to one line whenever `#Sub` is hidden. The Java
@@ -45,7 +45,14 @@ Router for `ui/`.
   `hideIfCurrent(gen)` on `HytaleServer.SCHEDULED_EXECUTOR`, so a stale hide from an earlier
   summary is a no-op against a newer one. `KeyedCustomHud` supplies the position / throttle /
   register-and-lookup base only; it has no TTL.
-- **`RpgStationsSettingsAsset.SummaryHud`** (`Enabled`/`Position`/`OffsetX`/`OffsetY`/`TtlMs`, via
+- **`RpgStationsSettingsAsset.SummaryHud`** (`Enabled`/`Position`/`OffsetX`/`OffsetY`/`TtlMs`/`MaxRows`, via
   `station.SettingsCatalog`) governs whether/where this panel shows; a disabled setting leaves this
   mod's own toast path as the only feedback surface. A listening mod that wants a different
   fallback owns that itself, outside this package.
+- **Row cap: the `.ui` slot count is the HARD ceiling, `MaxRows` draws fewer.** A HUD update can
+  only repaint elements the document already declares, never append one, so `MAX_LEDGER_ROWS` (12)
+  and the `#RpgStationSummaryItem0..11` run must move together; `StationSummaryHud#ledgerRowCap`
+  clamps the authored `SummaryHud.MaxRows` to it and is read per push, so a settings reload lands on
+  the next summary. `renderLedger` cuts the row list to that cap and still hands the renderer ALL 12
+  slots, so a slot the cap no longer admits is hidden rather than left showing what a longer session
+  painted in it; whatever the cut dropped is what the keyed `+N more` row reports.
