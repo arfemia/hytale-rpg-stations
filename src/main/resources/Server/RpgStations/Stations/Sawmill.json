@@ -20,7 +20,9 @@
       },
       "Recipe": {
         "$Comment": "Authors only FromCrafting, never Conversions. The three Categories are genuine native recipe categories (every Wood_<Species>_{Planks,Decorative,Ornate}.json shares the same Wood_<Species>_Trunk ResourceTypeId input and the same Builders/StructuralCrafting bench, only the Category differs), so this is native-recipe composition, not invented content: the deriver surfaces 3 output categories per log species, 33 conversions in all, each stamped with its source category so sneak+F offers Planks/Decorative/Ornate for whatever log is loaded. A plain F press defaults to the FIRST authored Categories entry, so the array order (WoodPlanks first) is the default priority; reorder it to change that default, sneak+F still offers all three. Yield is purely DETERMINISTIC: Base 1 matches the native yield (every derived recipe in all three categories authors OutputQuantity 1 against a single-trunk input, true across all 11 wood species), so reading it tells you exactly what one cycle makes - everything conditional lives in Bonus below. A station deriving categories whose native recipes are NOT 1:1 should author Yield.Scale rather than Base, since the native quantity is not readable at the derivation seam.",
-        "FromCrafting": { "Categories": ["WoodPlanks", "DecorativePlanks", "OrnatePlanks"] },
+        "FromCrafting": {
+          "Categories": ["WoodPlanks", "DecorativePlanks", "OrnatePlanks"]
+        },
         "Yield": { "Base": 1 }
       },
       "Work": {
@@ -30,17 +32,21 @@
         "MaxMoveMeters": 1.5
       },
       "Custody": {
-        "$Comment": "Placed-input custody: hold logs and press F to load up to 100 into the bench, then work from the pile instead of your backpack. States maps the claim lifecycle onto the block's own interaction states; Display renders the placed logs as a prop at the block top, Offset.Y -0.1 embedding them slightly into the bench. Scale is a fraction of a real block for a block-shaped item like a log, so 1.0 would draw a full-size trunk on the bench top and 0.46 sizes the pile to just under half that; raise it for a bulkier load or lower it for a token one.",
+        "$Comment": "Placed-input custody: hold logs and press F to load up to 100 into the bench, then work from the pile instead of your backpack. States maps the claim lifecycle onto the block's own interaction states; Display renders the placed logs as a prop at the block top, Offset.Y sliding that pile up or down against the bench surface: lower it to sink the pile into the bench, raise it to stand the pile clear. Scale is a fraction of a real block for a block-shaped item like a log, so 1.0 would draw a full-size trunk on the bench top and 0.55 sizes the pile to just over half that; raise it for a bulkier load or lower it for a token one.",
         "MaxQuantity": 100,
         "States": { "Empty": "Default", "Loaded": "Loaded" },
         "Display": {
-          "Offset": { "Y": -0.1 },
-          "Scale": 0.46
+          "Offset": { "Y": 0.15 },
+          "Scale": 0.75
         }
       },
       "Bonus": {
         "$Comment": "Everything conditional or probabilistic about output lives here, as visible Rolls. ONE roll is authored inline: the tool ladder below, which is the whole of what this bench pays for a better hatchet, so the reward for an upgrade is a single curve you can read top to bottom. Prefer that shape - a bare Chance roll beside a ladder that already prices the same axis buys variance without giving the player a new decision. Reach for one when a station wants an outcome its ladder genuinely cannot express, and see docs/loot-and-factors.md for a worked example. The rpgstations:output_items reward adds EXTRA units of the cycle's own product (the actual species being milled) - additive on top of Recipe.Yield, so the two numbers stay directly comparable and no file can silently multiply another's. The amount is FRACTIONAL: the whole part is granted every cycle and the fraction left over is the chance of one more, so 1.5 pays one plank always plus a second half the time. Everything the cycle grants is summed before that single resolution, so two rolls paying 0.5 each average one whole plank. Lootables pulls in three tables, one roll each: SawmillFinds is the session-loyalty ladder any worker can reach, SawmillTrophy is the Sawmiller's Hatchet chase, and SawmillMasterworkFinds is the fourth find tier that chase pays out. Finds arrive as drop-list items and the trophy as an item grant, both different things from the planks these rolls add. Keep one roll per Lootable when authoring your own: a Lootable folds by id and a later layer replaces the whole FILE, so a table holding one roll is one a pack can re-tune without inheriting anything it did not want.",
-        "Lootables": ["SawmillFinds", "SawmillTrophy", "SawmillMasterworkFinds"],
+        "Lootables": [
+          "SawmillFinds",
+          "SawmillTrophy",
+          "SawmillMasterworkFinds"
+        ],
         "Rolls": [
           {
             "$Comment": "The tool ladder that pays for the milling time: a starter hatchet earns nothing extra and every upgrade is felt. Factors sum THREE tool axes because no two can rank the vanilla hatchet ladder alone: quality (the native ItemQuality.QualityValue - Junk 0, Common 1, Uncommon 2, Rare 3, Epic 4, Legendary 5) at weight 10.0 dominates, item level at 0.1 breaks ties inside a quality tier, and gather power at 1.0 rewards the genuinely better cutter. Quality alone cannot separate Wood/Crude from Copper (all three are Common); power alone cannot either (Wood and Copper share an identical 0.2 Woods power, and power SATURATES at 0.5 from the mid ladder up); item level separates them but must stay a small term because it does not track rarity (Onyxium is Epic at item level 4, so a level-led formula would rank it below a copper hatchet). The curve over the vanilla hatchets, counted on top of Recipe.Yield's one plank: Wood 10.6 and Crude 10.55 reach no floor (1 plank per cycle); Copper 11.3 reaches the 11 floor (2); Iron 22.3 reaches the 22 floor, whose FRACTIONAL 1.5 pays one plank always plus a second half the time, so Iron averages 2.5 rather than rounding onto a neighbouring tier and collapsing a rung; Thorium 33.5, Cobalt 34.0 and Adamantite 34.5 reach the 33 floor (3); Onyxium 40.9 and Mithril 45.5 reach the 40 floor (4); and the 50 floor (5 planks) is beyond every forgeable tool - only the sawmill's own drop-only Sawmiller's Hatchet (Legendary, scoring 55.55) or a better modded tool reaches it, making the trophy the bench's one endgame upgrade. A fractional floor value is the general route for any half-step tier, a modded one included: author it on the floor that earns it and it composes with every rung above and below, which a roll banded to one quality tier beside the ladder cannot do (a modded tool matching that tier while reaching a higher floor would collect both). Floors are NOT cumulative - the highest reached Min wins, and two floors sharing a Min is a validator warning since only the last authored one could ever be reached. Reweight Factors to change what the curve rewards, move a floor Min to change which tier earns which step, or append a floor for a modded tier above Epic.",
@@ -52,11 +58,61 @@
                 { "Factor": "hytale:tool_power", "Weight": 1.0 }
               ],
               "Floors": [
-                { "Min": 11.0, "Grants": { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "1" } } ] } },
-                { "Min": 22.0, "Grants": { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "1.5" } } ] } },
-                { "Min": 33.0, "Grants": { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "2" } } ] } },
-                { "Min": 40.0, "Grants": { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "3" } } ] } },
-                { "Min": 50.0, "Grants": { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "4" } } ] } }
+                {
+                  "Min": 11.0,
+                  "Grants": {
+                    "Rewards": [
+                      {
+                        "Kind": "rpgstations:output_items",
+                        "Params": { "Count": "1" }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "Min": 22.0,
+                  "Grants": {
+                    "Rewards": [
+                      {
+                        "Kind": "rpgstations:output_items",
+                        "Params": { "Count": "1.5" }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "Min": 33.0,
+                  "Grants": {
+                    "Rewards": [
+                      {
+                        "Kind": "rpgstations:output_items",
+                        "Params": { "Count": "2" }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "Min": 40.0,
+                  "Grants": {
+                    "Rewards": [
+                      {
+                        "Kind": "rpgstations:output_items",
+                        "Params": { "Count": "3" }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "Min": 50.0,
+                  "Grants": {
+                    "Rewards": [
+                      {
+                        "Kind": "rpgstations:output_items",
+                        "Params": { "Count": "4" }
+                      }
+                    ]
+                  }
+                }
               ]
             }
           }
@@ -108,7 +164,7 @@
           "$Comment": "The strike landing behind each swing: a second moment holding DelayMs 140, the same generic offset every Presentation carries, so the wood-hit sound and chips arrive part-way through the stroke the way a hatchet breaking a log does. Keep the delay well under Animation.Swing.IntervalMs or the held cue lands in the next swing instead; the validator warns when it does not.",
           "DelayMs": 140,
           "Sounds": ["SFX_Wood_Hit"],
-          "Particles": [ { "SystemId": "Block_Hit_Wood" } ]
+          "Particles": [{ "SystemId": "Block_Hit_Wood" }]
         },
         "Cycle": {
           "$Comment": "Plays once per completed conversion, holding its break sound by 100ms so the plank lands a tenth of a second after the cut reads as finished rather than on the same instant the cycle ticks over. Keep the delay under Work.CycleMs or the cue lands in the next cycle; the validator warns when it does not.",
@@ -118,24 +174,21 @@
         "Completion": {
           "$Comment": "Plays once when the session ends. The other ids an action can author here are step:<actionId>:<stepId>, one per beat of a Steps program, and cue:<yourName>, one per cue a loot roll names.",
           "Sounds": ["SFX_Chest_Wooden_Open_Player"],
-          "Particles": [ { "SystemId": "Block_Gem_Sparks" } ]
+          "Particles": [{ "SystemId": "Block_Gem_Sparks" }]
         },
         "Rare_Find": {
           "$Comment": "What an ordinary lucky find sounds like at this bench, and the first of the four-cue palette below. A Roll or a Ladder floor names a cue and this map decides what that cue IS, so re-skinning every find at once is one edit here rather than one per table - and the tables themselves stay pure numbers. Only ever plays over a find that genuinely produced something.\n\nThe three cue: ids beside it exist so a loot table can escalate without owning any presentation of its own. Author your own tables against these four names and the bench sounds right with nothing further to write; author a new name here and in your table's Cue when a fifth beat is genuinely a different moment.",
           "Sounds": ["SFX_Coins_Land"],
-          "Particles": [ { "SystemId": "Block_Gem_Sparks" } ]
+          "Particles": [{ "SystemId": "Block_Gem_Sparks" }]
         },
         "cue:find_deep": {
           "$Comment": "A find from the deeper tiers - grander than the everyday chime, short of the trophy. Name it from a Ladder floor that pays a genuinely better table.",
           "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player"],
-          "Particles": [ { "SystemId": "Effect_Crown_Gold" } ]
+          "Particles": [{ "SystemId": "Effect_Crown_Gold" }]
         },
         "cue:find_apex": {
           "$Comment": "The top of a find ladder: the deep cue plus coins and sparks, for the tier a fully invested worker reaches and nothing above it.",
-          "Sounds": [
-            "SFX_Chest_Legendary_FirstOpen_Player",
-            "SFX_Coins_Land"
-          ],
+          "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player", "SFX_Coins_Land"],
           "Particles": [
             { "SystemId": "Effect_Crown_Gold" },
             { "SystemId": "Block_Gem_Sparks" }
