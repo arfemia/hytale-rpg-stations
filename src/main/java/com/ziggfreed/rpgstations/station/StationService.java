@@ -290,6 +290,26 @@ public final class StationService {
                                  @Nonnull Presentation presentation, @Nonnull Vector3d targetPos,
                                  long dueAtMs) {
     }
+
+    /**
+     * Summary panels held open past their own lifetime, one queue per world (see
+     * {@link #parkHeldSummary}). Same shape and the same reason as the delayed-cue partition above:
+     * a held panel belongs to a session that has already stopped, so it cannot live on the session
+     * object. Drained at the top of {@link #tickFrameOnce}, ahead of the session loop and its
+     * empty-queue early return, so the last session of a world can still hand its panel back.
+     */
+    private final WorldKeyedQueues<HeldSummary> heldSummariesByWorld = new WorldKeyedQueues<>("rpgstations-summary");
+
+    /**
+     * One summary panel waiting for its worker to step away from where they finished: the panel's
+     * generation token (what {@code StationSummaryHud.tryRelease} arms), the worker, and the spot
+     * plus radius that count as "still there". Nothing here reads the session object - the session
+     * is gone by the time this is parked.
+     */
+    private record HeldSummary(@Nonnull PlayerRef playerRef, @Nonnull Ref<EntityStore> ref,
+                               @Nonnull UUID playerUuid, long generation,
+                               double x, double y, double z, double radiusSq) {
+    }
     private final ConcurrentHashMap<UUID, StationSession> byPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, UUID> byBlock = new ConcurrentHashMap<>();
 
@@ -405,6 +425,7 @@ public final class StationService {
     public void attachDrainer() {
         sessionsByWorld.markDrainerAttached();
         pendingMomentsByWorld.markDrainerAttached();
+        heldSummariesByWorld.markDrainerAttached();
     }
 
     public int activeCount() {
@@ -954,6 +975,9 @@ public final class StationService {
             byBlock.put(blockKey, playerUuid);
         }
         sessionsByWorld.queueFor(world).offer(s);
+        // Whoever presses in for another run is working, not reading the last run's totals: a panel
+        // held for them here gets its timed lifetime back and fades while this session runs.
+        releaseHeldSummary(playerUuid, world);
 
         // Actively-working block state (Custody.States.Working) for the CLASSIC convert loop: an
         // implicit-program session has no authored step to light its block on entry, and its first
@@ -1004,6 +1028,10 @@ public final class StationService {
         // completion moment is emitted from inside stop(), so its cue routinely outlives both its
         // own session and, when it was the world's last one, the whole session queue.
         drainPendingMoments(world, store);
+        // Held summary panels ride the same per-world drain, and for the same reason: the panel of
+        // a run that ended by itself outlives its session, waiting out a worker who may be away
+        // from the keyboard entirely.
+        drainHeldSummaries(world, store);
         // The unattended pass (decision 90) rides the same per-world drain, ALSO outside the
         // session-empty early return - its whole point is stations working while nobody holds a
         // session. Throttled per world inside.
@@ -2164,8 +2192,14 @@ public final class StationService {
      * cross-jar theming. Falls back to the classic {@code NotificationUtil} toast (cycles-only
      * body, no ledger rows - a text toast has no icon slot) on a settings-disabled HUD, an
      * unregistered instance, or a push failure.
+     *
+     * <p>A run that ended ITSELF ({@link #holdsSummaryOpen}) leaves its panel up instead of timing
+     * it out, and {@link #parkHeldSummary} watches for the worker to step away from where it left
+     * them. The timed lifetime then runs from that moment, so the totals of a run that finished
+     * while nobody was watching are still there when whoever ran it comes back.
      */
-    private void showSessionSummary(@Nonnull StationSession s, @Nullable Store<EntityStore> store) {
+    private void showSessionSummary(@Nonnull StationSession s, @Nullable Store<EntityStore> store,
+            @Nonnull StopReason reason) {
         if (s.playerRef == null) {
             return;
         }
@@ -2174,10 +2208,132 @@ public final class StationService {
         List<SummaryEnricher> enrichers = SummaryEnricherRegistryImpl.getInstance().enrichers();
         List<SummaryRow> extraRows = enricherRows(s, store, enrichers);
         Consumer<UICommandBuilder> decorateHook = enrichers.isEmpty() ? null : cmd -> decorate(s, cmd, enrichers);
-        if (!StationSummaryHud.tryShow(s.playerRef, title, body, s.stationIconItemId, extraRows, ledgerRows(s),
-                decorateHook)) {
+        boolean hold = holdsSummaryOpen(reason) && store != null;
+        long shown = StationSummaryHud.tryShow(s.playerRef, title, body, s.stationIconItemId, extraRows,
+                ledgerRows(s), decorateHook, hold);
+        if (shown == 0L) {
             toast(s.playerRef, body);
+            return;
         }
+        // A held panel with nobody watching for the walk-off would stay on screen forever, so a park
+        // that could not happen (no transform to measure from, no resolvable world) hands the panel
+        // its normal lifetime right here instead.
+        if (hold && !parkHeldSummary(s, store, shown)) {
+            StationSummaryHud.tryRelease(s.playerRef, shown);
+        }
+    }
+
+    /**
+     * PURE: does a stop of this kind leave its summary panel up until the worker steps away?
+     *
+     * <p>A run that ENDED ITSELF - the material ran out, a repeating program worked its inputs down,
+     * a ritual completed - leaves a worker standing where they worked, quite often not at the
+     * keyboard at all, and a panel that fades six seconds later is a result nobody ever reads. Those
+     * three keep the summary on screen until the worker leaves the spot, and the timed lifetime runs
+     * from that moment. Every other stop is the worker leaving under their own steam - crouching
+     * out, walking off, swapping tools, taking a hit - and its panel keeps the plain timed lifetime.
+     */
+    static boolean holdsSummaryOpen(@Nonnull StopReason reason) {
+        return reason == StopReason.OUT_OF_INPUTS || reason == StopReason.INPUTS_EXHAUSTED
+                || reason == StopReason.RITUAL_COMPLETE;
+    }
+
+    /**
+     * Parks a held panel until its worker steps away. The spot is where they are STANDING NOW, read
+     * after the hold, the mount and the camera have all been released, so it is where the run
+     * actually left them; the radius is the session's own walk-off radius, so "away" here means what
+     * it meant while the work was running. Returns false when there is no spot to measure from or no
+     * world to park in, which is the caller's cue to let the panel time out normally.
+     */
+    private boolean parkHeldSummary(@Nonnull StationSession s, @Nonnull Store<EntityStore> store, long generation) {
+        if (s.playerRef == null || s.playerUuid == null || s.ref == null || !s.ref.isValid()
+                || s.ref.getStore() != store) {
+            return false;
+        }
+        TransformComponent transform = store.getComponent(s.ref, TransformComponent.getComponentType());
+        Vector3d pos = transform != null ? transform.getPosition() : null;
+        if (pos == null) {
+            return false;
+        }
+        World world;
+        try {
+            world = WorldEvictors.worldOf(store);
+        } catch (Throwable t) {
+            Log.fine("STATION could not resolve the world for a held summary: " + t.getMessage());
+            return false;
+        }
+        // One held panel per worker: whatever an earlier run parked goes now rather than riding
+        // along until that worker next walks somewhere.
+        releaseHeldSummary(s.playerUuid, world);
+        return heldSummariesByWorld.queueFor(world).offer(new HeldSummary(s.playerRef, s.ref, s.playerUuid,
+                generation, pos.x, pos.y, pos.z, s.maxMoveSq));
+    }
+
+    /**
+     * Ends the hold on whatever panel this world holds for {@code playerUuid}, handing it the timed
+     * lifetime it would have had at session end. The release is a no-op on a panel a newer summary
+     * has already replaced, so this is safe to call whenever a worker's attention has clearly moved
+     * on - starting another run, or parking a fresher panel.
+     */
+    private void releaseHeldSummary(@Nonnull UUID playerUuid, @Nonnull World world) {
+        ConcurrentLinkedQueue<HeldSummary> queue = heldSummariesByWorld.peek(world);
+        if (queue == null || queue.isEmpty()) {
+            return;
+        }
+        Iterator<HeldSummary> it = queue.iterator();
+        while (it.hasNext()) {
+            HeldSummary held = it.next();
+            if (held.playerUuid().equals(playerUuid)) {
+                it.remove();
+                StationSummaryHud.tryRelease(held.playerRef(), held.generation());
+            }
+        }
+    }
+
+    /**
+     * Hands its normal lifetime back to every held panel in this world whose worker has stepped away
+     * from the spot it was parked at - the panel is still readable on the way out rather than
+     * blinking off mid-stride.
+     *
+     * <p>A worker who is gone (a stale ref, or one that has left this world) is released the same
+     * way rather than dropped: arming the hide is the safe direction, since the alternative can pin
+     * a panel on a client that nothing will ever clear it from. Runs BEFORE the session loop in
+     * {@link #tickFrameOnce} and independently of it - a held panel belongs to a session that has
+     * already stopped, and the world may by then hold no sessions at all.
+     */
+    private void drainHeldSummaries(@Nonnull World world, @Nonnull Store<EntityStore> store) {
+        ConcurrentLinkedQueue<HeldSummary> queue = heldSummariesByWorld.peek(world);
+        if (queue == null || queue.isEmpty()) {
+            return;
+        }
+        Iterator<HeldSummary> it = queue.iterator();
+        while (it.hasNext()) {
+            HeldSummary held = it.next();
+            if (heldSummaryStillAtSpot(held, store)) {
+                continue;
+            }
+            it.remove();
+            StationSummaryHud.tryRelease(held.playerRef(), held.generation());
+        }
+    }
+
+    /** Whether a held panel's worker is still in this world and still inside its radius. */
+    private static boolean heldSummaryStillAtSpot(@Nonnull HeldSummary held, @Nonnull Store<EntityStore> store) {
+        Ref<EntityStore> ref = held.ref();
+        if (!ref.isValid() || ref.getStore() != store) {
+            return false;
+        }
+        TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
+        Vector3d pos = transform != null ? transform.getPosition() : null;
+        return pos != null && withinHoldRadius(pos.x, pos.y, pos.z, held.x(), held.y(), held.z(), held.radiusSq());
+    }
+
+    /** PURE: is ({@code px},{@code py},{@code pz}) still within {@code radiusSq} of the parked spot? */
+    static boolean withinHoldRadius(double px, double py, double pz, double x, double y, double z, double radiusSq) {
+        double dx = px - x;
+        double dy = py - y;
+        double dz = pz - z;
+        return dx * dx + dy * dy + dz * dz <= radiusSq;
     }
 
     /**
@@ -3014,7 +3170,7 @@ public final class StationService {
                 if (s.cyclesDone > 0) {
                     // Summary enrichers (design section 7.2/7.3) run INSIDE this call, before the
                     // unconditional StationSessionCompletedEvent fires below.
-                    showSessionSummary(s, store);
+                    showSessionSummary(s, store, reason);
                 }
                 if (entityAlive && shouldPlayCompletion(silent, s.cyclesDone)) {
                     playCompletionMoment(s, store);

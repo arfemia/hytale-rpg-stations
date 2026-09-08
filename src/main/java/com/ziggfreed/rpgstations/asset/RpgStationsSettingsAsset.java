@@ -320,7 +320,9 @@ public final class RpgStationsSettingsAsset
                 .documentation("Vertical pixel offset from the chosen Position preset.").add()
                 .appendInherited(new KeyedCodec<>("TtlMs", Codec.LONG, false),
                         (o, v) -> o.ttlMs = v, o -> o.ttlMs, (o, p) -> o.ttlMs = p.ttlMs)
-                .documentation("How long the summary panel stays on screen, in milliseconds.")
+                .documentation("How long the summary panel stays on screen, in milliseconds. A run "
+                        + "that ended by itself, with its worker still standing at the station, keeps its "
+                        + "panel up until they step away, and this is how long it lingers from that moment.")
                 .addValidator(CodecWarnValidators.positive("SummaryHud.TtlMs should be positive.")).add()
                 .appendInherited(new KeyedCodec<>("MaxRows", Codec.INTEGER, false),
                         (o, v) -> o.maxRows = v, o -> o.maxRows, (o, p) -> o.maxRows = p.maxRows)

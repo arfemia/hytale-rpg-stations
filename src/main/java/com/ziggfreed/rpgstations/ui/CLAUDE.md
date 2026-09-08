@@ -45,6 +45,14 @@ Router for `ui/`.
   `hideIfCurrent(gen)` on `HytaleServer.SCHEDULED_EXECUTOR`, so a stale hide from an earlier
   summary is a no-op against a newer one. `KeyedCustomHud` supplies the position / throttle /
   register-and-lookup base only; it has no TTL.
+- **A held panel schedules nothing until someone says so.** `showSummary(..., holdOpen)` parks its
+  generation in `heldGeneration` instead of arming a hide, and `releaseHold(gen)` (statically,
+  `tryRelease(playerRef, gen)`) arms the authored `TtlMs` from the moment it is called; the CAS
+  against `heldGeneration` is what keeps a stale releaser from cutting short the panel a newer run
+  put up, and every `showSummary` clears the field first so a newer summary always cancels an older
+  hold. WHEN a hold ends is not this class's call: `station.StationService` holds the panel of a run
+  that ended itself (`holdsSummaryOpen`) and releases it when the worker steps away from where they
+  finished, engages again, or leaves the world.
 - **`RpgStationsSettingsAsset.SummaryHud`** (`Enabled`/`Position`/`OffsetX`/`OffsetY`/`TtlMs`/`MaxRows`, via
   `station.SettingsCatalog`) governs whether/where this panel shows; a disabled setting leaves this
   mod's own toast path as the only feedback surface. A listening mod that wants a different

@@ -25,7 +25,7 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
 | `SummaryHud.Enabled` | `true` | Whether the post-session summary panel shows at all. |
 | `SummaryHud.Position` | none | A shared-library HudPosition preset id, authored PascalCase like every other id in this schema (e.g. `TopCenter`); the legacy `TOP_CENTER` spelling still resolves since matching is case- and underscore-insensitive. An unknown or omitted value falls back to the HUD's own built-in default. |
 | `SummaryHud.OffsetX` / `.OffsetY` | `0` / none | A pixel offset applied on top of the position preset. |
-| `SummaryHud.TtlMs` | none | How long the summary panel stays on screen before it auto-dismisses, in milliseconds. |
+| `SummaryHud.TtlMs` | none | How long the summary panel stays on screen before it dismisses itself, in milliseconds. A run that ended by itself with its worker still at the station holds its panel until they step away; this is then how long it lingers from that moment. |
 | `SummaryHud.MaxRows` | `12` | How many ledger rows the panel may grow to before the rest fold into a single `+N more` line. The panel sizes itself to what is showing, so this is a ceiling rather than a height: a three-row session still draws a three-row panel. Twelve is also the hard ceiling the panel can draw at all, so a larger number changes nothing; lower it to keep the panel small on a crowded screen. |
 | `Limits.MaxSessionsPerWorld` | unlimited | The most work sessions that may run at once in ONE world; a press past it is denied with a localized toast, the station left untouched. |
 | `Limits.MaxPuppetsPerWorld` | unlimited | The most live puppets that may exist at once in ONE world; past it a session still starts and runs, it just performs in the player's own body instead of spawning a puppet - the same fallback a failed spawn already takes. |
@@ -52,6 +52,14 @@ mods known to use it.
 A long session can outrun the panel: rows past `SummaryHud.MaxRows` fold into one `+N more` line at
 the bottom rather than pushing the panel off the screen. Raising the number is what makes a busy
 session list everything, and twelve rows is as far as the panel can go.
+
+A run that ends by itself waits for its worker. When the material runs out, a repeating program works
+its inputs down, or a ritual finishes, the panel stays up while whoever ran it is still standing at
+the station - often nobody is at the keyboard for the last few minutes of a long run, and the totals
+should still be there when they come back. It dismisses on `SummaryHud.TtlMs` once they step away
+from where the run left them, and starting another run at the station dismisses it the same way. A
+run the worker ended themselves - walking off, crouching out, swapping tools, taking a hit - gets the
+plain timed panel, since they are already leaving.
 
 ## Why an asset, not a config file
 

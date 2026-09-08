@@ -7,6 +7,15 @@ there is no prior public release to diff against, so every entry is additive by 
 
 ## 0.1.0 (first public release)
 
+- **A run that finishes on its own holds its summary panel until the worker walks away.** A station
+  that works through a stack of logs finishes whenever it finishes, often minutes after whoever
+  started it stopped watching, so a panel on a six-second timer would be gone before they read it.
+  When the material runs out, a repeating program works its inputs down, or a ritual completes, the
+  panel stays up while the worker is still standing where the run left them, and `SummaryHud.TtlMs`
+  runs from the moment they step outside the station's own walk-off radius, so the summary is still
+  readable on the way out. Engaging the station again releases it the same way. A stop the worker
+  made themselves (crouching out, walking off, swapping tools, taking a hit) keeps the plain timed
+  panel, since they are already leaving.
 - **The session summary grows to twelve ledger rows, and `SummaryHud.MaxRows` draws fewer.** A long
   run fills the panel: two contribution rows from a listening mod, what it consumed, what it
   produced and a lucky find each get a line, and the panel folded everything past six into

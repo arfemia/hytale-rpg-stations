@@ -6,9 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -742,5 +744,44 @@ public class StationServiceTest {
                 "one entry per receiving socket id, quantities summed across the cycle's produce items");
         assertTrue(StationService.drainCycleSocketCounts(s).isEmpty(),
                 "the buffer clears with the drain, so each cycle's counts are forwarded exactly once");
+    }
+
+    // ==================== The held summary panel (a run that ended itself waits for the worker) ====================
+
+    @Test
+    void holdsSummaryOpen_forEveryStopTheRunItselfDecided() {
+        assertTrue(StationService.holdsSummaryOpen(StationService.StopReason.OUT_OF_INPUTS));
+        assertTrue(StationService.holdsSummaryOpen(StationService.StopReason.INPUTS_EXHAUSTED));
+        assertTrue(StationService.holdsSummaryOpen(StationService.StopReason.RITUAL_COMPLETE));
+    }
+
+    @Test
+    void holdsSummaryOpen_everyOtherStopKeepsTheTimedPanel() {
+        Set<StationService.StopReason> held = EnumSet.of(StationService.StopReason.OUT_OF_INPUTS,
+                StationService.StopReason.INPUTS_EXHAUSTED, StationService.StopReason.RITUAL_COMPLETE);
+        for (StationService.StopReason reason : StationService.StopReason.values()) {
+            if (held.contains(reason)) {
+                continue;
+            }
+            assertFalse(StationService.holdsSummaryOpen(reason),
+                    reason + ": a worker who ended the run themselves is not waiting to read anything, "
+                            + "and a new stop reason has to opt in deliberately");
+        }
+    }
+
+    @Test
+    void withinHoldRadius_stillThereAtTheSpotAndOnTheBoundary() {
+        assertTrue(StationService.withinHoldRadius(10.0, 64.0, -3.0, 10.0, 64.0, -3.0, 2.25),
+                "standing exactly where the run left them");
+        assertTrue(StationService.withinHoldRadius(11.5, 64.0, -3.0, 10.0, 64.0, -3.0, 2.25),
+                "the boundary still counts as there, matching the walk-off check this borrows its radius from");
+    }
+
+    @Test
+    void withinHoldRadius_awayOncePastTheRadiusInAnyDirection() {
+        assertFalse(StationService.withinHoldRadius(11.6, 64.0, -3.0, 10.0, 64.0, -3.0, 2.25),
+                "one step past the radius is away");
+        assertFalse(StationService.withinHoldRadius(10.0, 66.0, -3.0, 10.0, 64.0, -3.0, 2.25),
+                "height counts too: the radius is a sphere, the same one the session walked off through");
     }
 }

@@ -46,6 +46,9 @@ import com.ziggfreed.rpgstations.i18n.RpgMsg;
  * crest/text/however-many ledger rows are showing. Auto-hide uses the {@code ToastController}
  * TTL pattern: a monotonic {@link #generation} counter stamped by every {@link #showSummary}
  * guards a stale scheduled hide from clearing a NEWER summary that re-armed in the meantime.
+ * A summary may also be shown HELD OPEN, arming nothing until its owner calls
+ * {@link #releaseHold} - the panel of a run that ended by itself waits for its worker to come back
+ * to the keyboard, and the station engine decides when that wait is over.
  *
  * <p><b>Neutral frame, themeable from outside.</b> The {@code .ui} uses the common {@code
  * ZigFrames.ui}'s {@code @ZigDecoratedFrame}, never another mod's frame set;
@@ -100,6 +103,18 @@ public final class StationSummaryHud extends KeyedCustomHud {
 
     /** Generation token guarding a stale scheduled hide (the {@code ToastController} TTL pattern). */
     private final AtomicLong generation = new AtomicLong(0L);
+
+    /**
+     * The generation of the summary currently HELD OPEN (0 = none): one shown at the end of a run
+     * whose worker is still standing where they finished waits here for {@link #releaseHold}
+     * instead of arming its own hide, so a finished run's totals are still on screen when whoever
+     * ran it comes back. Every {@link #showSummary} clears it first, so a newer summary always
+     * cancels an older hold.
+     */
+    private final AtomicLong heldGeneration = new AtomicLong(0L);
+
+    /** The lifetime {@link #releaseHold} arms for the held summary: the one it was pushed with. */
+    private volatile long heldDurationMs = DEFAULT_DURATION_MS;
 
     public StationSummaryHud(@Nonnull PlayerRef playerRef) {
         super(playerRef, HUD_KEY);
@@ -220,11 +235,18 @@ public final class StationSummaryHud extends KeyedCustomHud {
      * pushes (a registered {@code SummaryEnricher.decorate}, design section 3.2), then schedule
      * the auto-hide at {@code durationMs}. A second call before the first hide fires bumps
      * {@link #generation}, so the STALE scheduled hide from the first call becomes a no-op.
+     *
+     * <p>{@code holdOpen} leaves the panel up instead: nothing is scheduled, and the returned
+     * generation is what a later {@link #releaseHold} arms the timed lifetime with. The caller
+     * decides when a hold ends; this class only keeps the panel painted until it says so.
+     *
+     * @return the generation token of the summary just pushed.
      */
-    public void showSummary(@Nonnull Message title, @Nonnull Message body, @Nullable String stationIconItemId,
+    public long showSummary(@Nonnull Message title, @Nonnull Message body, @Nullable String stationIconItemId,
             @Nonnull List<SummaryRow> extraRows, @Nonnull List<LedgerRow> ledgerRows, long durationMs,
-            @Nullable Consumer<UICommandBuilder> decorateHook) {
+            @Nullable Consumer<UICommandBuilder> decorateHook, boolean holdOpen) {
         long gen = generation.incrementAndGet();
+        heldGeneration.set(0L);
 
         UICommandBuilder cmd = new UICommandBuilder();
         cmd.set(rootSelector() + ".Visible", true);
@@ -242,7 +264,29 @@ public final class StationSummaryHud extends KeyedCustomHud {
         update(false, cmd);
 
         long ttl = durationMs > 0 ? durationMs : DEFAULT_DURATION_MS;
+        if (holdOpen) {
+            // The duration is published BEFORE the generation, so a releaser that sees this hold at
+            // all sees the lifetime that came with it.
+            heldDurationMs = ttl;
+            heldGeneration.set(gen);
+            return gen;
+        }
         HytaleServer.SCHEDULED_EXECUTOR.schedule(() -> hideIfCurrent(gen), ttl, TimeUnit.MILLISECONDS);
+        return gen;
+    }
+
+    /**
+     * End a hold: the panel {@code gen} identifies gets the same timed lifetime it would have had
+     * at session end, counted from now. Returns false when {@code gen} is not the generation being
+     * held - a newer summary has replaced it, or the hold was already released - so a stale caller
+     * can never cut short what a newer run put up.
+     */
+    public boolean releaseHold(long gen) {
+        if (gen <= 0L || !heldGeneration.compareAndSet(gen, 0L)) {
+            return false;
+        }
+        HytaleServer.SCHEDULED_EXECUTOR.schedule(() -> hideIfCurrent(gen), heldDurationMs, TimeUnit.MILLISECONDS);
+        return true;
     }
 
     /**
@@ -341,39 +385,76 @@ public final class StationSummaryHud extends KeyedCustomHud {
     }
 
     /**
-     * Resolve {@code playerRef}'s registered instance and push a summary, returning {@code
-     * false} (never throwing) when the surface is settings-disabled, unregistered, or the push
-     * fails. MUST run on the WORLD THREAD (mirrors {@code MmoHud}'s contract - the native
-     * {@code HudManager} map is not concurrent). {@code extraRows} and {@code decorateHook} are
-     * the {@code SummaryEnricher} plumbing (design section 3.2) - pass {@code List.of()}/{@code
-     * null} when nothing is registered.
+     * The authored {@code SummaryHud.TtlMs}, falling back to {@link #DEFAULT_DURATION_MS} when
+     * nothing usable is authored. Read per use, so a settings reload lands on the next panel rather
+     * than the next restart.
      */
-    public static boolean tryShow(@Nonnull PlayerRef playerRef, @Nonnull Message title, @Nonnull Message body,
+    private static long settingsTtlMs() {
+        RpgStationsSettingsAsset.SummaryHud settings = SettingsCatalog.getInstance().current().getSummaryHud();
+        Long authored = settings != null ? settings.getTtlMs() : null;
+        return authored != null && authored > 0 ? authored : DEFAULT_DURATION_MS;
+    }
+
+    /**
+     * Resolve {@code playerRef}'s registered instance and push a summary, returning {@code 0}
+     * (never throwing) when the surface is settings-disabled, unregistered, or the push fails.
+     * MUST run on the WORLD THREAD (mirrors {@code MmoHud}'s contract - the native {@code
+     * HudManager} map is not concurrent). {@code extraRows} and {@code decorateHook} are the
+     * {@code SummaryEnricher} plumbing (design section 3.2) - pass {@code List.of()}/{@code null}
+     * when nothing is registered.
+     *
+     * @param holdOpen keep the panel up until {@link #tryRelease} instead of timing it out.
+     * @return the pushed summary's generation token, to hand back to {@link #tryRelease}; {@code 0}
+     *         when nothing was shown.
+     */
+    public static long tryShow(@Nonnull PlayerRef playerRef, @Nonnull Message title, @Nonnull Message body,
             @Nullable String stationIconItemId, @Nonnull List<SummaryRow> extraRows,
-            @Nonnull List<LedgerRow> ledgerRows, @Nullable Consumer<UICommandBuilder> decorateHook) {
+            @Nonnull List<LedgerRow> ledgerRows, @Nullable Consumer<UICommandBuilder> decorateHook,
+            boolean holdOpen) {
         RpgStationsSettingsAsset.SummaryHud settings = SettingsCatalog.getInstance().current().getSummaryHud();
         if (settings != null && !settings.isEnabled()) {
-            return false;
+            return 0L;
         }
         try {
             Ref<EntityStore> ref = playerRef.getReference();
             if (ref == null || !ref.isValid()) {
-                return false;
+                return 0L;
             }
             Player player = ref.getStore().getComponent(ref, Player.getComponentType());
+            if (player == null) {
+                return 0L;
+            }
+            StationSummaryHud hud = KeyedCustomHud.get(player, HUD_KEY, StationSummaryHud.class);
+            if (hud == null) {
+                return 0L;
+            }
+            return hud.showSummary(title, body, stationIconItemId, extraRows, ledgerRows, settingsTtlMs(),
+                    decorateHook, holdOpen);
+        } catch (Throwable t) {
+            Log.fine(HUD_KEY + ": tryShow failed: " + t.getMessage());
+            return 0L;
+        }
+    }
+
+    /**
+     * Release the panel {@code generation} identifies on {@code playerRef}'s registered instance: it
+     * fades on the authored lifetime from here. False (never throwing) when the player is gone, the
+     * surface is unregistered, or that generation is no longer the one being held. MUST run on the
+     * WORLD THREAD, like {@link #tryShow}.
+     */
+    public static boolean tryRelease(@Nonnull PlayerRef playerRef, long generation) {
+        if (generation <= 0L) {
+            return false;
+        }
+        try {
+            Player player = resolvePlayer(playerRef);
             if (player == null) {
                 return false;
             }
             StationSummaryHud hud = KeyedCustomHud.get(player, HUD_KEY, StationSummaryHud.class);
-            if (hud == null) {
-                return false;
-            }
-            long durationMs = settings != null && settings.getTtlMs() != null && settings.getTtlMs() > 0
-                    ? settings.getTtlMs() : DEFAULT_DURATION_MS;
-            hud.showSummary(title, body, stationIconItemId, extraRows, ledgerRows, durationMs, decorateHook);
-            return true;
+            return hud != null && hud.releaseHold(generation);
         } catch (Throwable t) {
-            Log.fine(HUD_KEY + ": tryShow failed: " + t.getMessage());
+            Log.fine(HUD_KEY + ": tryRelease failed: " + t.getMessage());
             return false;
         }
     }

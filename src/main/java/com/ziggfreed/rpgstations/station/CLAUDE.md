@@ -818,6 +818,33 @@ session, so a mob taking damage or dying - the overwhelming majority of either e
 populated world - used to pay a dispatch plus a session lookup for a question whose answer could
 only ever be "no". The prior `Query.any()` on the damage system paid that cost for EVERY entity.
 
+## The summary panel a finished run holds open
+
+`stop()` shows the session summary through `showSessionSummary(s, store, reason)`, and the REASON
+decides its lifetime. `holdsSummaryOpen` (pure, `StationServiceTest`-covered) says yes for exactly
+`OUT_OF_INPUTS`, `INPUTS_EXHAUSTED` and `RITUAL_COMPLETE` - the three stops the RUN made rather than
+the worker - and those push the panel with `holdOpen`, so `StationSummaryHud` schedules no hide at
+all. Every other stop (crouch-out, walk-off, tool swap, damage, death, disconnect) keeps the plain
+`SummaryHud.TtlMs` panel: that worker is already leaving.
+
+A held panel is parked in `heldSummariesByWorld` (a `WorldKeyedQueues<HeldSummary>`, the same shape
+and the same reason as the delayed-cue partition - it outlives its session) carrying the panel's
+generation token plus the spot and radius that count as "still there": the position read AFTER the
+hold, the mount and the camera are released, so it is where the run actually left the worker, and
+`s.maxMoveSq`, the session's own walk-off radius, so "away" means what it meant while the work was
+running. `drainHeldSummaries` runs at the TOP of `tickFrameOnce` beside `drainPendingMoments`,
+outside the session-empty early return, and hands the panel its normal lifetime
+(`StationSummaryHud.tryRelease`) the moment `withinHoldRadius` says the worker stepped out - the
+summary is still readable on the way out rather than blinking off mid-stride. A worker whose ref went
+stale or who left the world is released the same way rather than dropped: arming the hide is the safe
+direction, since the alternative pins a panel on a client that nothing will ever clear it from.
+
+`releaseHeldSummary(playerUuid, world)` is the ONE removal path, and engaging again calls it - a
+worker pressing in for another run is working, not reading. Every release is generation-checked
+inside the HUD, so a stale one can never cut short the panel a newer run put up; a park that cannot
+happen (no transform to measure from, no resolvable world) releases immediately instead, since a held
+panel nobody is watching for would otherwise stay on screen forever.
+
 ## World-unload teardown + the disconnect posture (`RemoveWorldEvent`)
 
 **Every one of this engine's VOLATILE block-keyed maps (`displayByBlock` - whose keys append a

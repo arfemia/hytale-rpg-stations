@@ -1433,7 +1433,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Position` | `string` | `null` | A shared-library HudPosition preset id, authored PascalCase like every other id in this schema (e.g. 'TopCenter'); the legacy SCREAMING_SNAKE spelling ('TOP_CENTER') still resolves since matching is case- and underscore-insensitive. Null or unknown falls back to the HUD's own default. |
 | `OffsetX` | `integer` | `null` | Horizontal pixel offset from the chosen Position preset; defaults to 0. |
 | `OffsetY` | `integer` | `null` | Vertical pixel offset from the chosen Position preset. |
-| `TtlMs` | `long` | `null` | How long the summary panel stays on screen, in milliseconds. |
+| `TtlMs` | `long` | `null` | How long the summary panel stays on screen, in milliseconds. A run that ended by itself, with its worker still standing at the station, keeps its panel up until they step away, and this is how long it lingers from that moment. |
 | `MaxRows` | `integer` | `null` | How many ledger rows the panel may grow to before the rest fold into a single '+N more' line. The panel sizes itself to whatever is showing, so a quiet session still draws a short panel and this is only the ceiling a busy one stops at; lower it to keep the panel small on a crowded screen. The panel has a hard ceiling of its own that a larger number cannot pass, and leaving this out uses it. |
 
 <a id="field-settingsasset-limits"></a>
