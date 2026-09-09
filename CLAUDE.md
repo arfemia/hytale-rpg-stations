@@ -44,8 +44,9 @@ skinned puppet performing the work" - `StationAsset.Puppet`, `station.StationPup
 `Hide.Route:"Scale"` in-game-CROWNED, primitives lifted to `ziggfreed-common`'s
 `entity.PlayerPuppetService`/`ItemPropEntityService` - see `station/CLAUDE.md`'s puppet-engine
 bullet and `asset/CLAUDE.md`'s `Puppet` bullet) plus a round-5 item-grant UX wave (hotbar-first-
-if-space grants via common's `inventory.InventoryGrant`, native-pickup-mimic retrieve feedback via
-common's `feedback.PickupMimic`, gold lucky-drop notifications - see `loot/CLAUDE.md` and
+if-space grants via common's `inventory.InventoryGrant`, output counted on common's shared HUD item
+rows (`ui.hud.bar.HudBars.itemMoved`, the retrieve keeping its pickup SFX through
+`feedback.PickupMimic.playPickupSfx`), gold lucky-drop notifications - see `loot/CLAUDE.md` and
 `station/CLAUDE.md`'s custody/retrieval bullets). Full narrative + the CONSOLIDATED next-session
 in-game checklist: `../../.claude/plans/work-stations-mod-extraction-prompt.md`. **The maintainer's
 FULL in-game puppet confirm landed (2026-07-23)** - held-item mirror updates within a beat, player

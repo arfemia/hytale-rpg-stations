@@ -90,6 +90,7 @@ import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.sound.Sound3D;
+import com.ziggfreed.common.ui.hud.bar.HudBars;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.common.util.NumberFormatter;
 import com.ziggfreed.common.world.BlockOps;
@@ -1912,7 +1913,7 @@ public final class StationService {
         }
         if (s.playerRef != null) {
             for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
-                notifyItemGain(s.playerRef, e.getKey(), e.getValue(), true);
+                notifyLuckyFind(s.playerRef, e.getKey(), e.getValue());
             }
         }
         // F1 (decision 51d): every granted Roll's Grants.Effects[] now goes LIVE - apply each native
@@ -2035,13 +2036,13 @@ public final class StationService {
         if (breakdown != null) {
             breakdown.addBonus(reported);
         }
-        // Tell the player about the bonus too. The Produce phase notifies only the recipe's own
+        // Count the bonus on the player's row too. The Produce phase reports only the recipe's own
         // deterministic Yield, so without this a cycle that granted one base plank plus four from
-        // the tool ladder reported a single plank - the toast under-counted every bonus this
-        // station pays, which reads as the reward not working rather than the toast being wrong.
-        // Not flagged lucky: this is ordinary output of the cycle, just more of it.
+        // the tool ladder counted a single plank - the row under-counted every bonus this station
+        // pays, which reads as the reward not working rather than the count being wrong. Not a
+        // lucky find: this is ordinary output of the cycle, just more of it.
         if (s.playerRef != null) {
-            notifyItemGain(s.playerRef, itemId, reported, false);
+            notifyItemGain(s.playerRef, itemId, reported);
         }
         return reported;
     }
@@ -2227,15 +2228,22 @@ public final class StationService {
      * PURE: does a stop of this kind leave its summary panel up until the worker steps away?
      *
      * <p>A run that ENDED ITSELF - the material ran out, a repeating program worked its inputs down,
-     * a ritual completed - leaves a worker standing where they worked, quite often not at the
-     * keyboard at all, and a panel that fades six seconds later is a result nobody ever reads. Those
-     * three keep the summary on screen until the worker leaves the spot, and the timed lifetime runs
-     * from that moment. Every other stop is the worker leaving under their own steam - crouching
-     * out, walking off, swapping tools, taking a hit - and its panel keeps the plain timed lifetime.
+     * a ritual completed, the bag filled up, the session hit its cap, the tool finally broke -
+     * leaves a worker standing where they worked, quite often not at the keyboard at all, and a
+     * panel that fades six seconds later is a result nobody ever reads. Those keep the summary on
+     * screen until the worker leaves the spot, and the timed lifetime runs from that moment.
+     *
+     * <p>Every other stop keeps the plain timed lifetime, for one of three reasons: the worker ended
+     * it under their own steam and is already looking elsewhere (crouching out, walking off,
+     * swapping tools, taking a hit), there is nobody left to read it (death, a disconnect, the
+     * server going down, a world change), or what the run needed went away underneath it (the
+     * station, its anchor, its socket, its structure, the feature itself) - as does a run that
+     * failed or was denied rather than finishing.
      */
     static boolean holdsSummaryOpen(@Nonnull StopReason reason) {
         return reason == StopReason.OUT_OF_INPUTS || reason == StopReason.INPUTS_EXHAUSTED
-                || reason == StopReason.RITUAL_COMPLETE;
+                || reason == StopReason.RITUAL_COMPLETE || reason == StopReason.INVENTORY_FULL
+                || reason == StopReason.SESSION_CAP || reason == StopReason.TOOL_BROKEN;
     }
 
     /**
@@ -6136,16 +6144,14 @@ public final class StationService {
                     }
                 }
                 if (!landed.isEmpty()) {
-                    // Round-5 refinement 2: mimic the ENGINE's own native pickup feedback (message +
-                    // SFX + item icon) per genuinely-received stack, via common's PickupMimic (which
-                    // itself delegates to the real Player#notifyPickupItem - not a re-derived
-                    // lookalike, scout findings 1-4). The classic generic toast below is reached
-                    // only when EVERY stack dropped (landed stays empty) - a PARTIAL drop (some
-                    // stacks landed, one or more overflowed to the block) fires this pickup
-                    // feedback for what landed and gives no separate notice for the dropped
-                    // remainder; "you picked it up" would still be a lie for something sitting on
-                    // the ground, so that gap is accepted rather than mixing both toast shapes.
-                    notifyNativePickup(store, ref, landed, claim.blockX, claim.blockY, claim.blockZ);
+                    // What landed is counted on the shared HUD's item rows and sounds like a pickup
+                    // from the block; nothing about it reaches the notification feed. The generic
+                    // toast below is reached only when EVERY stack dropped (landed stays empty) - a
+                    // PARTIAL drop (some stacks landed, one or more overflowed to the block) counts
+                    // what landed and gives no separate notice for the dropped remainder; "you
+                    // picked it up" would still be a lie for something sitting on the ground, so
+                    // that gap is accepted rather than mixing both shapes.
+                    notifyRetrieved(store, ref, playerRef, landed, claim.blockX, claim.blockY, claim.blockZ);
                 } else {
                     toast(playerRef, RpgMsg.tr("ui.station.retrieve.done"));
                 }
@@ -7196,11 +7202,11 @@ public final class StationService {
             boolean landed = ItemGrantUtil.grantOrDrop(player, new ItemStack(outputItemId, resolved),
                     commandBuffer, store, claim.blockX, claim.blockY, claim.blockZ);
             if (landed) {
-                notifyItemGain(playerRef, outputItemId, resolved, false);
+                notifyItemGain(playerRef, outputItemId, resolved);
             }
         }
         for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
-            notifyItemGain(playerRef, e.getKey(), e.getValue(), true);
+            notifyLuckyFind(playerRef, e.getKey(), e.getValue());
         }
         for (String cue : result.getCues()) {
             playPresentationAt(world, playerRef, ref, claimActionMoment(claim, cue),
@@ -7628,70 +7634,63 @@ public final class StationService {
     }
 
     /**
-     * Round-5 refinement 3 (maintainer, 2026-07-22): a live, item-specific "what you gained"
-     * notification - icon + client-resolved name, with the quantity riding the item-slot count
-     * badge (round-7 D-4 - the value is now the bare item name so this reads EXACTLY like a native
-     * pickup), routed through {@code ziggfreed-common}'s {@code feedback.Notify#itemKeyed} (the SAME
-     * item-slot packet shape a native pickup uses; leg A's shared lift). Deliberately LIGHTER than
-     * {@link #notifyNativePickup}/{@code PickupMimic}: no SFX and
-     * no {@code ShowItemPickupNotifications} gate - this fires ambiently roughly once per work
-     * cycle, not for a one-shot deliberate pickup action, so it skips the sound cue that primitive
-     * layers on. {@code lucky=true} appends the ALREADY-9-locale {@code ui.station.summary.lucky}
-     * suffix (DRY - the SAME {@code Msg.cat} composition {@link #ledgerRows} builds for the
-     * end-of-session ledger row) and styles the whole line {@link #GOLD}. Called from both this
-     * class ({@link #applyGrantResult}) and {@code StationStepHandlers.ProduceHandler} (same
-     * package). Never throws.
+     * Ordinary output landed: count it on the shared HUD's row for that item
+     * ({@code ziggfreed-common}'s {@code ui.hud.bar.HudBars#itemMoved}). The row is the library's
+     * and needs nothing from this mod: it names and pictures the item from the id alone, keeps a
+     * running total since it came up, and fades a few seconds after the last gain. Nothing here
+     * reaches the notification feed, because a notice that repeats every cycle pins that feed: the
+     * client drains it strictly oldest first and merging into an entry refreshes it in place, so
+     * an item notice landing every few seconds held the head of the feed for a whole session.
+     * Called from both this class ({@link #applyGrantResult}, {@link #grantBonusOutputItems}) and
+     * {@code StationStepHandlers.ProduceHandler} (same package). Never throws.
      */
-    static void notifyItemGain(@Nonnull PlayerRef playerRef, @Nonnull String itemId, int quantity, boolean lucky) {
+    static void notifyItemGain(@Nonnull PlayerRef playerRef, @Nonnull String itemId, int quantity) {
         try {
-            Message line = RpgMsg.tr("ui.station.gain.produced", itemNameMsg(itemId), quantity);
-            if (lucky) {
-                line = Msg.cat(line, Msg.raw(" "), RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
-            }
-            // D-4: the value is now the bare item name ({0}); the quantity rides the item-slot count
-            // badge, matching a native pickup exactly (the unused quantity arg above is harmless).
-            // Routed through the shared item-keyed helper (identical packet shape) - leg A's lift.
-            Notify.itemKeyed(playerRef, line, null, itemId, quantity, gainTag(itemId, lucky));
+            HudBars.itemMoved(playerRef, itemId, quantity);
         } catch (Throwable t) {
-            Log.fine("STATION item-gain notify failed: " + t.getMessage());
+            Log.fine("STATION item-gain row failed: " + t.getMessage());
         }
     }
 
     /**
-     * What one item-gain notice is filed under, so a run of them GROWS a single entry rather than
-     * dropping a fresh one every cycle: a worker milling for a minute reads one climbing pile per
-     * item, and everything else the feed has to say stays visible beside it.
-     *
-     * <p>The luck flag is part of the tag because a merged entry keeps the wording of the notice
-     * that opened it and only its count climbs: sharing one tag would let a lucky find land silently
-     * on the plain line and lose the words that made it worth pointing out.
+     * A lucky find is the one output notice that stays on the feed: it is rare, and the words that
+     * make it worth pointing out (the nine-locale {@code ui.station.summary.lucky} suffix, the same
+     * {@code Msg.cat} composition {@link #ledgerRows} builds for the end-of-session ledger row,
+     * the whole line {@link #GOLD}) have no home on a HUD row that names the item and nothing
+     * else. Routed through {@code feedback.Notify#itemKeyed} with its own tag so a second find of
+     * the same item grows this line rather than opening another. Never throws.
      */
+    static void notifyLuckyFind(@Nonnull PlayerRef playerRef, @Nonnull String itemId, int quantity) {
+        try {
+            Message line = Msg.cat(RpgMsg.tr("ui.station.gain.produced", itemNameMsg(itemId), quantity),
+                    Msg.raw(" "), RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
+            Notify.itemKeyed(playerRef, line, null, itemId, quantity, luckyTag(itemId));
+        } catch (Throwable t) {
+            Log.fine("STATION lucky-find notify failed: " + t.getMessage());
+        }
+    }
+
+    /** What a lucky-find notice is filed under, so a second find of one item grows the same gold line. */
     @Nonnull
-    private static String gainTag(@Nonnull String itemId, boolean lucky) {
-        return "rpgstations:gain|" + itemId + (lucky ? "|lucky" : "");
+    private static String luckyTag(@Nonnull String itemId) {
+        return "rpgstations:gain|" + itemId + "|lucky";
     }
 
     /**
-     * Round-5 refinement 2: mimics the ENGINE's own native item-pickup feedback (message + SFX +
-     * item icon) once per retrieved stack, via {@code common.feedback.PickupMimic
-     * #notifyLikeNativePickup} - which itself delegates STRAIGHT to the real {@code
-     * Player#notifyPickupItem}, never a re-derived lookalike (scout findings 1-4). 3D-positioned
-     * at the station block center (a world position IS known here) so the SFX plays from the
-     * block, matching where the materials visually sat. Never throws.
+     * A retrieve that landed: every stack is counted on the shared HUD's item rows
+     * ({@link #notifyItemGain}), and the native pickup cue plays ONCE, 3D at the station block
+     * ({@code PickupMimic#playPickupSfx}, the sound alone, no feed entry), so taking the materials
+     * out still sounds like picking them up and the panel shows what was taken. Never throws.
      */
-    private static void notifyNativePickup(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
-            @Nonnull List<ItemStack> stacks, int blockX, int blockY, int blockZ) {
+    private static void notifyRetrieved(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
+            @Nonnull PlayerRef playerRef, @Nonnull List<ItemStack> stacks, int blockX, int blockY, int blockZ) {
         if (stacks.isEmpty() || !ref.isValid()) {
             return;
         }
-        Vector3d pos = new Vector3d(blockX + 0.5, blockY + 0.5, blockZ + 0.5);
         for (ItemStack stack : stacks) {
-            try {
-                PickupMimic.notifyLikeNativePickup(ref, store, stack, pos);
-            } catch (Throwable t) {
-                Log.fine("STATION retrieve pickup-mimic notify failed: " + t.getMessage());
-            }
+            notifyItemGain(playerRef, stack.getItemId(), stack.getQuantity());
         }
+        PickupMimic.playPickupSfx(ref, store, new Vector3d(blockX + 0.5, blockY + 0.5, blockZ + 0.5));
     }
 
     /** Package-private: {@code StationStructures}' pattern toasts ride the same yellow notification. */

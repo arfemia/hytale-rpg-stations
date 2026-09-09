@@ -25,7 +25,8 @@ import javax.annotation.Nonnull;
  * {@code ui.station.retrieve.hint} (the display entity's own {@code Interactions} hint,
  * {@code StationCustodyDisplay#addRetrieveInteraction}).
  * The round-5 grant-notification round (2026-07-22) adds {@code ui.station.gain.produced} (the
- * live item-gain toast, {@code StationService#notifyItemGain}).
+ * item line a lucky find's feed notice opens with, {@code StationService#notifyLuckyFind}; ordinary
+ * output is counted on the shared HUD's item rows and needs no key of this mod's).
  * The pre-release schema sweep adds {@code ui.station.summary.produced_breakdown} - the smaller
  * SECOND line under a PRODUCED ledger row, decomposing that row's total into its per-cycle base and
  * yield-bonus terms plus the cycle count ({@code StationService#yieldBreakdownLine}). It renders only

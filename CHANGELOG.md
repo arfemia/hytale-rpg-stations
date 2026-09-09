@@ -26,12 +26,18 @@ there is no prior public release to diff against, so every entry is additive by 
   so a reload lands on the next summary. `StationSummaryHudTest` pins the slot run against the
   constant, since a command written against a slot the document does not declare crashes the
   client.
-- **A run's item-gain notices grow one entry per item instead of one per cycle.** `notifyItemGain`
-  fires roughly once a work cycle and sent every one untagged, so twenty cycles queued twenty
-  toasts and pushed everything else out of the feed. Each now carries a tag of the item id plus
-  whether the line is a lucky one, which is what the client merges on: the plain pile climbs on one
-  entry, a lucky find keeps its own gold line rather than landing silently on the plain one's
-  frozen words.
+- **What a station makes shows on the corner HUD, not the notification feed.** Every produced
+  stack, every bonus unit and every stack taken out with press-F is counted on Ziggfreed Common's
+  progress-bar panel, one row per item: the item's own icon and name, the number climbing beside
+  it for as long as the run keeps going, gone a few seconds after the last gain, with nothing
+  authored for it (a vanilla item, a pack item and an id nobody has written a file for all read the
+  same). The feed drains strictly oldest first and merging into an entry refreshes it in place, so
+  an item notice landing every cycle pinned everything behind it for a whole session; the panel
+  has no such rule. A retrieve still sounds like a pickup at the block (`PickupMimic.playPickupSfx`,
+  the cue alone). The one output notice left on the feed is a lucky find (`notifyLuckyFind`, gold,
+  tagged per item so a second find grows the same line), because it is rare and its words have no
+  home on a row. Denials, a seat unavailable, inventory full and the rest of the one-off notices
+  stay where they were.
 - **Requires ZiggfreedCommon 2.1.0 or newer.** The manifest floor and the compile pin move together with the library's 2.1.0 release, the version the whole mod family stands on; a 2.0.x jar fails this mod's load by name rather than mid-cycle.
 - **The station objective kinds are this engine's own: `WORK_STATION` and `STATION_OUTPUT`.**
   RPG Stations fires both into ziggfreed-common's shared progression runtime itself

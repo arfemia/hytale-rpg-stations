@@ -753,12 +753,18 @@ public class StationServiceTest {
         assertTrue(StationService.holdsSummaryOpen(StationService.StopReason.OUT_OF_INPUTS));
         assertTrue(StationService.holdsSummaryOpen(StationService.StopReason.INPUTS_EXHAUSTED));
         assertTrue(StationService.holdsSummaryOpen(StationService.StopReason.RITUAL_COMPLETE));
+        assertTrue(StationService.holdsSummaryOpen(StationService.StopReason.INVENTORY_FULL),
+                "a bag that filled up stops the run without the worker moving an inch");
+        assertTrue(StationService.holdsSummaryOpen(StationService.StopReason.SESSION_CAP));
+        assertTrue(StationService.holdsSummaryOpen(StationService.StopReason.TOOL_BROKEN));
     }
 
     @Test
     void holdsSummaryOpen_everyOtherStopKeepsTheTimedPanel() {
         Set<StationService.StopReason> held = EnumSet.of(StationService.StopReason.OUT_OF_INPUTS,
-                StationService.StopReason.INPUTS_EXHAUSTED, StationService.StopReason.RITUAL_COMPLETE);
+                StationService.StopReason.INPUTS_EXHAUSTED, StationService.StopReason.RITUAL_COMPLETE,
+                StationService.StopReason.INVENTORY_FULL, StationService.StopReason.SESSION_CAP,
+                StationService.StopReason.TOOL_BROKEN);
         for (StationService.StopReason reason : StationService.StopReason.values()) {
             if (held.contains(reason)) {
                 continue;

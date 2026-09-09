@@ -530,15 +530,19 @@ count the grant pass's `StationOutputProducedEvent` carries. **That tally is FRA
 leftover fraction's probability), so a `1.5` ladder floor pays one item always plus a second half
 the time, and two rolls paying `0.5` each average a whole item instead of rounding twice; the
 produced row's breakdown records the RESOLVED count, since that is what the player received. **It
-also NOTIFIES that count** (`notifyItemGain`, not lucky-flagged): the Produce phase only ever
-announces the recipe's own deterministic `Yield`, so a bonus that is not separately notified makes
-every toast under-report - a cycle paying one base plank plus four from the tool ladder announced a
-single plank, which reads in game as the bonus not working at all. **Any NEW grant path owes its own
-notification for the same reason.** Those notices are TAGGED (`gainTag`: the item id plus whether the
-line is a lucky one), so a long run grows ONE climbing entry per item on the corner feed instead of
-dropping a fresh line every cycle over whatever else the player needed to see; luck is part of the
-tag because a merged entry keeps the words of the notice that opened it, and a lucky find sharing
-the plain line's tag would land on it silently. An
+also COUNTS that count** (`notifyItemGain`): the Produce phase only ever reports the recipe's own
+deterministic `Yield`, so a bonus that is not separately counted makes every row under-report - a
+cycle paying one base plank plus four from the tool ladder counted a single plank, which reads in
+game as the bonus not working at all. **Any NEW grant path owes its own count for the same reason.**
+Ordinary output NEVER touches the notification feed: `notifyItemGain` is ziggfreed-common's
+`HudBars.itemMoved`, one row per item on the shared progress-bar panel (named and pictured from the
+id alone, a running total since the row came up, fading after the last gain, nothing authored), and
+a press-F retrieve counts what landed the same way and keeps only the native pickup SFX at the block
+(`notifyRetrieved`, `PickupMimic.playPickupSfx`). The feed drains strictly oldest first and merging
+refreshes an entry in place, so a notice landing every cycle pinned the whole feed; only a LUCKY find
+still gets a feed line (`notifyLuckyFind`, gold, its own `luckyTag` so a second find grows the same
+line), because it is rare and its words have no home on a row. One-off notices (a denial, a seat
+unavailable, inventory full, the retrieve-when-everything-dropped toast) stay on the feed. An
 authored `Steps` program has no single "cycle output" for
 `OutputItems` to add to (`s.cycleOutputItemId` stays null, and `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT`
 warns on an action authoring `OutputItems` there - on its own `Bonus` or on a step's `Roll` phase

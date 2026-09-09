@@ -714,7 +714,7 @@ final class StationStepHandlers {
                 ctx.session.producedItems.merge(item.getItemId(), quantity, Integer::sum);
                 committed.add(new ItemStack(item.getItemId(), quantity));
                 if (ctx.session.playerRef != null) {
-                    StationService.notifyItemGain(ctx.session.playerRef, item.getItemId(), quantity, false);
+                    StationService.notifyItemGain(ctx.session.playerRef, item.getItemId(), quantity);
                 }
             }
             // M1 (review minor m1): the outputs are now committed to the inventory, so the consumed
