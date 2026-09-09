@@ -52,6 +52,7 @@ ui.station.anchor_unreachable = До ближайшего {0} не добрат�
 ui.station.anchor_busy = Кто-то уже использует ближайший {0}.
 ui.station.summary.title = Работа завершена
 ui.station.summary.cycles = Проработано {0} циклов
+ui.station.hud.cycles = Циклы: {0, number}
 ui.station.summary.item_consumed = -{1} {0}
 ui.station.summary.item_produced = +{1} {0}
 ui.station.summary.produced_breakdown = ({0} база + {1} инструмент) x {2} циклов

@@ -26,10 +26,9 @@
         "Yield": { "Base": 1 }
       },
       "Work": {
-        "$Comment": "CycleMs 4805 is the in-game-tuned milling cadence; MaxDurationMs caps a session at ten minutes; MaxMoveMeters is the walk-off distance that ends it.",
+        "$Comment": "CycleMs 4805 is the in-game-tuned milling cadence and MaxDurationMs caps a session at ten minutes. MaxMoveMeters, the distance you can drift from the spot you started before the run ends, is left unstated so this station takes the engine default; state it here to give this one station more or less room than the rest.",
         "CycleMs": 4805,
-        "MaxDurationMs": 600000,
-        "MaxMoveMeters": 1.5
+        "MaxDurationMs": 600000
       },
       "Custody": {
         "$Comment": "Placed-input custody: hold logs and press F to load up to 100 into the bench, then work from the pile instead of your backpack. States maps the claim lifecycle onto the block's own interaction states; Display renders the placed logs as a prop at the block top, Offset.Y sliding that pile up or down against the bench surface: lower it to sink the pile into the bench, raise it to stand the pile clear. Scale is a fraction of a real block for a block-shaped item like a log, so 1.0 would draw a full-size trunk on the bench top and 0.55 sizes the pile to just over half that; raise it for a bulkier load or lower it for a token one.",

@@ -26,6 +26,7 @@ ui.station.stop.complete = Você termina seu trabalho.
 ui.station.stop.capped = Este item não pode ser melhorado mais.
 ui.station.summary.title = Trabalho Completo
 ui.station.summary.cycles = Trabalhou {0} ciclos
+ui.station.hud.cycles = Ciclos: {0, number}
 ui.station.summary.item_consumed = -{1} {0}
 ui.station.summary.item_produced = +{1} {0}
 ui.station.summary.produced_breakdown = ({0} base + {1} ferramenta) x {2} ciclos

@@ -52,6 +52,7 @@ ui.station.anchor_unreachable = Das nahegelegene {0} ist nicht erreichbar.
 ui.station.anchor_busy = Jemand anderes nutzt das nahegelegene {0} bereits.
 ui.station.summary.title = Arbeit Abgeschlossen
 ui.station.summary.cycles = {0} Zyklen erledigt
+ui.station.hud.cycles = Zyklen: {0, number}
 ui.station.summary.item_consumed = -{1} {0}
 ui.station.summary.item_produced = +{1} {0}
 ui.station.summary.produced_breakdown = ({0} Basis + {1} Werkzeug) x {2} Zyklen

@@ -155,7 +155,7 @@ public final class StationService {
 
     static final long DEFAULT_CYCLE_MS = 5000L;
     private static final long DEFAULT_MAX_DURATION_MS = 600_000L;
-    private static final double DEFAULT_MAX_MOVE_METERS = 1.5;
+    private static final double DEFAULT_MAX_MOVE_METERS = 0.5;
     private static final String DEFAULT_HOLD_EFFECT = "RPG_Station_Hold";
 
     /** Round-5 refinement 3: the "lucky grant" notification color (distinct from {@link #toast}'s plain YELLOW). */
@@ -163,6 +163,16 @@ public final class StationService {
 
     /** The session-progress row's place in the shared HUD's left panel: near the top, while a session is live. */
     private static final int SESSION_ROW_ORDER = 0;
+
+    /**
+     * How long a stopped run's held HUD rows (the session row, its item rows, its lucky-find rows)
+     * stay readable before they fade: long enough to read the final numbers, short enough that the
+     * panel does not linger once nobody is working the station any more.
+     */
+    private static final long SESSION_ROW_FADE_MS = 5000L;
+
+    /** Words the session row's own number: "Cycles: {0}", not the panel's plain "+N" - a cycle count is not a gain. */
+    private static final String SESSION_CYCLES_KEY = "rpgstations.ui.station.hud.cycles";
 
     /**
      * D-6: the enhance summary accent (design section 9.5, phase 2 round-7). The engine's OWN
@@ -1965,7 +1975,7 @@ public final class StationService {
         }
         if (s.playerRef != null) {
             for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
-                notifyLuckyFind(s.playerRef, e.getKey(), e.getValue());
+                notifyLuckyFind(s, e.getKey(), e.getValue());
             }
         }
         // F1 (decision 51d): every granted Roll's Grants.Effects[] now goes LIVE - apply each native
@@ -2094,7 +2104,7 @@ public final class StationService {
         // pays, which reads as the reward not working rather than the count being wrong. Not a
         // lucky find: this is ordinary output of the cycle, just more of it.
         if (s.playerRef != null) {
-            notifyItemGain(s.playerRef, itemId, reported);
+            notifyItemGain(s, itemId);
         }
         return reported;
     }
@@ -3113,6 +3123,11 @@ public final class StationService {
         if (!s.stopped.compareAndSet(false, true)) {
             return;
         }
+        // This run's held HUD rows (the session row, its item rows, its lucky-find rows) are its own
+        // ledger for the whole run and never fade on a clock while it is live - they go away TOGETHER,
+        // right here, whichever of the many reasons below ended it (this is the one funnel every stop
+        // path reaches, silent ones included).
+        fadeSessionRows(s.playerRef);
         byPlayer.remove(s.playerUuid, s);
         if (s.blockKey != null) {
             byBlock.remove(s.blockKey, s.playerUuid);
@@ -7740,15 +7755,16 @@ public final class StationService {
     }
 
     /**
-     * Ordinary output landed: count it on the shared HUD's row for that item
-     * ({@code ziggfreed-common}'s {@code ui.hud.bar.HudBars#itemMoved}). The row is the library's
-     * and needs nothing from this mod: it names and pictures the item from the id alone, keeps a
-     * running total since it came up, and fades a few seconds after the last gain. Nothing here
-     * reaches the notification feed, because a notice that repeats every cycle pins that feed: the
-     * client drains it strictly oldest first and merging into an entry refreshes it in place, so
-     * an item notice landing every few seconds held the head of the feed for a whole session.
-     * Called from both this class ({@link #applyGrantResult}, {@link #grantBonusOutputItems}) and
-     * {@code StationStepHandlers.ProduceHandler} (same package). Never throws.
+     * Ordinary output landed OUTSIDE a live session (an unattended gather's replayed roll pass, a
+     * press-F custody retrieve): count it on the shared HUD's row for that item ({@code
+     * ziggfreed-common}'s {@code ui.hud.bar.HudBars#itemMoved}). The row is the library's and needs
+     * nothing from this mod: it names and pictures the item from the id alone, keeps a running total
+     * since it came up, and fades a few seconds after the last gain, since there is no session
+     * ledger here for it to belong to. Nothing here reaches the notification feed, because a notice
+     * that repeats every cycle pins that feed: the client drains it strictly oldest first and
+     * merging into an entry refreshes it in place, so an item notice landing every few seconds held
+     * the head of the feed for a whole session. Called from {@link #applyGatherGrantResult} and
+     * {@link #notifyRetrieved}. Never throws.
      */
     static void notifyItemGain(@Nonnull PlayerRef playerRef, @Nonnull String itemId, int quantity) {
         try {
@@ -7759,68 +7775,130 @@ public final class StationService {
     }
 
     /**
-     * A working player's own reading of the run: one row per session, on the same shared left
-     * panel, moved by ONE cycle every time this station's action completes one - idle-practice
-     * and authored-Steps-program cycles included, since {@link StationSession#cyclesDone} counts
-     * every one of them the same way. The row id is the station's own id (this mod's vocabulary,
-     * not the library's), the label its localized name ({@link #stationNameMsg}), and the fill is
-     * how many more cycles the resolved conversion's pile can still feed out of how many it could
-     * feed the moment this session engaged ({@link StationSession#feedableCyclesAtStart}) - full
-     * at engage, draining as the pile runs down, and back up when someone tops the station off
-     * mid-run, since the denominator never moves. A session with no resolved conversion to read a
-     * pile from (idle practice, or a Steps program) has {@code feedableCyclesAtStart} 0, which a
-     * {@link HudBarReading} with a non-positive maximum always reads as full, so only the cycle
-     * count moves for it. No bar-end captions - a cycle count has no natural scale words. Never
+     * Ordinary output landed DURING a live session: count the item's row at this run's own running
+     * total for it ({@code s.producedItems}, already merged by the caller BEFORE this is called) -
+     * decision (2026-09-09): the row and the end-of-session ledger ({@link #ledgerRows}) must read
+     * the same number off the same tracked total, never a second accumulation of the library's own.
+     * Held ({@link HudBarDisplay#held()}) so the row survives the whole run rather than fading
+     * mid-session and taking its total with it; {@link #stop} fades every row this run put up,
+     * together, once the run ends. Called from {@link #applyGrantResult} (via {@link
+     * #grantBonusOutputItems}) and {@code StationStepHandlers.ProduceHandler} (same package). Never
      * throws.
      */
+    static void notifyItemGain(@Nonnull StationSession s, @Nonnull String itemId) {
+        if (s.playerRef == null) {
+            return;
+        }
+        try {
+            int total = s.producedItems.getOrDefault(itemId, 0);
+            HudBars.itemTotalled(s.playerRef, HudBars.itemRowId(itemId), itemId, total, HudBarDisplay.NONE.held());
+        } catch (Throwable t) {
+            Log.fine("STATION item-gain row failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * A working player's own reading of the run: one row per session, on the same shared left
+     * panel - idle-practice and authored-Steps-program cycles included, since {@link
+     * StationSession#cyclesDone} counts every one of them the same way. The row id is the station's
+     * own id (this mod's vocabulary, not the library's), the label its localized name ({@link
+     * #stationNameMsg}), and the fill is how many more cycles the resolved conversion's pile can
+     * still feed out of how many it could feed the moment this session engaged ({@link
+     * StationSession#feedableCyclesAtStart}) - full at engage, draining as the pile runs down, and
+     * back up when someone tops the station off mid-run, since the denominator never moves. A
+     * session with no resolved conversion to read a pile from (idle practice, or a Steps program)
+     * has {@code feedableCyclesAtStart} 0, which a {@link HudBarReading} with a non-positive maximum
+     * always reads as full, so only the cycle count moves for it. No bar-end captions - a cycle
+     * count has no natural scale words.
+     *
+     * <p>The row's own number is {@link StationSession#cyclesDone} OUTRIGHT (decision 2026-09-09:
+     * the same total the summary reports, never a re-accumulated delta), worded {@code "Cycles: N"}
+     * ({@link #SESSION_CYCLES_KEY}) rather than the panel's plain "+N" - a cycle count is not a
+     * gain. Held so the row survives the whole run; {@link #stop} fades it, together with every
+     * other row this run put up, once the run ends. Never throws.
+     */
     static void notifySessionCycle(@Nonnull StationSession s, int remainingCycles) {
-        moveSessionRow(s, 1, remainingCycles);
+        moveSessionRow(s, remainingCycles);
     }
 
     /**
      * Seeds the session-progress row at engage, before any cycle has completed: the same row
-     * {@link #notifySessionCycle} moves, at zero gain, reading full-out-of-full so the player sees
+     * {@link #notifySessionCycle} moves, at zero cycles, reading full-out-of-full so the player sees
      * their run's row the instant they start rather than only after the first cycle lands.
      */
     static void seedSessionRow(@Nonnull StationSession s) {
-        moveSessionRow(s, 0, s.feedableCyclesAtStart);
+        moveSessionRow(s, s.feedableCyclesAtStart);
     }
 
-    /** The one {@code HudBars#moved} call {@link #notifySessionCycle}/{@link #seedSessionRow} share. Never throws. */
-    private static void moveSessionRow(@Nonnull StationSession s, double delta, int remainingCycles) {
+    /** The one {@code HudBars#totalled} call {@link #notifySessionCycle}/{@link #seedSessionRow} share. Never throws. */
+    private static void moveSessionRow(@Nonnull StationSession s, int remainingCycles) {
         try {
             StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
             if (asset == null) {
                 return;
             }
-            HudBars.moved(s.playerRef, s.stationId, delta,
+            HudBars.totalled(s.playerRef, s.stationId, s.cyclesDone,
                     new HudBarReading(remainingCycles, s.feedableCyclesAtStart),
-                    HudBarDisplay.of(stationNameMsg(asset), null, null, SESSION_ROW_ORDER));
+                    HudBarDisplay.of(stationNameMsg(asset), null, null, SESSION_ROW_ORDER)
+                            .counting(SESSION_CYCLES_KEY)
+                            .held());
         } catch (Throwable t) {
             Log.fine("STATION session-progress row failed: " + t.getMessage());
         }
     }
 
     /**
-     * A lucky find gets its OWN gold row per item, alongside the ordinary running-count row
-     * {@link #notifyItemGain} keeps for the same item: it is rare, and the words that make it
-     * worth pointing out (the nine-locale {@code ui.station.summary.lucky} suffix, the same
-     * {@code Msg.cat} composition {@link #ledgerRows} builds for the end-of-session ledger row,
-     * the whole line {@link #GOLD}) have no home on a row that names the item and nothing else.
-     * Routed through {@code ziggfreed-common}'s caller-named {@code HudBars#itemMoved} on
-     * {@link #luckyFindRowId} - this mod's own row, never the library's {@code item:} one - so the
-     * row still pictures and names the item like any other; only the label says more. No longer
-     * reaches the notification feed: four lucky finds queuing at once used to hold the front of
-     * that feed, which drains strictly oldest first. Never throws.
+     * A lucky find OUTSIDE a live session (an unattended gather's replayed roll pass): its own gold
+     * row per item, alongside the ordinary running-count row {@link #notifyItemGain} keeps for the
+     * same item - it is rare, and the words that make it worth pointing out (the nine-locale
+     * {@code ui.station.summary.lucky} suffix, the same {@code Msg.cat} composition {@link
+     * #ledgerRows} builds for the end-of-session ledger row, the whole line {@link #GOLD}) have no
+     * home on a row that names the item and nothing else. Routed through {@code ziggfreed-common}'s
+     * caller-named {@code HudBars#itemMoved} on {@link #luckyFindRowId} - this mod's own row, never
+     * the library's {@code item:} one - so the row still pictures and names the item like any other;
+     * only the label says more. Called from {@link #applyGatherGrantResult}. Never throws.
      */
     static void notifyLuckyFind(@Nonnull PlayerRef playerRef, @Nonnull String itemId, int quantity) {
         try {
             Message line = Msg.cat(RpgMsg.tr("ui.station.gain.produced", itemNameMsg(itemId), quantity),
                     Msg.raw(" "), RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
             HudBars.itemMoved(playerRef, luckyFindRowId(itemId), itemId, quantity,
-                    new HudBarDisplay(line, null, null, null, null, null, null));
+                    new HudBarDisplay(line, null, null, null, null, null, null, null));
         } catch (Throwable t) {
             Log.fine("STATION lucky-find row failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * A lucky find DURING a live session: as the sessionless {@link #notifyLuckyFind}'s per-find
+     * flavor line (worded with {@code grantedQuantity}, this grant's own amount - per-move flavor
+     * text describing what just happened), but the row's own number is this run's running lucky-find
+     * total for the item ({@code s.luckItems}, already merged by the caller BEFORE this is called),
+     * matching what {@link #ledgerRows} reports for the same item at the end of the run. Held so the
+     * row survives the whole run; {@link #stop} fades it, together with every other row this run put
+     * up, once the run ends. Called from {@link #applyGrantResult}. Never throws.
+     */
+    static void notifyLuckyFind(@Nonnull StationSession s, @Nonnull String itemId, int grantedQuantity) {
+        if (s.playerRef == null) {
+            return;
+        }
+        try {
+            Message line = Msg.cat(RpgMsg.tr("ui.station.gain.produced", itemNameMsg(itemId), grantedQuantity),
+                    Msg.raw(" "), RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
+            int total = s.luckItems.getOrDefault(itemId, 0);
+            HudBars.itemTotalled(s.playerRef, luckyFindRowId(itemId), itemId, total,
+                    new HudBarDisplay(line, null, null, null, null, null, null, null).held());
+        } catch (Throwable t) {
+            Log.fine("STATION lucky-find row failed: " + t.getMessage());
+        }
+    }
+
+    /** Sends every held row this run put on the shared HUD panel away together. Never throws. */
+    private static void fadeSessionRows(@Nullable PlayerRef playerRef) {
+        try {
+            HudBars.fadeAll(playerRef, SESSION_ROW_FADE_MS);
+        } catch (Throwable t) {
+            Log.fine("STATION session-row fade failed: " + t.getMessage());
         }
     }
 

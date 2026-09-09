@@ -52,6 +52,7 @@ ui.station.anchor_unreachable = A közeli {0} nem érhető el.
 ui.station.anchor_busy = Valaki más már használja a közeli {0}-t.
 ui.station.summary.title = Munka Befejezve
 ui.station.summary.cycles = {0} ciklus végrehajtva
+ui.station.hud.cycles = Ciklus: {0, number}
 ui.station.summary.item_consumed = -{1} {0}
 ui.station.summary.item_produced = +{1} {0}
 ui.station.summary.produced_breakdown = ({0} alap + {1} szerszám) x {2} kör

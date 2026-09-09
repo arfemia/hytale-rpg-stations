@@ -66,6 +66,9 @@ import javax.annotation.Nonnull;
  * toasted to the worker once per window, {@code StationService#noteCustodyProduce}) and
  * {@code ui.station.output_overdone} (an expired window collapsing to its Overdone items, toasted
  * to whoever's touch settled it, {@code StationService#settleDoneness}).
+ * The held-HUD-ledger leg (2026-09-09) adds {@code ui.station.hud.cycles}: the session-progress
+ * row's own number on the shared HUD panel, "Cycles: {0}" rather than the panel's plain "+N"
+ * ({@code StationService#moveSessionRow}).
  * A mismatch means either a shipped key the validator doesn't know about (harmless) or a
  * validator entry for a retired key (also harmless, but stale).
  */
@@ -136,6 +139,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.anchor_busy",
             "rpgstations.ui.station.summary.title",
             "rpgstations.ui.station.summary.cycles",
+            "rpgstations.ui.station.hud.cycles",
             "rpgstations.ui.station.summary.item_consumed",
             "rpgstations.ui.station.summary.item_produced",
             "rpgstations.ui.station.summary.produced_breakdown",

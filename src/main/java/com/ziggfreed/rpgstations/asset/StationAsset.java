@@ -308,7 +308,7 @@ public final class StationAsset
 
     /**
      * The work-loop cadence and bounds. Reader defaults ({@code StationService}):
-     * {@code CycleMs} 5000, {@code MaxDurationMs} 600000, {@code MaxMoveMeters} 1.5.
+     * {@code CycleMs} 5000, {@code MaxDurationMs} 600000, {@code MaxMoveMeters} 0.5.
      * {@code MaxMoveMeters} is an EXIT trigger, NOT an anti-idle guard. Block occupancy is NOT here:
      * one worker per placed block is a property of the block ({@link Block#getExclusive()}).
      */
