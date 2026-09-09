@@ -158,7 +158,20 @@ a maintainer meets immediately:
   `FactorRef` is gone).
 - **A `Cue` is a MOMENT ID, not a presentation body.** The loot layer names a moment; the station
   decides what it sounds like, through the same `emitMoment` funnel every other station moment uses.
-  The open `cue:<yourName>` namespace sits beside the well-known ids and `step:<actionId>:<stepId>`.
+  The open `Cue:<Your_Name>` namespace sits beside the well-known ids and `Step:<ActionId>:<StepId>`.
+- **Every id is written `Is_Like_This` and matched case-insensitively (decision 101).** The moment
+  vocabulary (`Cycle`/`Swing`/`Impact`/`Rare_Find`/`Completion`/`Ready`/`Overdone`/`Refused`, the
+  `Refused:<Reason>`/`Cue:`/`Step:` prefixes, a pattern's `Activated`/`Broken`), the reserved anchor
+  `Self` and every action id are underscore-separated PascalCase in every constant, shipped file and
+  doc; `StationFlairs.caseInsensitiveMomentKeys` holds every moment map as a case-insensitive map
+  that keeps the authored spelling, so a pack authoring `cycle` resolves with no validator refusal
+  and no rewrite. Lang keys, permission nodes, command names and JSON field names are not ids.
+- **A refused press ANSWERS (decisions 98-100): `station.StationRefusals` is the ONE seam** every
+  denial goes through (notice + `Refused:<Reason>` cue + `StationRefusedEvent`), resolving the cue
+  action-specific > action-blanket > settings-specific > settings-blanket per leaf, throttled per
+  (player, block, reason) by `Settings.Refusals.RepeatWindowMs` - and the `Sounds` leaf escapes the
+  throttle on purpose. The jar's `Settings.json` ships the one engine-wide default, `Refused`
+  playing `SFX_Generic_Crafting_Failed`. See `station/CLAUDE.md`'s "Refusals" section.
 - **The three station-only payouts are registered reward KINDS** inside `Grants.Rewards`:
   `rpgstations:output_items`, `rpgstations:contribution`, `rpgstations:effect`. They COLLECT onto
   the pass rather than acting, which is why they are a per-pass registry seeded from the
@@ -453,7 +466,7 @@ between this engine and any mod that wants to hook it. Split by shape, per the n
 **observe-only moments are native Hytale events** (`StationSessionStartedEvent`/
 `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`/
 `StationEnhanceCompletedEvent`/`StationUnattendedGatheredEvent`/`StationOutputProducedEvent`/
-`StationStructureChangedEvent`, eight POJOs
+`StationStructureChangedEvent`/`StationRefusedEvent`, nine POJOs
 `implements IEvent<Void>`, dispatched `HytaleServer.get().getEventBus().dispatchFor(...)` +
 `hasListener()` on the world thread, fired from `station.StationEvents`); **request/response
 points are typed registries** on the static `RpgStationsApi` holder (`FactorRegistry` - the one
@@ -616,7 +629,7 @@ fix layers on cleanly.
   `station.StationFlairs.Slot` enum (`CYCLE`/`SWING`/`RARE_FIND`/`COMPLETION`) is RETIRED for an
   open STRING moment id (`StationFlairs.MOMENT_CYCLE`/`MOMENT_SWING`/`MOMENT_IMPACT`/
   `MOMENT_RARE_FIND`/`MOMENT_COMPLETION` well-known constants, plus
-  `stepMomentId(actionId, stepId)` building a per-step `step:<actionId>:<stepId>` id a `Present`
+  `stepMomentId(actionId, stepId)` building a per-step `Step:<ActionId>:<StepId>` id a `Present`
   step resolves against). `MOMENT_IMPACT` is a NEW id split off `MOMENT_SWING` this leg (the
   delayed swing-impact cue previously reused the swing slot verbatim - a flair author can now
   target either cue independently; no shipped content depended on the fused behavior). A new
@@ -626,7 +639,7 @@ fix layers on cleanly.
   reshaped to the SAME open `{Moments}` shape as `FlairAsset`, no more fixed leaves - UNIONED with
   every applicable `FlairAsset`, folded ONTO it for a same-id collision). `StationValidator` warns
   (never blocks) on an empty `Moments` map, an unrecognized moment id (typo detection - a
-  `step:`-prefixed id or one of the 5 well-known ids always passes, so a FUTURE engine moment
+  `Step:`-prefixed id or one of the 5 well-known ids always passes, so a FUTURE engine moment
   never breaks an OLDER pack), and a `FlairAsset.Stations` entry naming an unknown station.
   `api.impl.StationViewImpl.flairIds()` and `station.StationCatalog.allFlairIds()` both reuse the
   merge point rather than an inline-only view that would now be incomplete. A registered

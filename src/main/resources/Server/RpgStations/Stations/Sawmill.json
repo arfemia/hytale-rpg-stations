@@ -180,12 +180,12 @@
           "Sounds": ["SFX_Coins_Land"],
           "Particles": [{ "SystemId": "Block_Gem_Sparks" }]
         },
-        "cue:find_deep": {
+        "Cue:Find_Deep": {
           "$Comment": "A find from the deeper tiers - grander than the everyday chime, short of the trophy. Name it from a Ladder floor that pays a genuinely better table.",
           "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player"],
           "Particles": [{ "SystemId": "Effect_Crown_Gold" }]
         },
-        "cue:find_apex": {
+        "Cue:Find_Apex": {
           "$Comment": "The top of a find ladder: the deep cue plus coins and sparks, for the tier a fully invested worker reaches and nothing above it.",
           "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player", "SFX_Coins_Land"],
           "Particles": [
@@ -193,8 +193,8 @@
             { "SystemId": "Block_Gem_Sparks" }
           ]
         },
-        "cue:trophy": {
-          "$Comment": "The Sawmiller's Hatchet win, kept as its own moment rather than sharing rare_find so the once-in-a-session payout can sound like one. A cue: id is author-defined - name it here and again in the roll's Cue, and a flair can re-skin exactly this beat without touching ordinary finds.",
+        "Cue:Trophy": {
+          "$Comment": "The Sawmiller's Hatchet win, kept as its own moment rather than sharing Rare_Find so the once-in-a-session payout can sound like one. A Cue: id is author-defined - name it here and again in the roll's Cue, and a flair can re-skin exactly this beat without touching ordinary finds.",
           "Sounds": ["SFX_Chest_Legendary_FirstOpen_Player"],
           "Particles": [
             { "SystemId": "Effect_Crown_Gold" },

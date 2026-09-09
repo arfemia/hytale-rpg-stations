@@ -249,7 +249,7 @@ resolution section for the engine half.
   - **`Anchors` - named multi-station anchor declarations:**
     `{"<anchorId>": {"Station": "<stationId>", "MaxRadiusMeters": 12}}` (`MaxRadiusMeters` names
     its unit). Legal on both an inline `ActionDef` and a standalone `ActionAsset` (expected mostly
-    on the latter). The reserved anchor id `"self"` (the primary station block) is implicit and
+    on the latter). The reserved anchor id `"Self"` (the primary station block) is implicit and
     never authored. DISCOVERY (nearest matching placed block within `MaxRadiusMeters`), CLAIMING,
     and a `StationStep.Walk`/`At` naming an anchor all EXECUTE - see `../station/CLAUDE.md`.
     `ANCHOR_STATION_UNKNOWN` warns an unknown `Station`.
@@ -281,7 +281,7 @@ resolution section for the engine half.
     stands still while the server is down - an outage cooks and burns nothing), then collapses
     ONCE to the `Overdone` items (exact-`ItemId` entries only, the output route rule; the codec
     warns and the engine ignores anything else). `ReadyMs` alone = purely presentational (Ready
-    look + `ready` moment, nothing degrades); `Overdone` without a reachable `ReadyMs` never opens
+    look + `Ready` moment, nothing degrades); `Overdone` without a reachable `ReadyMs` never opens
     a window (`DONENESS_OVERDONE_WITHOUT_READY`); a window on an action with no
     `Produce.To:"Custody"` step has no pile to sit on (`DONENESS_WITHOUT_PRODUCE_SOCKET`).
     Unauthored anywhere = deterministic exactly as before. Engine half: `../station/CLAUDE.md`'s
@@ -328,11 +328,14 @@ resolution section for the engine half.
   - **`Moments`** - an OPEN `Map<String, Presentation>` keyed by MOMENT ID, the same vocabulary and
     the same shape a [`FlairAsset`](FlairAsset.java) keys its own `Moments` by (one moment
     vocabulary, whether a cue is authored by the action or overlaid by a flair). Well-known ids:
-    `cycle` (every finished cycle), `swing` and `impact` (each `Animation.Swing` tick - the swing,
+    `Cycle` (every finished cycle), `Swing` and `Impact` (each `Animation.Swing` tick - the swing,
     and the strike landing behind it, which is late purely because its own `Presentation.DelayMs`
-    says so), `rare_find`, `completion`, plus a per-step `step:<actionId>:<stepId>`. Keys are
-    canonicalized to lowercase and matched case-insensitively (`StationFlairs.canonicalMomentKeys`
-    is the ONE canonicalizer, shared with both flair maps), so an authored `"Cycle"` resolves.
+    says so), `Rare_Find`, `Completion`, `Ready`, `Overdone`, `Refused` and `Refused:<Reason>`, plus
+    a per-step `Step:<ActionId>:<StepId>` and the open `Cue:<Your_Name>`. Ids are written
+    `Is_Like_This` and matched case-insensitively: every moment map the engine holds is built through
+    `StationFlairs.caseInsensitiveMomentKeys` (the ONE shape, shared with both flair maps and the
+    settings' defaults), a case-insensitive map that keeps the authored spelling, so an authored
+    `"cycle"` resolves and nothing rewrites it.
     Decoded through `ziggfreed-common`'s `InheritMapCodec`, so native `Parent` merges the map PER
     KEY and per leaf under it - a child re-skinning one moment inherits every other one plus the
     leaves it did not mention. **SPECIFICITY WINS, resolved in exactly one place**
@@ -341,7 +344,7 @@ resolution section for the engine half.
     for that step's moment - the site-supplied presentation plays and the map entry is not
     consulted for that emission. An unrecognized key is the same warn-only typo finding a flair map
     gets (`UNKNOWN_MOMENT_ID`), never a block.
-    **A loot `Cue` is the opposite case, and `rare_find` IS action-authorable.** A `Roll`/
+    **A loot `Cue` is the opposite case, and `Rare_Find` IS action-authorable.** A `Roll`/
     `Ladder.Floor` `Cue` is a moment ID carrying no presentation, so
     `StationService#applyGrantResult` emits it with a NULL base and THIS map decides what it sounds
     like - which is exactly how the jar's Sawmill publishes its four-cue palette. (`StationValidator`'s
@@ -447,7 +450,7 @@ resolution section for the engine half.
   - **Base fields** (every step): `Id` (unique within one action's `Steps`; required whenever
     another step or an `ExtensionAsset` insertion anchors on it), `Conditions` +
     `OnConditionFail{Result:Skip|Fail, Goto}` (the gate + branch/skip mechanism), `At` (an anchor
-    id from the action's `Anchors` map; absent = the primary station `"self"`), `Repeat`
+    id from the action's `Anchors` map; absent = the primary station `"Self"`), `Repeat`
     (`{Times}` fixed XOR `{Min,Max,Factors}` ranged, resolved once at step entry via the pure
     `resolveCount(factorContribution)`; authoring both routes is an `afterDecode` warn, matching
     the four sibling exactly-one-of groups, since the fixed `Times` silently wins), `Duration`
@@ -586,12 +589,12 @@ resolution section for the engine half.
   - **A `Cue` is a MOMENT ID**, not a presentation body: the loot layer names a moment and the
     station decides what it sounds like. It resolves through the SAME `emitMoment` funnel every
     other station moment does, so an action's own `Moments` entry for that id plays it and every
-    applicable flair overlays it. Well-known ids (`rare_find`, `cycle`, `swing`, `impact`,
-    `completion`), a per-step `step:<actionId>:<stepId>`, and the OPEN author-defined
-    `cue:<yourName>` namespace all pass the typo check - mint a `cue:` id whenever a jackpot should
+    applicable flair overlays it. Well-known ids (`Rare_Find`, `Cycle`, `Swing`, `Impact`,
+    `Completion`), a per-step `Step:<ActionId>:<StepId>`, and the OPEN author-defined
+    `Cue:<Your_Name>` namespace all pass the typo check - mint a `Cue:` id whenever a jackpot should
     sound different from an ordinary find, and author the matching key in the action's `Moments`.
-    The jar's Sawmill publishes a four-cue palette (`rare_find`, `cue:find_deep`, `cue:find_apex`,
-    `cue:trophy`) that a table can name with no presentation of its own.
+    The jar's Sawmill publishes a four-cue palette (`Rare_Find`, `Cue:Find_Deep`, `Cue:Find_Apex`,
+    `Cue:Trophy`) that a table can name with no presentation of its own.
   - **Three station payouts are registered reward KINDS** inside `Grants.Rewards`, so they compose
     with `Items`/`DropLists`/`Commands` and with anything another mod registered:
     - `rpgstations:output_items` (`{"Count": "1.5"}`) - ADDITIVE units of the cycle's own primary
@@ -656,8 +659,8 @@ resolution section for the engine half.
 - **[`FlairAsset`](FlairAsset.java)** - a standalone, ANY-mod-authorable cosmetic flair layer,
   `Server/RpgStations/Flairs/<Name>.json` (Pattern A, id = lowercased filename): `{Stations?[],
   Moments}`. `Stations` null/empty = applies to every station; `Moments` is an OPEN
-  `Map<String, Presentation>` keyed by an arbitrary moment id (well-known ids `cycle`/`swing`/
-  `impact`/`rare_find`/`completion` plus a per-step `step:<actionId>:<stepId>` id) - nothing
+  `Map<String, Presentation>` keyed by an arbitrary moment id (well-known ids `Cycle`/`Swing`/
+  `Impact`/`Rare_Find`/`Completion` plus a per-step `Step:<ActionId>:<StepId>` id) - nothing
   hardcodes the vocabulary in Java. Decoded through `ziggfreed-common`'s `InheritMapCodec`, so
   native `Parent` merges it PER MOMENT ID (and per leaf under it), exactly like an action's own
   `Moments`: a child re-skinning one moment inherits the rest. Folded into `station.FlairCatalog`
@@ -772,7 +775,16 @@ resolution section for the engine half.
   Settings.json`, a single id (`settings`), jar default + pack-overridable: `{Enabled,
   SummaryHud:{Enabled, Position, OffsetX, OffsetY, TtlMs}, Limits:{MaxSessionsPerWorld,
   MaxPuppetsPerWorld, MaxStashesPerSection, UnattendedIntervalMs,
-  MaxUnattendedGatherCycles}}`. `Position` is a shared-library
+  MaxUnattendedGatherCycles}, Moments:{<momentId>: Presentation}, Refusals:{RepeatWindowMs}}`.
+  **`Moments`** is the ENGINE-WIDE default cue layer (an `InheritMapCodec` over `Presentation`,
+  merged per moment id under `Parent`): it sits UNDER every action's own entry for the same id, per
+  leaf via `Presentation.overlaid`, and the jar ships exactly one entry, `Refused` playing
+  `SFX_Generic_Crafting_Failed` (decision 99). **`Refusals.RepeatWindowMs`** (nullable, reader
+  default 1500, negative reads as 0 = no throttle) is the repeat window `station.StationRefusals`
+  throttles a same-reason repeat with; it is its own group so a later refusal knob has a home
+  beside it. `StationValidator.validateSettings` walks the `Moments` map through the same
+  `checkMomentsMap` an action's gets (typo warn, native-ref advisories, the
+  `REFUSED_MOMENT_DELAY_IGNORED` note). `Position` is a shared-library
   `HudPosition` preset id, authored PascalCase like every other id in this schema (e.g.
   `"TopCenter"`); the legacy SCREAMING_SNAKE spelling (`"TOP_CENTER"`) still resolves since
   matching is case- and underscore-insensitive. `OffsetX` is `OffsetY`'s horizontal sibling.

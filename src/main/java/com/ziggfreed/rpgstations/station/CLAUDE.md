@@ -82,7 +82,7 @@ the WHOLE set executes:
   `hytale:tool_quality >= 2`, a `Chance` of `Base` 0 summed from the three tool factors
   (quality x16.2, item level x0.162, power x1.62) and clamped at 90, and a `Ladder` over
   `cycle_count` plus `tool_quality` (weight 5) whose 5/25/50 floors grant the jar's own
-  `Drops/RPG_Station_Sawmill_T{1,2,3}` tables (the upper two floors name the `rare_find` cue, kept
+  `Drops/RPG_Station_Sawmill_T{1,2,3}` tables (the upper two floors name the `Rare_Find` cue, kept
   honest by the smart-cue rule since each table authors its own empty weight). The tool decides how
   often; the session decides how deep.
   **`SawmillMasterworkFinds` (`Lootables/SawmillMasterworkFinds.json`) is the T4 find tier** - gated
@@ -101,7 +101,7 @@ the WHOLE set executes:
   with NO factors - deliberately the plainest possible curve, since a luck-scaled one reads channels
   this mod knows nothing about - granting inline through its own top-level `Grants.Items` (one
   `RPG_Tool_Hatchet_Sawmiller`: hotbar first, then the backpack, then the ground at the block when
-  the bag is full) under its own top-level `Cue: "cue:trophy"`, the open
+  the bag is full) under its own top-level `Cue: "Cue:Trophy"`, the open
   cue-namespace moment id the action's `Moments` map then dresses. It is the
   shipped exemplar of the roll-level cue; an item grant counts as produced only when the stack
   actually landed, so the fanfare never fires over an empty hand, and because it is an item grant
@@ -142,10 +142,47 @@ the WHOLE set executes:
 `IDLE -> STARTING -> WORKING -> STOPPING` machine over transient, player-anchored
 [`StationSession`](StationSession.java)s (never persisted - no per-player state lives in this mod,
 by construction). One entry (`toggle`, from `interaction/StationUseInteraction`'s object-form
-`Station` param), one idempotent exit funnel (`stop`), every start-denial a localized toast.
+`Station` param), one idempotent exit funnel (`stop`), every start-denial answered through the one
+refusal seam below (notice + cue + event).
 Sessions bucket per world in a `WorldKeyedQueues` (ziggfreed-common) drained by
 [`StationFrameSystem`](StationFrameSystem.java) `extends AbstractWorldFrameSystem` (ECS systems
 are class-keyed - this is RpgStations' OWN concrete subclass).
+
+## Refusals: every denial answers (decisions 98-100)
+
+[`StationRefusals`](StationRefusals.java) is the ONE seam a turned-away press goes through - `toggle`
+opens a `StationRefusals.Press` for the press and enriches it as the press resolves (`world`,
+`station`, `action`), every denial calls `press.refuse(langKey)` (or `refuseNamed` for a `_named`
+wording variant, or `refuse(key, message)` for a pre-built one such as an `AnchorResolution` deny),
+and a press that engages never touches it again. The custody retrieve path and
+`StationStructures`' CONFLICT/DENIED completions answer through the same seam (a pattern hands in
+its own `Moments` via `patternMoments`, which also switches the flair overlay off). This is vanilla's
+`Bench.FailedSoundEventId` expressed through the moment vocabulary.
+
+- **Every refusal is a moment.** The reason is the wording key's tail after `ui.station.` in id
+  casing (`reasonOf`: `no_materials` is `No_Materials`, `retrieve.busy` is `Retrieve_Busy`, a
+  `_named` variant collapses to its base), and the moment id is `Refused:<Reason>`
+  (`StationFlairs.refusedMomentId`); `Refused` is the blanket, `Refused:` a recognized prefix.
+- **Resolution, nearest wins per leaf** (`resolveCue`, pure): the action's `Refused:<Reason>`, the
+  action's `Refused`, the settings' `Refused:<Reason>`, the settings' `Refused`
+  (`SettingsCatalog.defaultMoments`, the `Settings.Moments` map). Every layer folds through
+  `Presentation.overlaid`, the one per-leaf rule; an omitted leaf falls through, an AUTHORED empty
+  `Sounds` array is a leaf meaning silence. Then the flair overlay, `Refused:<Reason>` over `Refused`.
+- **The throttle keys (player, block, reason)** (`throttleKey` + `admit`, pure, self-pruning past
+  `THROTTLE_PRUNE_SIZE`) with the window from `Settings.Refusals.RepeatWindowMs` (reader default
+  1500; `0` disables). A repeat inside the window sends no notice, plays none of the cue's non-sound
+  leaves and fires no event. **The `Sounds` leaf ESCAPES the throttle and plays on every press** -
+  deliberate, so the station always answers audibly; `Presentation.soundsOnly()`/`withoutSounds()`
+  are the split. Playback rides `playPresentationAt` (sessionless; a `DelayMs` reads as zero, the
+  validator notes one under `REFUSED_MOMENT_DELAY_IGNORED`).
+- **The event** is the api's `StationRefusedEvent` (`StationEvents.fireRefused`), fired AFTER the
+  notice and cue and ONLY for a non-throttled refusal, carrying store/playerRef, player and world
+  uuids, block position, station id, action id (null before one was chosen) and the reason id.
+- **Tests:** `StationRefusalsTest` (reason ids, the four-layer order, the throttle key and window,
+  the sound/rest split, lowercase-authored resolution), `PresentationOverlaidTest` (the overlay
+  rule), `RpgStationsSettingsAssetCodecTest` (the `Moments` map + `Refusals` group).
+  `StationStructures` keeps no throttle of its own any more (it once held a 5s per-player-per-anchor
+  toast cooldown); the seam's window covers its refusals and the coverage moved with it.
 
 ## The step engine (design 2.1, decisions 34/38 - REWRITTEN this wave)
 
@@ -268,7 +305,7 @@ UNION over every action's effective sockets (an Item socket answers by its pile,
 provider never touches the world itself and every other build site simply omits the readings
 (the factor then fails closed there).
 
-**Per-action completion.** The session-end `completion` moment, and a
+**Per-action completion.** The session-end `Completion` moment, and a
 `Roll{Trigger:"Completion"}` in the action's own `Bonus`, are both read off the RESOLVED action -
 there is no station-level completion-loot fallback any more, matching the "no station-level
 group" rule everywhere else.
@@ -608,7 +645,7 @@ presentation-playback funnel every SESSION-scoped station moment goes through
 `MOMENT_COMPLETION`/`MOMENT_READY`/`MOMENT_OVERDONE`, plus a per-step
 `StationFlairs.stepMomentId(actionId, stepId)`) - it is ALSO the flair-resolution choke point
 (`StationFlairs.effective` against `FlairCatalog.effectiveFlairsFor`'s merged map). A SESSIONLESS
-cue (a pattern `activated`/`broken` moment, an overdue window collapsing with nobody engaged)
+cue (a pattern `Activated`/`Broken` moment, an overdue window collapsing with nobody engaged)
 plays through `StationService.playPresentationAt` instead.
 
 **SPECIFICITY WINS, and this is the ONE place it is decided.** The `presentation` argument is
@@ -622,18 +659,18 @@ re-resolves the action at stop: a call site that has nothing more specific to sa
 the map answers. The one place the gate also had to widen is the per-step emission
 (`StationStepHandlers.emitEntryCues` -> `StationStepDecisions.shouldEmitPresentationOnEntry`, which
 now takes an `actionAuthorsThisMoment` flag): a step with no `Presentation` of its own still has a
-moment to play when the action authored one under its `step:<actionId>:<stepId>` id. That second
+moment to play when the action authored one under its `Step:<ActionId>:<StepId>` id. That second
 route is gated to per-STEP ids only (`StationStepDecisions.actionAuthorsStepMoment`): an id-less step
-resolves to the action-wide `cycle` moment, which the cycle machinery itself owns, so honoring a
-`Moments.cycle` entry there would replay the cycle cue once per unnamed beat.
+resolves to the action-wide `Cycle` moment, which the cycle machinery itself owns, so honoring a
+`Moments.Cycle` entry there would replay the cycle cue once per unnamed beat.
 
 **Which moment id a step's entry cue plays under** is `StationStepDecisions.momentIdForStep`
-(`StationStepHandlers.presentMomentId` wraps it with the live action): `step:<actionId>:<stepId>` for
-an AUTHORED step id, else `cycle`. The implicit convert loop an action with no `Steps` runs is
-`cycle` too - its one step is engine-synthesized (`ImplicitProgram.ID_WORK`, which no author ever
-wrote), and its iteration IS the cycle, so a flair re-skins the classic work loop by the same `cycle`
-id the docs name for it rather than by a `step:` id derived from an engine-internal name.
-**A loot CUE is a moment id like any other**, so `rare_find` (and any author-defined `cue:<name>`)
+(`StationStepHandlers.presentMomentId` wraps it with the live action): `Step:<ActionId>:<StepId>` for
+an AUTHORED step id, else `Cycle`. The implicit convert loop an action with no `Steps` runs is
+`Cycle` too - its one step is engine-synthesized (`ImplicitProgram.ID_WORK`, which no author ever
+wrote), and its iteration IS the cycle, so a flair re-skins the classic work loop by the same `Cycle`
+id the docs name for it rather than by a `Step:` id derived from an engine-internal name.
+**A loot CUE is a moment id like any other**, so `Rare_Find` (and any author-defined `Cue:<Name>`)
 IS action-authorable now: the loot layer names the moment and the map decides what it sounds like.
 That is the whole reason the cue stopped being a presentation body - one edit re-skins every table
 that names it, and the tables stay pure numbers.
@@ -646,7 +683,7 @@ extracted body, byte-identical to the pre-delay path); a delayed one is parked i
 presentation, so a mid-wait catalog re-fold can never change what was scheduled. Four rules bind:
 - **ONE scheduler.** `scheduleCueAt(now, delay)`/`cueDue(now, dueAt)` are the pure pair EVERY offset
   cue in this engine resolves through: a moment's own `DelayMs`, a single `Sounds` entry's, and the
-  `impact` moment that is late purely because it authors one. There is no dedicated single-slot
+  `Impact` moment that is late purely because it authors one. There is no dedicated single-slot
   machinery beside the queue any more - the session carries no pending-impact field, the frame drain
   has no impact branch, and `stop()` has no impact reset. Do not add a second due-time rule.
 - **A `Sounds` entry with its own `DelayMs` is split into its own cue, before anything is queued.**
@@ -686,7 +723,7 @@ presentation, so a mid-wait catalog re-fold can never change what was scheduled.
 
 **Which delay to reach for** - three offsets, one scheduler, and the choice is about IDENTITY, not
 timing:
-- **A separate `Moments` entry** (`impact` beside `swing`) when the late cue is its own BEAT that a
+- **A separate `Moments` entry** (`Impact` beside `Swing`) when the late cue is its own BEAT that a
   flair should be able to re-skin or re-time on its own. It is late because its own
   `Presentation.DelayMs` says so; the moment id is what buys the flair target.
 - **`Presentation.DelayMs`** when a whole moment simply reads early and wants nudging onto its beat,
@@ -1083,7 +1120,7 @@ pattern is idempotent, the pattern's `Requires` gate (evaluated against the plac
 places still evaluate it) denies with `ui.station.pattern_requirements_unmet[_named]`, and an
 activation swaps the anchor via `BlockOps.setBlock` CARRYING its read rotation (`swapFor`, pure:
 skip when the base ids already match - the custom-core style), stamps the stash tag's pattern
-segment, feeds `registerKnownStationBlock`, plays the `activated` moment
+segment, feeds `registerKnownStationBlock`, plays the `Activated` moment
 (`playPatternMoment`: sounds/particles positionally - the particles through
 `StationService.spawnPresentationParticles`, the ONE leak-guarded spawn core - shake/native
 payloads on the placer; cues play at once, no session exists to queue a `DelayMs`), and fires the
@@ -1119,7 +1156,7 @@ reader with the broken position overlaid as air (`withBrokenAt` - the event fire
 removal). A failed walk reverts: `stopSessionsForStructureLost` (every session at the anchor,
 primary or claimed remote, `StopReason.STRUCTURE_LOST` - the present-player hand-back family,
 `ui.station.structure_lost`), then the L4 `onCustodyBlockBroken` funnel (drop remaining piles
-once, remove stash, despawn props, de-index), the `broken` moment, the swap back to
+once, remove stash, despawn props, de-index), the `Broken` moment, the swap back to
 `effectiveRevertBlock` (again rotation-carrying), and the api `StationStructureChangedEvent`
 (activated=false, actor=the breaker, null on an environment break). Pure cores + the walk live under
 `PatternCompileTest` / `StructureDetectionTest` / `StructureRevertTest` /
@@ -1173,7 +1210,7 @@ two package-private seams on `StationService`:
 
 - **`enterWorkingState(session, anchorId)`** resolves the anchor through the SAME
   `anchorBlockKeyFor` the step phases use, so ONE call covers both altitudes: the PRIMARY block
-  (absent/`"self"`) and a CLAIMED REMOTE ANCHOR. It is IDEMPOTENT per block (re-entering the same
+  (absent/`"Self"`) and a CLAIMED REMOTE ANCHOR. It is IDEMPOTENT per block (re-entering the same
   block never re-writes the state, so a repeating single-step convert program holds a steady look
   instead of flickering once per cycle) and exits any previously-working block first, so at most
   one block per player is ever left working (`workingByPlayer`, a transient `UUID -> WorkingFlip`
@@ -1245,7 +1282,7 @@ items. The pieces:
 - **One window per stash, opened/re-stamped by `StationService#noteCustodyProduce`** - called ONCE
   per committed produce PHASE from `StationStepHandlers.producePhase` (never per item; a
   multi-socket phase's window sits on its FIRST produced socket). Every batch re-stamps the clock
-  ("stirring the pot"); only the FIRST fires the `ready` moment + `ui.station.output_ready` toast
+  ("stirring the pot"); only the FIRST fires the `Ready` moment + `ui.station.output_ready` toast
   and flips `States.Ready` (skipped while a Working flip holds the block - the resting flip shows
   Ready at the next stop instead).
 - **The settle is LAZY and there is ONE core**, `StationService#settleDoneness` (the
@@ -1262,7 +1299,7 @@ items. The pieces:
   (`StationDoneness.overdoneReplacement`); the pile's owner and `Unique` stack are untouched, no
   other pile is touched (per-socket isolation), the window clears, `States.Overdone` flips, the
   pile's display prop despawns (the hydrate/first-touch respawn rebuilds it from the settled
-  contents), the `overdone` moment fires - through an engaged session's cue queue when one works
+  contents), the `Overdone` moment fires - through an engaged session's cue queue when one works
   the block (`sessionAt`), else immediately at the block via `playPresentationAt` (the ONE
   sessionless playback core `StationStructures`' pattern moments also delegate to) - and the
   toucher gets `ui.station.output_overdone`.
@@ -1280,7 +1317,7 @@ items. The pieces:
 
 Pure cores in [`StationDoneness`](StationDoneness.java) (boundary math, replacement rule,
 resting-state pick), record ops on the claim, orchestration on `StationService`; the moment ids
-`ready`/`overdone` are well-known (`StationFlairs.MOMENT_READY`/`MOMENT_OVERDONE`), so flairs
+`Ready`/`Overdone` are well-known (`StationFlairs.MOMENT_READY`/`MOMENT_OVERDONE`), so flairs
 overlay them like any cue.
 
 ## Unattended processing (decision 90)
@@ -1552,7 +1589,7 @@ engine; it stores no per-player fact). The plugin seeds that union with its own
 a mod with a genuinely foreign unlock store registers its provider beside it. The open STRING moment id vocabulary
 is `MOMENT_CYCLE`/`MOMENT_SWING`/`MOMENT_IMPACT`/`MOMENT_RARE_FIND`/`MOMENT_COMPLETION`/
 `MOMENT_READY`/`MOMENT_OVERDONE` (the seven `WELL_KNOWN_MOMENT_IDS` a typo check spell-checks),
-plus `stepMomentId(actionId, stepId)` and the open `cue:<name>` namespace. The flair map is the merge of TWO sources
+plus `stepMomentId(actionId, stepId)` and the open `Cue:<Name>` namespace. The flair map is the merge of TWO sources
 ([`FlairCatalog`](FlairCatalog.java)`.effectiveFlairsFor`): a station's own inline `Flairs`
 (`asset.StationAsset.Flair`, `{Moments}`) UNIONED with every folded `asset.FlairAsset` whose
 `Stations` list applies - a same-flair-id `FlairAsset` entry wins. `api.impl.StationViewImpl
@@ -1730,7 +1767,7 @@ the load-bearing lessons that still apply going forward:
   when the session captured one at engage (`StationSession#startBlockItemId`, resolved ONCE and
   shared with the summary crest), block-type-id fallback (`StationSession#startBlockTypeId`, read
   through zc's `BlockOps.blockItemIdAt`) only for a block with no containing Item. This covers the
-  latent twin by construction - a `StationStepHandlers` working-step flip at `At: "self"` writes
+  latent twin by construction - a `StationStepHandlers` working-step flip at `At: "Self"` writes
   the SAME primary block through the SAME check.
 - **A restart-orphaned `Loaded` block state with no live claim behind it must recover, not
   dead-end.** `ActionResolver#selectActionForBlockState(asset, currentStateName)` is the THIRD

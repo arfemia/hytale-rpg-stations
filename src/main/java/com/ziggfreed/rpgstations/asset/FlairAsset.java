@@ -29,14 +29,14 @@ import com.ziggfreed.common.codec.InheritMapCodec;
  * consulted per moment id exactly like a station's own inline flair.
  *
  * <pre>{@code
- * { "Stations": ["sawmill"], "Moments": { "swing": { "Particles": "Petal_Burst" },
- *                                         "step:enhance:stamp": { "Sound": "SFX_Choir_Hit" } } }
+ * { "Stations": ["sawmill"], "Moments": { "Swing": { "Particles": "Petal_Burst" },
+ *                                         "Step:Enhance:Stamp": { "Sound": "SFX_Choir_Hit" } } }
  * }</pre>
  *
  * <p>{@link #getStations()} {@code null} (or empty) means "applies to every station" - the design's
  * own "Stations null = applies to all" wording. {@link #getMoments()} is keyed by an ENGINE-EMITTED
- * moment id ({@code cycle}/{@code swing}/{@code impact}/{@code rare_find}/{@code completion}, or a
- * per-step {@code step:<actionId>:<stepId>} - see {@code station.StationFlairs}) or any FUTURE
+ * moment id ({@code Cycle}/{@code Swing}/{@code Impact}/{@code Rare_Find}/{@code Completion}, or a
+ * per-step {@code Step:<ActionId>:<StepId>} - see {@code station.StationFlairs}) or any FUTURE
  * moment id a newer engine emits; an unrecognized key warns at audit ({@code
  * station.StationValidator}), never errors, so an older-authored pack never breaks against a
  * newer engine.
@@ -70,7 +70,7 @@ public final class FlairAsset implements JsonAssetWithMap<String, DefaultAssetMa
             .appendInherited(new KeyedCodec<>("Moments",
                             new InheritMapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.moments = v, a -> a.moments, (a, p) -> a.moments = p.moments)
-            .documentation("Moment id (cycle/swing/impact/rare_find/completion or step:<action>:<step>) -> the presentation overlay. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored.").add()
+            .documentation("Moment id (Cycle/Swing/Impact/Rare_Find/Completion/Ready/Overdone, Refused or Refused:<Reason>, Cue:<Your_Name>, or Step:<ActionId>:<StepId>; written Is_Like_This, matched case-insensitively) -> the presentation overlay. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored.").add()
             .build();
 
     public FlairAsset() {
@@ -98,7 +98,7 @@ public final class FlairAsset implements JsonAssetWithMap<String, DefaultAssetMa
         return stations;
     }
 
-    /** Moment id ({@code cycle}/{@code swing}/.../{@code step:<actionId>:<stepId>}) -> Presentation. */
+    /** Moment id ({@code Cycle}/{@code Swing}/.../{@code Step:<ActionId>:<StepId>}) -> Presentation. */
     @Nullable
     public Map<String, Presentation> getMoments() {
         return moments;

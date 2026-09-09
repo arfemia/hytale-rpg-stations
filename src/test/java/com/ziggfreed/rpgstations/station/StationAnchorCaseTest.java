@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import org.junit.jupiter.api.Test;
 
+import com.ziggfreed.rpgstations.asset.ActionDef;
+
 /**
  * The ONE anchor-id case rule (review minor: validator/runtime case divergence). The validator is
  * fully case-insensitive (it lowercases both declared anchor keys and step {@code At}/{@code Walk.To}
@@ -34,6 +36,7 @@ class StationAnchorCaseTest {
         s.anchorBlocks.put("fire", "world:10:20:30");
 
         // "self" (any case), null, and blank all resolve to the primary block, never the anchor map.
+        assertEquals("world:1:2:3", StationService.anchorBlockKeyFor(s, ActionDef.Anchor.RESERVED_SELF));
         assertEquals("world:1:2:3", StationService.anchorBlockKeyFor(s, "self"));
         assertEquals("world:1:2:3", StationService.anchorBlockKeyFor(s, "SELF"));
         assertEquals("world:1:2:3", StationService.anchorBlockKeyFor(s, null));

@@ -110,6 +110,33 @@ public final class Presentation {
     }
 
     /**
+     * PURE, the ONE per-leaf overlay rule every layered presentation in this engine resolves
+     * through: {@code over}'s non-null leaves replace {@code base}'s, a leaf {@code over} omits
+     * falls through to {@code base}'s. An AUTHORED empty array (an {@code "Sounds": []}) is a
+     * non-null leaf and therefore wins as "none", which is how an inner layer silences an outer
+     * one; only an OMITTED key falls through.
+     *
+     * <p>Identity-preserving at the edges so a caller can tell "nothing overlaid" apart: a null
+     * {@code over} returns {@code base} itself, a null {@code base} returns {@code over} itself.
+     * Both non-null always rebuilds, so the result never aliases either argument.
+     */
+    @Nullable
+    public static Presentation overlaid(@Nullable Presentation base, @Nullable Presentation over) {
+        if (over == null) {
+            return base;
+        }
+        if (base == null) {
+            return over;
+        }
+        return of(over.sounds != null ? over.sounds : base.sounds,
+                over.particles != null ? over.particles : base.particles,
+                over.shake != null ? over.shake : base.shake,
+                over.interaction != null ? over.interaction : base.interaction,
+                over.effect != null ? over.effect : base.effect,
+                over.delayMs != null ? over.delayMs : base.delayMs);
+    }
+
+    /**
      * The one-shot sounds played at this moment, in authored order; null/empty = silent. Every
      * entry is a normalized {@link SoundCue} whichever shape it was authored in - a bare id string
      * decodes to a cue with no offset of its own.
@@ -117,6 +144,28 @@ public final class Presentation {
     @Nullable
     public SoundCue[] getSounds() {
         return sounds;
+    }
+
+    /**
+     * Whether any leaf other than {@code Sounds} has something to play: particles, a shake, an
+     * interaction, or an effect. The complement of a sound-only cue - a caller that must play the
+     * sounds on one rule and everything else on another asks this before scheduling the rest.
+     */
+    public boolean hasNonSoundCue() {
+        return (particles != null && particles.length > 0)
+                || shake != null || interaction != null || effect != null;
+    }
+
+    /** A copy carrying ONLY this moment's {@code Sounds} (no timing, nothing else); null when it has none. */
+    @Nullable
+    public Presentation soundsOnly() {
+        return sounds != null && sounds.length > 0 ? of(sounds, null, null, null, null, null) : null;
+    }
+
+    /** A copy carrying everything EXCEPT {@code Sounds} (timing kept); null when nothing else is authored. */
+    @Nullable
+    public Presentation withoutSounds() {
+        return hasNonSoundCue() ? of(null, particles, shake, interaction, effect, delayMs) : null;
     }
 
     /**

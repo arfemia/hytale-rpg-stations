@@ -98,7 +98,7 @@ public final class ActionAsset implements JsonAssetWithMap<String, DefaultAssetM
             .appendInherited(new KeyedCodec<>("Moments",
                             new InheritMapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.body.moments = v, a -> a.body.moments, (a, p) -> a.body.moments = p.body.moments)
-            .documentation("What it sounds and looks like, keyed by moment id (cycle/swing/impact/completion, or step:<actionId>:<stepId>); matching is case-insensitive. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why rare_find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it).").add()
+            .documentation("What it sounds and looks like, keyed by moment id (Cycle/Swing/Impact/Completion/Ready/Overdone, Refused or Refused:<Reason> for a press this action turns away, a Cue:<Your_Name> a loot roll names, or Step:<ActionId>:<StepId>); ids are written Is_Like_This and matched case-insensitively. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why Rare_Find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). A Refused entry sits over the settings' engine-wide Refused default per leaf: author only the leaves to change, and an empty Sounds array to silence this action's refusals.").add()
             .build();
 
     /**

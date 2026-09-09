@@ -1,7 +1,6 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.function.BiFunction;
 
@@ -134,14 +133,14 @@ final class StationStepDecisions {
     }
 
     /**
-     * The moment id one step's iteration-entry cue plays under: {@code step:<actionId>:<stepId>} for
+     * The moment id one step's iteration-entry cue plays under: {@code Step:<ActionId>:<StepId>} for
      * a step that authors an {@code Id}, else the action-wide {@link StationFlairs#MOMENT_CYCLE}.
      *
      * <p>{@code implicitProgram} is the recipe-driven convert loop the engine builds for an action
      * that authors no {@code Steps}. Its single step is engine-synthesized and its iteration IS the
-     * cycle, so its cue is the plain {@code cycle} moment - the id the docs name for "each completed
+     * cycle, so its cue is the plain {@code Cycle} moment - the id the docs name for "each completed
      * work cycle", and the id a flair re-skins it by. Only an AUTHORED step id ever earns a
-     * {@code step:} moment id.
+     * {@code Step:} moment id.
      */
     @Nonnull
     static String momentIdForStep(@Nonnull String actionId, @Nullable String stepId, boolean implicitProgram) {
@@ -154,18 +153,18 @@ final class StationStepDecisions {
     /**
      * Whether the running action's own {@code Moments} map carries the entry for {@code momentId} -
      * the second of the two routes {@link #shouldEmitPresentationOnEntry} accepts. Only a PER-STEP
-     * moment id ({@code step:<actionId>:<stepId>}) qualifies: an id-less step resolves to the
-     * action-wide {@code cycle} moment, which the cycle machinery itself owns, so honoring a
-     * {@code Moments.cycle} entry there would replay the cycle cue once per unnamed beat of the
+     * moment id ({@code Step:<ActionId>:<StepId>}) qualifies: an id-less step resolves to the
+     * action-wide {@code Cycle} moment, which the cycle machinery itself owns, so honoring a
+     * {@code Moments.Cycle} entry there would replay the cycle cue once per unnamed beat of the
      * program instead of once per completed cycle. {@code actionMoments} is the session's snapshot,
-     * already canonicalized to lowercase keys, so the lookup lowercases to match.
+     * case-insensitive by construction, so one plain lookup answers under any authored casing.
      */
     static boolean actionAuthorsStepMoment(@Nullable Map<String, Presentation> actionMoments,
             @Nonnull String momentId) {
         if (actionMoments == null || !StationFlairs.isStepMomentId(momentId)) {
             return false;
         }
-        return actionMoments.containsKey(momentId.toLowerCase(Locale.ROOT));
+        return actionMoments.containsKey(momentId);
     }
 
     /**

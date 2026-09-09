@@ -56,7 +56,7 @@
                 "RPG_Station_Sawmill_T2"
               ]
             },
-            "Cue": "rare_find"
+            "Cue": "Rare_Find"
           },
           {
             "Min": 50,
@@ -65,7 +65,7 @@
                 "RPG_Station_Sawmill_T3"
               ]
             },
-            "Cue": "rare_find"
+            "Cue": "Rare_Find"
           }
         ]
       }

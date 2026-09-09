@@ -26,7 +26,7 @@ final class StationWalkState {
     /** Timeout grace added to the ideal travel time before a walk completes as-arrived (design 2.3's 2s). */
     static final long TIMEOUT_GRACE_MS = 2000L;
 
-    /** The anchor id this walk targets ({@code "self"} or a declared anchor id). */
+    /** The anchor id this walk targets ({@code "Self"} or a declared anchor id). */
     @Nonnull final String targetAnchorId;
 
     /** The poll-driven walk handle from {@code StationPerformer.walkTo}. */

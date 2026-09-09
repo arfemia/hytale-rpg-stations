@@ -112,7 +112,7 @@ public final class ActionDef {
             .appendInherited(new KeyedCodec<>("Moments",
                             new InheritMapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
                     (o, v) -> o.moments = v, o -> o.moments, (o, p) -> o.moments = p.moments)
-            .documentation("What it sounds and looks like, keyed by moment id (cycle/swing/impact/completion, or step:<actionId>:<stepId>); matching is case-insensitive. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why rare_find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it).").add()
+            .documentation("What it sounds and looks like, keyed by moment id (Cycle/Swing/Impact/Completion/Ready/Overdone, Refused or Refused:<Reason> for a press this action turns away, a Cue:<Your_Name> a loot roll names, or Step:<ActionId>:<StepId>); ids are written Is_Like_This and matched case-insensitively. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why Rare_Find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). A Refused entry sits over the settings' engine-wide Refused default per leaf: author only the leaves to change, and an empty Sounds array to silence this action's refusals.").add()
             .build();
 
     public ActionDef() {
@@ -323,14 +323,14 @@ public final class ActionDef {
      *
      * <p><b>Specificity wins.</b> An entry here is the BASE presentation for its moment id wherever
      * the engine has nothing more specific. Where it does - a {@code StationStep}'s own
-     * {@code Presentation} for that step's {@code step:<actionId>:<stepId>} moment, a
-     * {@code Ladder.Floor}'s cue for {@code rare_find} - the site-supplied one is played and the map
+     * {@code Presentation} for that step's {@code Step:<ActionId>:<StepId>} moment, a
+     * {@code Ladder.Floor}'s cue for {@code Rare_Find} - the site-supplied one is played and the map
      * entry is not consulted for that emission.
      *
-     * <p><b>{@code rare_find} is therefore not authorable here</b> (the validator warns): that moment
+     * <p><b>{@code Rare_Find} is therefore not authorable here</b> (the validator warns): that moment
      * only ever fires WITH the earning {@code Roll}/{@code Ladder.Floor} cue already in hand, so an
      * entry keyed by it could never win. Author the cue on the roll or floor that earns it; a flair
-     * still overlays it under the {@code rare_find} id like any other moment.
+     * still overlays it under the {@code Rare_Find} id like any other moment.
      */
     @Nullable
     public Map<String, Presentation> getMoments() {
@@ -358,7 +358,7 @@ public final class ActionDef {
                 .documentation("The third-person camera pull while working, plus the optional fixed-look Recipe preset.").add()
                 .appendInherited(new KeyedCodec<>("Animation", StationAsset.Animation.CODEC, false),
                         (o, v) -> o.animation = v, o -> o.animation, (o, p) -> o.animation = p.animation)
-                .documentation("The work emote id, the action clip, and the per-swing cadence (Swing.IntervalMs) - pure timing; what a swing SOUNDS and LOOKS like is the swing/impact entry of Moments.").add()
+                .documentation("The work emote id, the action clip, and the per-swing cadence (Swing.IntervalMs) - pure timing; what a swing SOUNDS and LOOKS like is the Swing/Impact entry of Moments.").add()
                 .appendInherited(new KeyedCodec<>("Puppet", Puppet.CODEC, false),
                         (o, v) -> o.puppet = v, o -> o.puppet, (o, p) -> o.puppet = p.puppet)
                 .documentation("The puppet presentation route: mount the player, hide their body, spawn a skinned visual performing the work. Null = the classic in-body worker.").add()
@@ -399,12 +399,12 @@ public final class ActionDef {
     /**
      * ONE multi-station anchor declaration: {@link #station} is the target STATION id (a type
      * filter), {@link #maxRadiusMeters} the horizontal radius in meters from the primary station
-     * block. The reserved anchor id {@code "self"} = the primary block (never authored; the
+     * block. The reserved anchor id {@code "Self"} = the primary block (never authored; the
      * validator rejects declaring it). Anchor discovery, claiming, and walk execution are all live.
      */
     public static final class Anchor {
         /** The reserved anchor id every program has implicitly (the primary station block); never authored. */
-        public static final String RESERVED_SELF = "self";
+        public static final String RESERVED_SELF = "Self";
         /** The design default anchor discovery radius (horizontal blocks/meters). */
         public static final double DEFAULT_MAX_RADIUS_METERS = 12.0;
 

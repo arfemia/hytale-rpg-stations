@@ -173,7 +173,7 @@ final class StationSession {
     int durabilityPerCycle;
 
     // Per-swing cadence (Animation.Swing). 0 swingIntervalMs = no swing layer. What a swing SOUNDS
-    // like is the "swing"/"impact" entries of `moments` below, not a field of its own.
+    // like is the "Swing"/"Impact" entries of `moments` below, not a field of its own.
     long swingIntervalMs;
     long nextSwingAtMs;
 
@@ -343,7 +343,7 @@ final class StationSession {
     /**
      * The resolved anchor block keys (scope-2 wave 3, design 2.2/2.4 - decision 28c): {@code
      * anchorId -> "<worldUuid>:<x>:<y>:<z>"} for every declared {@code Anchors} entry the engage
-     * DISCOVERED and CLAIMED (atomically, first-wins) plus the implicit reserved {@code "self"}
+     * DISCOVERED and CLAIMED (atomically, first-wins) plus the implicit reserved {@code "Self"}
      * anchor (the primary station block). A step's {@code At}/{@code Walk.To} resolves its target
      * blockKey against this map; {@code stop()} releases every claimed anchor block (and returns its
      * custody) via it. Empty for a single-station program (every wave-2 program) - only an action

@@ -64,7 +64,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Moments` | map of [Presentation](#type-presentation) | `null` | An open moment id (cycle/swing/impact/rare_find/completion, or step:<actionId>:<stepId>) to a Presentation overlay; each authored leaf overlays the base moment's own leaves, per moment id. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored. |
+| `Moments` | map of [Presentation](#type-presentation) | `null` | An open moment id (Cycle/Swing/Impact/Rare_Find/Completion/Ready/Overdone, Refused or Refused:<Reason>, a Cue:<Your_Name>, or Step:<ActionId>:<StepId>; written Is_Like_This, matched case-insensitively) to a Presentation overlay; each authored leaf overlays the base moment's own leaves, per moment id. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored. |
 
 <a id="type-actionasset"></a>
 ## ActionAsset
@@ -85,7 +85,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Bonus` | [LootRef](#type-lootref) | `null` | What ELSE a cycle hands over: referenced Lootables plus inline Rolls. Yield decides how much of the thing you made, Bonus decides what else you got. |
 | `ContributionScale` | [ContributionScale](#field-actionasset-contributionscale) | `null` | A factor ladder multiplying every Work.PerCycleContributions amount before it is forwarded; the engine pre-scales, so a listener grants the amount verbatim. |
 | `Worker` | [Worker](#field-actionasset-worker) | `null` | How the person looks doing this: Hold, Camera, Animation, Puppet. |
-| `Moments` | map of [Presentation](#type-presentation) | `null` | What it sounds and looks like, keyed by moment id (cycle/swing/impact/completion, or step:<actionId>:<stepId>); matching is case-insensitive. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why rare_find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). |
+| `Moments` | map of [Presentation](#type-presentation) | `null` | What it sounds and looks like, keyed by moment id (Cycle/Swing/Impact/Completion/Ready/Overdone, Refused or Refused:<Reason> for a press this action turns away, a Cue:<Your_Name> a loot roll names, or Step:<ActionId>:<StepId>); ids are written Is_Like_This and matched case-insensitively. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why Rare_Find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). A Refused entry sits over the settings' engine-wide Refused default per leaf: author only the leaves to change, and an empty Sounds array to silence this action's refusals. |
 
 <a id="field-actionasset-select"></a>
 ### ActionAsset.Select
@@ -153,7 +153,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Hold` | [Hold](#field-actionasset-worker-hold) | `null` | The movement lock while working: the default self-effect hold, or the Mount knob family (seated/standing mount). |
 | `Camera` | [Camera](#field-actionasset-worker-camera) | `null` | The third-person camera pull while working, plus the optional fixed-look Recipe preset. |
-| `Animation` | [Animation](#field-actionasset-worker-animation) | `null` | The work emote id, the action clip, and the per-swing cadence (Swing.IntervalMs) - pure timing; what a swing SOUNDS and LOOKS like is the swing/impact entry of Moments. |
+| `Animation` | [Animation](#field-actionasset-worker-animation) | `null` | The work emote id, the action clip, and the per-swing cadence (Swing.IntervalMs) - pure timing; what a swing SOUNDS and LOOKS like is the Swing/Impact entry of Moments. |
 | `Puppet` | [Puppet](#type-puppet) | `null` | The puppet presentation route: mount the player, hide their body, spawn a skinned visual performing the work. Null = the classic in-body worker. |
 
 <a id="field-actionasset-tool-gather"></a>
@@ -345,7 +345,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Bonus` | [LootRef](#type-lootref) | `null` | What ELSE a cycle hands over: referenced Lootables plus inline Rolls. Yield decides how much of the thing you made, Bonus decides what else you got. |
 | `ContributionScale` | [ContributionScale](#field-actiondef-contributionscale) | `null` | A factor ladder multiplying every Work.PerCycleContributions amount before it is forwarded; the engine pre-scales, so a listener grants the amount verbatim. |
 | `Worker` | [Worker](#field-actiondef-worker) | `null` | How the person looks doing this: Hold, Camera, Animation, Puppet. |
-| `Moments` | map of [Presentation](#type-presentation) | `null` | What it sounds and looks like, keyed by moment id (cycle/swing/impact/completion, or step:<actionId>:<stepId>); matching is case-insensitive. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why rare_find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). |
+| `Moments` | map of [Presentation](#type-presentation) | `null` | What it sounds and looks like, keyed by moment id (Cycle/Swing/Impact/Completion/Ready/Overdone, Refused or Refused:<Reason> for a press this action turns away, a Cue:<Your_Name> a loot roll names, or Step:<ActionId>:<StepId>); ids are written Is_Like_This and matched case-insensitively. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why Rare_Find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). A Refused entry sits over the settings' engine-wide Refused default per leaf: author only the leaves to change, and an empty Sounds array to silence this action's refusals. |
 
 <a id="field-actiondef-select"></a>
 ### ActionDef.Select
@@ -413,7 +413,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Hold` | [Hold](#field-actiondef-worker-hold) | `null` | The movement lock while working: the default self-effect hold, or the Mount knob family (seated/standing mount). |
 | `Camera` | [Camera](#field-actiondef-worker-camera) | `null` | The third-person camera pull while working, plus the optional fixed-look Recipe preset. |
-| `Animation` | [Animation](#field-actiondef-worker-animation) | `null` | The work emote id, the action clip, and the per-swing cadence (Swing.IntervalMs) - pure timing; what a swing SOUNDS and LOOKS like is the swing/impact entry of Moments. |
+| `Animation` | [Animation](#field-actiondef-worker-animation) | `null` | The work emote id, the action clip, and the per-swing cadence (Swing.IntervalMs) - pure timing; what a swing SOUNDS and LOOKS like is the Swing/Impact entry of Moments. |
 | `Puppet` | [Puppet](#type-puppet) | `null` | The puppet presentation route: mount the player, hide their body, spawn a skinned visual performing the work. Null = the classic in-body worker. |
 
 <a id="field-actiondef-tool-gather"></a>
@@ -594,7 +594,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Id` | `string` | `null` | Unique step id within one action's Steps array; required when another step or extension insertion anchors on it. |
 | `Conditions` | array of [Condition](#type-condition) | `null` | Gate re-checked at each iteration entry; a failing check runs OnConditionFail. |
 | `OnConditionFail` | [OnConditionFail](#field-stationstep-onconditionfail) | `null` | What a failing Conditions check does: Skip (no-op continue) or Fail (default); Goto jumps to a step Id. |
-| `At` | `string` | `null` | The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'self'. |
+| `At` | `string` | `null` | The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'Self'. Ids are matched case-insensitively. |
 | `Repeat` | [Repeat](#field-stationstep-repeat) | `null` | Per-step iteration count: a fixed Times, or Min/Max/Factors resolved once at step entry. |
 | `Duration` | [Duration](#field-stationstep-duration) | `null` | A post-phase hold in ms per iteration; prop/presentation persist across the hold. |
 | `Presentation` | [Presentation](#type-presentation) | `null` | A sound/particles/etc. cue played once at step ITERATION entry. |
@@ -645,7 +645,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `To` | `string` | `null` | The anchor id to walk the puppet to (or the reserved 'self' = the primary station). |
+| `To` | `string` | `null` | The anchor id to walk the puppet to (or the reserved 'Self' = the primary station). Ids are matched case-insensitively. |
 | `SpeedMps` | `double` | `null` | Straight-line walk speed in meters per second (reader-defaults to 2.5). |
 
 <a id="field-stationstep-consume"></a>
@@ -1245,7 +1245,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Activate` | [Activate](#field-structurepatternasset-activate) | `null` | What completion does to the anchor block: the station block it becomes, and the block a broken shape reverts it to. |
 | `Cells` | array of [Cell](#field-structurepatternasset-cells-item) | `null` | The cells of the shape, each an offset plus what must stand there. Exactly one cell is the anchor. Under native Parent this ARRAY is replaced wholesale, never merged per entry - a child re-authoring any cell re-authors them all. |
 | `Requires` | [Requires](#type-requires) | `null` | The activation gate, evaluated against the player whose placement completed the shape; a failing gate leaves the blocks standing and the station unactivated. |
-| `Moments` | map of [Presentation](#type-presentation) | `null` | Moment id -> the presentation played at the anchor. Well-known ids: 'activated' (a completed build turned into the station) and 'broken' (the standing shape was broken and reverted). Cues play at once; a DelayMs here is read as zero. Under native Parent the map merges PER MOMENT ID. |
+| `Moments` | map of [Presentation](#type-presentation) | `null` | Moment id -> the presentation played at the anchor. Well-known ids: 'Activated' (a completed build turned into the station), 'Broken' (the standing shape was broken and reverted), and 'Refused' plus 'Refused:<Reason>' (a completion the pattern turned away: Refused:Structure_Conflict, Refused:Pattern_Requirements_Unmet), each the nearest layer over the settings' own Refused defaults. Ids are written Is_Like_This and matched case-insensitively. Cues play at once; a DelayMs here is read as zero. Under native Parent the map merges PER MOMENT ID. |
 
 <a id="field-structurepatternasset-identity"></a>
 ### StructurePatternAsset.Identity
@@ -1308,7 +1308,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Tags` | map of array of `string` | `null` | Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.<br><br>For example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.<br><br>Tags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**. |
 | `Name` | `string` | `null` | Ignored - the flair id comes from the asset filename, not this key. Kept as a schema field for editor display only. |
 | `Stations` | array of `string` | `null` | Station ids this flair applies to; null/empty = every station. |
-| `Moments` | map of [Presentation](#type-presentation) | `null` | Moment id (cycle/swing/impact/rare_find/completion or step:<action>:<step>) -> the presentation overlay. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored. |
+| `Moments` | map of [Presentation](#type-presentation) | `null` | Moment id (Cycle/Swing/Impact/Rare_Find/Completion/Ready/Overdone, Refused or Refused:<Reason>, Cue:<Your_Name>, or Step:<ActionId>:<StepId>; written Is_Like_This, matched case-insensitively) -> the presentation overlay. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored. |
 
 <a id="type-extensionasset"></a>
 ## ExtensionAsset
@@ -1423,6 +1423,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Enabled` | `boolean` | `null` | The engine master switch; false disables the whole RpgStations engine at the SettingsCatalog check. Reader-defaults to true. |
 | `SummaryHud` | [SummaryHud](#field-settingsasset-summaryhud) | `null` | The end-of-session summary panel's layout and lifetime. |
 | `Limits` | [Limits](#field-settingsasset-limits) | `null` | Ceilings a server owner can set on what this engine is allowed to have live at once (sessions and puppets per world, placed-input stashes per chunk section), plus the unattended pass's per-world visit interval and a ceiling on how many accrued unattended cycles one gather pays. Absent, or any ceiling leaf left null, means unlimited; the interval defaults to 1000ms. |
+| `Moments` | map of [Presentation](#type-presentation) | `null` | Engine-wide default cues, keyed by moment id exactly like an action's own Moments (Cycle/Swing/Impact/Completion/Ready/Overdone, Refused and Refused:<Reason>, or a Step:/Cue: id); ids are written Is_Like_This and matched case-insensitively. An entry here sits UNDER every action's entry for the same id, per leaf: the action's authored leaves win and the leaves it omits fall through to this one, so a moment no action dressed still plays. The Refused entries are what a turned-away press answers with, and they resolve nearest-first per leaf: the action's Refused:<Reason>, the action's Refused, this map's Refused:<Reason>, then this map's Refused. An authored empty Sounds array means silence and is different from leaving the key out, which falls through. A refusal cue plays at once: a DelayMs on it, or on one of its Sounds, is read as zero. Under native Parent the map merges PER MOMENT ID. |
+| `Refusals` | [Refusals](#field-settingsasset-refusals) | `null` | How a turned-away press is answered when the same player repeats it: the repeat window inside which the same reason at the same block is answered by its sound alone. |
 
 <a id="field-settingsasset-summaryhud"></a>
 ### SettingsAsset.SummaryHud
@@ -1447,4 +1449,11 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `UnattendedIntervalMs` | `long` | `null` | How often, in milliseconds, ONE world's unattended pass runs (visiting placed-input stations whose action authors Work.Unattended and settling any cycles world game time has earned them). Null (the default) means 1000. Raising it makes unattended stations settle in coarser bursts; the math is the same either way. |
 | `MaxUnattendedGatherCycles` | `integer` | `null` | A server-owner ceiling on how many accrued unattended cycles ONE gather pays out. The effective ceiling is the SMALLER of this and the action's own Work.Unattended.MaxCycles, so it can only tighten what an action authors, never raise it. Null (the default) means no owner ceiling: each action's own knob alone applies. |
 | `MaxCustodyClaimsPerWorld` | `integer` | `null` | Retired and ignored. Placed input is stored on the block's own chunk section, so the bound is per section: author MaxStashesPerSection instead. A value here logs a warning naming that replacement and changes nothing. |
+
+<a id="field-settingsasset-refusals"></a>
+### SettingsAsset.Refusals
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `RepeatWindowMs` | `long` | `null` | Milliseconds inside which the same player pressing the same station again for the SAME reason is answered by the refusal cue's sound alone: no second notice stacks on the first, no second particle burst or camera shake, and no event for a listening mod. A different reason, or the same reason at another block, always gets the full answer. Null (the default) means 1500; 0 answers every press in full. |
 

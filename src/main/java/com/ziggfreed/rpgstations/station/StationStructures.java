@@ -16,13 +16,11 @@ import org.joml.Vector3i;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
-import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.cast.WorldEvictors;
-import com.ziggfreed.common.i18n.Msg;
 import com.ziggfreed.common.world.BlockOps;
 import com.ziggfreed.common.world.pattern.BlockPattern;
 import com.ziggfreed.common.world.pattern.BlockReader;
@@ -37,7 +35,6 @@ import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
-import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.station.PatternCatalog.CompiledPattern;
 import com.ziggfreed.rpgstations.station.PatternCells.CellMatcher;
 import com.ziggfreed.rpgstations.util.Log;
@@ -71,22 +68,7 @@ public final class StationStructures {
 
     private static final StationStructures INSTANCE = new StationStructures();
 
-    /**
-     * How long one player's refusal toast at one anchor stays suppressed after showing. A refused
-     * completion (a conflicting anchor, a failed {@code Requires} gate) deliberately leaves its
-     * pending entry standing - a later placement may complete legitimately - so a builder placing
-     * block after block near the anchor keeps re-running the same walk; without a throttle every
-     * one of those placements re-toasts the same refusal.
-     */
-    static final long REFUSAL_TOAST_COOLDOWN_MS = 5_000L;
-
-    /** How many throttle entries may accumulate before a decision prunes the expired ones. */
-    private static final int REFUSAL_TOAST_PRUNE_SIZE = 256;
-
     private final PendingAnchorIndex pending = new PendingAnchorIndex();
-
-    /** (player | world | anchor) -&gt; the last refusal-toast wall-clock ms; in-memory only, never persisted. */
-    private final Map<String, Long> refusalToastAt = new java.util.concurrent.ConcurrentHashMap<>();
 
     private StationStructures() {
     }
@@ -342,7 +324,7 @@ public final class StationStructures {
      * One completed DETECT walk: decide against the anchor's stash tag, evaluate the gate, and on
      * {@link ActivationDecision#ACTIVATE} swap the anchor (carrying its placed rotation), stamp the
      * stash's pattern segment, feed the station discovery index, clear the pending entries, play
-     * the {@code activated} moment, and fire the api structure-changed event.
+     * the {@code Activated} moment, and fire the api structure-changed event.
      */
     private void handleCompletedShape(@Nonnull World world, @Nonnull UUID worldUuid,
             @Nonnull ChunkStore chunkStore, @Nullable PlayerRef playerRef,
@@ -365,14 +347,16 @@ public final class StationStructures {
             return;
         }
         if (tagDecision == ActivationDecision.CONFLICT) {
-            if (refusalToastAllowed(playerRef, worldUuid, ax, ay, az)) {
-                toast(playerRef, RpgMsg.tr("ui.station.structure_conflict"));
+            StationRefusals.Press press = refusal(world, playerRef, placerRef, cp, ax, ay, az);
+            if (press != null) {
+                press.refuse("ui.station.structure_conflict");
             }
             return;
         }
         if (!requiresPassed(cp, playerRef)) {
-            if (refusalToastAllowed(playerRef, worldUuid, ax, ay, az)) {
-                toast(playerRef, requirementsUnmetToast(cp));
+            StationRefusals.Press press = refusal(world, playerRef, placerRef, cp, ax, ay, az);
+            if (press != null) {
+                press.refuseNamed("ui.station.pattern_requirements_unmet", patternNameKey(cp));
             }
             return;
         }
@@ -466,14 +450,32 @@ public final class StationStructures {
         return true;
     }
 
-    /** The gate-denial toast, naming the structure when its {@code Identity.NameKey} is authored. */
-    @Nonnull
-    private static Message requirementsUnmetToast(@Nonnull CompiledPattern cp) {
-        String nameKey = cp.asset().getIdentity() != null ? cp.asset().getIdentity().getNameKey() : null;
-        if (nameKey != null && !nameKey.isBlank()) {
-            return RpgMsg.tr("ui.station.pattern_requirements_unmet_named", Msg.key(nameKey));
+    /**
+     * The refusal context for a completion this walk turned away (a conflicting anchor, a failed
+     * {@code Requires} gate), answering through the one {@link StationRefusals} seam every station
+     * press uses: the pattern's own {@code Moments} are the nearest cue layer, its station (or its
+     * own id) names the refusal, and the seam's repeat throttle keeps a builder placing block after
+     * block near the anchor from being told the same thing on every placement - a refused
+     * completion deliberately leaves its pending entry standing, so the walk re-runs each time.
+     * Null when there is nobody to answer (an environment-driven walk); the refusal itself still
+     * stands.
+     */
+    @Nullable
+    private static StationRefusals.Press refusal(@Nonnull World world, @Nullable PlayerRef playerRef,
+            @Nullable Ref<EntityStore> placerRef, @Nonnull CompiledPattern cp, int ax, int ay, int az) {
+        if (playerRef == null) {
+            return null;
         }
-        return RpgMsg.tr("ui.station.pattern_requirements_unmet");
+        return StationRefusals.press(world.getEntityStore().getStore(), placerRef, playerRef,
+                        cp.stationId() != null ? cp.stationId() : cp.id(), ax, ay, az)
+                .world(world)
+                .patternMoments(cp.asset().getMoments());
+    }
+
+    /** The structure's authored {@code Identity.NameKey}, or null - what a refusal names it by. */
+    @Nullable
+    private static String patternNameKey(@Nonnull CompiledPattern cp) {
+        return cp.asset().getIdentity() != null ? cp.asset().getIdentity().getNameKey() : null;
     }
 
     // ==================== break (invalidation + revert) ====================
@@ -551,7 +553,7 @@ public final class StationStructures {
      * The shape at {@code (ax, ay, az)} is gone: stop every session working the anchor
      * ({@code StopReason.STRUCTURE_LOST}, the present-player hand-back family), drop whatever the
      * stash still holds at the block once and remove it (the custody break funnel - which also
-     * despawns the display props and de-indexes the block), play the {@code broken} moment, swap
+     * despawns the display props and de-indexes the block), play the {@code Broken} moment, swap
      * the anchor back to its revert block carrying its current rotation, and fire the api
      * structure-changed event.
      */
@@ -688,44 +690,4 @@ public final class StationStructures {
         StationService.playPresentationAt(world, playerRef, ref, p, x, y, z);
     }
 
-    private static void toast(@Nullable PlayerRef playerRef, @Nonnull Message message) {
-        if (playerRef != null) {
-            StationService.toast(playerRef, message);
-        }
-    }
-
-    /**
-     * The live refusal-toast throttle for {@link #handleCompletedShape}'s CONFLICT/DENIED
-     * branches, keyed per (player, world, anchor) - see {@link #REFUSAL_TOAST_COOLDOWN_MS} for
-     * why the same refusal would otherwise repeat on every nearby placement. The refusal itself is
-     * never throttled, only its toast; a toast-less refusal still refuses.
-     */
-    private boolean refusalToastAllowed(@Nullable PlayerRef playerRef, @Nonnull UUID worldUuid,
-            int ax, int ay, int az) {
-        if (playerRef == null || playerRef.getUuid() == null) {
-            return false; // nobody to toast (an environment-driven walk)
-        }
-        return refusalToastAllowed(refusalToastAt,
-                playerRef.getUuid() + "|" + worldUuid + "|" + ax + "|" + ay + "|" + az,
-                System.currentTimeMillis(), REFUSAL_TOAST_COOLDOWN_MS);
-    }
-
-    /**
-     * PURE throttle decision: {@code true} (and the shown-at record updates) when {@code key} has
-     * not toasted within {@code cooldownMs} of {@code nowMs}. Self-pruning: once the map outgrows
-     * {@link #REFUSAL_TOAST_PRUNE_SIZE}, expired entries are dropped before recording - the map
-     * stays bounded by the refusals genuinely live inside one cooldown window.
-     */
-    static boolean refusalToastAllowed(@Nonnull Map<String, Long> lastShownAt, @Nonnull String key,
-            long nowMs, long cooldownMs) {
-        Long last = lastShownAt.get(key);
-        if (last != null && nowMs - last < cooldownMs) {
-            return false;
-        }
-        if (lastShownAt.size() > REFUSAL_TOAST_PRUNE_SIZE) {
-            lastShownAt.values().removeIf(shownAt -> shownAt == null || nowMs - shownAt >= cooldownMs);
-        }
-        lastShownAt.put(key, nowMs);
-        return true;
-    }
 }

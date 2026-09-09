@@ -86,7 +86,7 @@ public final class FlairCatalog {
                         || flair.getMoments() == null || flair.getMoments().isEmpty()) {
                     continue;
                 }
-                out.put(flairId.toLowerCase(Locale.ROOT), lowercaseMomentKeys(flair.getMoments()));
+                out.put(flairId.toLowerCase(Locale.ROOT), StationFlairs.caseInsensitiveMomentKeys(flair.getMoments()));
             }
         }
         for (FlairAsset fa : flairAssets.values()) {
@@ -94,17 +94,8 @@ public final class FlairCatalog {
                     || !fa.appliesTo(stationId)) {
                 continue;
             }
-            out.put(fa.getId().toLowerCase(Locale.ROOT), lowercaseMomentKeys(fa.getMoments()));
+            out.put(fa.getId().toLowerCase(Locale.ROOT), StationFlairs.caseInsensitiveMomentKeys(fa.getMoments()));
         }
         return out;
-    }
-
-    /**
-     * {@code moments} re-keyed to lowercase, through the ONE canonicalizer every moment map in this
-     * engine shares ({@link StationFlairs#canonicalMomentKeys}) - a flair's, and an action's own.
-     */
-    @Nonnull
-    private static Map<String, Presentation> lowercaseMomentKeys(@Nonnull Map<String, Presentation> moments) {
-        return StationFlairs.canonicalMomentKeys(moments);
     }
 }

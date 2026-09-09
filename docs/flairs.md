@@ -13,15 +13,21 @@ it looks and sounds while doing it.
 ## The open moment vocabulary
 
 A flair is keyed by a **moment id** - an open string, never a fixed enum, so a future engine version
-can emit a new moment without a schema break. Five well-known ids cover the built-in engine moments:
+can emit a new moment without a schema break. Every id is written `Is_Like_This` (underscore-separated
+PascalCase, the shape Hytale's own ids take) and matched case-insensitively: a pack that authored
+`cycle` keeps resolving, and nothing rewrites it. Eight well-known ids cover the built-in engine
+moments:
 
 | Moment id | Fires when |
 |---|---|
-| `cycle` | Each completed work cycle. |
-| `swing` | Each per-swing animation beat. |
-| `impact` | Each swing too, one moment later - it is the strike landing, and what makes it late is its own `Presentation.DelayMs`. |
-| `rare_find` | A `Roll` or a reached `Ladder.Floor` pays out with a cue of its own. |
-| `completion` | The session ends (non-silent, at least one completed cycle). |
+| `Cycle` | Each completed work cycle. |
+| `Swing` | Each per-swing animation beat. |
+| `Impact` | Each swing too, one moment later - it is the strike landing, and what makes it late is its own `Presentation.DelayMs`. |
+| `Rare_Find` | A `Roll` or a reached `Ladder.Floor` pays out with a cue of its own. |
+| `Completion` | The session ends (non-silent, at least one completed cycle). |
+| `Ready` | A produced batch's doneness window opens: the output now waits Ready in its custody pile. |
+| `Overdone` | A doneness window expires: the waiting pile collapsed to its authored Overdone items. |
+| `Refused` | The station turned a press away (nothing to work with, the wrong tool, someone else's pile, a busy anchor, a locked gate). `Refused:<Reason>` narrows it to one reason: `Refused:No_Materials`, `Refused:Wrong_Tool`, `Refused:Occupied`, `Refused:Socket_Wrong_Input`, ... the reason being the tail of the notice's own key. See [Settings](settings.md#refusals) for how the four layers resolve and why the sound plays on every press. |
 
 **An action authors its own cues under the same ids**, in its `Moments` map (see
 [Actions and Steps](actions-and-steps.md)) - one open `momentId -> Presentation` map holding
@@ -30,16 +36,16 @@ leaf, for the moment ids it names. Where the engine already holds a more specifi
 emission - a step's own `Presentation`, a loot floor's cue - that one plays and the map entry is not
 consulted for it.
 
-`rare_find` is the one moment an action does NOT author: it fires only with the earning `Roll` or
+`Rare_Find` is the one moment an action does NOT author: it fires only with the earning `Roll` or
 `Ladder.Floor` cue already in hand, so author the presentation there (the validator warns on an
-action `Moments` entry keyed `rare_find`, which could never play). A flair still overlays it by that
+action `Moments` entry keyed `Rare_Find`, which could never play). A flair still overlays it by that
 id like any other moment.
 
-A step program adds a SIXTH kind of moment id automatically for every step:
-`step:<actionId>:<stepId>`, letting a flair target one specific beat of a specific ritual (for example
-`step:enhance:stamp` for the Anvil's enhance-commit beat specifically). An unrecognized moment id is a
-content-audit note (typo detection), never an error - an older-authored flair never breaks against a
-newer engine that has grown new moment ids.
+A step program adds a moment id automatically for every step: `Step:<ActionId>:<StepId>`, letting a
+flair target one specific beat of a specific ritual (for example `Step:Enhance:Stamp` for the Anvil's
+enhance-commit beat specifically); a loot roll can name an id of its own under `Cue:<Your_Name>`. An
+unrecognized moment id is a content-audit note (typo detection), never an error - an older-authored
+flair never breaks against a newer engine that has grown new moment ids.
 
 ## The standalone FlairAsset
 
@@ -51,8 +57,8 @@ station's own file at all:
 {
   "Stations": ["sawmill"],
   "Moments": {
-    "swing": { "Particles": [ { "SystemId": "Petal_Burst" } ] },
-    "step:enhance:stamp": { "Sounds": ["SFX_Choir_Hit"] }
+    "Swing": { "Particles": [ { "SystemId": "Petal_Burst" } ] },
+    "Step:Enhance:Stamp": { "Sounds": ["SFX_Choir_Hit"] }
   }
 }
 ```

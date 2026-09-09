@@ -1,6 +1,6 @@
 # Settings
 
-The RpgStationsSettingsAsset server-wide Enabled flag, Summary HUD, and owner Limits.
+The RpgStationsSettingsAsset server-wide Enabled flag, Summary HUD, owner Limits, the engine-wide default cues, and how a refused press is answered.
 
 RPG Stations has no separate config-file layer - even its server-wide toggles are an ordinary content
 asset, `Server/RpgStations/Settings/Settings.json`. There is exactly one fixed id (`settings`)
@@ -15,7 +15,9 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
   "Enabled": true,
   "SummaryHud": { "Enabled": true, "Position": "TopCenter", "OffsetY": 72, "TtlMs": 6000, "MaxRows": 12 },
   "Limits": { "MaxSessionsPerWorld": 60, "MaxPuppetsPerWorld": 40, "MaxStashesPerSection": 8,
-              "UnattendedIntervalMs": 1000, "MaxUnattendedGatherCycles": 12 }
+              "UnattendedIntervalMs": 1000, "MaxUnattendedGatherCycles": 12 },
+  "Moments": { "Refused": { "Sounds": ["SFX_Generic_Crafting_Failed"] } },
+  "Refusals": { "RepeatWindowMs": 1500 }
 }
 ```
 
@@ -32,12 +34,40 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
 | `Limits.MaxStashesPerSection` | unlimited | The most blocks in ONE chunk section (a 32x32x32 cube) that may hold placed station input at once; topping up material already placed always works, only a placement that would open a NEW store past the ceiling is denied, and a [multiblock structure's](structures-and-sockets.md) own activation mark never counts against it. The retired `MaxCustodyClaimsPerWorld` spelling is ignored with a boot warning naming this leaf. |
 | `Limits.UnattendedIntervalMs` | `1000` | How often ONE world's [unattended pass](unattended-work.md) runs, in milliseconds - the pass that settles custody-loaded stations whose action authors `Work.Unattended`, and that rebuilds missing placed-item displays after a chunk loads. Raising it makes unattended stations settle in coarser bursts; the math is the same either way. |
 | `Limits.MaxUnattendedGatherCycles` | unlimited | A server-wide ceiling on how many accrued [unattended](unattended-work.md) cycles ONE gather pays out. The effective ceiling is the SMALLER of it and each action's own `Work.Unattended.MaxCycles`, so it can only tighten what an action authors, never raise it; absent means each action's own knob alone applies. |
+| `Moments` | one entry: `Refused` | The engine-wide default cue layer, keyed by moment id exactly like an action's own `Moments` map (see [Flairs](flairs.md) for the vocabulary). An entry here sits UNDER every action's entry for the same id, per leaf: the action's authored leaves win, the leaves it omits fall through to this one, so a moment no action dressed still plays. The jar ships exactly one entry, `Refused`, playing `SFX_Generic_Crafting_Failed` - the same sound the vanilla benches play when they cannot proceed. |
+| `Refusals.RepeatWindowMs` | `1500` | How long, in milliseconds, the same player pressing the same station again for the SAME reason is answered by the refusal cue's sound alone: no second notice stacks on the first, no second particle burst or camera shake, and no event for a listening mod. `0` answers every press in full. See [Refusals](#refusals) below. |
 
-The three top-level knobs (`Enabled`, `SummaryHud`, `Limits`) are independent and composable -
-disabling the summary HUD does not disable the engine, and vice versa. Every leaf is nullable, so a
+The top-level knobs (`Enabled`, `SummaryHud`, `Limits`, `Moments`, `Refusals`) are independent and
+composable - disabling the summary HUD does not disable the engine, and vice versa. Every leaf is nullable, so a
 partial owner override changes only what it mentions. `Limits` is deliberately unauthored in the jar
 default: every leaf means unlimited when absent, and the right ceiling depends on a server's own
 player count and hardware - a busy server sets its own numbers rather than inheriting a guess.
+
+<a id="refusals"></a>
+## Refusals
+
+A station that turns a press away - nothing it can work with, the wrong tool, a full socket, someone
+else's materials, a busy anchor, a locked gate, a structure that cannot be raised - answers, rather
+than staying silent: a notice, a cue, and a native event for listening mods. The cue is an ordinary
+moment, so the same `Moments` vocabulary dresses it and a flair can overlay it.
+
+**Resolution order, nearest wins, per leaf.** For a reason such as `No_Materials`, the engine reads
+the action's `Moments["Refused:No_Materials"]`, then the action's `Moments["Refused"]`, then the
+settings' `Moments["Refused:No_Materials"]`, then the settings' `Moments["Refused"]`. Each nearer
+layer's authored leaves sit over the outer one's, and a leaf a layer omits falls through - the same
+inherit-on-omit rule the rest of the schema uses - so an action that authors only `Particles` for
+its refusals keeps the default sound underneath. To silence one station's refusals, author an EMPTY
+`Sounds` array (`"Refused": { "Sounds": [] }`): an authored empty array is a leaf and reads as none,
+where leaving the key out falls through. A refusal plays at once; a `DelayMs` on it reads as zero.
+
+**The repeat window, and its one deliberate asymmetry.** Inside `Refusals.RepeatWindowMs` a repeat
+of the same reason, by the same player, at the same block is a mashed key: the notice is not stacked
+again, the cue's `Particles`, `Shake`, `Interaction` and `Effect` leaves do not replay, and no event
+fires, so one event is one refusal worth reacting to. **The `Sounds` leaf plays on EVERY refused
+press regardless.** That is on purpose: the station must always answer audibly or it reads as
+broken, while a second camera shake on a held key would be worse than the stacked notices the window
+exists to prevent. A different reason, or the same reason at another block, is new information and
+always gets the full answer.
 
 <a id="the-summary-panel"></a>
 ## What the summary panel shows

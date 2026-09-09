@@ -200,10 +200,10 @@ is the exact inverse of a permanently-opaque channel.
   receiving socket id, the degenerate socket-less pile under `"main"`; a cycle whose produce went
   to the worker's inventory (or produced nothing, e.g. idle) reports an EMPTY immutable map,
   never null.
-- **`event/`** - the eight `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
+- **`event/`** - the nine `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
   `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`/
   `StationEnhanceCompletedEvent`/`StationUnattendedGatheredEvent`/`StationOutputProducedEvent`/
-  `StationStructureChangedEvent`), immutable,
+  `StationStructureChangedEvent`/`StationRefusedEvent`), immutable,
   dispatched via `HytaleServer.get().getEventBus().dispatchFor(...)` + `hasListener()` on the
   owning world thread - see `src/main/java/com/ziggfreed/rpgstations/station/CLAUDE.md` for the concrete firing rules and
   `com.ziggfreed.rpgstations.station.StationEvents` (the implementation). Each event's javadoc
@@ -268,7 +268,11 @@ exists specifically so a consumer can detect which additive members are present 
 reflection: bump it by exactly one integer per addition batch that lands under this policy (not
 per individual method - a coordinated wave of additions is one bump), never on its own.
 `apiVersion()` itself is exempt from "default-bodied only" since it shipped before the freeze; it
-will never change again once RpgStations reaches 1.0.0. Current value is **8**: the
+will never change again once RpgStations reaches 1.0.0. Current value is **9**: the
+`StationRefusedEvent` event class (a station turned a press away - player, world and block
+position, station id, the action id when one had been chosen, and the reason as an `Is_Like_This`
+id; fired from the world thread AFTER the engine's own notice and cue, and ONLY for a refusal the
+settings' repeat window let through, so one dispatch is one refusal worth reacting to) - from 8, the
 `StationOutputProducedEvent` grant-pass contract (the event now also fires once per committed
 grant pass, carrying every stack a loot roll paid into the worker's hands - no member was added,
 but the moments an EXISTING event fires for grew, which a consumer branches on exactly like a new
@@ -284,7 +288,7 @@ the engine-computed plain-data readings behind the `rpgstations:socket_filled` b
 reached from 4, itself the `StationUnattendedGatheredEvent` event class's bump (from the
 `stationCount()` default-bodied addition's 3). **The api ARTIFACT's semver tracks this integer:
 `apiVersion()` N ships as artifact `0.N.0`** (`gradle.properties` `api_version`, currently
-`0.8.0`), so the number a consumer branches on and the number on the jar they compile against can
+`0.9.0`), so the number a consumer branches on and the number on the jar they compile against can
 never disagree; a bump of one is a bump of the other, in the same change.
 
 `RpgStationsApi.isAvailable()`/`find()` (added the same round) are convenience, not a way around

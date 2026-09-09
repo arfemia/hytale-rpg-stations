@@ -45,7 +45,7 @@ first; this one covers only what a STATION adds on top.
 - **A CUE is a MOMENT ID, never a presentation body.** The loot layer names a moment and this engine
   decides what it sounds like: `StationService.applyGrantResult` emits each earned cue through the
   ONE `emitMoment` funnel, where the action's own `Moments` map and every applicable flair get their
-  say. Well-known ids plus `step:<actionId>:<stepId>` and the open author-defined `cue:<name>`
+  say. Well-known ids plus `Step:<ActionId>:<StepId>` and the open author-defined `Cue:<Name>`
   namespace all pass the typo check (`StationFlairs.isKnownMomentId`).
 - **What a pass paid is REPORTED once, as station output.** After the cues and the item toasts,
   `StationService.applyGrantResult` puts every stack the pass landed (the `OutputItems` bonus as

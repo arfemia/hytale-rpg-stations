@@ -7,6 +7,32 @@ there is no prior public release to diff against, so every entry is additive by 
 
 ## 0.1.0 (first public release)
 
+- **A station that turns you away says so, and every id reads `Is_Like_This`.** Pressing F at a
+  Sawmill with nothing to mill used to stack the same yellow notice twice and make no sound at all,
+  so the station read as broken rather than as refusing. Every denial - nothing to work with, the
+  wrong tool, a worn tool, a full socket, someone else's pile, a busy or missing anchor, a locked
+  gate, a full server, a structure that cannot be raised, a retrieve at a busy block - now answers
+  through one seam (`station.StationRefusals`): the notice, a `Refused:<Reason>` moment cue, and a
+  native `StationRefusedEvent` on the api (apiVersion 9, artifact 0.9.0). The cue resolves nearest
+  first, per leaf: the action's `Refused:<Reason>`, the action's `Refused`, the settings'
+  `Refused:<Reason>`, the settings' `Refused`, an omitted leaf falling through and an authored empty
+  `Sounds` array meaning silence; a flair overlays the result like any other moment. The jar's
+  `Settings.json` ships the one engine-wide default, `Refused` playing
+  `SFX_Generic_Crafting_Failed`, the sound the vanilla benches make when they cannot proceed, so a
+  station with no refusal cue of its own still sounds like it heard you. A repeat of the same reason
+  by the same player at the same block inside `Refusals.RepeatWindowMs` (default 1500) is a mashed
+  key: no second notice, no second particle burst or shake, no event - but the sound plays on every
+  press, on purpose, so the station always answers audibly. `StationStructures`' own 5s
+  refusal-toast throttle is retired into the seam. With it, every id this mod mints or accepts
+  is underscore-separated PascalCase, matching Hytale's own: the moment constants are `Cycle`,
+  `Swing`, `Impact`, `Rare_Find`, `Completion`, `Ready`, `Overdone`, `Refused`; the prefixes are
+  `Cue:`, `Step:` (a composed `Step:Mill:Chop` keeps its parts' authored casing) and `Refused:`; a
+  pattern's moments are `Activated`/`Broken`; the reserved anchor is `Self`; the Sawmill's cues are
+  `Cue:Find_Deep`/`Cue:Find_Apex`/`Cue:Trophy` and its finds name `Rare_Find`. Matching stays
+  case-insensitive everywhere (`StationFlairs.caseInsensitiveMomentKeys` holds every moment map as a
+  case-insensitive map that keeps the authored spelling; no validator refuses a lowercase id), so
+  older-authored content keeps resolving unchanged. `SCHEMA.md`, the guides and the routers carry
+  the convention.
 - **A run that finishes on its own holds its summary panel until the worker walks away.** A station
   that works through a stack of logs finishes whenever it finishes, often minutes after whoever
   started it stopped watching, so a panel on a six-second timer would be gone before they read it.
@@ -66,7 +92,7 @@ there is no prior public release to diff against, so every entry is additive by 
 - **The Sawmiller's Hatchet is an item grant.** `SawmillTrophy.json` pays the trophy through
   `Grants.Items` (one `RPG_Tool_Hatchet_Sawmiller`: hotbar first, then the backpack, then the
   ground at the station when the bag is full), so the win is countable station output and the
-  `cue:trophy` fanfare plays only when the hatchet actually landed.
+  `Cue:Trophy` fanfare plays only when the hatchet actually landed.
 - `ShippedAssetDecodeTest` also decodes what the jar ships into the shared library's stores
   (`Server/ZiggfreedCommon/Lootables` and `ObjectiveKinds`) through the library's own codecs, keyed
   by the store folder directly under each root so a store may group its files one level deeper.
@@ -153,7 +179,7 @@ there is no prior public release to diff against, so every entry is additive by 
   pile standing with its clock running (the batch is world state now - it is neither refunded nor
   duplicated); gathering before expiry simply ends the window. Two new `Custody.States` leaves
   (`Ready`, `Overdone` - the state set stays closed by the engine, packs re-point names only) and
-  two new moment ids (`ready`, `overdone`, flair-overlayable like every cue) carry the look and
+  two new moment ids (`Ready`, `Overdone`, flair-overlayable like every cue) carry the look and
   sound, `ReadyMs` alone is a legal purely-presentational window, and two validator findings catch
   an `Overdone` that can never settle and a window with no custody produce to sit on.
 - **The sneak+F picker also opens for multi-recipe stations.** A station whose action carries two
@@ -170,7 +196,7 @@ there is no prior public release to diff against, so every entry is additive by 
   keeping the rotation it was placed with, and is an ordinary station from then on; a pattern
   whose activation block equals its own anchor block arms a custom core block with no swap at all.
   An optional `Requires` gate (permission and/or factors) checks the builder before activating,
-  authored `activated`/`broken` moments play at the anchor, and a spot already claimed by a
+  authored `Activated`/`Broken` moments play at the anchor, and a spot already claimed by a
   different structure refuses politely. Breaking any block of the standing shape reverts the
   anchor to its original block, stops whoever was working there (their placed materials hand
   back), and drops anything else stored at the block - fire and explosions included. A standing
@@ -359,7 +385,7 @@ to recompile against a later release rather than treat these types as stable.
   an authored group) or `Surface: "Entity"` (a standing work mount for a
   station that wants its worker on their feet, with a dismount-on-move knob).
 - Adds the open flair/moment vocabulary: a moment is an open string id (the well-known
-  cycle/swing/impact/rare_find/completion constants plus a per-step `step:<actionId>:<stepId>` id
+  Cycle/Swing/Impact/Rare_Find/Completion constants plus a per-step `Step:<ActionId>:<StepId>` id
   any step's own `Presentation` resolves against), and a standalone `FlairAsset` Pattern A type lets
   ANY installed mod or pack ship a cosmetic flair layer for a station without touching that
   station's own JSON.
@@ -610,22 +636,22 @@ is pre-release, so each change below is a hard break with no alias.
   `{Cycle, Completion}` pair - the same open vocabulary and the same shape a `FlairAsset` already
   keys its own `Moments` by, so a cue reads the same whether an action authored it or a flair
   overlaid it. `Cycle` and `Completion` keep working verbatim (matching is case-insensitive), and
-  `swing`/`impact`/`step:<actionId>:<stepId>` are authorable beside them. Native
+  `Swing`/`Impact`/`Step:<ActionId>:<StepId>` are authorable beside them. Native
   `Parent` merges the map per KEY and per leaf under it, so a child re-skinning one moment inherits
   every other. **Specificity wins**: an entry is the base for its moment id wherever the engine has
   nothing more specific, and a step's own `Presentation` (or a loot floor's cue) outranks it for
   that emission. An unrecognized key is the same warn-only typo finding a flair map gets.
-  `rare_find` is the one well-known id an action does NOT author, since that moment only ever fires
+  `Rare_Find` is the one well-known id an action does NOT author, since that moment only ever fires
   with the earning `Roll`/`Ladder.Floor` cue already in hand: author it there, and the new warn-only
   `RARE_FIND_MOMENT_NEVER_PLAYS` finding catches a map entry that could never play. An action's
-  `Moments` entry drives a STEP's cue only for a `step:<actionId>:<stepId>` id, so an unnamed step
-  never replays the action-wide `cycle` cue per beat. The implicit convert loop's per-cycle cue plays
-  under `cycle` itself, so a flair re-skins the classic work loop by the id the docs name for it.
+  `Moments` entry drives a STEP's cue only for a `Step:<ActionId>:<StepId>` id, so an unnamed step
+  never replays the action-wide `Cycle` cue per beat. The implicit convert loop's per-cycle cue plays
+  under `Cycle` itself, so a flair re-skins the classic work loop by the id the docs name for it.
 - **A swing's cues moved out of `Worker.Animation` and into `Moments`.** `Animation.Swing` is now
-  pure cadence (`IntervalMs`); the swing cue is the `swing` moment and the strike landing behind it
-  is the `impact` moment, late purely because it authors the generic `Presentation.DelayMs`. That
+  pure cadence (`IntervalMs`); the swing cue is the `Swing` moment and the strike landing behind it
+  is the `Impact` moment, late purely because it authors the generic `Presentation.DelayMs`. That
   removes the engine's one piece of dedicated single-cue scheduling machinery: every offset in the
-  mod now rides one queue and one due-time core. `impact` stays a distinct flair-targetable moment
+  mod now rides one queue and one due-time core. `Impact` stays a distinct flair-targetable moment
   id, so a flair can still re-skin or re-time the strike independently of the swing.
 - **`Puppet.Yaw` is `Puppet.Rotation`**, the shared `{Yaw, Pitch, Roll}` degrees group already used
   by `Custody.Display` and particle bursts. `Rotation.Yaw` folds with the placed block's facing
@@ -1096,10 +1122,10 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
     table names a moment and the station decides what it sounds like, through the same emission
     funnel every other station moment uses - so re-skinning every find at once is one edit in an
     action's `Moments` map rather than one per table, and a flair can target a find cue by name.
-    Well-known moment ids, a per-step `step:<actionId>:<stepId>` and the OPEN author-defined
-    `cue:<yourName>` namespace all resolve. The smart-cue rule is unchanged: a cue beside grants
+    Well-known moment ids, a per-step `Step:<ActionId>:<StepId>` and the OPEN author-defined
+    `Cue:<Your_Name>` namespace all resolve. The smart-cue rule is unchanged: a cue beside grants
     rides only once those grants genuinely produced something. The shipped Sawmill publishes a
-    four-cue palette (`rare_find`, `cue:find_deep`, `cue:find_apex`, `cue:trophy`) a table can name
+    four-cue palette (`Rare_Find`, `Cue:Find_Deep`, `Cue:Find_Apex`, `Cue:Trophy`) a table can name
     with no presentation of its own.
   - **The three station-only payouts are registered reward KINDS** inside `Grants.Rewards`, so they
     compose with `Items`, `DropLists`, `Commands` and anything another mod registered:

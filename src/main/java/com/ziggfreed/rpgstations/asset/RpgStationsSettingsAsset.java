@@ -1,6 +1,8 @@
 package com.ziggfreed.rpgstations.asset;
 
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.function.IntSupplier;
 
 import javax.annotation.Nonnull;
@@ -13,6 +15,7 @@ import com.hypixel.hytale.assetstore.map.JsonAssetWithMap;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.ziggfreed.common.asset.EditorSchema;
+import com.ziggfreed.common.codec.InheritMapCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditorSectionStart;
@@ -29,9 +32,19 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditorSectionStart;
  * {
  *   "Enabled": true,
  *   "SummaryHud": { "Enabled": true, "Position": "TopCenter", "OffsetY": 120, "TtlMs": 6000 },
- *   "Limits": { "MaxSessionsPerWorld": 60, "MaxPuppetsPerWorld": 40, "MaxStashesPerSection": 8 }
+ *   "Limits": { "MaxSessionsPerWorld": 60, "MaxPuppetsPerWorld": 40, "MaxStashesPerSection": 8 },
+ *   "Moments": { "Refused": { "Sounds": ["SFX_Generic_Crafting_Failed"] } },
+ *   "Refusals": { "RepeatWindowMs": 1500 }
  * }
  * }</pre>
+ *
+ * <p>{@code Moments} is the ENGINE-WIDE default cue layer: a moment id to {@link Presentation}
+ * map that sits UNDER every action's own {@code Moments} entry for the same id, per leaf (the
+ * action's authored leaves win, its omitted leaves fall through to here), so a moment no action
+ * dressed still plays. The jar ships one entry, the bare {@code Refused} cue every turned-away
+ * press answers with; {@code station.StationRefusals} documents how a per-reason
+ * {@code Refused:<Reason>} entry stacks on it. Every id is written {@code Is_Like_This} and
+ * matched case-insensitively.
  */
 public final class RpgStationsSettingsAsset
         implements JsonAssetWithMap<String, DefaultAssetMap<String, RpgStationsSettingsAsset>> {
@@ -45,6 +58,8 @@ public final class RpgStationsSettingsAsset
     @Nullable private Boolean enabled;
     @Nullable private SummaryHud summaryHud;
     @Nullable private Limits limits;
+    @Nullable private Map<String, Presentation> moments;
+    @Nullable private Refusals refusals;
 
     public static final AssetBuilderCodec<String, RpgStationsSettingsAsset> CODEC = AssetBuilderCodec.builder(
                     RpgStationsSettingsAsset.class,
@@ -71,6 +86,15 @@ public final class RpgStationsSettingsAsset
                     (a, v) -> a.limits = v, a -> a.limits, (a, parent) -> a.limits = parent.limits)
             .documentation("Ceilings a server owner can set on what this engine is allowed to have live at once (sessions and puppets per world, placed-input stashes per chunk section), plus the unattended pass's per-world visit interval and a ceiling on how many accrued unattended cycles one gather pays. Absent, or any ceiling leaf left null, means unlimited; the interval defaults to 1000ms.")
             .metadata(new UIEditorSectionStart("Limits")).add()
+            .appendInherited(new KeyedCodec<>("Moments",
+                            new InheritMapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
+                    (a, v) -> a.moments = v, a -> a.moments, (a, parent) -> a.moments = parent.moments)
+            .documentation("Engine-wide default cues, keyed by moment id exactly like an action's own Moments (Cycle/Swing/Impact/Completion/Ready/Overdone, Refused and Refused:<Reason>, or a Step:/Cue: id); ids are written Is_Like_This and matched case-insensitively. An entry here sits UNDER every action's entry for the same id, per leaf: the action's authored leaves win and the leaves it omits fall through to this one, so a moment no action dressed still plays. The Refused entries are what a turned-away press answers with, and they resolve nearest-first per leaf: the action's Refused:<Reason>, the action's Refused, this map's Refused:<Reason>, then this map's Refused. An authored empty Sounds array means silence and is different from leaving the key out, which falls through. A refusal cue plays at once: a DelayMs on it, or on one of its Sounds, is read as zero. Under native Parent the map merges PER MOMENT ID.")
+            .metadata(new UIEditorSectionStart("Moments")).add()
+            .appendInherited(new KeyedCodec<>("Refusals", Refusals.CODEC, false),
+                    (a, v) -> a.refusals = v, a -> a.refusals, (a, parent) -> a.refusals = parent.refusals)
+            .documentation("How a turned-away press is answered when the same player repeats it: the repeat window inside which the same reason at the same block is answered by its sound alone.")
+            .metadata(new UIEditorSectionStart("Refusals")).add()
             .build();
 
     public RpgStationsSettingsAsset() {
@@ -86,11 +110,20 @@ public final class RpgStationsSettingsAsset
     @Nonnull
     public static RpgStationsSettingsAsset of(@Nullable Boolean enabled, @Nullable SummaryHud summaryHud,
             @Nullable Limits limits) {
+        return of(enabled, summaryHud, limits, null, null);
+    }
+
+    /** Java-side construction path carrying the engine-wide default cues and the refusal knobs too. */
+    @Nonnull
+    public static RpgStationsSettingsAsset of(@Nullable Boolean enabled, @Nullable SummaryHud summaryHud,
+            @Nullable Limits limits, @Nullable Map<String, Presentation> moments, @Nullable Refusals refusals) {
         RpgStationsSettingsAsset a = new RpgStationsSettingsAsset();
         a.id = ID;
         a.enabled = enabled;
         a.summaryHud = summaryHud;
         a.limits = limits;
+        a.moments = moments;
+        a.refusals = refusals;
         return a;
     }
 
@@ -128,6 +161,76 @@ public final class RpgStationsSettingsAsset
     @Nullable
     public Limits getLimits() {
         return limits;
+    }
+
+    /**
+     * The engine-wide default cue layer, keyed by moment id AS AUTHORED (the engine holds it in a
+     * case-insensitive map where it reads it, exactly as it does an action's map); {@code null}
+     * when none is authored.
+     */
+    @Nullable
+    public Map<String, Presentation> getMoments() {
+        return moments;
+    }
+
+    /** The refusal knobs, or {@code null} when the owner authored none (every leaf reader-defaulted). */
+    @Nullable
+    public Refusals getRefusals() {
+        return refusals;
+    }
+
+    /** {@link Refusals#effectiveRepeatWindowMs()} over {@link #getRefusals()}, the reader default when the group is absent. */
+    public long effectiveRefusalRepeatWindowMs() {
+        return refusals != null ? refusals.effectiveRepeatWindowMs() : Refusals.DEFAULT_REPEAT_WINDOW_MS;
+    }
+
+    /**
+     * How a turned-away press is answered when the same player repeats it. One knob today, in its
+     * own group so a later refusal knob has a home beside it rather than a prefix.
+     *
+     * <p>{@link #repeatWindowMs} is the window inside which a REPEAT - the same reason, by the same
+     * player, at the same block - is answered by its sound alone: no second notice stacks on the
+     * first, no second particle burst or camera shake, no second event for a listener. The sound
+     * still plays on every press, so the station always answers audibly. Defaults to
+     * {@value #DEFAULT_REPEAT_WINDOW_MS}ms; {@code 0} disables the throttle (every press is
+     * answered in full), which is the arithmetic meaning of a zero-width window rather than a
+     * separate switch.
+     */
+    public static final class Refusals {
+
+        /** The {@link #repeatWindowMs} reader default: a repeat inside a second and a half is a mashed key. */
+        public static final long DEFAULT_REPEAT_WINDOW_MS = 1500L;
+
+        @Nullable protected Long repeatWindowMs;
+
+        public static final BuilderCodec<Refusals> CODEC = BuilderCodec.builder(Refusals.class, Refusals::new)
+                .appendInherited(new KeyedCodec<>("RepeatWindowMs", Codec.LONG, false),
+                        (o, v) -> o.repeatWindowMs = v, o -> o.repeatWindowMs,
+                        (o, p) -> o.repeatWindowMs = p.repeatWindowMs)
+                .documentation("Milliseconds inside which the same player pressing the same station again for the SAME reason is answered by the refusal cue's sound alone: no second notice stacks on the first, no second particle burst or camera shake, and no event for a listening mod. A different reason, or the same reason at another block, always gets the full answer. Null (the default) means 1500; 0 answers every press in full.")
+                .addValidator(CodecWarnValidators.nonNegative("Refusals.RepeatWindowMs should not be negative.")).add()
+                .build();
+
+        @Nonnull
+        public static Refusals of(@Nullable Long repeatWindowMs) {
+            Refusals r = new Refusals();
+            r.repeatWindowMs = repeatWindowMs;
+            return r;
+        }
+
+        @Nullable
+        public Long getRepeatWindowMs() {
+            return repeatWindowMs;
+        }
+
+        /**
+         * {@link #repeatWindowMs} reader-defaulted: null means {@value #DEFAULT_REPEAT_WINDOW_MS}, a
+         * negative value (already a codec warning) reads as {@code 0} - no throttle - rather than as a
+         * window that admits nothing.
+         */
+        public long effectiveRepeatWindowMs() {
+            return repeatWindowMs == null ? DEFAULT_REPEAT_WINDOW_MS : Math.max(0L, repeatWindowMs);
+        }
     }
 
     /**

@@ -66,6 +66,7 @@ import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.Presentation;
+import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StationAsset;
@@ -221,6 +222,7 @@ public final class StationValidator {
             out.addAll(validateLootables(LootableConfig.getInstance().all().values(),
                     dropListKnown, factorKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), stationKnown));
+            out.addAll(validateSettings(SettingsCatalog.getInstance().current()));
             // Review minor (validator-standalone-action-unwired): the flagship standalone prepfish
             // ActionAsset (Ref'd from CuttingBoard) and every ExtensionAsset are validated HERE, in
             // the FULL post-load pass, now that ActionCatalog/ExtensionCatalog exist. Deliberately NOT
@@ -268,6 +270,7 @@ public final class StationValidator {
             out.addAll(validateLootables(LootableConfig.getInstance().all().values(),
                     ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), ALWAYS_KNOWN));
+            out.addAll(validateSettings(SettingsCatalog.getInstance().current()));
             out.addAll(validatePatterns(PatternCatalog.getInstance().all().values(),
                     ALWAYS_KNOWN, ALWAYS_KNOWN));
             return out;
@@ -3268,7 +3271,7 @@ public final class StationValidator {
 
     /**
      * The timing sibling of {@code CYCLE_DELAY_OVERLAPS_NEXT_CYCLE}/
-     * {@code STEP_DELAY_OVERLAPS_ITS_DURATION}, over the {@code impact} moment: a strike cue held
+     * {@code STEP_DELAY_OVERLAPS_ITS_DURATION}, over the {@code Impact} moment: a strike cue held
      * for at least a whole swing interval lands on (or after) the swing that replays the same
      * moment, so it reads as belonging to the wrong swing.
      */
@@ -3292,11 +3295,11 @@ public final class StationValidator {
     }
 
     /**
-     * The {@code rare_find} moment is the one well-known id an ACTION cannot author: it is only ever
+     * The {@code Rare_Find} moment is the one well-known id an ACTION cannot author: it is only ever
      * emitted WITH the earning {@code Roll}/{@code Ladder.Floor} cue already in hand, and the
      * site-supplied presentation always outranks the map entry, so an entry keyed by it decodes,
      * reads as a known moment, and then never plays. Warn-only, and deliberately not part of the
-     * shared map walk - a FLAIR keyed {@code rare_find} is meaningful (it overlays the earning cue).
+     * shared map walk - a FLAIR keyed {@code Rare_Find} is meaningful (it overlays the earning cue).
      */
     private static void checkRareFindNotActionAuthored(@Nullable Map<String, Presentation> moments,
                                                        @Nonnull String label, @Nonnull String id,
@@ -3305,9 +3308,9 @@ public final class StationValidator {
             return;
         }
         out.add(Finding.warning(DOMAIN, "RARE_FIND_MOMENT_NEVER_PLAYS",
-                label + " Moments authors rare_find, which an action can never supply - that cue comes"
+                label + " Moments authors Rare_Find, which an action can never supply - that cue comes"
                         + " from the Roll or Ladder.Floor that earned it. Move the presentation onto the"
-                        + " roll/floor (a flair can still overlay it under the rare_find id)", id));
+                        + " roll/floor (a flair can still overlay it under the Rare_Find id)", id));
     }
 
     /**
@@ -3416,7 +3419,7 @@ public final class StationValidator {
      * Shared {@code Moments} map coverage (design section 9.6, leg F): an empty/absent map can
      * never overlay anything ({@code EMPTY_FLAIR}), each authored Presentation still gets the
      * existing unplayed-leaves check, and an unrecognized moment id (typo'd against the 5
-     * well-known ids / the {@code step:} prefix - {@link StationFlairs#isKnownMomentId}) warns
+     * well-known ids / the {@code Step:} prefix - {@link StationFlairs#isKnownMomentId}) warns
      * ONLY - per the design's own binding note, a future engine moment must never fail an older
      * pack's validation.
      */
@@ -3434,7 +3437,7 @@ public final class StationValidator {
      * The ONE {@code momentId -> Presentation} map walk, shared by BOTH map-shaped moment surfaces
      * in this schema - an action's own {@code Moments} and a flair's - because they key by the exact
      * same open vocabulary and a finding phrased for one reads correctly for the other. A blank key
-     * warns; an unrecognized one (typo'd against the 5 well-known ids or the {@code step:} prefix -
+     * warns; an unrecognized one (typo'd against the well-known ids or the {@code Step:} prefix -
      * {@link StationFlairs#isKnownMomentId}) warns ONLY, never blocks: a future engine moment must
      * not fail an older pack's validation. Each authored Presentation then gets the standard
      * native-reference advisories.
@@ -3450,11 +3453,56 @@ public final class StationValidator {
             }
             if (!StationFlairs.isKnownMomentId(momentId)) {
                 out.add(Finding.warning(DOMAIN, "UNKNOWN_MOMENT_ID",
-                        label + "['" + momentId + "'] is not a recognized moment id (cycle/swing/impact/"
-                                + "rare_find/completion, or a step:<actionId>:<stepId> id) - check for a typo", id));
+                        label + "['" + momentId + "'] is not a recognized moment id (Cycle/Swing/Impact/"
+                                + "Rare_Find/Completion/Ready/Overdone/Refused, a Refused:<Reason>, a Cue:<Name>,"
+                                + " or a Step:<ActionId>:<StepId> id; matching ignores case) - check for a typo", id));
+            }
+            if (StationFlairs.isRefusalMomentId(momentId) && authorsAnyDelay(entry.getValue())) {
+                // A refusal has no session to queue against and answers the press at once; the
+                // delay decodes and then does nothing, which is worth one note rather than a silent
+                // shrug.
+                out.add(Finding.info(DOMAIN, "REFUSED_MOMENT_DELAY_IGNORED",
+                        label + "['" + momentId + "'] authors a DelayMs, which a refusal cue reads as zero -"
+                                + " a refused press is answered at once", id));
             }
             checkNativeRefs(entry.getValue(), label + "['" + momentId + "']", id, out);
         }
+    }
+
+    /** Whether {@code p} holds any playback offset at all: the moment's own, or one of its {@code Sounds} entries'. */
+    private static boolean authorsAnyDelay(@Nullable Presentation p) {
+        if (p == null) {
+            return false;
+        }
+        if (p.effectiveDelayMs() > 0) {
+            return true;
+        }
+        Presentation.SoundCue[] sounds = p.getSounds();
+        if (sounds != null) {
+            for (Presentation.SoundCue cue : sounds) {
+                if (cue != null && cue.effectiveDelayMs() > 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The settings asset's own {@code Moments} map - the engine-wide default cue layer - walked
+     * through the SAME map check an action's or a flair's map gets (typo warn on an unrecognized
+     * id, the native-reference advisories, the refusal-delay note), because it keys by the same
+     * open vocabulary. Singleton-free; the two live passes hand in {@code SettingsCatalog}'s
+     * current asset.
+     */
+    @Nonnull
+    public static List<Finding> validateSettings(@Nullable RpgStationsSettingsAsset settings) {
+        List<Finding> out = new ArrayList<>();
+        if (settings == null || settings.getMoments() == null || settings.getMoments().isEmpty()) {
+            return out;
+        }
+        checkMomentsMap(settings.getMoments(), "Settings Moments", RpgStationsSettingsAsset.ID, out);
+        return out;
     }
 
     /**
@@ -3959,7 +4007,7 @@ public final class StationValidator {
      * An action's own {@code Anchors} map coverage (scope-2 design 2.2): every declared anchor's
      * {@code Station} must be blank-free and resolve against {@code stationKnown} ({@code
      * ANCHOR_STATION_UNKNOWN} covers both a blank and an unresolved station id - the reserved
-     * anchor id {@code "self"} is never declared here, it is implicit). A station that resolves but
+     * anchor id {@code "Self"} is never declared here, it is implicit). A station that resolves but
      * that NO block item maps to gets the separate warn-only {@code ANCHOR_STATION_NOT_DISCOVERABLE}
      * (AV wave, see {@link #stationDiscoverableLive}) - it decodes fine and simply can never be found
      * in the world.
@@ -3998,7 +4046,7 @@ public final class StationValidator {
      * {@link #checkLootRef}), a {@code Repeat.Factors}/{@code Walk} check, and (design 9.5) a
      * {@code Stamp} phase's own coverage. Also flags {@code WALK_TARGET_UNKNOWN_ANCHOR}/
      * {@code STEP_AT_UNKNOWN_ANCHOR} (a {@code Walk.To}/{@code At} not matching {@code
-     * knownAnchorIds} or the reserved {@code "self"}), and {@code WALK_REQUIRES_PUPPET} (any step
+     * knownAnchorIds} or the reserved {@code "Self"}), and {@code WALK_REQUIRES_PUPPET} (any step
      * authoring {@code Walk} when the resolved Puppet is not active - flagged once per action).
      * The multi-station seam (Walk/At/Produce.To:Custody) EXECUTES, so there is no
      * warn gating those phases; the anchor/walk checks above are the live coverage.
@@ -4146,7 +4194,7 @@ public final class StationValidator {
         }
     }
 
-    /** True when {@code value} is the reserved {@code "self"} anchor or a member of {@code knownAnchorIds}. */
+    /** True when {@code value} is the reserved {@code "Self"} anchor or a member of {@code knownAnchorIds}. */
     private static boolean isKnownAnchorTarget(@Nullable String value, @Nonnull Set<String> knownAnchorIds) {
         if (value == null || value.isBlank()) {
             return false;

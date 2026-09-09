@@ -158,6 +158,71 @@ public class RpgStationsSettingsAssetCodecTest {
         assertEquals(7, child.getLimits().getMaxSessionsPerWorld(), "sibling leaf inherits");
     }
 
+    // ==================== Moments (the engine-wide default cue layer) ====================
+
+    @Test
+    void moments_decodeAsAMomentIdToPresentationMap() throws Exception {
+        RpgStationsSettingsAsset a = decodeAsset("{ \"Moments\": { \"Refused\": { \"Sounds\": [\"Fixture_Thunk\"] },"
+                + " \"Refused:No_Materials\": { \"Particles\": [ { \"SystemId\": \"Fixture_Puff\" } ] } } }");
+        assertNotNull(a.getMoments());
+        assertEquals(2, a.getMoments().size());
+        assertEquals("Fixture_Thunk", a.getMoments().get("Refused").getSounds()[0].getEventId());
+        assertEquals("Fixture_Puff", a.getMoments().get("Refused:No_Materials").getParticles()[0].getSystemId());
+    }
+
+    @Test
+    void moments_areAbsentByDefault() throws Exception {
+        assertNull(decodeAsset("{}").getMoments(), "an unauthored Moments map stays null");
+        assertNull(RpgStationsSettingsAsset.defaults().getMoments(), "the built-in default dresses no moment");
+    }
+
+    @Test
+    void moments_anAuthoredEmptySoundsArrayDecodesAsAnEmptyLeaf_notAnOmission() throws Exception {
+        RpgStationsSettingsAsset a = decodeAsset("{ \"Moments\": { \"Refused\": { \"Sounds\": [] } } }");
+        assertNotNull(a.getMoments().get("Refused").getSounds(), "the leaf is authored");
+        assertEquals(0, a.getMoments().get("Refused").getSounds().length, "and it is empty: silence");
+    }
+
+    @Test
+    void moments_parentInheritance_mergesPerMomentId() throws Exception {
+        AssetExtraInfo.Data data = new AssetExtraInfo.Data(RpgStationsSettingsAsset.class, "Settings", null);
+        RpgStationsSettingsAsset parent = RpgStationsSettingsAsset.CODEC.decodeAndInheritJsonAsset(
+                RawJsonReader.fromJsonString("{ \"Moments\": { \"Refused\": { \"Sounds\": [\"Fixture_Thunk\"] },"
+                        + " \"Cycle\": { \"Sounds\": [\"Fixture_Cycle\"] } } }"),
+                null, new AssetExtraInfo<>(data));
+
+        RpgStationsSettingsAsset child = decodeWithParent(
+                "{ \"Moments\": { \"Refused\": { \"Sounds\": [\"Fixture_Child_Thunk\"] } } }",
+                parent, "settings_child", "settings");
+        assertEquals("Fixture_Child_Thunk", child.getMoments().get("Refused").getSounds()[0].getEventId(),
+                "own entry wins");
+        assertNotNull(child.getMoments().get("Cycle"), "an entry the child omits inherits");
+    }
+
+    // ==================== Refusals (the repeat window) ====================
+
+    @Test
+    void refusals_repeatWindowMs_decodesAndReaderDefaults() throws Exception {
+        RpgStationsSettingsAsset a = decodeAsset("{ \"Refusals\": { \"RepeatWindowMs\": 900 } }");
+        assertNotNull(a.getRefusals());
+        assertEquals(900L, a.getRefusals().getRepeatWindowMs());
+        assertEquals(900L, a.effectiveRefusalRepeatWindowMs());
+
+        RpgStationsSettingsAsset bare = decodeAsset("{}");
+        assertNull(bare.getRefusals(), "an unauthored Refusals group stays null");
+        assertEquals(RpgStationsSettingsAsset.Refusals.DEFAULT_REPEAT_WINDOW_MS, bare.effectiveRefusalRepeatWindowMs(),
+                "the window has a reader default whether or not the group is authored");
+        assertEquals(RpgStationsSettingsAsset.Refusals.DEFAULT_REPEAT_WINDOW_MS,
+                RpgStationsSettingsAsset.Refusals.of(null).effectiveRepeatWindowMs());
+    }
+
+    @Test
+    void refusals_zeroDisablesTheThrottle_andANegativeValueReadsAsZero() {
+        assertEquals(0L, RpgStationsSettingsAsset.Refusals.of(0L).effectiveRepeatWindowMs());
+        assertEquals(0L, RpgStationsSettingsAsset.Refusals.of(-40L).effectiveRepeatWindowMs(),
+                "a negative window is a codec warning and never a window that admits nothing");
+    }
+
     @Test
     void atCapacity_nullMaxIsUnlimited() {
         assertFalse(RpgStationsSettingsAsset.Limits.atCapacity(null, () -> 1_000));

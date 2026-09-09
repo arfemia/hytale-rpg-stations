@@ -137,7 +137,7 @@ A `Presentation` also carries `DelayMs`, which is not a cue but a timing knob ov
 it holds every sound, particle, shake, interaction and effect in that moment together for the given
 number of milliseconds before they play. A per-sound `DelayMs` ADDS to it. Reach for it when a cue
 reads as slightly early - the jar's Sawmill holds its cycle break sound by `100` so the plank lands
-just after the cut looks finished, and holds its whole `impact` moment by `140` so the wood-hit
+just after the cut looks finished, and holds its whole `Impact` moment by `140` so the wood-hit
 lands part-way through the swing.
 Omit it (or author zero) to play at once. Playback resolves on the server tick, so the cue fires on
 the first tick at or after the delay, never before it.

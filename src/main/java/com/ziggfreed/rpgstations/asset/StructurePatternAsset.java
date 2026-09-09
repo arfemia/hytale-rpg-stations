@@ -50,10 +50,10 @@ public final class StructurePatternAsset
         implements JsonAssetWithMap<String, DefaultAssetMap<String, StructurePatternAsset>> {
 
     /** The moment id played at the anchor when a completed build activates. */
-    public static final String MOMENT_ACTIVATED = "activated";
+    public static final String MOMENT_ACTIVATED = "Activated";
 
     /** The moment id played at the anchor when a standing shape is broken and reverts. */
-    public static final String MOMENT_BROKEN = "broken";
+    public static final String MOMENT_BROKEN = "Broken";
 
     private String id;
     private AssetExtraInfo.Data data;
@@ -101,7 +101,7 @@ public final class StructurePatternAsset
             .appendInherited(new KeyedCodec<>("Moments",
                             new InheritMapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
                     (a, v) -> a.moments = v, a -> a.moments, (a, p) -> a.moments = p.moments)
-            .documentation("Moment id -> the presentation played at the anchor. Well-known ids: 'activated' (a completed build turned into the station) and 'broken' (the standing shape was broken and reverted). Cues play at once; a DelayMs here is read as zero. Under native Parent the map merges PER MOMENT ID.")
+            .documentation("Moment id -> the presentation played at the anchor. Well-known ids: 'Activated' (a completed build turned into the station), 'Broken' (the standing shape was broken and reverted), and 'Refused' plus 'Refused:<Reason>' (a completion the pattern turned away: Refused:Structure_Conflict, Refused:Pattern_Requirements_Unmet), each the nearest layer over the settings' own Refused defaults. Ids are written Is_Like_This and matched case-insensitively. Cues play at once; a DelayMs here is read as zero. Under native Parent the map merges PER MOMENT ID.")
             .metadata(new UIEditorSectionStart("Moments")).add()
             .afterDecode((StructurePatternAsset asset, com.hypixel.hytale.codec.ExtraInfo extraInfo) -> {
                 if (asset.cells == null || asset.cells.length == 0) {

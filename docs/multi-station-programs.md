@@ -19,7 +19,7 @@ station's press.
 
 `Station` is a TYPE filter (the target station's own id, e.g. `CookingFire`, matched case-insensitively
 at resolve); `MaxRadiusMeters` is the horizontal block search radius from the primary station block
-(defaults to 12). The anchor id `self` is reserved for the primary block itself and is never authored.
+(defaults to 12). The anchor id `Self` is reserved for the primary block itself and is never authored.
 
 ### Discovery
 
@@ -62,7 +62,7 @@ plus a grace window) means a walk can never wedge the session even if something 
 
 ## Custody at anchors
 
-A step's `At` field names which anchor it runs at (absent = the primary station, `self`). A
+A step's `At` field names which anchor it runs at (absent = the primary station, `Self`). A
 `Consume`/`Produce` phase on a step authoring `At` reads/writes THAT anchor's own custody claim, not
 the primary station's - `Produce.To: "Custody"` is exactly how a program deposits an in-progress item
 onto a remote block for the anchor's own cook/process loop to work.
@@ -138,7 +138,7 @@ and back.
     { "Id": "Harvest", "At": "Fire",
       "Consume": { "Items": [{ "ItemId": "Food_Fish_Raw", "Quantity": 1 }], "From": "Custody" },
       "Duration": { "Ms": 400 }, "Presentation": { "Particles": [ { "SystemId": "Block_Break_Dust" } ] } },
-    { "Id": "WalkBack", "Walk": { "To": "self" },
+    { "Id": "WalkBack", "Walk": { "To": "Self" },
       "Puppet": { "Prop": { "Source": "ItemId", "ItemId": "Food_Fish_Grilled" } } },
     { "Id": "Deposit",
       "Produce": { "Items": [{ "ItemId": "Food_Fish_Grilled", "Quantity": 1 }], "To": "Custody" },
@@ -159,7 +159,7 @@ this one job. Reading the program beat by beat:
   claim, not the Cutting Board's. `Cook` authors `IsWork: true` explicitly (a pure `Duration` beat is
   not a Consume+Produce convert, so it must opt in) - that is what puts the fire into its lit
   `Custody.States.Working` look for exactly this beat.
-- `WalkBack` returns the puppet to `self` (the Cutting Board) carrying the grilled fish.
+- `WalkBack` returns the puppet to `Self` (the Cutting Board) carrying the grilled fish.
 - `Deposit` produces the grilled fish back into the Cutting Board's custody, where it accumulates
   until the session stops (auto-returned to the player's inventory).
 

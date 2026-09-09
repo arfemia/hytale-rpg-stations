@@ -1815,8 +1815,8 @@ public final class StationAsset
          * and there is no swing layer at all.
          *
          * <p>This group is pure timing. What a swing SOUNDS and LOOKS like is authored beside every
-         * other cue, as the action's {@code Moments} entry keyed {@code "swing"} - and the strike
-         * landing a beat later is the {@code "impact"} entry, whose own
+         * other cue, as the action's {@code Moments} entry keyed {@code "Swing"} - and the strike
+         * landing a beat later is the {@code "Impact"} entry, whose own
          * {@code Presentation.DelayMs} is what makes it late. Keeping the cadence here and the cues
          * there is what lets a flair re-skin or re-time either moment on its own.
          */
@@ -1852,8 +1852,8 @@ public final class StationAsset
      * <p><b>Leg F (design section 9.6):</b> the old fixed {@code Swing}/{@code Cycle}/
      * {@code RareFind}/{@code Completion} leaves are REPLACED by an open {@link #moments} map
      * keyed by an arbitrary STRING moment id (engine-emitted well-known ids
-     * {@code cycle}/{@code swing}/{@code impact}/{@code rare_find}/{@code completion}, plus a
-     * per-step {@code step:<actionId>:<stepId>} - see {@code station.StationFlairs}'s constants)
+     * {@code Cycle}/{@code Swing}/{@code Impact}/{@code Rare_Find}/{@code Completion}, plus a
+     * per-step {@code Step:<ActionId>:<StepId>} - see {@code station.StationFlairs}'s constants)
      * - unreleased, no back-compat alias, the same shape a standalone {@link FlairAsset} uses for
      * its own {@code Moments} leaf (shared vocabulary, one flair-content shape whether authored
      * inline or in a separate file).
@@ -1865,7 +1865,7 @@ public final class StationAsset
                 .appendInherited(new KeyedCodec<>("Moments",
                                 new InheritMapCodec<>(Presentation.CODEC, LinkedHashMap::new), false),
                         (o, v) -> o.moments = v, o -> o.moments, (o, p) -> o.moments = p.moments)
-                .documentation("An open moment id (cycle/swing/impact/rare_find/completion, or step:<actionId>:<stepId>) to a Presentation overlay; each authored leaf overlays the base moment's own leaves, per moment id. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored.").add()
+                .documentation("An open moment id (Cycle/Swing/Impact/Rare_Find/Completion/Ready/Overdone, Refused or Refused:<Reason>, a Cue:<Your_Name>, or Step:<ActionId>:<StepId>; written Is_Like_This, matched case-insensitively) to a Presentation overlay; each authored leaf overlays the base moment's own leaves, per moment id. Under native Parent the map merges PER MOMENT ID, so a child re-skinning one moment inherits every other moment the base authored.").add()
                 .build();
 
         @Nonnull
@@ -1875,7 +1875,7 @@ public final class StationAsset
             return f;
         }
 
-        /** Moment id ({@code cycle}/{@code swing}/.../{@code step:<actionId>:<stepId>}) -> Presentation. */
+        /** Moment id ({@code Cycle}/{@code Swing}/.../{@code Step:<ActionId>:<StepId>}) -> Presentation. */
         @Nullable
         public Map<String, Presentation> getMoments() {
             return moments;

@@ -18,12 +18,13 @@ import com.ziggfreed.rpgstations.api.impl.FlairUnlockRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Presentation;
 
 /**
- * A structural guard over {@link StationFlairs#effective}, which hand-enumerates every
- * {@link Presentation} leaf and rebuilds the winner through {@code Presentation.of}. That shape is
- * fine right up until a leaf is ADDED: an overlay that does not know about the new leaf both fails
- * to apply a flair's value for it AND erases the base's value for it, because the rebuild only
- * carries the leaves it was taught. Neither failure is visible in a compiler error or in any
- * hand-written per-leaf test, since the new leaf simply has no test.
+ * A structural guard over {@link StationFlairs#effective} and the per-leaf rule it stacks flairs
+ * through, {@code Presentation.overlaid}, which hand-enumerates every {@link Presentation} leaf and
+ * rebuilds the winner through {@code Presentation.of}. That shape is fine right up until a leaf is
+ * ADDED: an overlay that does not know about the new leaf both fails to apply a flair's value for
+ * it AND erases the base's value for it, because the rebuild only carries the leaves it was
+ * taught. Neither failure is visible in a compiler error or in any hand-written per-leaf test,
+ * since the new leaf simply has no test.
  *
  * <p>So this walks {@code Presentation.CODEC}'s own entries rather than a hand-written list (the
  * same public {@code BuilderCodec#getEntries()} walk the documentation-coverage guard uses), and
@@ -40,12 +41,11 @@ public class StationFlairsLeafParityTest {
 
     /** What the next author has to do when one of the assertions below fails. */
     private static final String WHAT_TO_UPDATE =
-            "\n\nStationFlairs.effective hand-enumerates Presentation's leaves and rebuilds the winner"
-                    + " through Presentation.of, so a NEW leaf on Presentation.CODEC needs all four of:"
-                    + "\n  1. a seed from the base in StationFlairs.effective (Type x = base != null ? base.getX() : null)"
-                    + "\n  2. an overlay for it in the same method's per-flair loop (if (momentPresentation.getX() != null) ...)"
-                    + "\n  3. a slot on the widest Presentation.of factory, which is what the rebuild returns"
-                    + "\n  4. the leaf authored in BOTH fixtures in this test, so it stays covered here.";
+            "\n\nPresentation.overlaid hand-enumerates Presentation's leaves and rebuilds the winner"
+                    + " through Presentation.of, so a NEW leaf on Presentation.CODEC needs all three of:"
+                    + "\n  1. an over-else-base line for it in Presentation.overlaid (over.x != null ? over.x : base.x)"
+                    + "\n  2. a slot on the widest Presentation.of factory, which is what the rebuild returns"
+                    + "\n  3. the leaf authored in BOTH fixtures in this test, so it stays covered here.";
 
     /** Every leaf a Presentation has, authored. The parity assertions below check that claim. */
     private static final String EVERY_LEAF_BASE = """

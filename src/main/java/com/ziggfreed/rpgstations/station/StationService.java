@@ -451,8 +451,9 @@ public final class StationService {
 
     /**
      * The one entry point (world thread, from {@code StationUseInteraction}). A re-press
-     * while working is the primary exit; otherwise validate (each denial a localized toast)
-     * and engage. Never throws.
+     * while working is the primary exit; otherwise validate (each denial answered through the
+     * one {@link StationRefusals} seam: notice + cue + event, repeat-throttled) and engage.
+     * Never throws.
      */
     public void toggle(@Nonnull Store<EntityStore> store, @Nonnull Ref<EntityStore> ref,
                        @Nonnull Player player, @Nonnull CommandBuffer<EntityStore> commandBuffer,
@@ -473,16 +474,20 @@ public final class StationService {
             stop(existing, StopReason.PLAYER_EXIT, store, commandBuffer);
             return;
         }
+        // The refusal context for THIS press: every denial below answers through it (StationRefusals -
+        // notice + cue + event, repeat-throttled), and it learns the world, station and action as
+        // the press resolves them. A press that engages never touches it again.
+        StationRefusals.Press press = StationRefusals.press(store, ref, playerRef, stationId, blockX, blockY, blockZ);
 
         // 1) Feature gate + catalog hit.
         if (!stationsEnabled()) {
-            toast(playerRef, RpgMsg.tr("ui.station.locked"));
+            press.refuse("ui.station.locked");
             return;
         }
         StationAsset asset = StationCatalog.getInstance().getStation(stationId);
         if (asset == null) {
             Log.warn("STATION unknown station id '" + stationId + "' on block interaction");
-            toast(playerRef, RpgMsg.tr("ui.station.locked"));
+            press.refuse("ui.station.locked");
             return;
         }
 
@@ -496,6 +501,7 @@ public final class StationService {
             Log.warn("STATION could not resolve world for session start: " + t.getMessage());
             return;
         }
+        press.world(world).station(asset);
 
         // Warm the lazy station index (scope-2 wave 3, gate m4): this interaction "sees" the primary
         // block, so a later anchor discovery elsewhere finds it (and learns its block item id -> id
@@ -540,10 +546,11 @@ public final class StationService {
                     currentBlockStateName(world, blockX, blockY, blockZ));
         }
         if (selectedActionId == null) {
-            toast(playerRef, RpgMsg.tr("ui.station.no_action"));
+            press.refuse("ui.station.no_action");
             return;
         }
         ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, selectedActionId);
+        press.action(action);
 
         // 2.5) Requires gate (Permission + factor Conditions), ANDed: the STATION's own entry gate
         // AND the selected action's own. Neither defaults the other - an action that authors none is
@@ -552,7 +559,7 @@ public final class StationService {
         // claim-commit path bypasses selection, and the station-level gate is only checked here).
         if (!checkRequires(asset.getRequires(), playerRef, asset, action, socketsFilled)
                 || !checkRequires(action.getRequires(), playerRef, asset, action, socketsFilled)) {
-            toast(playerRef, RpgMsg.tr("ui.station.locked"));
+            press.refuse("ui.station.locked");
             return;
         }
 
@@ -581,7 +588,7 @@ public final class StationService {
             if (!authoredSockets && claim != null && !claim.ownerId.equals(playerUuid)) {
                 // The classic single-pile ownership gate, unchanged: a foreign claim denies even
                 // placement. With authored sockets the per-pile share rules below decide instead.
-                toast(playerRef, RpgMsg.tr("ui.station.occupied"));
+                press.refuse("ui.station.occupied");
                 return;
             }
             boolean loadedBefore = claim != null && claim.totalQuantity() > 0;
@@ -612,7 +619,7 @@ public final class StationService {
                     // that already stands adds no new record, so it is never denied and a player
                     // is never locked out of material they already placed.
                     if (claim == null && atStashCap(world, blockX, blockY, blockZ)) {
-                        toast(playerRef, RpgMsg.tr("ui.station.storage_full"));
+                        press.refuse("ui.station.storage_full");
                         return;
                     }
                     moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
@@ -629,7 +636,7 @@ public final class StationService {
                     if (found != null) {
                         // Same ceiling, same reason, at the backpack-sourced placement site.
                         if (claim == null && atStashCap(world, blockX, blockY, blockZ)) {
-                            toast(playerRef, RpgMsg.tr("ui.station.storage_full"));
+                            press.refuse("ui.station.storage_full");
                             return;
                         }
                         moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
@@ -664,7 +671,7 @@ public final class StationService {
                     StationAsset.Work workForIdle = action.getWork();
                     boolean idleCapable = !stepsAuthored && workForIdle != null && workForIdle.getIdle() != null;
                     if (!idleCapable) {
-                        toast(playerRef, RpgMsg.tr(placementDenyKey(authoredSockets, placeDenial)));
+                        press.refuse(placementDenyKey(authoredSockets, placeDenial));
                         return;
                     }
                 }
@@ -677,7 +684,7 @@ public final class StationService {
                 // socket's Use grant - the classic occupied deny, relaxed per socket.
                 Custody.ResolvedSocket useDenied = firstUseDeniedSocket(claim, custodySockets, playerUuid);
                 if (useDenied != null) {
-                    toastSocketRefusal(playerRef, "ui.station.not_shared", useDenied);
+                    press.refuseNamed("ui.station.not_shared", useDenied.label());
                     return;
                 }
                 // Required sockets gate ENGAGE: an Item socket needs a non-empty pile, a Block
@@ -685,7 +692,7 @@ public final class StationService {
                 Custody.ResolvedSocket missing = firstRequiredSocketUnsatisfied(world, custodySockets, claim,
                         blockX, blockY, blockZ);
                 if (missing != null) {
-                    toastSocketRefusal(playerRef, "ui.station.socket_missing", missing);
+                    press.refuseNamed("ui.station.socket_missing", missing.label());
                     return;
                 }
             }
@@ -699,7 +706,7 @@ public final class StationService {
         if (exclusive) {
             UUID occupant = byBlock.get(blockKey);
             if (occupant != null && !occupant.equals(playerUuid)) {
-                toast(playerRef, RpgMsg.tr("ui.station.occupied"));
+                press.refuse("ui.station.occupied");
                 return;
             }
         }
@@ -708,7 +715,7 @@ public final class StationService {
         // identity every heartbeat. A null gate means no tool is required.
         StationAsset.Tool toolGate = action.getTool();
         if (!heldToolMatches(player, toolGate)) {
-            toast(playerRef, RpgMsg.tr("ui.station.wrong_tool"));
+            press.refuse("ui.station.wrong_tool");
             return;
         }
         // 4b) Tool WEAR gate, orthogonal to the identity routes above and checked at ENGAGE only -
@@ -716,7 +723,7 @@ public final class StationService {
         // ends at breakage (TOOL_BROKEN) rather than at this threshold.
         if (toolGate != null && toolGate.hasDurabilityGate()
                 && resolveHeldToolDurabilityPercent(player) < toolGate.getMinStartPercent()) {
-            toast(playerRef, RpgMsg.tr("ui.station.tool_worn"));
+            press.refuse("ui.station.tool_worn");
             return;
         }
 
@@ -751,13 +758,13 @@ public final class StationService {
         boolean startIdle = false;
         if (check.state == ConversionState.NO_INPUTS) {
             if (!idleEnabled) {
-                toast(playerRef, RpgMsg.tr("ui.station.no_materials"));
+                press.refuse("ui.station.no_materials");
                 return;
             }
             startIdle = true;
         }
         if (check.state == ConversionState.NO_ROOM) {
-            toast(playerRef, RpgMsg.tr("ui.station.inventory_full"));
+            press.refuse("ui.station.inventory_full");
             return;
         }
 
@@ -769,7 +776,7 @@ public final class StationService {
         // also sits before the anchor claims below, so a denial here has nothing to roll back.
         // Unlimited by default: the check costs one null read until an owner sets it.
         if (atSessionCap(world)) {
-            toast(playerRef, RpgMsg.tr("ui.station.server_busy"));
+            press.refuse("ui.station.server_busy");
             return;
         }
 
@@ -787,7 +794,7 @@ public final class StationService {
         AnchorResolution anchorRes = resolveAndClaimAnchors(world, worldUuid, playerUuid, action, programSteps,
                 transform, store, blockX, blockY, blockZ, blockKey);
         if (anchorRes.denied()) {
-            toast(playerRef, anchorRes.denyToast);
+            press.refuse(anchorRes.denyKey, anchorRes.denyToast);
             return;
         }
         Map<String, String> claimedAnchorBlocks = anchorRes.anchorBlocks;
@@ -859,7 +866,7 @@ public final class StationService {
                     }
                 }
             }
-            toast(playerRef, RpgMsg.tr("ui.station.seat_unavailable"));
+            press.refuse("ui.station.seat_unavailable");
             return;
         }
         // Past the LAST engage denial: the session is committed, so the picker choice this engage
@@ -2585,8 +2592,11 @@ public final class StationService {
      * already holds for this emission - a step's own, a reached loot floor's. When it holds none,
      * the running action's own {@code Moments} entry for {@code momentId} is used instead
      * ({@link StationSession#moments}, snapshotted at engage). That one rule is why an action can
-     * author {@code swing}/{@code impact}/{@code cycle}/{@code completion} beside every other cue
-     * and still never override a step that speaks for itself.
+     * author {@code Swing}/{@code Impact}/{@code Cycle}/{@code Completion} beside every other cue
+     * and still never override a step that speaks for itself. Underneath whichever of those wins
+     * sits the settings' engine-wide default for the same id ({@link SettingsCatalog#defaultMoment}),
+     * per leaf through {@link Presentation#overlaid}: the winner's authored leaves stand, its
+     * omitted leaves fall through to the default, and a moment nobody dressed still plays it.
      *
      * <p><b>{@code Presentation.DelayMs} is applied HERE, after the flair fold</b>, so the winning
      * presentation is the one whose timing is honored (a flair that re-times a moment re-times the
@@ -2600,7 +2610,11 @@ public final class StationService {
     static void emitMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
                                    @Nonnull String momentId, @Nullable Presentation base,
                                    @Nonnull Vector3d targetPos) {
-        Presentation resolvedBase = base != null ? base : actionMoment(s, momentId);
+        // The settings' engine-wide default for this moment sits UNDER whatever the caller or the
+        // action authored, per leaf (Presentation.overlaid): an authored leaf wins, an omitted one
+        // falls through, and a moment nobody dressed still plays the owner's default.
+        Presentation resolvedBase = Presentation.overlaid(SettingsCatalog.getInstance().defaultMoment(momentId),
+                base != null ? base : actionMoment(s, momentId));
         Presentation p = StationFlairs.effective(resolvedBase, effectiveFlairs(s), momentId, s.playerUuid, s.stationId);
         if (p == null) {
             return;
@@ -2624,12 +2638,12 @@ public final class StationService {
 
     /**
      * The running action's own authored {@code Moments} entry for {@code momentId}, or null. The
-     * session's snapshot is already canonicalized to lowercase keys, so the lookup lowercases to
-     * match and a key authored {@code "Cycle"} resolves.
+     * session's snapshot is case-insensitive by construction, so one plain lookup answers under
+     * any authored casing.
      */
     @Nullable
     private static Presentation actionMoment(@Nonnull StationSession s, @Nonnull String momentId) {
-        return s.moments == null ? null : s.moments.get(momentId.toLowerCase(Locale.ROOT));
+        return s.moments == null ? null : s.moments.get(momentId);
     }
 
     /**
@@ -3014,7 +3028,7 @@ public final class StationService {
     /**
      * The ONE pure due-time scheduler in this engine: the millisecond at which a cue delayed by
      * {@code delayMs} comes due. EVERY offset cue resolves through it - a moment's own
-     * {@code Presentation.DelayMs}, a single {@code Sounds} entry's, and the {@code impact} moment
+     * {@code Presentation.DelayMs}, a single {@code Sounds} entry's, and the {@code Impact} moment
      * that is late purely because it authors one - so there is deliberately no second scheduling
      * rule to keep in step with this one.
      */
@@ -3094,7 +3108,7 @@ public final class StationService {
             return;
         }
         Vector3d playerPos = transform.getPosition();
-        // No base is passed: emitMoment resolves the session's own snapshotted "completion" entry,
+        // No base is passed: emitMoment resolves the session's own snapshotted "Completion" entry,
         // the same route every other action-authored moment takes.
         emitMoment(store, s, StationFlairs.MOMENT_COMPLETION, null, playerPos);
     }
@@ -5030,20 +5044,24 @@ public final class StationService {
      * or a graceful deny with a localized toast key + the station-name arg it interpolates.
      */
     private static final class AnchorResolution {
+        /** The refusal wording key behind {@link #denyToast} (its reason names the refusal moment); null on success. */
+        @Nullable final String denyKey;
         @Nullable final Map<String, String> anchorBlocks;
         @Nullable final Message denyToast;
 
-        private AnchorResolution(@Nullable Map<String, String> anchorBlocks, @Nullable Message denyToast) {
+        private AnchorResolution(@Nullable Map<String, String> anchorBlocks, @Nullable String denyKey,
+                @Nullable Message denyToast) {
+            this.denyKey = denyKey;
             this.anchorBlocks = anchorBlocks;
             this.denyToast = denyToast;
         }
 
         static AnchorResolution ok(@Nonnull Map<String, String> anchorBlocks) {
-            return new AnchorResolution(anchorBlocks, null);
+            return new AnchorResolution(anchorBlocks, null, null);
         }
 
-        static AnchorResolution deny(@Nonnull Message denyToast) {
-            return new AnchorResolution(null, denyToast);
+        static AnchorResolution deny(@Nonnull String denyKey, @Nonnull Message denyToast) {
+            return new AnchorResolution(null, denyKey, denyToast);
         }
 
         boolean denied() {
@@ -5059,8 +5077,8 @@ public final class StationService {
      * DISTINCT toast from the not-found one, AV wave), and must not be busy with its OWN session or hold a
      * non-empty custody claim (else {@code ui.station.anchor_busy}, gate m5). On success every
      * resolved anchor's blockKey is claimed into {@link #byBlock} (first-wins) and returned; the
-     * reserved {@code "self"} anchor maps to the primary block. A single-station action (no
-     * {@code Anchors}) returns just {@code self}.
+     * reserved {@code "Self"} anchor maps to the primary block. A single-station action (no
+     * {@code Anchors}) returns just {@code Self}.
      *
      * <p>Runs BEFORE the session object is built, so a mid-resolution deny leaves ZERO partial
      * claims (nothing was written until every anchor validated). On success the caller writes the
@@ -5089,14 +5107,14 @@ public final class StationService {
             if (anchorId == null || anchorId.isBlank() || anchor == null || anchor.getStation() == null
                     || anchor.getStation().isBlank()) {
                 releaseClaimed(claimed, playerUuid);
-                return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_missing",
+                return AnchorResolution.deny("ui.station.anchor_missing", RpgMsg.tr("ui.station.anchor_missing",
                         Msg.raw(anchorId != null ? anchorId : ""), 0));
             }
             int radius = StationAnchors.cappedRadius(anchor.effectiveMaxRadiusMeters());
             String blockKey = discoverAnchorBlock(world, worldUuid, px, py, pz, anchor.getStation(), radius);
             if (blockKey == null) {
                 releaseClaimed(claimed, playerUuid);
-                return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_missing",
+                return AnchorResolution.deny("ui.station.anchor_missing", RpgMsg.tr("ui.station.anchor_missing",
                         anchorStationNameMsg(anchor.getStation()), radius));
             }
             // m5 precedence: refuse a block busy with its own session OR a non-empty custody claim.
@@ -5108,7 +5126,7 @@ public final class StationService {
                     && !playerUuid.equals(custodyClaim.ownerId);
             if (!StationAnchors.claimAllowed(busy, custodyBusy)) {
                 releaseClaimed(claimed, playerUuid);
-                return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_busy",
+                return AnchorResolution.deny("ui.station.anchor_busy", RpgMsg.tr("ui.station.anchor_busy",
                         anchorStationNameMsg(anchor.getStation())));
             }
             // A walk-targeted anchor must be reachable at engage (design 2.3's per-anchor solve);
@@ -5123,15 +5141,15 @@ public final class StationService {
                     // Its OWN toast, not anchor_missing: the block WAS found, it just cannot be
                     // walked to. Telling the player "no cooking fire found within 12 blocks" while
                     // one sits in plain sight sends them looking for a station they already have.
-                    return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_unreachable",
-                            anchorStationNameMsg(anchor.getStation())));
+                    return AnchorResolution.deny("ui.station.anchor_unreachable",
+                            RpgMsg.tr("ui.station.anchor_unreachable", anchorStationNameMsg(anchor.getStation())));
                 }
             }
             // Atomic first-wins claim into byBlock (the generalized occupancy map).
             UUID prior = byBlock.putIfAbsent(blockKey, playerUuid);
             if (prior != null && !prior.equals(playerUuid)) {
                 releaseClaimed(claimed, playerUuid);
-                return AnchorResolution.deny(RpgMsg.tr("ui.station.anchor_busy",
+                return AnchorResolution.deny("ui.station.anchor_busy", RpgMsg.tr("ui.station.anchor_busy",
                         anchorStationNameMsg(anchor.getStation())));
             }
             claimed.add(blockKey);
@@ -5147,7 +5165,7 @@ public final class StationService {
         }
     }
 
-    /** The lowercased anchor ids any {@code Walk} step in {@code steps} targets ({@code "self"} excluded - always reachable). */
+    /** The lowercased anchor ids any {@code Walk} step in {@code steps} targets ({@code "Self"} excluded - always reachable). */
     @Nonnull
     private static java.util.Set<String> walkTargetAnchorIds(@Nullable List<StationStep> steps) {
         java.util.Set<String> out = new java.util.HashSet<>();
@@ -5166,7 +5184,7 @@ public final class StationService {
 
     /**
      * The blockKey a step's {@code At}/{@code Walk.To} anchor id resolves to for THIS session
-     * (design 2.2's custody-at-anchor + walk-target lookup): the reserved {@code "self"} (or a
+     * (design 2.2's custody-at-anchor + walk-target lookup): the reserved {@code "Self"} (or a
      * null/blank id) is the primary block; any other id reads {@link StationSession#anchorBlocks}.
      * Returns {@code null} for an unresolved anchor id (an engine guard - the validator already
      * warned; the handler denies gracefully).
@@ -5192,7 +5210,7 @@ public final class StationService {
         return anchorId.toLowerCase(java.util.Locale.ROOT);
     }
 
-    /** The live custody claim at a step's {@code At} anchor (or the primary block for {@code "self"}/absent). */
+    /** The live custody claim at a step's {@code At} anchor (or the primary block for {@code "Self"}/absent). */
     @Nullable
     StationCustodyClaim custodyClaimForAnchor(@Nonnull StationSession s, @Nullable String anchorId) {
         return custodyClaimFor(s, anchorBlockKeyFor(s, anchorId));
@@ -5201,7 +5219,7 @@ public final class StationService {
     /**
      * {@code Produce.To:"Custody"} execution (scope-2 wave 3, design 2.2): stores {@code quantity}
      * of {@code itemId} into the {@code socketId} pile of the custody claim at the step's
-     * {@code At} anchor block (the primary block for {@code "self"}), creating the claim when
+     * {@code At} anchor block (the primary block for {@code "Self"}), creating the claim when
      * absent. The receiving pile is OWNED BY THE SESSION'S WORKER (a produce pile belongs to
      * whoever did the work; topping up an existing pile leaves its owner alone), and the
      * placed-as-entity display spawns from the SOCKET's own {@code Display} group - resolved off
@@ -5304,7 +5322,7 @@ public final class StationService {
      * The {@code Custody} group governing an anchor, for whichever nested group the caller needs:
      * for a named anchor, the ANCHOR station's own FIRST AUTHORED action's Custody (its own
      * {@code Display}/{@code States} knobs) when that Custody actually CARRIES the wanted group,
-     * else the running action's Custody (always, for the reserved {@code "self"}). The first
+     * else the running action's Custody (always, for the reserved {@code "Self"}). The first
      * authored action is the anchor station's own primary job, which is the one whose block
      * vocabulary a visiting program should honour. A best-effort lookup - a missing/unknown anchor
      * station falls back to the running action's Custody.
@@ -5320,7 +5338,7 @@ public final class StationService {
      * a block's state VOCABULARY belongs to its OWN station, never the running one's, so a remote
      * anchor whose station authors no {@code Custody.States} is simply never flipped (writing the
      * running action's state names there would clobber a foreign block's state with a
-     * near-universally-resolvable name like {@code "Default"}). The {@code "self"} branch is
+     * near-universally-resolvable name like {@code "Default"}). The {@code "Self"} branch is
      * unconditional either way: the primary block's vocabulary IS the running action's.
      */
     @Nullable
@@ -5344,7 +5362,7 @@ public final class StationService {
         return allowRunningFallback ? runningActionCustody(s) : null;
     }
 
-    /** The {@code Custody} group of the action this session is actually running (the {@code "self"} answer). */
+    /** The {@code Custody} group of the action this session is actually running (the {@code "Self"} answer). */
     @Nullable
     private static Custody runningActionCustody(@Nonnull StationSession s) {
         StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
@@ -5364,7 +5382,7 @@ public final class StationService {
     }
 
     /**
-     * The world coordinates an anchor id resolves to for THIS session: the reserved {@code "self"}
+     * The world coordinates an anchor id resolves to for THIS session: the reserved {@code "Self"}
      * (or a null/blank id) is the primary station block, any other id parses the already-resolved
      * {@code blockKey}. The ONE derivation every anchor-addressed call site shares
      * ({@code Produce.To:Custody}, the Working flip, the walk target) - {@code null} when the key is
@@ -5381,12 +5399,12 @@ public final class StationService {
 
     /**
      * Releases every ANCHOR block this session claimed (design 2.6, {@code stop()}'s teardown):
-     * clears the {@link #byBlock} occupancy for each non-{@code self} anchor and, on a hand-back
+     * clears the {@link #byBlock} occupancy for each non-{@code Self} anchor and, on a hand-back
      * stop ({@code returnsCustody} - see {@link #custodyReturnsAtStop}), returns any custody
      * standing at that anchor to the owner (else drops it at the block) and resets that anchor's
      * own {@code Custody.States} block state back to Empty. A leave-it stop releases only the
      * occupancy: the anchor's stash stays in the world with its Loaded look, honest for materials
-     * still standing there. Skips {@code self} (the primary block's own claim + custody are
+     * still standing there. Skips {@code Self} (the primary block's own claim + custody are
      * handled by the existing {@code stop()} paths).
      */
     private void releaseAnchorClaims(@Nonnull StationSession s, @Nullable CommandBuffer<EntityStore> commandBuffer,
@@ -5528,7 +5546,7 @@ public final class StationService {
 
     /**
      * Resolves the target anchor's block-top column point (scope-2 wave 3, design 2.3): the reserved
-     * {@code "self"}/null anchor targets the primary block, any other id reads
+     * {@code "Self"}/null anchor targets the primary block, any other id reads
      * {@link StationSession#anchorBlocks}. Returns the block-centred column point (the walk goal), or
      * {@code null} when the anchor is unresolved (the handler maps a null to a graceful
      * {@link StopReason#PATH_BLOCKED} stop). The actual PATH SOLVE now lives behind the performer
@@ -5677,17 +5695,6 @@ public final class StationService {
             case FULL -> "ui.station.socket_full";
             case WRONG_INPUT -> "ui.station.socket_wrong_input";
         };
-    }
-
-    /** A socket refusal toast, naming the socket through its authored {@code Label} lang key when it has one. */
-    private static void toastSocketRefusal(@Nonnull PlayerRef playerRef, @Nonnull String baseKey,
-            @Nonnull Custody.ResolvedSocket socket) {
-        String label = socket.label();
-        if (label != null && !label.isBlank()) {
-            toast(playerRef, RpgMsg.tr(baseKey + "_named", Msg.key(label)));
-        } else {
-            toast(playerRef, RpgMsg.tr(baseKey));
-        }
     }
 
     /**
@@ -6205,10 +6212,12 @@ public final class StationService {
             }
             boolean hasActiveSession = blockKey != null && sessionWorkingAt(blockKey);
             Custody claimCustody = null;
+            StationAsset claimAsset = null;
+            ActionResolver.ResolvedAction claimAction = null;
             if (claim != null) {
-                StationAsset claimAsset = StationCatalog.getInstance().getStation(claim.stationId);
-                claimCustody = claimAsset != null
-                        ? ActionResolver.resolve(claimAsset, claim.actionId).getCustody() : null;
+                claimAsset = StationCatalog.getInstance().getStation(claim.stationId);
+                claimAction = claimAsset != null ? ActionResolver.resolve(claimAsset, claim.actionId) : null;
+                claimCustody = claimAction != null ? claimAction.getCustody() : null;
             }
             // Per-socket reclaim right: the pile's own owner, relaxed by that socket's
             // Share.Reclaim (never by another socket's).
@@ -6278,8 +6287,15 @@ public final class StationService {
                 }
             }
             String key = retrieveOutcomeKey(outcome);
-            if (key != null) {
-                toast(playerRef, RpgMsg.tr(key));
+            if (key != null && claim != null) {
+                // A denial answers through the one refusal seam like any station press; decide()
+                // only denies over a found claim, so the claim names the block and the action.
+                StationRefusals.Press press = StationRefusals.press(store, ref, playerRef, claim.stationId,
+                        claim.blockX, claim.blockY, claim.blockZ).world(world).action(claimAction);
+                if (claimAsset != null) {
+                    press.station(claimAsset);
+                }
+                press.refuse(key);
             }
         } catch (Throwable t) {
             Log.warn("STATION custody retrieve failed: " + t.getMessage(), t);
@@ -6486,7 +6502,7 @@ public final class StationService {
      * leaves it unlit until the cook beat begins.
      *
      * <p>Covers BOTH altitudes with one call, because it resolves through the SAME
-     * {@link #anchorBlockKeyFor} the step phases already use: an absent/{@code "self"} anchor is the
+     * {@link #anchorBlockKeyFor} the step phases already use: an absent/{@code "Self"} anchor is the
      * primary station block (the cooking fire's own plain-F convert loop), any other id is the
      * claimed remote anchor (the cutting board's fish program lighting the fire it walked to).
      *
@@ -6703,7 +6719,7 @@ public final class StationService {
      * {@code socketId}'s pile (a multi-socket phase's window sits on its FIRST produced socket).
      * A FRESH open (the first batch) additionally flips the block to {@code States.Ready} (unless
      * a work step is actively holding it in its Working look - the resting flip shows Ready at the
-     * next stop instead), fires the {@code ready} moment through the session's own cue queue, and
+     * next stop instead), fires the {@code Ready} moment through the session's own cue queue, and
      * toasts the worker; a later batch while the window is open re-stamps the clock silently
      * ("stirring the pot" - the whole pile's window measures time since the LAST batch landed).
      */
@@ -6777,7 +6793,7 @@ public final class StationService {
      * produced-batch count (the pile's owner and {@code Unique} stack untouched; no other pile is
      * touched), the window clears, the block flips to its {@code States.Overdone} resting look
      * (unless a work step actively holds it), the pile's display prop despawns (it respawns from
-     * the settled contents on the next touch), the {@code overdone} moment fires - through an
+     * the settled contents on the next touch), the {@code Overdone} moment fires - through an
      * engaged session's cue queue when one is working the block, else immediately at the block
      * like a structure moment - and the toucher (when known) gets the overdone toast.
      *
@@ -7925,7 +7941,7 @@ public final class StationService {
         PickupMimic.playPickupSfx(ref, store, new Vector3d(blockX + 0.5, blockY + 0.5, blockZ + 0.5));
     }
 
-    /** Package-private: {@code StationStructures}' pattern toasts ride the same yellow notification. */
+    /** Package-private: {@link StationRefusals}' notices and {@code StationStructures}' pattern toasts ride the same yellow notification. */
     static void toast(@Nonnull PlayerRef playerRef, @Nonnull Message message) {
         try {
             NotificationUtil.sendNotification(playerRef.getPacketHandler(), message.color(Color.YELLOW));

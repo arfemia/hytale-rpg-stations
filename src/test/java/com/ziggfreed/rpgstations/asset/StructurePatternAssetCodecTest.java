@@ -39,8 +39,8 @@ public class StructurePatternAssetCodecTest {
               "Requires": { "Permission": "fixture.build.ring" },
               "Moments": {
                 "$Comment": "editorial keys are legal inside this InheritMapCodec map",
-                "activated": { "Sounds": ["Fixture_Chime"] },
-                "broken": { "Sounds": ["Fixture_Crumble"] }
+                "Activated": { "Sounds": ["Fixture_Chime"] },
+                "Broken": { "Sounds": ["Fixture_Crumble"] }
               }
             }
             """;
@@ -56,8 +56,8 @@ public class StructurePatternAssetCodecTest {
         assertEquals("Fixture_Station_Beta", a.getActivate().getBlock());
         assertEquals(4, a.getCells().length);
         assertEquals("fixture.build.ring", a.getRequires().getPermission());
-        assertNotNull(a.moment("activated"));
-        assertNotNull(a.moment("Broken"), "moment lookup is case-insensitive");
+        assertNotNull(a.moment(StructurePatternAsset.MOMENT_ACTIVATED));
+        assertNotNull(a.moment("broken"), "moment lookup is case-insensitive");
         assertNull(a.moment("unheard_of"));
     }
 

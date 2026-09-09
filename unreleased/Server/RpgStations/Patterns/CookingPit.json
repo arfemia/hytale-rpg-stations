@@ -22,11 +22,11 @@
     { "Offset": { "X": 1, "Y": 0, "Z": -1 }, "Block": { "ResourceTypeId": "Rock" } }
   ],
   "Moments": {
-    "activated": {
+    "Activated": {
       "Sounds": ["SFX_Flame_Ignite"],
       "Particles": [ { "SystemId": "Block_Gem_Sparks" } ]
     },
-    "broken": {
+    "Broken": {
       "Sounds": ["SFX_Campfire_Break"]
     }
   }

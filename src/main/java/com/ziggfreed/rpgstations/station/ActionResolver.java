@@ -2,7 +2,6 @@ package com.ziggfreed.rpgstations.station;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 
@@ -245,7 +244,7 @@ public final class ActionResolver {
                 worker != null ? worker.getCamera() : null,
                 worker != null ? worker.getAnimation() : null,
                 worker != null ? worker.getPuppet() : null,
-                moments != null ? StationFlairs.canonicalMomentKeys(moments) : null);
+                moments != null ? StationFlairs.caseInsensitiveMomentKeys(moments) : null);
     }
 
     /**
@@ -608,22 +607,23 @@ public final class ActionResolver {
 
         /**
          * The action's authored {@code Moments} entry for {@code momentId} (matched
-         * case-insensitively), or null when it authors none. This is the BASE for that moment; a
+         * case-insensitively - the map is built through
+         * {@link StationFlairs#caseInsensitiveMomentKeys}), or null when it authors none. This is the BASE for that moment; a
          * presentation the engine already holds for the same emission - a step's own, a loot
          * floor's - outranks it and is played instead.
          */
         @Nullable
         public Presentation getMoment(@Nonnull String momentId) {
-            return moments == null ? null : moments.get(momentId.toLowerCase(Locale.ROOT));
+            return moments == null ? null : moments.get(momentId);
         }
 
-        /** Shorthand for the {@code cycle} moment: the per-completed-cycle cue. */
+        /** Shorthand for the {@code Cycle} moment: the per-completed-cycle cue. */
         @Nullable
         public Presentation getPresentation() {
             return getMoment(StationFlairs.MOMENT_CYCLE);
         }
 
-        /** Shorthand for the {@code completion} moment: the session-end cue. */
+        /** Shorthand for the {@code Completion} moment: the session-end cue. */
         @Nullable
         public Presentation getCompletion() {
             return getMoment(StationFlairs.MOMENT_COMPLETION);

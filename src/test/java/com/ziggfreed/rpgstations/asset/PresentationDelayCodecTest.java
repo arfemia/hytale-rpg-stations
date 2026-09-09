@@ -70,19 +70,19 @@ public class PresentationDelayCodecTest {
     @Test
     void decodesOnTheMomentARollCueNames() throws Exception {
         ActionDef a = inlineAction("{ \"Rare_Find\": { \"Sounds\": [\"Fixture_Roll_Cue\"], \"DelayMs\": 75 },"
-                        + " \"cue:trophy\": { \"Sounds\": [\"Fixture_Floor_Cue\"], \"DelayMs\": 300 } }",
+                        + " \"Cue:Trophy\": { \"Sounds\": [\"Fixture_Floor_Cue\"], \"DelayMs\": 300 } }",
                 "[ { \"Id\": \"x\" } ]");
 
         assertEquals(75L, a.getMoments().get("Rare_Find").effectiveDelayMs());
-        assertEquals(300L, a.getMoments().get("cue:trophy").effectiveDelayMs());
+        assertEquals(300L, a.getMoments().get("Cue:Trophy").effectiveDelayMs());
     }
 
     @Test
     void decodesOnAFlairAssetMoment() throws Exception {
-        FlairAsset flair = decodeFlair("{ \"Moments\": { \"cycle\":"
+        FlairAsset flair = decodeFlair("{ \"Moments\": { \"Cycle\":"
                 + " { \"Sounds\": [\"Fixture_Golden\"], \"DelayMs\": 500 } } }");
 
-        assertEquals(500L, flair.getMoments().get("cycle").effectiveDelayMs());
+        assertEquals(500L, flair.getMoments().get("Cycle").effectiveDelayMs());
     }
 
     // ==================== Reader defaults ====================

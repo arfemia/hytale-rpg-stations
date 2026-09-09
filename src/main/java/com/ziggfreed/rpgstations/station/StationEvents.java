@@ -19,6 +19,7 @@ import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.api.event.StationCycleCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationEnhanceCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationOutputProducedEvent;
+import com.ziggfreed.rpgstations.api.event.StationRefusedEvent;
 import com.ziggfreed.rpgstations.api.event.StationSessionCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationSessionStartedEvent;
 import com.ziggfreed.rpgstations.api.event.StationStructureChangedEvent;
@@ -178,6 +179,26 @@ final class StationEvents {
             }
         } catch (Throwable t) {
             log("StationStructureChanged", t);
+        }
+    }
+
+    /**
+     * Fires the refusal moment from {@link StationRefusals}, AFTER the engine's own answer to the
+     * press (notice + cue) went out, and ONLY for a refusal the repeat throttle let through - so
+     * one dispatch is one refusal a listener should react to.
+     */
+    static void fireRefused(@Nonnull Store<EntityStore> store, @Nonnull PlayerRef playerRef,
+            @Nonnull UUID playerId, @Nonnull UUID worldUuid, int blockX, int blockY, int blockZ,
+            @Nonnull String stationId, @Nullable String actionId, @Nonnull String reason) {
+        try {
+            IEventDispatcher<StationRefusedEvent, StationRefusedEvent> d =
+                    HytaleServer.get().getEventBus().dispatchFor(StationRefusedEvent.class);
+            if (d.hasListener()) {
+                d.dispatch(new StationRefusedEvent(store, playerRef, playerId, worldUuid, blockX, blockY, blockZ,
+                        stationId, actionId, reason));
+            }
+        } catch (Throwable t) {
+            log("StationRefused", t);
         }
     }
 

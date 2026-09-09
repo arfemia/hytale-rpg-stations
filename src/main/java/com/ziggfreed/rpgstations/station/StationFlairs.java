@@ -1,9 +1,10 @@
 package com.ziggfreed.rpgstations.station;
 
-import java.util.LinkedHashMap;
+import java.util.Collections;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 
@@ -12,7 +13,6 @@ import javax.annotation.Nullable;
 
 import com.ziggfreed.rpgstations.api.impl.FlairUnlockRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Presentation;
-import com.ziggfreed.rpgstations.asset.EffectRef;
 
 /**
  * The achievement/reward flair override seam. A station may author NAMED cosmetic flair
@@ -35,8 +35,8 @@ import com.ziggfreed.rpgstations.asset.EffectRef;
  * open flair/moment vocabulary. {@link #MOMENT_CYCLE}/{@link #MOMENT_SWING}/{@link #MOMENT_IMPACT}/
  * {@link #MOMENT_RARE_FIND}/{@link #MOMENT_COMPLETION} are the engine's own well-known ids
  * (constants, not an enum - nothing hardcodes the vocabulary as a closed set); {@link
- * #stepMomentId} builds the per-step {@code step:<actionId>:<stepId>} id a multi-action
- * station's {@code Present} step resolves against. {@code swing} and {@code impact} are the two
+ * #stepMomentId} builds the per-step {@code Step:<ActionId>:<StepId>} id a multi-action
+ * station's {@code Present} step resolves against. {@code Swing} and {@code Impact} are the two
  * cues one swing tick fires: the swing itself, and the strike landing behind it (whose lateness is
  * its own {@code Presentation.DelayMs}, nothing dedicated). They are separate ids precisely so a
  * flair can re-skin or re-time either one alone. The overlay-MERGE semantics themselves (per-leaf,
@@ -55,33 +55,52 @@ import com.ziggfreed.rpgstations.asset.EffectRef;
  * order (a later id's non-null leaf wins over an earlier id's on the same leaf). An unlocked
  * id with no matching entry in the station's effective flair map is silently ignored.
  *
- * <p><b>Casing is canonicalized to lowercase at BOTH ends</b> (flair ids and moment ids alike):
- * {@link FlairCatalog} lowercases the authored keys and this class lowercases the lookup plus
- * whatever a provider hands back, so an inline {@code Flairs} key, a standalone {@code FlairAsset}
- * id, and a provider's returned id all meet in ONE namespace - which is what makes a single
- * {@code FlairUnlockProvider} able to satisfy both authoring routes, and what stops a moment key
- * authored {@code "Cycle"} from validating as known and then never firing.
+ * <p><b>Moment ids are written {@code Is_Like_This} and matched case-insensitively.</b> Every id
+ * this engine mints is underscore-separated PascalCase ({@code Cycle}, {@code Rare_Find},
+ * {@code Refused:No_Materials}, {@code Step:Mill:Chop}), the same shape Hytale's own ids take, and
+ * that is the spelling every constant here, every shipped file and every document shows. Matching
+ * never depends on it: every moment map the engine holds is built through
+ * {@link #caseInsensitiveMomentKeys}, which keeps each key's authored spelling and answers a lookup
+ * under any casing, so a pack authoring {@code cycle} resolves exactly as one authoring
+ * {@code Cycle} does, with no validator refusal and no rewrite. The prefix checks here fold case
+ * the same way. Flair ids meet in one lowercase namespace ({@link FlairCatalog} lowercases the
+ * authored keys and this class lowercases whatever a provider hands back), which is what lets a
+ * single {@code FlairUnlockProvider} satisfy both authoring routes.
  */
 public final class StationFlairs {
 
     /** The cycle-complete moment, played per finished (real or idle) cycle at the block. */
-    public static final String MOMENT_CYCLE = "cycle";
+    public static final String MOMENT_CYCLE = "Cycle";
     /** The per-swing cue, fired together with the work animation re-fire. */
-    public static final String MOMENT_SWING = "swing";
+    public static final String MOMENT_SWING = "Swing";
     /** The delayed swing-impact cue (design 9.6 - split off {@link #MOMENT_SWING} this leg). */
-    public static final String MOMENT_IMPACT = "impact";
+    public static final String MOMENT_IMPACT = "Impact";
     /** A reached loot-ladder floor's flourish. */
-    public static final String MOMENT_RARE_FIND = "rare_find";
+    public static final String MOMENT_RARE_FIND = "Rare_Find";
     /** The session-completion moment, played at the player's own position. */
-    public static final String MOMENT_COMPLETION = "completion";
+    public static final String MOMENT_COMPLETION = "Completion";
     /** A produced batch's doneness window opening: output now waits Ready in its custody pile. */
-    public static final String MOMENT_READY = "ready";
+    public static final String MOMENT_READY = "Ready";
     /** A doneness window expiring: the waiting pile collapsed to its authored Overdone items. */
-    public static final String MOMENT_OVERDONE = "overdone";
+    public static final String MOMENT_OVERDONE = "Overdone";
+    /**
+     * A press the station turned away, whatever the reason - the catch-all a per-reason
+     * {@link #refusedMomentId} falls through to, per leaf. Played by {@link StationRefusals}.
+     */
+    public static final String MOMENT_REFUSED = "Refused";
 
-    private static final Set<String> WELL_KNOWN_MOMENT_IDS = Set.of(
+    private static final Set<String> WELL_KNOWN_MOMENT_IDS = caseInsensitiveSet(
             MOMENT_CYCLE, MOMENT_SWING, MOMENT_IMPACT, MOMENT_RARE_FIND, MOMENT_COMPLETION,
-            MOMENT_READY, MOMENT_OVERDONE);
+            MOMENT_READY, MOMENT_OVERDONE, MOMENT_REFUSED);
+
+    /**
+     * The prefix of a PER-REASON refusal moment id, {@code Refused:<Reason>}, where {@code Reason}
+     * is the refusal's own wording key tail (the part of {@code ui.station.<reason>} after the
+     * dot) in id casing: {@code Refused:No_Materials}, {@code Refused:Wrong_Tool},
+     * {@code Refused:Occupied}. A per-reason entry overlays the bare {@link #MOMENT_REFUSED} entry
+     * per leaf, so an author dresses one reason differently without restating the rest.
+     */
+    public static final String REFUSED_MOMENT_PREFIX = MOMENT_REFUSED + ":";
 
     /**
      * The prefix an author uses to mint a moment id of their own: a loot roll's {@code Cue} names a
@@ -93,73 +112,89 @@ public final class StationFlairs {
      * it in the roll's {@code Cue} and again as a key in the action's {@code Moments} map (or in a
      * flair), and the two meet at the emission.
      */
-    public static final String CUE_MOMENT_PREFIX = "cue:";
+    public static final String CUE_MOMENT_PREFIX = "Cue:";
 
-    private static final String STEP_MOMENT_PREFIX = "step:";
+    private static final String STEP_MOMENT_PREFIX = "Step:";
 
     private StationFlairs() {
     }
 
     /**
-     * Builds the per-step moment id {@code step:<actionId>:<stepId>} (design section 9.6).
-     *
-     * <p>Both arguments are LOWERCASED, so a PascalCase-authored action or step id composes to a
-     * stable lowercase moment id. Moment ids are matched by exact map key, and the whole flair
-     * pipeline canonicalizes to lowercase at both ends ({@link #effective} lowercases the lookup and
-     * {@link FlairCatalog} lowercases the authored keys), so a key authored {@code "Cycle"} resolves
-     * instead of validating as known and then silently never firing.
+     * Builds the per-step moment id {@code Step:<ActionId>:<StepId>} (design section 9.6). Both
+     * parts keep their authored spelling ({@code Step:Mill:Chop}); matching is case-insensitive
+     * wherever the id is looked up, so the spelling is presentation, never identity.
      */
     @Nonnull
     public static String stepMomentId(@Nonnull String actionId, @Nonnull String stepId) {
-        return STEP_MOMENT_PREFIX + actionId.toLowerCase(Locale.ROOT) + ":" + stepId.toLowerCase(Locale.ROOT);
+        return STEP_MOMENT_PREFIX + actionId + ":" + stepId;
     }
 
     /**
-     * {@code moments} re-keyed to lowercase, dropping blank keys and null values: the ONE
-     * canonicalizer every moment map in this engine shares - a station's inline {@code Flairs}
-     * entry, a standalone {@code FlairAsset}, and an action's own {@code Moments}.
-     *
-     * <p>Moment ids are matched by EXACT map key at play time, so canonicalizing here (with
-     * {@link #effective} and the action resolver lowercasing the lookup side to match) is what makes
-     * a key authored {@code "Cycle"} actually fire instead of validating as a known id and then
-     * silently never matching. A later duplicate under a different casing wins, the same later-wins
-     * rule the rest of this schema follows.
+     * Builds the per-reason refusal moment id {@code Refused:<Reason>} (see
+     * {@link #REFUSED_MOMENT_PREFIX}); {@code reason} arrives in id casing from
+     * {@link StationRefusals#reasonOf} and is kept as given.
      */
     @Nonnull
-    public static Map<String, Presentation> canonicalMomentKeys(@Nonnull Map<String, Presentation> moments) {
-        Map<String, Presentation> out = new LinkedHashMap<>(moments.size());
+    public static String refusedMomentId(@Nonnull String reason) {
+        return REFUSED_MOMENT_PREFIX + reason;
+    }
+
+    /** Whether {@code momentId} is the bare {@link #MOMENT_REFUSED} or a {@code Refused:<Reason>} id, under any casing. */
+    public static boolean isRefusalMomentId(@Nullable String momentId) {
+        return momentId != null
+                && (MOMENT_REFUSED.equalsIgnoreCase(momentId) || hasPrefix(momentId, REFUSED_MOMENT_PREFIX));
+    }
+
+    /**
+     * {@code moments} as a CASE-INSENSITIVE map that keeps every key's authored spelling, dropping
+     * blank keys and null values: the ONE shape every moment map in this engine is held in - a
+     * station's inline {@code Flairs} entry, a standalone {@code FlairAsset}, an action's own
+     * {@code Moments}, the settings' engine-wide defaults, a pattern's cues at refusal time.
+     *
+     * <p>Moment ids are matched by plain map lookup at play time, so building the map here (rather
+     * than folding case at every lookup) is what makes a key authored {@code cycle} resolve
+     * against {@link #MOMENT_CYCLE} instead of validating as a known id and then silently never
+     * matching, while the spelling an author chose is what the map still shows. A later duplicate
+     * under a different casing keeps the FIRST spelling and takes the later value, the same
+     * later-wins rule the rest of this schema follows.
+     */
+    @Nonnull
+    public static Map<String, Presentation> caseInsensitiveMomentKeys(@Nonnull Map<String, Presentation> moments) {
+        Map<String, Presentation> out = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         for (Map.Entry<String, Presentation> e : moments.entrySet()) {
             if (e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) {
                 continue;
             }
-            out.put(e.getKey().toLowerCase(Locale.ROOT), e.getValue());
+            out.put(e.getKey(), e.getValue());
         }
         return out;
     }
 
     /**
-     * Whether {@code momentId} is a PER-STEP id ({@code step:<actionId>:<stepId>}) rather than one of
+     * Whether {@code momentId} is a PER-STEP id ({@code Step:<ActionId>:<StepId>}) rather than one of
      * the well-known engine moments - the one class of moment id an action's own {@code Moments} map
      * may drive a step's iteration-entry cue with.
      */
     public static boolean isStepMomentId(@Nullable String momentId) {
-        return momentId != null && momentId.toLowerCase(Locale.ROOT).startsWith(STEP_MOMENT_PREFIX);
+        return momentId != null && hasPrefix(momentId, STEP_MOMENT_PREFIX);
     }
 
     /**
-     * Whether {@code momentId} is a RECOGNIZED id: one of the 5 well-known engine constants
-     * (case-insensitive) or a {@code step:}-prefixed per-step id. An unrecognized id is never an
-     * error (design 9.6 - "future engine moments must not break old packs") - callers use this
-     * ONLY for a validator warning surfacing a likely typo, never to reject content.
+     * Whether {@code momentId} is a RECOGNIZED id: one of the well-known engine constants
+     * (case-insensitive) or an id under one of the three open prefixes - {@code Step:} (per step),
+     * {@code Cue:} (author-minted loot cues), {@code Refused:} (per refusal reason). An unrecognized
+     * id is never an error (design 9.6 - "future engine moments must not break old packs") -
+     * callers use this ONLY for a validator warning surfacing a likely typo, never to reject
+     * content.
      */
     public static boolean isKnownMomentId(@Nullable String momentId) {
         if (momentId == null || momentId.isBlank()) {
             return false;
         }
-        String lower = momentId.toLowerCase(Locale.ROOT);
-        return WELL_KNOWN_MOMENT_IDS.contains(lower)
-                || lower.startsWith(STEP_MOMENT_PREFIX)
-                || lower.startsWith(CUE_MOMENT_PREFIX);
+        return WELL_KNOWN_MOMENT_IDS.contains(momentId)
+                || hasPrefix(momentId, STEP_MOMENT_PREFIX)
+                || hasPrefix(momentId, CUE_MOMENT_PREFIX)
+                || hasPrefix(momentId, REFUSED_MOMENT_PREFIX);
     }
 
     /**
@@ -168,8 +203,8 @@ public final class StationFlairs {
      * Returns {@code base} (possibly {@code null}) UNCHANGED whenever there is nothing to
      * overlay - the zero-cost common path under the default provider. {@code flairs} is the
      * ALREADY-MERGED {@code flairId -> momentId -> Presentation} map ({@link
-     * FlairCatalog#effectiveFlairsFor}) - this method itself is decoupled from either source
-     * asset type.
+     * FlairCatalog#effectiveFlairsFor}, every inner map case-insensitive by construction) - this
+     * method itself is decoupled from either source asset type.
      */
     @Nullable
     public static Presentation effective(@Nullable Presentation base,
@@ -184,49 +219,37 @@ public final class StationFlairs {
             return base;
         }
 
-        String lookupId = momentId.toLowerCase(Locale.ROOT);
-        Presentation.SoundCue[] sounds = base != null ? base.getSounds() : null;
-        Presentation.ModelParticle[] particles = base != null ? base.getParticles() : null;
-        Presentation.Shake shake = base != null ? base.getShake() : null;
-        Presentation.Interaction interaction = base != null ? base.getInteraction() : null;
-        EffectRef effect = base != null ? base.getEffect() : null;
-        Long delayMs = base != null ? base.getDelayMs() : null;
-        boolean overlaidAny = false;
-
+        // The per-leaf rule itself is Presentation.overlaid - the ONE overlay every layered
+        // presentation in this engine resolves through; this loop only decides WHICH flair
+        // moments stack, and in what order. A flair authoring no leaf at all still overlays
+        // (rebuilding the base leaf for leaf), which is what keeps a leaf added to Presentation
+        // covered by the parity guard rather than silently dropped.
+        Presentation out = base;
         for (String flairId : new TreeSet<>(lowercased(unlockedIds))) {
             Map<String, Presentation> moments = flairs.get(flairId);
             if (moments == null) {
                 continue; // unlocked id with no matching effective flair - ignored, never an error
             }
-            Presentation momentPresentation = moments.get(lookupId);
+            Presentation momentPresentation = moments.get(momentId);
             if (momentPresentation == null) {
                 continue;
             }
-            overlaidAny = true;
-            if (momentPresentation.getSounds() != null) {
-                sounds = momentPresentation.getSounds();
-            }
-            if (momentPresentation.getParticles() != null) {
-                particles = momentPresentation.getParticles();
-            }
-            if (momentPresentation.getShake() != null) {
-                shake = momentPresentation.getShake();
-            }
-            if (momentPresentation.getInteraction() != null) {
-                interaction = momentPresentation.getInteraction();
-            }
-            if (momentPresentation.getEffect() != null) {
-                effect = momentPresentation.getEffect();
-            }
-            if (momentPresentation.getDelayMs() != null) {
-                delayMs = momentPresentation.getDelayMs();
-            }
+            out = out == null ? Presentation.overlaid(new Presentation(), momentPresentation)
+                    : Presentation.overlaid(out, momentPresentation);
         }
+        return out;
+    }
 
-        if (!overlaidAny) {
-            return base;
-        }
-        return Presentation.of(sounds, particles, shake, interaction, effect, delayMs);
+    /** Whether {@code id} starts with {@code prefix} under any casing. */
+    private static boolean hasPrefix(@Nonnull String id, @Nonnull String prefix) {
+        return id.regionMatches(true, 0, prefix, 0, prefix.length());
+    }
+
+    @Nonnull
+    private static Set<String> caseInsensitiveSet(@Nonnull String... ids) {
+        Set<String> out = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        Collections.addAll(out, ids);
+        return Collections.unmodifiableSet(out);
     }
 
     /**

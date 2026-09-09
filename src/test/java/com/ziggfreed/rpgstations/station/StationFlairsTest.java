@@ -51,8 +51,9 @@ public class StationFlairsTest {
         FlairUnlockRegistryImpl.getInstance().register(playerId -> flairIds);
     }
 
+    /** One flair's moment map, held the way {@code FlairCatalog} hands it to the fold: case-insensitive, spelling kept. */
     private static Map<String, Presentation> moments(String momentId, Presentation p) {
-        return Map.of(momentId, p);
+        return StationFlairs.caseInsensitiveMomentKeys(Map.of(momentId, p));
     }
 
     /** One undelayed {@code Sounds} entry, the shorthand shape a bare id string decodes to. */
@@ -416,8 +417,10 @@ public class StationFlairsTest {
     // ==================== stepMomentId / isKnownMomentId (open vocabulary, design 9.6) ====================
 
     @Test
-    void stepMomentId_buildsThePrefixedId() {
-        assertEquals("step:enhance:stamp", StationFlairs.stepMomentId("enhance", "stamp"));
+    void stepMomentId_buildsThePrefixedId_keepingBothPartsAsAuthored() {
+        assertEquals("Step:Enhance:Stamp", StationFlairs.stepMomentId("Enhance", "Stamp"));
+        assertEquals("Step:enhance:stamp", StationFlairs.stepMomentId("enhance", "stamp"),
+                "the parts are not re-cased: matching is case-insensitive, so spelling is presentation only");
     }
 
     @Test
@@ -425,7 +428,7 @@ public class StationFlairsTest {
         grant(Set.of("golden_saw"));
         Presentation stampBase = Presentation.ofSound("SFX_Stamp_Base");
         Presentation cycleBase = Presentation.ofSound("SFX_Cycle_Base");
-        String stepId = StationFlairs.stepMomentId("enhance", "stamp");
+        String stepId = StationFlairs.stepMomentId("Enhance", "Stamp");
         Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw",
                 moments(stepId, Presentation.ofSound("SFX_Golden_Stamp")));
 
@@ -437,18 +440,69 @@ public class StationFlairsTest {
     }
 
     @Test
-    void isKnownMomentId_recognizesTheFiveWellKnownIds() {
+    void isKnownMomentId_recognizesEveryWellKnownId_underAnyCasing() {
         assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_CYCLE));
         assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_SWING));
         assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_IMPACT));
         assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_RARE_FIND));
         assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_COMPLETION));
+        assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_READY));
+        assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_OVERDONE));
+        assertTrue(StationFlairs.isKnownMomentId("cycle"), "a lowercase-authored id is still the same id");
+        assertTrue(StationFlairs.isKnownMomentId("RARE_FIND"));
     }
 
     @Test
-    void isKnownMomentId_recognizesAnyStepPrefixedId() {
+    void isKnownMomentId_recognizesAnyStepOrCuePrefixedId_underAnyCasing() {
+        assertTrue(StationFlairs.isKnownMomentId("Step:Enhance:Stamp"));
+        assertTrue(StationFlairs.isKnownMomentId("Step:Some_Future_Action:Some_Future_Step"));
         assertTrue(StationFlairs.isKnownMomentId("step:enhance:stamp"));
-        assertTrue(StationFlairs.isKnownMomentId("step:some_future_action:some_future_step"));
+        assertTrue(StationFlairs.isKnownMomentId(StationFlairs.CUE_MOMENT_PREFIX + "Trophy"));
+        assertTrue(StationFlairs.isKnownMomentId("cue:trophy"));
+        assertTrue(StationFlairs.isStepMomentId("step:mill:chop"));
+        assertFalse(StationFlairs.isStepMomentId("Cue:Trophy"));
+    }
+
+    @Test
+    void wellKnownConstants_areWrittenIsLikeThis() {
+        for (String id : new String[] {StationFlairs.MOMENT_CYCLE, StationFlairs.MOMENT_SWING,
+                StationFlairs.MOMENT_IMPACT, StationFlairs.MOMENT_RARE_FIND, StationFlairs.MOMENT_COMPLETION,
+                StationFlairs.MOMENT_READY, StationFlairs.MOMENT_OVERDONE, StationFlairs.MOMENT_REFUSED,
+                StationFlairs.CUE_MOMENT_PREFIX, StationFlairs.REFUSED_MOMENT_PREFIX,
+                StationFlairs.stepMomentId("Mill", "Chop")}) {
+            assertTrue(id.matches("([A-Z][a-z0-9]*)(_[A-Z][a-z0-9]*)*(:([A-Z][a-z0-9]*)(_[A-Z][a-z0-9]*)*)*:?"),
+                    id + " is not underscore-separated PascalCase");
+        }
+    }
+
+    @Test
+    void aLowercaseAuthoredFlairMoment_resolvesAgainstThePascalCaseId_andKeepsItsSpelling() {
+        grant(Set.of("golden_saw"));
+        Presentation base = Presentation.ofSound("SFX_Base");
+        Map<String, Presentation> authored = moments("cycle", Presentation.ofSound("SFX_Golden_Cycle"));
+        Map<String, Map<String, Presentation>> flairs = Map.of("golden_saw", authored);
+
+        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.MOMENT_CYCLE, PLAYER, STATION_ID);
+
+        assertEquals("SFX_Golden_Cycle", result.getSounds()[0].getEventId(),
+                "matching never depends on casing, so a pack authoring cycle keeps resolving");
+        assertEquals("cycle", authored.keySet().iterator().next(),
+                "and the spelling the author chose is what the map still shows");
+    }
+
+    @Test
+    void caseInsensitiveMomentKeys_dropsBlanksAndNulls_andALaterDuplicateWinsUnderTheFirstSpelling() {
+        Map<String, Presentation> authored = new java.util.LinkedHashMap<>();
+        authored.put("Swing", Presentation.ofSound("SFX_First"));
+        authored.put(" ", Presentation.ofSound("SFX_Blank"));
+        authored.put("Impact", null);
+        authored.put("SWING", Presentation.ofSound("SFX_Later"));
+
+        Map<String, Presentation> out = StationFlairs.caseInsensitiveMomentKeys(authored);
+
+        assertEquals(1, out.size());
+        assertEquals("Swing", out.keySet().iterator().next(), "the first spelling stays");
+        assertEquals("SFX_Later", out.get("swing").getSounds()[0].getEventId(), "the later value wins");
     }
 
     @Test
@@ -456,5 +510,29 @@ public class StationFlairsTest {
         assertFalse(StationFlairs.isKnownMomentId("cycel"));
         assertFalse(StationFlairs.isKnownMomentId(""));
         assertFalse(StationFlairs.isKnownMomentId(null));
+    }
+
+    @Test
+    void isKnownMomentId_recognizesRefusedAndAnyRefusedPrefixedId_whateverTheirCasing() {
+        assertTrue(StationFlairs.isKnownMomentId(StationFlairs.MOMENT_REFUSED));
+        assertTrue(StationFlairs.isKnownMomentId("refused"));
+        assertTrue(StationFlairs.isKnownMomentId("Refused:No_Materials"));
+        assertTrue(StationFlairs.isKnownMomentId("REFUSED:Some_Future_Reason"),
+                "a per-reason id is open, exactly like Step: and Cue:, so a newer reason never trips an older pack");
+        assertFalse(StationFlairs.isKnownMomentId("Refuse"), "the bare typo is still caught");
+    }
+
+    @Test
+    void aFlairOverlaysARefusalMomentLikeAnyOther() {
+        grant(Set.of("gilded"));
+        Presentation base = Presentation.ofSound("SFX_Thunk");
+        Map<String, Map<String, Presentation>> flairs = Map.of("gilded",
+                moments("Refused:No_Materials", Presentation.of(null, "Particles_Gilded_Puff")));
+
+        Presentation result = StationFlairs.effective(base, flairs, StationFlairs.refusedMomentId("No_Materials"),
+                PLAYER, STATION_ID);
+
+        assertEquals("SFX_Thunk", result.getSounds()[0].getEventId(), "the base sound falls through");
+        assertEquals("Particles_Gilded_Puff", result.getParticles()[0].getSystemId());
     }
 }

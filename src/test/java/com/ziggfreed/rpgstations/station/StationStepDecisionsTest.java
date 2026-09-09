@@ -124,8 +124,8 @@ public class StationStepDecisionsTest {
 
     @Test
     void momentId_authoredStepId_isThePerStepId() {
-        assertEquals("step:mill:chop", StationStepDecisions.momentIdForStep("Mill", "Chop", false),
-                "both halves lowercase, so a PascalCase-authored pair composes to one stable id");
+        assertEquals("Step:Mill:Chop", StationStepDecisions.momentIdForStep("Mill", "Chop", false),
+                "both halves keep their authored spelling; the id is matched case-insensitively wherever it is read");
     }
 
     @Test
@@ -138,18 +138,20 @@ public class StationStepDecisionsTest {
     void momentId_implicitProgram_isTheCycleMoment_neverAStepIdNoAuthorWrote() {
         assertEquals(StationFlairs.MOMENT_CYCLE,
                 StationStepDecisions.momentIdForStep("mill", ImplicitProgram.ID_WORK, true),
-                "the implicit convert loop's one synthesized step IS the cycle, so a flair targets it as 'cycle'");
+                "the implicit convert loop's one synthesized step IS the cycle, so a flair targets it as 'Cycle'");
     }
 
     // ==================== The action-authored route into a step's entry cue ====================
 
     @Test
     void actionMoments_driveAStepCueOnlyForAPerStepMomentId() {
-        Map<String, Presentation> moments = Map.of("step:mill:chop", Presentation.ofSound("SFX"));
-        assertTrue(StationStepDecisions.actionAuthorsStepMoment(moments, "step:mill:chop"));
-        assertTrue(StationStepDecisions.actionAuthorsStepMoment(moments, "STEP:MILL:CHOP"),
-                "the lookup lowercases to match the session's canonicalized snapshot");
-        assertFalse(StationStepDecisions.actionAuthorsStepMoment(moments, "step:mill:sand"));
+        // The session's snapshot is held the way ActionResolver builds it: case-insensitive, spelling kept.
+        Map<String, Presentation> moments = StationFlairs.caseInsensitiveMomentKeys(
+                Map.of("step:mill:chop", Presentation.ofSound("SFX")));
+        assertTrue(StationStepDecisions.actionAuthorsStepMoment(moments, "Step:Mill:Chop"),
+                "a lowercase-authored entry answers the engine's own id");
+        assertTrue(StationStepDecisions.actionAuthorsStepMoment(moments, "STEP:MILL:CHOP"));
+        assertFalse(StationStepDecisions.actionAuthorsStepMoment(moments, "Step:Mill:Sand"));
     }
 
     @Test
@@ -162,7 +164,7 @@ public class StationStepDecisionsTest {
 
     @Test
     void actionMoments_absentMap_isNeverARoute() {
-        assertFalse(StationStepDecisions.actionAuthorsStepMoment(null, "step:mill:chop"));
+        assertFalse(StationStepDecisions.actionAuthorsStepMoment(null, "Step:Mill:Chop"));
     }
 
     // ==================== Step-synced puppet clip ====================

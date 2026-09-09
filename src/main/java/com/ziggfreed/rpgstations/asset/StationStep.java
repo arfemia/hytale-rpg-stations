@@ -31,7 +31,7 @@ import com.ziggfreed.common.loot.stamp.StampSpec;
  * Steps} array; required whenever another step or an {@code ExtensionAsset} insertion anchors on
  * it), {@link #conditions} + {@link #onConditionFail} (the gate + its branch/skip result),
  * {@link #at} (an anchor id from the action's {@code Anchors} map; absent = the primary station
- * {@code "self"}), {@link #repeat} (per-step iteration count), {@link #duration} (post-phase hold),
+ * {@code "Self"}), {@link #repeat} (per-step iteration count), {@link #duration} (post-phase hold),
  * {@link #puppet} (per-step clip/prop), {@link #presentation} (a per-iteration-entry cue), and
  * {@link #commands} (a phase - see below).
  *
@@ -81,7 +81,7 @@ public final class StationStep {
             .documentation("What a failing Conditions check does: Skip (no-op continue) or Fail (default); Goto jumps to a step Id.").add()
             .appendInherited(new KeyedCodec<>("At", Codec.STRING, false),
                     (o, v) -> o.at = v, o -> o.at, (o, p) -> o.at = p.at)
-            .documentation("The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'self'.").add()
+            .documentation("The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'Self'. Ids are matched case-insensitively.").add()
             .appendInherited(new KeyedCodec<>("Repeat", Repeat.CODEC, false),
                     (o, v) -> o.repeat = v, o -> o.repeat, (o, p) -> o.repeat = p.repeat)
             .documentation("Per-step iteration count: a fixed Times, or Min/Max/Factors resolved once at step entry.").add()
@@ -149,7 +149,7 @@ public final class StationStep {
         return this;
     }
 
-    /** The anchor id this step runs at (from the action's {@code Anchors} map); null = the primary station {@code "self"}. */
+    /** The anchor id this step runs at (from the action's {@code Anchors} map); null = the primary station {@code "Self"}. */
     @Nullable
     public String getAt() {
         return at;
@@ -520,7 +520,7 @@ public final class StationStep {
 
     /**
      * The Walk phase (design 2.3): move the PUPPET to the anchor {@link #to}
-     * (an id from the action's {@code Anchors} map, or the reserved {@code "self"}) at
+     * (an id from the action's {@code Anchors} map, or the reserved {@code "Self"}) at
      * {@link #speedMps}. Requires the action's {@code Puppet} enabled (validator {@code
      * WALK_REQUIRES_PUPPET}).
      */
@@ -534,7 +534,7 @@ public final class StationStep {
         public static final BuilderCodec<Walk> CODEC = BuilderCodec.builder(Walk.class, Walk::new)
                 .appendInherited(new KeyedCodec<>("To", Codec.STRING, false),
                         (o, v) -> o.to = v, o -> o.to, (o, p) -> o.to = p.to)
-                .documentation("The anchor id to walk the puppet to (or the reserved 'self' = the primary station).").add()
+                .documentation("The anchor id to walk the puppet to (or the reserved 'Self' = the primary station). Ids are matched case-insensitively.").add()
                 .appendInherited(new KeyedCodec<>("SpeedMps", Codec.DOUBLE, false),
                         (o, v) -> o.speedMps = v, o -> o.speedMps, (o, p) -> o.speedMps = p.speedMps)
                 .documentation("Straight-line walk speed in meters per second (reader-defaults to 2.5).")

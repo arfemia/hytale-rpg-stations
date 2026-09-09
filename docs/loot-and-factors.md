@@ -31,9 +31,9 @@ those two numbers in separate groups is deliberate, so neither can silently mult
                                { "Factor": "hytale:stat", "Param": "YourMod_Luck_Woods" } ],
                  "Floors": [ { "Min": 50,  "Grants": { "DropLists": ["SawmillFinds_T1"] } },
                              { "Min": 100, "Grants": { "DropLists": ["SawmillFinds_T2"] },
-                               "Cue": "rare_find" } ] },
+                               "Cue": "Rare_Find" } ] },
   "Grants":    { "Rewards": [ { "Kind": "rpgstations:output_items", "Params": { "Count": "1.5" } } ] },
-  "Cue": "cue:trophy"
+  "Cue": "Cue:Trophy"
 }
 ```
 
@@ -55,7 +55,7 @@ the `rpgstations:output_items` reward is fractional: `1.5` hands over one item e
   several.
 - `Grants` - the reward vocabulary, below. Top-level `Grants` AND the reached floor's own `Grants` both
   apply when a Ladder is present.
-- `Cue` - a MOMENT ID the station plays at the block. The loot table names the moment; the action's own `Moments` map decides what it sounds like, and a flair overlays that. Well-known ids, a per-step `step:<actionId>:<stepId>`, and the open author-defined `cue:<yourName>` namespace all resolve. Played on the rare-find moment
+- `Cue` - a MOMENT ID the station plays at the block. The loot table names the moment; the action's own `Moments` map decides what it sounds like, and a flair overlays that. Well-known ids, a per-step `Step:<ActionId>:<StepId>`, and the open author-defined `Cue:<Your_Name>` namespace all resolve. Played on the rare-find moment
   when the roll HITS. A Ladder floor carries the same leaf for its own tier, so a tiered find
   celebrates per tier and a plain chance roll celebrates on the win with no Ladder involved.
 

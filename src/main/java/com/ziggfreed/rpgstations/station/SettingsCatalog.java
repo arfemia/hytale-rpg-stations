@@ -4,7 +4,9 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
+import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.util.Log;
 
@@ -20,6 +22,14 @@ public final class SettingsCatalog {
     private static final SettingsCatalog INSTANCE = new SettingsCatalog();
 
     private final AtomicReference<RpgStationsSettingsAsset> current = new AtomicReference<>(RpgStationsSettingsAsset.defaults());
+
+    /**
+     * The live settings' {@code Moments} map rebuilt ONCE per fold as a case-insensitive map with
+     * its authored spelling kept (blanks dropped - {@link StationFlairs#caseInsensitiveMomentKeys},
+     * the same shape an action's map is held in), so every emission reads it with one plain
+     * lookup. Never null: empty when nothing is authored.
+     */
+    private final AtomicReference<Map<String, Presentation>> defaultMoments = new AtomicReference<>(Map.of());
 
     private SettingsCatalog() {
     }
@@ -39,10 +49,34 @@ public final class SettingsCatalog {
         RpgStationsSettingsAsset settings = layer.get(RpgStationsSettingsAsset.ID);
         if (settings != null) {
             current.set(settings);
+            defaultMoments.set(canonicalMoments(settings));
             warnRetiredLeaves(settings);
         } else if (replace) {
             current.set(RpgStationsSettingsAsset.defaults());
+            defaultMoments.set(Map.of());
         }
+    }
+
+    @Nonnull
+    private static Map<String, Presentation> canonicalMoments(@Nonnull RpgStationsSettingsAsset settings) {
+        Map<String, Presentation> authored = settings.getMoments();
+        return authored == null || authored.isEmpty() ? Map.of() : StationFlairs.caseInsensitiveMomentKeys(authored);
+    }
+
+    /**
+     * The engine-wide default cue for {@code momentId} (matched case-insensitively), or null when
+     * the settings author none - the layer that sits UNDER an action's own entry for the same id,
+     * per leaf. Read live, never cached by a caller, so a settings reload lands on the next moment.
+     */
+    @Nullable
+    public Presentation defaultMoment(@Nonnull String momentId) {
+        return defaultMoments.get().get(momentId);
+    }
+
+    /** The whole engine-wide default cue map, case-insensitive with its authored spelling kept; empty (never null) when none is authored. */
+    @Nonnull
+    public Map<String, Presentation> defaultMoments() {
+        return defaultMoments.get();
     }
 
     /**

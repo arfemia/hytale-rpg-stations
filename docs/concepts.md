@@ -75,6 +75,16 @@ extensions, and settings. There is no separate config-file layer; adding or chan
 or editing an asset, and a server owner or pack author gets the exact same authoring surface RPG
 Stations itself ships its default content through.
 
+## Ids are written `Is_Like_This`
+
+Every id RPG Stations mints or accepts - a moment id (`Cycle`, `Rare_Find`, `Refused:No_Materials`,
+`Step:Mill:Chop`, `Cue:Trophy`), an action id (`Mill`, `Grill`), the reserved anchor `Self`, a
+pattern's `Activated` - is underscore-separated PascalCase, the shape Hytale's own ids take
+(`SFX_Generic_Crafting_Failed`, `Food_Fish_Raw`). Matching is case-insensitive everywhere, so content
+authored in another casing keeps resolving and nothing rewrites it; the convention is carried by what
+the jar ships and what the schema documents, never by a validator refusal. Lang keys, permission
+nodes, command names and JSON field names are not ids and follow their own conventions.
+
 ---
 
 Previous: [Getting Started](getting-started.md) · Next: [Your First Station](your-first-station.md)

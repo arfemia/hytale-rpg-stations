@@ -48,6 +48,14 @@ class StationEventsTest {
     }
 
     @Test
+    void fireRefused_noListener_neverThrows() {
+        assertDoesNotThrow(() -> StationEvents.fireRefused(null, null, PLAYER_ID, SESSION_ID,
+                0, 64, 0, "sawmill", "Mill", "No_Materials"));
+        assertDoesNotThrow(() -> StationEvents.fireRefused(null, null, PLAYER_ID, SESSION_ID,
+                0, 64, 0, "sawmill", null, "Locked"), "a refusal before any action resolved carries none");
+    }
+
+    @Test
     void fireOutputProduced_noListener_neverThrows() {
         assertDoesNotThrow(() -> StationEvents.fireOutputProduced(null, null, null, PLAYER_ID,
                 SESSION_ID, 0, 64, 0, "cookingpit", "Stew", "output", List.of()));

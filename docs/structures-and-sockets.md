@@ -28,7 +28,7 @@ Breaking any block of the standing shape swaps the anchor back and drops anythin
     { "Offset": { "X": 0, "Y": 0, "Z": -1 }, "Block": { "ResourceTypeId": "Rock" } },
     { "Offset": { "X": 0, "Y": 1, "Z": 0 }, "Empty": true }
   ],
-  "Moments": { "activated": { "Sounds": ["SFX_Flame_Ignite"] } }
+  "Moments": { "Activated": { "Sounds": ["SFX_Flame_Ignite"] } }
 }
 ```
 
@@ -93,8 +93,15 @@ On the placement that completes the shape:
    evaluates.
 3. The anchor swaps to `Activate.Block` (skipped when the id already matches), keeping the rotation
    the anchor block was placed with.
-4. The `activated` moment plays at the anchor (sounds, particles, a shake for the placer - the
+4. The `Activated` moment plays at the anchor (sounds, particles, a shake for the placer - the
    standard `Presentation` shape; cues play at once, a `DelayMs` here reads as zero).
+
+A completion the pattern turns away - a spot already claimed by another pattern, or a `Requires`
+gate the placer fails - answers like any refused station press: the notice, the `Refused` cue and
+the native refusal event, throttled per player, anchor and reason (see
+[Settings](settings.md#refusals)). The pattern's own `Moments` map is the nearest cue layer
+(`Refused:Structure_Conflict`, `Refused:Pattern_Requirements_Unmet`, or a bare `Refused`), over the
+settings' engine-wide default; a pattern's refusal takes no flair overlay, like its other moments.
 
 ## Build order, and what survives a restart
 
@@ -115,7 +122,7 @@ anchor. When the shape no longer holds:
   their own placed materials hand back to them like any present-player stop).
 - Whatever else the station still stored drops at the block once, exactly like breaking a station
   block directly.
-- The `broken` moment plays at the anchor.
+- The `Broken` moment plays at the anchor.
 - The anchor swaps back to `Activate.RevertBlock`, again keeping its rotation.
 
 Breaking the ANCHOR block itself skips the swap-back (the block is gone); the stored materials

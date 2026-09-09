@@ -169,7 +169,7 @@ authored `Overdone` items.
 
 Two `Custody.States` leaves and two `Moments` ids pair with the window: `States.Ready` /
 `States.Overdone` (see [Custody & the placed display](custody-and-placed-display.md)) and the
-`ready` / `overdone` moment ids, authorable in the action's `Moments` map (and overlayable by
+`Ready` / `Overdone` moment ids, authorable in the action's `Moments` map (and overlayable by
 flairs) like any other cue.
 
 ## The step record

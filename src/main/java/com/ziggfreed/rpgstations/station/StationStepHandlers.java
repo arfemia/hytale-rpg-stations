@@ -365,11 +365,11 @@ final class StationStepHandlers {
 
     /**
      * The per-step moment id ({@link StationStepDecisions#momentIdForStep}): {@code
-     * step:<actionId>:<stepId>} when the step authors an Id, else {@link StationFlairs#MOMENT_CYCLE}.
+     * Step:<ActionId>:<StepId>} when the step authors an Id, else {@link StationFlairs#MOMENT_CYCLE}.
      *
      * <p>An action that authors NO {@code Steps} runs the engine's implicit convert loop, whose one
-     * synthesized step is the cycle itself - so its cue plays under the plain {@code cycle} moment,
-     * the id the docs name and a flair targets, rather than under a {@code step:} id derived from an
+     * synthesized step is the cycle itself - so its cue plays under the plain {@code Cycle} moment,
+     * the id the docs name and a flair targets, rather than under a {@code Step:} id derived from an
      * engine-internal name no author ever wrote.
      */
     @Nonnull
