@@ -80,7 +80,6 @@ import com.ziggfreed.common.entity.HeldItemUtil;
 import com.ziggfreed.common.entity.PuppetNav;
 import com.ziggfreed.common.entity.performer.PerformerReconciler;
 import com.ziggfreed.common.factor.FactorCondition;
-import com.ziggfreed.common.feedback.Notify;
 import com.ziggfreed.common.feedback.PickupMimic;
 import com.ziggfreed.common.i18n.Msg;
 import com.ziggfreed.common.i18n.NativeNames;
@@ -90,6 +89,8 @@ import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.sound.Sound3D;
+import com.ziggfreed.common.ui.hud.bar.HudBarDisplay;
+import com.ziggfreed.common.ui.hud.bar.HudBarReading;
 import com.ziggfreed.common.ui.hud.bar.HudBars;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.common.util.NumberFormatter;
@@ -159,6 +160,9 @@ public final class StationService {
 
     /** Round-5 refinement 3: the "lucky grant" notification color (distinct from {@link #toast}'s plain YELLOW). */
     private static final Color GOLD = new Color(0xFFD700);
+
+    /** The session-progress row's place in the shared HUD's left panel: near the top, while a session is live. */
+    private static final int SESSION_ROW_ORDER = 0;
 
     /**
      * D-6: the enhance summary accent (design section 9.5, phase 2 round-7). The engine's OWN
@@ -800,6 +804,15 @@ public final class StationService {
         // The Required BLOCK sockets the heartbeat re-verifies (snapshotted, like every other
         // resolved config value). Empty for every socket-less action.
         s.requiredBlockSockets = requiredBlockSocketsOf(custodySockets);
+        // The session-progress HUD row's fixed denominator: how many more cycles the resolved
+        // conversion's pile could feed right now, read the SAME way the viability check just did
+        // (custody or live inventory). Zero for a Steps-authored action or an idle start
+        // (check.inputs is null either way), which the row's fill then reads as full throughout.
+        s.feedableCyclesAtStart = check.inputs != null
+                ? (custody != null
+                        ? feedableCyclesFromCustody(check.inputs, preClaim, custodySockets)
+                        : feedableCyclesFromInventory(check.inputs, PlayerAccess.combinedBackpackStorageHotbar(player)))
+                : 0;
         StationAsset.Identity identity = asset.getIdentity();
         String authoredIcon = identity != null ? identity.getIcon() : null;
         s.stationIconItemId = authoredIcon != null && !authoredIcon.isBlank()
@@ -979,6 +992,8 @@ public final class StationService {
         // Whoever presses in for another run is working, not reading the last run's totals: a panel
         // held for them here gets its timed lifetime back and fades while this session runs.
         releaseHeldSummary(playerUuid, world);
+        // The session-progress row, seeded before the first cycle ever lands.
+        seedSessionRow(s);
 
         // Actively-working block state (Custody.States.Working) for the CLASSIC convert loop: an
         // implicit-program session has no authored step to light its block on entry, and its first
@@ -1071,9 +1086,19 @@ public final class StationService {
                     // passes (never re-derived here, matching the kernel's resume contract). The
                     // phase-1 implicit program has no Wait step, so this branch is unreached by
                     // the shipped sawmill; it exists for a future authored Wait-bearing program.
-                    if (now >= s.stepDeadlineMs && !resumeCycleProgram(s, store, commandBuffer)) {
-                        it.remove();
-                        continue;
+                    if (now >= s.stepDeadlineMs) {
+                        int before = s.cyclesDone;
+                        boolean resumed = resumeCycleProgram(s, store, commandBuffer);
+                        if (s.cyclesDone > before) {
+                            // Only an authored Steps program ever suspends (the implicit program
+                            // never does), so feedableCyclesAtStart is 0 here too - full throughout,
+                            // same as the fresh-dispatch authored-program path.
+                            notifySessionCycle(s, s.feedableCyclesAtStart);
+                        }
+                        if (!resumed) {
+                            it.remove();
+                            continue;
+                        }
                     }
                 } else if (now >= s.nextCycleAtMs) {
                     s.nextCycleAtMs = now + s.cycleMs;
@@ -1212,16 +1237,24 @@ public final class StationService {
 
         ActionResolver.ResolvedAction action = ActionResolver.resolve(asset, s.actionId);
         if (action.getSteps() != null && action.getSteps().length > 0) {
-            return runAuthoredProgram(s, store, commandBuffer, asset, action, player);
+            int before = s.cyclesDone;
+            boolean ran = runAuthoredProgram(s, store, commandBuffer, asset, action, player);
+            if (s.cyclesDone > before) {
+                // An authored Steps program has no resolved Convert conversion to read a pile
+                // against, so the row's fill has nothing to divide - feedableCyclesAtStart is 0
+                // for this session (see the engage-time snapshot), which reads full throughout.
+                notifySessionCycle(s, s.feedableCyclesAtStart);
+            }
+            return ran;
         }
 
         Custody custody = action.getCustody();
+        StationCustodyClaim claim = custody != null
+                ? custodyClaimAt(sessionWorld(s), s.blockX, s.blockY, s.blockZ) : null;
         // The SAME conversion selection the engage check ran, re-resolved every cycle because
         // materials run out mid-session and the session's chosen output category still narrows the
         // recipe's derived conversions.
-        ConversionCheck check = selectConversion(asset, action, player,
-                custody != null ? custodyClaimAt(sessionWorld(s), s.blockX, s.blockY, s.blockZ) : null,
-                custody != null, s.chosenOutputCategory);
+        ConversionCheck check = selectConversion(asset, action, player, claim, custody != null, s.chosenOutputCategory);
         if (check.state == ConversionState.RUNNABLE) {
             if (s.idleMode) {
                 s.idleMode = false;
@@ -1238,7 +1271,19 @@ public final class StationService {
             if (check.durationMs > 0) {
                 s.nextCycleAtMs = System.currentTimeMillis() + check.durationMs;
             }
-            return runRealCycle(s, store, commandBuffer, asset, action, player, check);
+            int before = s.cyclesDone;
+            boolean ran = runRealCycle(s, store, commandBuffer, asset, action, player, check);
+            if (s.cyclesDone > before) {
+                // Read AFTER the cycle committed its consume, so the pile this reports is what is
+                // actually left - the SAME claim/inventory the cycle just drained, through the
+                // SAME per-ingredient matcher firstRunnableConversion(FromCustody) resolved
+                // availability with.
+                int remaining = custody != null
+                        ? feedableCyclesFromCustody(check.inputs, claim, custody.effectiveSockets())
+                        : feedableCyclesFromInventory(check.inputs, PlayerAccess.combinedBackpackStorageHotbar(player));
+                notifySessionCycle(s, remaining);
+            }
+            return ran;
         } else if (check.state == ConversionState.NO_INPUTS && s.idleEnabled) {
             if (!s.idleMode) {
                 s.idleMode = true;
@@ -1248,7 +1293,14 @@ public final class StationService {
                 exitWorkingState(s);
             }
             s.nextCycleAtMs = System.currentTimeMillis() + s.idleCycleMs;
-            return runIdleCycle(s, store, commandBuffer, action, player);
+            int before = s.cyclesDone;
+            boolean ran = runIdleCycle(s, store, commandBuffer, action, player);
+            if (s.cyclesDone > before) {
+                // Idle practice converts nothing, so there is no pile to read either - same full
+                // reading as the authored-program branch above.
+                notifySessionCycle(s, s.feedableCyclesAtStart);
+            }
+            return ran;
         } else if (check.state == ConversionState.NO_INPUTS) {
             stop(s, StopReason.OUT_OF_INPUTS, store, commandBuffer);
             return false;
@@ -4353,6 +4405,60 @@ public final class StationService {
         }
         return new ConversionCheck(
                 sawInputWithoutRoom ? ConversionState.NO_ROOM : ConversionState.NO_INPUTS);
+    }
+
+    /**
+     * How many more cycles {@code inputs} can feed, reading availability through
+     * {@code availableFor}: the minimum, over every input, of what is on hand divided by what one
+     * cycle needs. {@code availableFor} already answers a route-less MATCH-ANY input correctly for
+     * whichever pile it reads (the whole pile on the custody route, since {@link
+     * #firstRunnableConversionFromCustody} counts one there too; never called for one on the
+     * inventory route, since {@link #firstRunnableConversion} never selects such a conversion as
+     * RUNNABLE in the first place), so this fold does not special-case it. {@code null}/empty
+     * inputs, or an input set with nothing countable (every need {@code <= 0}), answer 0.
+     *
+     * <p>The pure fold behind the session-progress HUD row's fill ({@code
+     * StationSession#feedableCyclesAtStart}, {@code notifySessionCycle}): {@code
+     * feedableCyclesFromInventory}/{@code feedableCyclesFromCustody} below feed it the SAME
+     * per-ingredient matcher ({@link #liveIngredientMatcher}, wrapping {@link
+     * StationCustody#ingredientEntryMatcher}) {@link #firstRunnableConversion}/
+     * {@link #firstRunnableConversionFromCustody} resolve availability with, so a count and a
+     * runnability check never disagree on what qualifies.
+     */
+    private static int feedableCycles(@Nullable Ingredient[] inputs,
+            @Nonnull java.util.function.ToIntFunction<Ingredient> availableFor) {
+        if (inputs == null || inputs.length == 0) {
+            return 0;
+        }
+        int min = Integer.MAX_VALUE;
+        boolean any = false;
+        for (Ingredient in : inputs) {
+            if (in == null) {
+                continue;
+            }
+            int need = in.effectiveQuantity();
+            if (need <= 0) {
+                continue;
+            }
+            min = Math.min(min, availableFor.applyAsInt(in) / need);
+            any = true;
+        }
+        return any ? Math.max(0, min) : 0;
+    }
+
+    /** {@link #feedableCycles} against the player's live combined inventory - {@link #firstRunnableConversion}'s own pile. */
+    private static int feedableCyclesFromInventory(@Nullable Ingredient[] inputs, @Nullable ItemContainer combined) {
+        return feedableCycles(inputs, in -> InventoryIngredients.countMatching(combined, liveIngredientMatcher(in)));
+    }
+
+    /** {@link #feedableCycles} against a placed-input claim's socket piles - {@link #firstRunnableConversionFromCustody}'s own pile. */
+    private static int feedableCyclesFromCustody(@Nullable Ingredient[] inputs, @Nullable StationCustodyClaim claim,
+            @Nonnull List<Custody.ResolvedSocket> sockets) {
+        return feedableCycles(inputs, in -> {
+            String socketId = StationCustody.socketIdFor(in.getSocket(), null, sockets);
+            return StationCustody.availableInPile(claim != null ? claim.items(socketId) : null,
+                    liveIngredientMatcher(in));
+        });
     }
 
     // ==================== Placed-input custody (chunk-persisted stash) ====================
@@ -7653,27 +7759,75 @@ public final class StationService {
     }
 
     /**
-     * A lucky find is the one output notice that stays on the feed: it is rare, and the words that
-     * make it worth pointing out (the nine-locale {@code ui.station.summary.lucky} suffix, the same
+     * A working player's own reading of the run: one row per session, on the same shared left
+     * panel, moved by ONE cycle every time this station's action completes one - idle-practice
+     * and authored-Steps-program cycles included, since {@link StationSession#cyclesDone} counts
+     * every one of them the same way. The row id is the station's own id (this mod's vocabulary,
+     * not the library's), the label its localized name ({@link #stationNameMsg}), and the fill is
+     * how many more cycles the resolved conversion's pile can still feed out of how many it could
+     * feed the moment this session engaged ({@link StationSession#feedableCyclesAtStart}) - full
+     * at engage, draining as the pile runs down, and back up when someone tops the station off
+     * mid-run, since the denominator never moves. A session with no resolved conversion to read a
+     * pile from (idle practice, or a Steps program) has {@code feedableCyclesAtStart} 0, which a
+     * {@link HudBarReading} with a non-positive maximum always reads as full, so only the cycle
+     * count moves for it. No bar-end captions - a cycle count has no natural scale words. Never
+     * throws.
+     */
+    static void notifySessionCycle(@Nonnull StationSession s, int remainingCycles) {
+        moveSessionRow(s, 1, remainingCycles);
+    }
+
+    /**
+     * Seeds the session-progress row at engage, before any cycle has completed: the same row
+     * {@link #notifySessionCycle} moves, at zero gain, reading full-out-of-full so the player sees
+     * their run's row the instant they start rather than only after the first cycle lands.
+     */
+    static void seedSessionRow(@Nonnull StationSession s) {
+        moveSessionRow(s, 0, s.feedableCyclesAtStart);
+    }
+
+    /** The one {@code HudBars#moved} call {@link #notifySessionCycle}/{@link #seedSessionRow} share. Never throws. */
+    private static void moveSessionRow(@Nonnull StationSession s, double delta, int remainingCycles) {
+        try {
+            StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
+            if (asset == null) {
+                return;
+            }
+            HudBars.moved(s.playerRef, s.stationId, delta,
+                    new HudBarReading(remainingCycles, s.feedableCyclesAtStart),
+                    HudBarDisplay.of(stationNameMsg(asset), null, null, SESSION_ROW_ORDER));
+        } catch (Throwable t) {
+            Log.fine("STATION session-progress row failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * A lucky find gets its OWN gold row per item, alongside the ordinary running-count row
+     * {@link #notifyItemGain} keeps for the same item: it is rare, and the words that make it
+     * worth pointing out (the nine-locale {@code ui.station.summary.lucky} suffix, the same
      * {@code Msg.cat} composition {@link #ledgerRows} builds for the end-of-session ledger row,
-     * the whole line {@link #GOLD}) have no home on a HUD row that names the item and nothing
-     * else. Routed through {@code feedback.Notify#itemKeyed} with its own tag so a second find of
-     * the same item grows this line rather than opening another. Never throws.
+     * the whole line {@link #GOLD}) have no home on a row that names the item and nothing else.
+     * Routed through {@code ziggfreed-common}'s caller-named {@code HudBars#itemMoved} on
+     * {@link #luckyFindRowId} - this mod's own row, never the library's {@code item:} one - so the
+     * row still pictures and names the item like any other; only the label says more. No longer
+     * reaches the notification feed: four lucky finds queuing at once used to hold the front of
+     * that feed, which drains strictly oldest first. Never throws.
      */
     static void notifyLuckyFind(@Nonnull PlayerRef playerRef, @Nonnull String itemId, int quantity) {
         try {
             Message line = Msg.cat(RpgMsg.tr("ui.station.gain.produced", itemNameMsg(itemId), quantity),
                     Msg.raw(" "), RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
-            Notify.itemKeyed(playerRef, line, null, itemId, quantity, luckyTag(itemId));
+            HudBars.itemMoved(playerRef, luckyFindRowId(itemId), itemId, quantity,
+                    new HudBarDisplay(line, null, null, null, null, null, null));
         } catch (Throwable t) {
-            Log.fine("STATION lucky-find notify failed: " + t.getMessage());
+            Log.fine("STATION lucky-find row failed: " + t.getMessage());
         }
     }
 
-    /** What a lucky-find notice is filed under, so a second find of one item grows the same gold line. */
+    /** The row a lucky find of {@code itemId} moves: this mod's own vocabulary, never the library's {@code item:} row. */
     @Nonnull
-    private static String luckyTag(@Nonnull String itemId) {
-        return "rpgstations:gain|" + itemId + "|lucky";
+    private static String luckyFindRowId(@Nonnull String itemId) {
+        return "rpgstations:lucky_find:" + itemId;
     }
 
     /**

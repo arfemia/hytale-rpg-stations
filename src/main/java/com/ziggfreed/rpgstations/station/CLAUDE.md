@@ -539,10 +539,21 @@ Ordinary output NEVER touches the notification feed: `notifyItemGain` is ziggfre
 id alone, a running total since the row came up, fading after the last gain, nothing authored), and
 a press-F retrieve counts what landed the same way and keeps only the native pickup SFX at the block
 (`notifyRetrieved`, `PickupMimic.playPickupSfx`). The feed drains strictly oldest first and merging
-refreshes an entry in place, so a notice landing every cycle pinned the whole feed; only a LUCKY find
-still gets a feed line (`notifyLuckyFind`, gold, its own `luckyTag` so a second find grows the same
-line), because it is rare and its words have no home on a row. One-off notices (a denial, a seat
-unavailable, inventory full, the retrieve-when-everything-dropped toast) stay on the feed. An
+refreshes an entry in place, so a notice landing every cycle pinned the whole feed. **NO station
+output reaches the feed at all, a lucky find included**: `notifyLuckyFind` moves its own gold row
+(`HudBars.itemMoved` in the caller-named form, row id `luckyFindRowId` = `rpgstations:lucky_find:<ItemId>`,
+this mod's own vocabulary rather than the library's `item:` prefix), so a rare find is counted apart
+from that item's ordinary running total and still says `ui.station.summary.lucky` in gold. **The
+session itself moves a row too** (`seedSessionRow`/`moveSessionRow`, row id the bare `stationId`,
+label `stationNameMsg`, `SESSION_ROW_ORDER` 0 so it sorts above everything): its gain is cycles done
+and its fill is feedable cycles REMAINING over `StationSession.feedableCyclesAtStart`, so the bar
+drains as the pile runs down and climbs back when someone tops the station up. `feedableCycles`
+counts through the same matchers `firstRunnableConversion`/`firstRunnableConversionFromCustody`
+already build, never a second matching rule, and every one of the four places `cyclesDone` can
+increment pushes it behind a before/after compare (a suspended `Steps` program's `dispatchProgram`
+returns true for both "suspended" and "a cycle landed", so the boolean alone cannot tell them
+apart). One-off notices (a denial, a seat unavailable, inventory full, the
+retrieve-when-everything-dropped toast) stay on the feed. An
 authored `Steps` program has no single "cycle output" for
 `OutputItems` to add to (`s.cycleOutputItemId` stays null, and `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT`
 warns on an action authoring `OutputItems` there - on its own `Bonus` or on a step's `Roll` phase
