@@ -33,6 +33,36 @@ there is no prior public release to diff against, so every entry is additive by 
   case-insensitive map that keeps the authored spelling; no validator refuses a lowercase id), so
   older-authored content keeps resolving unchanged. `SCHEMA.md`, the guides and the routers carry
   the convention.
+- **What a mill makes is counted on the shared HUD panel, not shouted down the feed.** The corner
+  feed drains strictly oldest first and stops at the first entry that has not expired, and an item
+  notice merges into a matching entry and refreshes it where it stands, so a station reporting its
+  output every cycle held the front of the feed for the whole run. Every ordinary output (produced
+  stacks, bonus units, stacks taken out with press-F) goes to Ziggfreed Common's progress-bar panel
+  instead, one row per item with its own icon, name and a number climbing beside it, nothing
+  authored for any of it (`HudBars.itemMoved`). A retrieve keeps its pickup sound at the block.
+- **A lucky find gets its own gold row, and the run gets a bar of its own.** A find is rare enough
+  to be worth pointing out and too frequent to hold the feed, so it takes a gold row per item on
+  the panel, apart from that item's ordinary running total. The session itself has a bar: its gain
+  is the cycles behind the worker and its fill is the cycles the pile in front of them can still
+  feed, out of what it could feed when the run began, so it drains as the materials run down and
+  climbs back when someone tops the station up. The engine only ever asked whether a conversion
+  could run at all, never how many more times, so that count is a new read through the matchers
+  the question already builds; a cycle can land in four places and a suspended program's dispatch
+  answers the same for "a cycle landed" and "still waiting", so each compares the count either side
+  of the call rather than trusting the boolean.
+- **A run's rows are its ledger, and stepping away ends it sooner.** Every row a session puts up is
+  HELD for the whole run and they go away together when it stops, from the one funnel every stop
+  path reaches, silent and abnormal ones included; nothing fades out from under a total still being
+  added to. The numbers come from the maps the end-of-session summary already reads, so the bar and
+  the summary cannot disagree, and the session row states the cycles behind the worker as a total
+  worded by its own key (a count of cycles is not a gain). An unattended gather and a press-F
+  retrieve stay plain gains that fade on their own, having no live run to fold into. The walk-off
+  distance drops to half a block, since it is now also what takes the run's ledger off the screen;
+  the Sawmill stops pinning its own and takes the default.
+- **The Sawmill's placed logs sit on the bench instead of sunk into it.** The pile drew at
+  `Offset.Y` -0.1 and 0.46 scale, half inside the bench top, and read as a token rather than a
+  load; it sits at 0.15 and 0.75, clear of the surface at just over half a real block, and the
+  comment says which way each knob moves the pile.
 - **A run that finishes on its own holds its summary panel until the worker walks away.** A station
   that works through a stack of logs finishes whenever it finishes, often minutes after whoever
   started it stopped watching, so a panel on a six-second timer would be gone before they read it.
