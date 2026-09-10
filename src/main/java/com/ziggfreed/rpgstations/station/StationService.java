@@ -89,9 +89,9 @@ import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.sound.Sound3D;
-import com.ziggfreed.common.ui.hud.bar.HudBarDisplay;
-import com.ziggfreed.common.ui.hud.bar.HudBarReading;
-import com.ziggfreed.common.ui.hud.bar.HudBars;
+import com.ziggfreed.common.ui.hud.panel.HudRowDisplay;
+import com.ziggfreed.common.ui.hud.panel.HudBarReading;
+import com.ziggfreed.common.ui.hud.panel.HudPanels;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.common.util.NumberFormatter;
 import com.ziggfreed.common.world.BlockOps;
@@ -7773,7 +7773,7 @@ public final class StationService {
     /**
      * Ordinary output landed OUTSIDE a live session (an unattended gather's replayed roll pass, a
      * press-F custody retrieve): count it on the shared HUD's row for that item ({@code
-     * ziggfreed-common}'s {@code ui.hud.bar.HudBars#itemMoved}). The row is the library's and needs
+     * ziggfreed-common}'s {@code ui.hud.panel.HudPanels#itemMoved}). The row is the library's and needs
      * nothing from this mod: it names and pictures the item from the id alone, keeps a running total
      * since it came up, and fades a few seconds after the last gain, since there is no session
      * ledger here for it to belong to. Nothing here reaches the notification feed, because a notice
@@ -7784,7 +7784,7 @@ public final class StationService {
      */
     static void notifyItemGain(@Nonnull PlayerRef playerRef, @Nonnull String itemId, int quantity) {
         try {
-            HudBars.itemMoved(playerRef, itemId, quantity);
+            HudPanels.itemMoved(playerRef, itemId, quantity);
         } catch (Throwable t) {
             Log.fine("STATION item-gain row failed: " + t.getMessage());
         }
@@ -7795,7 +7795,7 @@ public final class StationService {
      * total for it ({@code s.producedItems}, already merged by the caller BEFORE this is called) -
      * decision (2026-09-09): the row and the end-of-session ledger ({@link #ledgerRows}) must read
      * the same number off the same tracked total, never a second accumulation of the library's own.
-     * Held ({@link HudBarDisplay#held()}) so the row survives the whole run rather than fading
+     * Held ({@link HudRowDisplay#held()}) so the row survives the whole run rather than fading
      * mid-session and taking its total with it; {@link #stop} fades every row this run put up,
      * together, once the run ends. Called from {@link #applyGrantResult} (via {@link
      * #grantBonusOutputItems}) and {@code StationStepHandlers.ProduceHandler} (same package). Never
@@ -7807,7 +7807,7 @@ public final class StationService {
         }
         try {
             int total = s.producedItems.getOrDefault(itemId, 0);
-            HudBars.itemTotalled(s.playerRef, HudBars.itemRowId(itemId), itemId, total, HudBarDisplay.NONE.held());
+            HudPanels.itemTotalled(s.playerRef, HudPanels.itemRowId(itemId), itemId, total, HudRowDisplay.NONE.held());
         } catch (Throwable t) {
             Log.fine("STATION item-gain row failed: " + t.getMessage());
         }
@@ -7846,16 +7846,16 @@ public final class StationService {
         moveSessionRow(s, s.feedableCyclesAtStart);
     }
 
-    /** The one {@code HudBars#totalled} call {@link #notifySessionCycle}/{@link #seedSessionRow} share. Never throws. */
+    /** The one {@code HudPanels#totalled} call {@link #notifySessionCycle}/{@link #seedSessionRow} share. Never throws. */
     private static void moveSessionRow(@Nonnull StationSession s, int remainingCycles) {
         try {
             StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
             if (asset == null) {
                 return;
             }
-            HudBars.totalled(s.playerRef, s.stationId, s.cyclesDone,
+            HudPanels.totalled(s.playerRef, s.stationId, s.cyclesDone,
                     new HudBarReading(remainingCycles, s.feedableCyclesAtStart),
-                    HudBarDisplay.of(stationNameMsg(asset), null, null, SESSION_ROW_ORDER)
+                    HudRowDisplay.of(stationNameMsg(asset), null, null, SESSION_ROW_ORDER)
                             .counting(SESSION_CYCLES_KEY)
                             .held());
         } catch (Throwable t) {
@@ -7870,7 +7870,7 @@ public final class StationService {
      * {@code ui.station.summary.lucky} suffix, the same {@code Msg.cat} composition {@link
      * #ledgerRows} builds for the end-of-session ledger row, the whole line {@link #GOLD}) have no
      * home on a row that names the item and nothing else. Routed through {@code ziggfreed-common}'s
-     * caller-named {@code HudBars#itemMoved} on {@link #luckyFindRowId} - this mod's own row, never
+     * caller-named {@code HudPanels#itemMoved} on {@link #luckyFindRowId} - this mod's own row, never
      * the library's {@code item:} one - so the row still pictures and names the item like any other;
      * only the label says more. Called from {@link #applyGatherGrantResult}. Never throws.
      */
@@ -7878,8 +7878,8 @@ public final class StationService {
         try {
             Message line = Msg.cat(RpgMsg.tr("ui.station.gain.produced", itemNameMsg(itemId), quantity),
                     Msg.raw(" "), RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
-            HudBars.itemMoved(playerRef, luckyFindRowId(itemId), itemId, quantity,
-                    new HudBarDisplay(line, null, null, null, null, null, null, null));
+            HudPanels.itemMoved(playerRef, luckyFindRowId(itemId), itemId, quantity,
+                    new HudRowDisplay(line, null, null, null, null, null, null, null));
         } catch (Throwable t) {
             Log.fine("STATION lucky-find row failed: " + t.getMessage());
         }
@@ -7902,8 +7902,8 @@ public final class StationService {
             Message line = Msg.cat(RpgMsg.tr("ui.station.gain.produced", itemNameMsg(itemId), grantedQuantity),
                     Msg.raw(" "), RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
             int total = s.luckItems.getOrDefault(itemId, 0);
-            HudBars.itemTotalled(s.playerRef, luckyFindRowId(itemId), itemId, total,
-                    new HudBarDisplay(line, null, null, null, null, null, null, null).held());
+            HudPanels.itemTotalled(s.playerRef, luckyFindRowId(itemId), itemId, total,
+                    new HudRowDisplay(line, null, null, null, null, null, null, null).held());
         } catch (Throwable t) {
             Log.fine("STATION lucky-find row failed: " + t.getMessage());
         }
@@ -7912,7 +7912,7 @@ public final class StationService {
     /** Sends every held row this run put on the shared HUD panel away together. Never throws. */
     private static void fadeSessionRows(@Nullable PlayerRef playerRef) {
         try {
-            HudBars.fadeAll(playerRef, SESSION_ROW_FADE_MS);
+            HudPanels.fadeAll(playerRef, SESSION_ROW_FADE_MS);
         } catch (Throwable t) {
             Log.fine("STATION session-row fade failed: " + t.getMessage());
         }

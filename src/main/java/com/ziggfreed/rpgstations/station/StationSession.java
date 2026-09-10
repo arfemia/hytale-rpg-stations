@@ -215,7 +215,7 @@ final class StationSession {
      * needs ({@code StationService#feedableCyclesFromInventory}/{@code #feedableCyclesFromCustody}).
      * Zero for a session with no resolved conversion to read a pile from (idle practice, or an
      * authored Steps program) - the session-progress row's fill then reads full throughout, since
-     * a {@link com.ziggfreed.common.ui.hud.bar.HudBarReading} with a non-positive maximum always
+     * a {@link com.ziggfreed.common.ui.hud.panel.HudBarReading} with a non-positive maximum always
      * does. This is the FIXED denominator the row divides by for the whole session (the
      * maintainer's explicit choice over a fixed time window): the bar starts full and drains as
      * the pile runs down, and jumps back toward full when someone tops the station off mid-run,

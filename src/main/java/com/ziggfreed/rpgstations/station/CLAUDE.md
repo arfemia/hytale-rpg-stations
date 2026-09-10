@@ -574,22 +574,22 @@ game as the bonus not working at all. **Any NEW grant path owes its own count fo
 Ordinary output NEVER touches the notification feed. **Two `notifyItemGain` overloads, one per
 context**: OUTSIDE a live session (an unattended gather's replayed roll pass, a press-F retrieve -
 `notifyRetrieved`/`PickupMimic.playPickupSfx` for the native pickup SFX) it is ziggfreed-common's
-plain `HudBars.itemMoved`, a delta-accumulated row with no ledger to belong to; DURING a live
-session it is `HudBars.itemTotalled`, reading the row's number straight off `StationSession
+plain `HudPanels.itemMoved`, a delta-accumulated row with no ledger to belong to; DURING a live
+session it is `HudPanels.itemTotalled`, reading the row's number straight off `StationSession
 .producedItems` (the SAME running total `ledgerRows` reports at session end - one tracked number,
-never a second accumulation) and marking the row HELD (`HudBarDisplay#held`) so it survives the
+never a second accumulation) and marking the row HELD (`HudRowDisplay#held`) so it survives the
 whole run instead of fading mid-session and losing its total. The feed drains strictly oldest first
 and merging refreshes an entry in place, so a notice landing every cycle pinned the whole feed. **NO
 station output reaches the feed at all, a lucky find included**: `notifyLuckyFind` has the same
-session/sessionless split, both moving the same gold row (`HudBars.itemMoved`/`itemTotalled` in the
+session/sessionless split, both moving the same gold row (`HudPanels.itemMoved`/`itemTotalled` in the
 caller-named form, row id `luckyFindRowId` = `rpgstations:lucky_find:<ItemId>`, this mod's own
 vocabulary rather than the library's `item:` prefix) so a rare find is counted apart from that
 item's ordinary running total and still says `ui.station.summary.lucky` in gold; the session form
 reads its number off `s.luckItems` and holds the row the same way. **The session itself moves a row
 too** (`seedSessionRow`/`moveSessionRow`, row id the bare `stationId`, label `stationNameMsg`,
 `SESSION_ROW_ORDER` 0 so it sorts above everything, held): its number is `StationSession.cyclesDone`
-OUTRIGHT (`HudBars.totalled`, not a re-accumulated delta) worded `"Cycles: {0}"`
-(`rpgstations.ui.station.hud.cycles`, bound via `HudBarDisplay#counting` so a cycle count never
+OUTRIGHT (`HudPanels.totalled`, not a re-accumulated delta) worded `"Cycles: {0}"`
+(`rpgstations.ui.station.hud.cycles`, bound via `HudRowDisplay#counting` so a cycle count never
 reads as a "+N" gain), and its fill is feedable cycles REMAINING over `StationSession
 .feedableCyclesAtStart`, so the bar drains as the pile runs down and climbs back when someone tops
 the station up. `feedableCycles` counts through the same matchers `firstRunnableConversion`/
@@ -598,7 +598,7 @@ the four places `cyclesDone` can increment pushes it behind a before/after compa
 `Steps` program's `dispatchProgram` returns true for both "suspended" and "a cycle landed", so the
 boolean alone cannot tell them apart). **Every row this mod holds on the shared panel for a run
 fades TOGETHER the moment the run ends**: `stop()`, the one exit funnel every stop path (silent
-ones included) reaches exactly once, calls `HudBars.fadeAll` on the stopping player right after its
+ones included) reaches exactly once, calls `HudPanels.fadeAll` on the stopping player right after its
 CAS guard passes, bringing the session row / item rows / lucky-find rows forward to fade a few
 seconds later (`SESSION_ROW_FADE_MS`) instead of hanging on the panel or on the HELD linger's own
 never-expire clock. One-off notices (a denial, a seat unavailable, inventory full, the
