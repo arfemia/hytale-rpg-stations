@@ -53,10 +53,19 @@ Router for `ui/`.
   hold. WHEN a hold ends is not this class's call: `station.StationService` holds the panel of a run
   that ended itself (`holdsSummaryOpen`) and releases it when the worker steps away from where they
   finished, engages again, or leaves the world.
-- **`RpgStationsSettingsAsset.SummaryHud`** (`Enabled`/`Position`/`OffsetX`/`OffsetY`/`TtlMs`/`MaxRows`, via
+- **`RpgStationsSettingsAsset.SummaryHud`** (`Enabled`/`Position`/`OffsetX`/`OffsetY`/`TtlMs`/`MaxRows`/`Color`, via
   `station.SettingsCatalog`) governs whether/where this panel shows; a disabled setting leaves this
   mod's own toast path as the only feedback surface. A listening mod that wants a different
   fallback owns that itself, outside this package.
+- **The panel is a HUD card and wears the colour every card shares.** `Color` is this panel's own
+  tint over the look Ziggfreed Common ships for every HUD card on its base
+  (`Server/ZiggfreedCommon/HudCards/Default.json`, owner layer `mods/ziggfreedcommon/hud-cards.json`):
+  one hex multiplied over the frame, eight digits carrying a transparency in the last two, resolved
+  per push by `StationSummaryHud.cardLook()` through the library's `HudCardLook` (a malformed value
+  warns once and falls through) and pushed through `UiRetint.retintColor` on `FRAME_SEL`
+  (`#RpgStationSummaryRoot #Content`, the frame's element; the root carries no background) AFTER
+  the decorate hook, so an owner's authored colour is the last word over a listening mod's theme
+  and an absent one keeps that theme. The identity pushes nothing.
 - **Row cap: the `.ui` slot count is the HARD ceiling, `MaxRows` draws fewer.** A HUD update can
   only repaint elements the document already declares, never append one, so `MAX_LEDGER_ROWS` (12)
   and the `#RpgStationSummaryItem0..11` run must move together; `StationSummaryHud#ledgerRowCap`

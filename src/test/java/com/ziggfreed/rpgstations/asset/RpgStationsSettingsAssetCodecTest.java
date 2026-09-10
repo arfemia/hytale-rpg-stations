@@ -74,6 +74,36 @@ public class RpgStationsSettingsAssetCodecTest {
         assertTrue(a.getSummaryHud().isEnabled());
     }
 
+    // ==================== SummaryHud.Color (this card's own tint) ====================
+
+    @Test
+    void summaryHud_colorDecodesTrimmedAndIsAbsentByDefault() throws Exception {
+        assertEquals("#ffffffb8", decodeAsset("{ \"SummaryHud\": { \"Color\": \" #ffffffb8 \" } }").getSummaryHud().getColor(),
+                "as authored, trimmed; the panel validates it against the shared library's hex reader");
+        assertNull(decodeAsset("{ \"SummaryHud\": { \"Enabled\": true } }").getSummaryHud().getColor(),
+                "absent: the look every HUD card shares");
+        assertNull(decodeAsset("{ \"SummaryHud\": { \"Color\": \"   \" } }").getSummaryHud().getColor(), "a blank is absent");
+        assertNull(RpgStationsSettingsAsset.defaults().getSummaryHud().getColor(), "the built-in default states none");
+    }
+
+    @Test
+    void summaryHud_color_siblingLeafInheritsUnderParent_ownWins() throws Exception {
+        AssetExtraInfo.Data data = new AssetExtraInfo.Data(RpgStationsSettingsAsset.class, "Settings", null);
+        RpgStationsSettingsAsset parent = RpgStationsSettingsAsset.CODEC.decodeAndInheritJsonAsset(
+                RawJsonReader.fromJsonString("{ \"SummaryHud\": { \"Color\": \"#112233\", \"TtlMs\": 4000 } }"),
+                null, new AssetExtraInfo<>(data));
+
+        RpgStationsSettingsAsset child = decodeWithParent("{ \"SummaryHud\": { \"TtlMs\": 9000 } }",
+                parent, "settings_child", "settings");
+        assertEquals("#112233", child.getSummaryHud().getColor(), "sibling leaf inherits");
+        assertEquals(9000L, child.getSummaryHud().getTtlMs(), "own leaf wins");
+
+        RpgStationsSettingsAsset restated = decodeWithParent("{ \"SummaryHud\": { \"Color\": \"#445566\" } }",
+                parent, "settings_child", "settings");
+        assertEquals("#445566", restated.getSummaryHud().getColor(), "own leaf wins");
+        assertEquals(4000L, restated.getSummaryHud().getTtlMs(), "sibling leaf inherits");
+    }
+
     // ==================== Limits (the owner ceilings) ====================
 
     @Test

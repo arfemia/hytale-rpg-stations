@@ -19,8 +19,11 @@ import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.ziggfreed.common.ui.UiRetint;
 import com.ziggfreed.common.ui.hud.HudPosition;
 import com.ziggfreed.common.ui.hud.KeyedCustomHud;
+import com.ziggfreed.common.ui.hud.card.HudCardConfig;
+import com.ziggfreed.common.ui.hud.card.HudCardLook;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.common.ui.rows.SummaryRowRenderer;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
@@ -56,6 +59,13 @@ import com.ziggfreed.rpgstations.i18n.RpgMsg;
  * binding) a registered {@code SummaryEnricher.decorate} (via {@code
  * api.SummaryDecorateContext#rootSelector()}) writes theming commands against cross-jar - see
  * that class's javadoc.
+ *
+ * <p><b>The panel is a HUD card.</b> It wears the colour every HUD card on the shared base wears
+ * ({@code Server/ZiggfreedCommon/HudCards/Default.json}, {@link HudCardConfig}) under this mod's
+ * own {@code SummaryHud.Color} ({@link #cardLook}): one hex multiplied over the frame, pushed on
+ * {@link #FRAME_SEL} with every summary only when it is not the identity, so the shipped look
+ * costs no command. It lands AFTER the decorate hook, so an owner's authored colour is the last
+ * word over a listening mod's theme and an absent one keeps that theme.
  */
 public final class StationSummaryHud extends KeyedCustomHud {
 
@@ -71,6 +81,13 @@ public final class StationSummaryHud extends KeyedCustomHud {
 
     /** Must match the {@code .ui}'s {@code #RpgStationSummaryRoot} static-fallback Width. */
     private static final int PANEL_WIDTH_PX = 528;
+
+    /**
+     * The element wearing the frame patch: the shared frame's {@code #Content} inside the root.
+     * The root itself carries no background, so the card colour is pushed here, where the texture
+     * it multiplies actually is.
+     */
+    static final String FRAME_SEL = ROOT_SELECTOR + " #Content";
 
     private static final long DEFAULT_DURATION_MS = 6000L;
     private static final long UPDATE_INTERVAL_MS = 250L;
@@ -261,6 +278,9 @@ public final class StationSummaryHud extends KeyedCustomHud {
                 Log.fine(HUD_KEY + ": summary decorate hook failed: " + t.getMessage());
             }
         }
+        // The card's colour lands after the hook, so an owner's authored colour is the last word
+        // over a listening mod's theme, and an absent one (the identity, nothing pushed) keeps it.
+        UiRetint.retintColor(cmd, FRAME_SEL, cardLook().cardColor());
         update(false, cmd);
 
         long ttl = durationMs > 0 ? durationMs : DEFAULT_DURATION_MS;
@@ -326,6 +346,19 @@ public final class StationSummaryHud extends KeyedCustomHud {
             cmd.set(ITEM_MORE_SEL + ".TextSpans",
                     RpgMsg.tr("ui.station.summary.items_more", overflow));
         }
+    }
+
+    /**
+     * The colour this panel is drawn in: the settings' own {@code SummaryHud.Color}, validated (a
+     * value that is not a hex warns once, naming the file, and reads as none), over the look every
+     * HUD card shares. Read per push, so a reload of either lands on the next summary.
+     */
+    @Nonnull
+    static HudCardLook cardLook() {
+        RpgStationsSettingsAsset.SummaryHud hud = SettingsCatalog.getInstance().current().getSummaryHud();
+        String own = hud == null ? null
+                : HudCardLook.authored(hud.getColor(), "Server/RpgStations/Settings/Settings.json (SummaryHud.Color)");
+        return HudCardLook.resolve(own, HudCardConfig.getInstance().sharedColor());
     }
 
     /**

@@ -7,6 +7,20 @@ there is no prior public release to diff against, so every entry is additive by 
 
 ## 0.1.0 (first public release)
 
+- **The summary panel wears the colour every HUD card shares, or one of its own.** The
+  end-of-session panel is a HUD card like Ziggfreed Common's bar panels and quest tracker, and it
+  reads the one look that library ships for all of them (`Server/ZiggfreedCommon/HudCards/Default.json`,
+  owner layer `mods/ziggfreedcommon/hud-cards.json`: one hex multiplied over the frame, eight digits
+  carrying a transparency in the last two, `#ffffffb8` being the same panel at about 72 percent), so
+  a server owner dims every card on the server at once from one file. `SummaryHud.Color` in
+  `Settings.json` gives this panel a colour of its own over it (`RpgStationsSettingsAsset.SummaryHud`,
+  raw as authored; `StationSummaryHud.cardLook()` validates it through the library's `HudCardLook`,
+  a value that is not a hex being ignored with one line in the log). The colour is pushed through
+  `UiRetint.retintColor` on the frame's element (`#RpgStationSummaryRoot #Content`, the root carrying
+  no background) with every summary, after a listening mod's decorate hook, so an authored colour is
+  the owner's last word and an absent one keeps that mod's theme; the shipped look sends nothing.
+  `SCHEMA.md` and the settings guide carry the leaf. Tests: `RpgStationsSettingsAssetCodecTest`,
+  `StationSummaryHudTest`.
 - **A station that turns you away says so, and every id reads `Is_Like_This`.** Pressing F at a
   Sawmill with nothing to mill used to stack the same yellow notice twice and make no sound at all,
   so the station read as broken rather than as refusing. Every denial - nothing to work with, the

@@ -397,7 +397,12 @@ public final class RpgStationsSettingsAsset
         }
     }
 
-    /** The panel layout + lifetime for {@code ui.StationSummaryHud}. */
+    /**
+     * The panel layout, lifetime and look for {@code ui.StationSummaryHud}. {@code Color} is this
+     * panel's own tint over the look every HUD card shares (the shared library's
+     * {@code Server/ZiggfreedCommon/HudCards/Default.json}): one hex multiplied over the frame,
+     * eight digits carrying a transparency in the last two, absent meaning the shared look.
+     */
     public static final class SummaryHud {
         @Nullable protected Boolean enabled;
         @Nullable protected String position;
@@ -405,6 +410,7 @@ public final class RpgStationsSettingsAsset
         @Nullable protected Integer offsetY;
         @Nullable protected Long ttlMs;
         @Nullable protected Integer maxRows;
+        @Nullable protected String color;
 
         public static final BuilderCodec<SummaryHud> CODEC = BuilderCodec.builder(SummaryHud.class, SummaryHud::new)
                 .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
@@ -436,6 +442,16 @@ public final class RpgStationsSettingsAsset
                         + "The panel has a hard ceiling of its own that a larger number cannot pass, "
                         + "and leaving this out uses it.")
                 .addValidator(CodecWarnValidators.positive("SummaryHud.MaxRows should be positive.")).add()
+                .appendInherited(new KeyedCodec<>("Color", Codec.STRING, false),
+                        (o, v) -> o.color = v, o -> o.color, (o, p) -> o.color = p.color)
+                .documentation("The colour the summary panel's frame is drawn in, as a hex that "
+                        + "MULTIPLIES the shipped frame: #ffffff is exactly the shipped look, a darker "
+                        + "hex darkens it, a hue tints it, and eight digits carry a transparency in the "
+                        + "last two (#ffffffb8 is about 72 percent). Left out, the panel takes the look "
+                        + "every HUD card shares, Server/ZiggfreedCommon/HudCards/Default.json, so one "
+                        + "file dims every card at once; state it here to treat this panel differently. "
+                        + "A value that is not a #rrggbb or #rrggbbaa hex is ignored with one line in "
+                        + "the log.").add()
                 .build();
 
         @Nonnull
@@ -490,6 +506,16 @@ public final class RpgStationsSettingsAsset
         @Nullable
         public Integer getMaxRows() {
             return maxRows == null || maxRows <= 0 ? null : maxRows;
+        }
+
+        /**
+         * This panel's own frame colour as authored, trimmed, or null for none (the shared HUD card
+         * look). The panel is what validates it, through the shared library's own hex reader, so a
+         * value that is not a hex is ignored there with one line rather than refused here.
+         */
+        @Nullable
+        public String getColor() {
+            return color == null || color.isBlank() ? null : color.trim();
         }
     }
 }

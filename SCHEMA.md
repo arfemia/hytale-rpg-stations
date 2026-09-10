@@ -1437,6 +1437,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `OffsetY` | `integer` | `null` | Vertical pixel offset from the chosen Position preset. |
 | `TtlMs` | `long` | `null` | How long the summary panel stays on screen, in milliseconds. A run that ended by itself, with its worker still standing at the station, keeps its panel up until they step away, and this is how long it lingers from that moment. |
 | `MaxRows` | `integer` | `null` | How many ledger rows the panel may grow to before the rest fold into a single '+N more' line. The panel sizes itself to whatever is showing, so a quiet session still draws a short panel and this is only the ceiling a busy one stops at; lower it to keep the panel small on a crowded screen. The panel has a hard ceiling of its own that a larger number cannot pass, and leaving this out uses it. |
+| `Color` | `string` | `null` | The colour the summary panel's frame is drawn in, as a hex that MULTIPLIES the shipped frame: #ffffff is exactly the shipped look, a darker hex darkens it, a hue tints it, and eight digits carry a transparency in the last two (#ffffffb8 is about 72 percent). Left out, the panel takes the look every HUD card shares, Server/ZiggfreedCommon/HudCards/Default.json, so one file dims every card at once; state it here to treat this panel differently. A value that is not a #rrggbb or #rrggbbaa hex is ignored with one line in the log. |
 
 <a id="field-settingsasset-limits"></a>
 ### SettingsAsset.Limits

@@ -773,7 +773,7 @@ resolution section for the engine half.
     cross-pack-aware validator's `EXTENSION_APPLIED` boot summary.
 - **[`RpgStationsSettingsAsset`](RpgStationsSettingsAsset.java)** - `Server/RpgStations/Settings/
   Settings.json`, a single id (`settings`), jar default + pack-overridable: `{Enabled,
-  SummaryHud:{Enabled, Position, OffsetX, OffsetY, TtlMs}, Limits:{MaxSessionsPerWorld,
+  SummaryHud:{Enabled, Position, OffsetX, OffsetY, TtlMs, MaxRows, Color}, Limits:{MaxSessionsPerWorld,
   MaxPuppetsPerWorld, MaxStashesPerSection, UnattendedIntervalMs,
   MaxUnattendedGatherCycles}, Moments:{<momentId>: Presentation}, Refusals:{RepeatWindowMs}}`.
   **`Moments`** is the ENGINE-WIDE default cue layer (an `InheritMapCodec` over `Presentation`,

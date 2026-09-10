@@ -15,6 +15,12 @@
 // is the FROZEN root selector a registered SummaryEnricherRegistry.decorate hook themes
 // through - part of the api contract, do not rename it casually.
 //
+// COLOUR: #RpgStationSummaryRoot #Content is the element wearing the frame patch (the root itself
+// has no Background), so its Background.Color is what StationSummaryHud retints with the card
+// colour: Settings.json's SummaryHud.Color over the look every HUD card shares
+// (Server/ZiggfreedCommon/HudCards/Default.json), a hex multiplied over the patch whose last two
+// digits are a transparency. Nothing is pushed for the shipped look.
+//
 // WIDTH: the frame invocation itself carries the explicit Anchor Width (not just its #Content
 // children), and that is the root-cause fix: an Anchor-less frame Group fills the nearest sized
 // ancestor (the full-viewport canvas), so #Content's own background rendered full width even
