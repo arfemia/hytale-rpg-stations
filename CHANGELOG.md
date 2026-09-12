@@ -5,7 +5,7 @@ Developer changelog for RPG Stations. No em-dashes.
 **1.0.0 is RPG Stations' first public release.** Everything below shipped into this one version;
 there is no prior public release to diff against, so every entry is additive by definition.
 
-## 1.0.0 (first public release)
+## 1.0.0 - 2026-09-12 (first public release)
 
 - **The summary panel wears the colour every HUD card shares, or one of its own.** The
   end-of-session panel is a HUD card like Ziggfreed Common's bar panels and quest tracker, and it
