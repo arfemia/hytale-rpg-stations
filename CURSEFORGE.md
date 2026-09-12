@@ -6,7 +6,7 @@ RPG Stations adds interactive work stations to your Hytale server. No menus, no 
 conversions - materials go in, your character (or a stand-in performer) visibly does the work over
 real time, and results come out.
 
-**0.1.0 ships one station: the Sawmill.**
+**1.0.0 ships one station: the Sawmill.**
 
 Craft the bench at a tier 2 Workbench, load logs onto it,
 press `F`, and your character saws them into that wood family's planks one cycle at a time, with a
@@ -112,7 +112,7 @@ replace exactly the one it wants to retune without inheriting the rest.
 An authorable ritual for gear: place a weapon at a station, strike it, and roll stats onto it from a
 configurable pool, capped by a composable budget model (a flat ceiling, a stat-scaled ceiling, or
 both at once - the tighter one wins). Durability upgrades land with no other mod installed at all.
-The engine ships this capability; 0.1.0 ships no default station that uses it, so it is here for
+The engine ships this capability; 1.0.0 ships no default station that uses it, so it is here for
 pack authors to build on.
 
 ### Flairs

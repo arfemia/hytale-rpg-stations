@@ -2,10 +2,10 @@
 
 Developer changelog for RPG Stations. No em-dashes.
 
-**0.1.0 is RPG Stations' first public release.** Everything below shipped into this one version;
+**1.0.0 is RPG Stations' first public release.** Everything below shipped into this one version;
 there is no prior public release to diff against, so every entry is additive by definition.
 
-## 0.1.0 (first public release)
+## 1.0.0 (first public release)
 
 - **The summary panel wears the colour every HUD card shares, or one of its own.** The
   end-of-session panel is a HUD card like Ziggfreed Common's bar panels and quest tracker, and it
@@ -257,7 +257,7 @@ there is no prior public release to diff against, so every entry is additive by 
   recipes; craft the iron Cooking Pot, mount it in the open cell, and the same press becomes
   Stew, deciding kebab / caesar salad / Hearty Stew off the ruled recipe rows), exercising the
   multiblock, socket, doneness, unattended and sharing machinery above end to end. It is held
-  back from 0.1.0 with the rest of the held content set (see the release-scope note below); the
+  back from 1.0.0 with the rest of the held content set (see the release-scope note below); the
   engine features it exercises all ship, and `HeldCookingPitPatternTest` keeps the held files
   build-verified so a later restore ships pre-verified.
 - **A gate factor for pot-shaped stations: `rpgstations:socket_filled`.** A station action's
@@ -329,7 +329,7 @@ cycle. Neither side hard-depends on the other. See `CLAUDE.md` for the full pack
 reference.
 
 **Release scope: the engine is complete; the shipped default content is the Sawmill alone.** The
-engine entries above all ship in full. What 0.1.0 deliberately does NOT ship is the finished
+engine entries above all ship in full. What 1.0.0 deliberately does NOT ship is the finished
 default content held back for a later release: the buildable Cooking Pit family (the pit's
 structure pattern, its two-action station, the Cooking Pot vessel and the Hearty Stew), the
 two-station fish-prep exemplar
@@ -344,9 +344,10 @@ reason, with `NpcPerformerSpike.java` kept in git. Capabilities the held station
 multi-station walks, the Entity mount surface, step programs) are engine features and remain fully
 authorable by any pack.
 
-**The `api` extension surface is NOT frozen at 0.1.0.** The freeze was always scoped to a 1.0.0
-release; shipping 0.1.0 means the contract may still change before then. Integrators should expect
-to recompile against a later release rather than treat these types as stable.
+**The `api` extension surface is NOT frozen at 1.0.0.** The contract may still change in a later
+release, additively where it can and otherwise where it must. Integrators should expect to
+recompile against a later release rather than treat these types as stable; the artifact's own
+version says which contract a build carries.
 
 ### Phase 1: extraction + the engine
 
@@ -392,7 +393,7 @@ to recompile against a later release rather than treat these types as stable.
   so a validation hook another mod registers speaks the same record this engine does, and a
   session-summary panel (`ui/StationSummaryHud`) showing cycles and items consumed/produced, plus whatever extra rows a
   listening mod adds via a registered `SummaryEnricher`.
-- Adds the `api` extension-surface artifact (still unfrozen at 0.1.0; the freeze lands at 1.0.0): native Hytale events for
+- Adds the `api` extension-surface artifact (not frozen at 1.0.0; it may still change in a later release): native Hytale events for
   observe-only moments (session started/cycle completed/session completed/tool broke) and typed
   registries for request/response points (`FactorRegistry`, `ContributionChannelRegistry`,
   `FlairUnlockRegistry`, `SummaryEnricherRegistry`, `ValidationHookRegistry`), the mechanism an
@@ -633,7 +634,7 @@ outcome; the sibling toast-stacking defects land in the consumer mod's own repo)
   claims the nearby station, a refund ledger returns any in-flight materials if the walk is
   interrupted, and a walk timeout clears a stuck walking state. The fish-preparation exemplar built
   on this seam (a cutting board that walks a character to a nearby fire and back to finish the job,
-  all from one `F` press on the primary block) is complete but HELD BACK from 0.1.0 under
+  all from one `F` press on the primary block) is complete but HELD BACK from 1.0.0 under
   `unreleased/`; the seam itself ships and any pack can author against it.
 
 ### Scope 3: native composition, performer contract, and the sneak+F recipe picker (2026-07-24 to 2026-07-29)
@@ -860,11 +861,11 @@ schema is pre-release, so the renames below are hard breaks with no aliases.
   retired vocabulary while explaining why it is retired. A convenient comment is exactly how a
   vocabulary creeps back in.
 
-### Pre-release schema sweep (the last authoring-surface pass before 0.1.0)
+### Pre-release schema sweep (the last authoring-surface pass before 1.0.0)
 
 The whole authoring surface was reviewed once more while a rename or removal was still free (the
 `api` freezes at 1.0.0, content schema had no back-compat obligation yet, and an unrecognized key only
-ever produces a boot-log `WARNING: Unused key(s)` line). Everything below is part of the 0.1.0 schema
+ever produces a boot-log `WARNING: Unused key(s)` line). Everything below is part of the 1.0.0 schema
 as shipped, not a change to something previously released.
 
 - **A station is an ORDERED LIST OF SELF-CONTAINED ACTIONS, and station-level group inheritance is
@@ -1033,7 +1034,7 @@ as shipped, not a change to something previously released.
 
 ### The shipped Sawmill: its tool curve, its finds, and how you get the bench
 
-The one default station 0.1.0 ships, authored entirely in ordinary content assets a server owner can
+The one default station 1.0.0 ships, authored entirely in ordinary content assets a server owner can
 retune or replace leaf by leaf. Nothing here is engine-special-cased.
 
 - Ships the Sawmill's tool-yield ladder, the curve that pays for the milling time. Three weighted
@@ -1141,7 +1142,7 @@ retune or replace leaf by leaf. Nothing here is engine-special-cased.
   regenerated via `gradlew generateSchemaDocs`) covering every content type. The public GitHub
   repository is the docs surface: no separate site build or deploy step is involved. A standalone
   documentation site (a Next.js static export under `docs-site/`) was drafted and then retired
-  before release in favor of this in-repo surface, so the shipped 0.1.0 docs are `README.md`, the
+  before release in favor of this in-repo surface, so the shipped 1.0.0 docs are `README.md`, the
   `docs/` markdown guides, and `SCHEMA.md` only.
 
 ### The loot layer re-bases onto ziggfreed-common's shared core

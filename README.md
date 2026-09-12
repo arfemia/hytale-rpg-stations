@@ -3,16 +3,16 @@
 Diegetic interactive work stations for Hytale - place a block, press `F`, and watch your character
 (or a stand-in performer) do the work over real time instead of an instant menu conversion.
 
-A standalone server mod, package root `com.ziggfreed.rpgstations`. It ships two complete jar-default
-stations - a Sawmill, craftable at a tier 2 Workbench, with a tool-scaling yield curve, a
-session-loyalty find ladder, and a rare trophy hatchet to chase; and a Cooking Pit you BUILD rather
-than craft (a ring of stone around an unlit campfire), which grills raw food over the bare flame and
-cooks whole meals once its iron Cooking Pot is mounted, unattended, with dishes that burn if you
-forget them - so it is playable with no content pack at all, and its engine underneath -
-multi-action stations, step programs, multi-station walks, multiblock structure patterns,
-placed-input custody with sockets and props, unattended work, doneness windows, the puppet
-performer, conditional loot, and enhancement stamping - is the full thing, all driven from ordinary
-content assets a pack (or a server's own assets) can extend.
+A standalone server mod, package root `com.ziggfreed.rpgstations`. It ships one complete jar-default
+station, a Sawmill, craftable at a tier 2 Workbench, with a tool-scaling yield curve, a
+session-loyalty find ladder, and a rare trophy hatchet to chase, so it is playable with no content
+pack at all; a Cooking Pit you BUILD rather than craft (a ring of stone around an unlit campfire,
+grilling raw food over the bare flame and cooking whole meals unattended once its iron Cooking Pot
+is mounted, with dishes that burn if you forget them) is finished and held under `unreleased/` for
+a later release. The engine underneath - multi-action stations, step programs, multi-station
+walks, multiblock structure patterns, placed-input custody with sockets and props, unattended
+work, doneness windows, the puppet performer, conditional loot, and enhancement stamping - is the
+full thing, all driven from ordinary content assets a pack (or a server's own assets) can extend.
 
 RPG Stations carries no progression vocabulary of its own and depends on no other mod. A soft
 extension surface (native events plus a typed api artifact) lets another mod turn completed station
@@ -21,7 +21,7 @@ work into its own rewards, without either mod hard-depending on the other. See
 
 ## Install
 
-Requires **ZiggfreedCommon** (`>=1.4.0`), the one hard dependency - drop its jar into your server's
+Requires **ZiggfreedCommon** (`>=2.1.0`), the one hard dependency - drop its jar into your server's
 `Mods/` folder first, then drop the RPG Stations jar into the same folder and restart. See
 [Getting Started](docs/getting-started.md) for the full walkthrough.
 

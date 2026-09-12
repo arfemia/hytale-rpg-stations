@@ -70,7 +70,7 @@ onto a remote block for the anchor's own cook/process loop to work.
 ## Walkthrough: preparing fish
 
 RPG Stations' own repository carries a complete, zero-progression, two-station exemplar (currently held
-back from the 0.1.0 jar, which ships Sawmill-only, but usable in a pack or restored from
+back from the 1.0.0 jar, which ships Sawmill-only, but usable in a pack or restored from
 `unreleased/`): a **Cutting Board** (the primary station, where the player presses F) and a **Cooking
 Fire** (the anchor, a fully-useful standalone station in its own right that the Cutting Board's program
 reaches out to). The whole loop: scale raw fish at the board, walk the fish over to a nearby fire, cook
