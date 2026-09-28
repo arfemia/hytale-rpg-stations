@@ -7,7 +7,7 @@ either direction. The standalone mod is RICH, not a husk: with RpgStations alone
 jar-shipped Sawmill runs the full diegetic work loop plus a generic reward layer (conditional
 lootables over native `ItemDropList`s, command rewards) - and needs nothing else. The buildable
 Cooking Pit exemplar (the multiblock/socket/unattended/doneness stack end to end) is finished but
-HELD under `unreleased/` for a later release; see the "0.1.0 release scope" section. Package root
+HELD under `unreleased/` for a later release; see the "1.0.0 release scope" section. Package root
 `com.ziggfreed.rpgstations`. **Status:
 phase 1 legs 0-6 landed** (scaffold, common lift, engine, lootables, api
 artifact, consumer bridge, pack bridge) **plus the leg P0 closeout** (the `command/` package: `/rpgstations
@@ -223,9 +223,9 @@ adversarial critique `../../.claude/research/raw/rpg-stations-design-critique-20
 adopted fixes binding). Origin plan: `../../.claude/plans/interactive-stations.md` +
 `../../.claude/plans/work-stations-mod-extraction-prompt.md`.
 
-## 0.1.0 release scope (maintainer ruling, 2026-08-06; re-affirmed 2026-09-02, superseding the ruling-7 amendment of the 2026-09-01 multiplacement round) - READ BEFORE TOUCHING SHIPPED CONTENT
+## 1.0.0 release scope (maintainer ruling, 2026-08-06; re-affirmed 2026-09-02, superseding the ruling-7 amendment of the 2026-09-01 multiplacement round) - READ BEFORE TOUCHING SHIPPED CONTENT
 
-**The first public release is `0.1.0`, not `1.0.0`, and ships the SAWMILL ONLY** (the original
+**The first public release is `1.0.0` and ships the SAWMILL ONLY** (the original
 2026-08-06 ruling; the 2026-09-01 round's ruling 7 briefly widened the set to include the
 cooking-pit exemplar, and the 2026-09-02 ruling supersedes that amendment and returns the release
 to Sawmill-only). The ENGINE is unchanged and complete - multiblock structure patterns, custody
@@ -251,11 +251,11 @@ the shipped default CONTENT set is narrowed.
   and `LangFileIntegrityTest` therefore needed no change in either direction.
 - **`/rpgstations npcspike` is unwired** (the field, dispatch case, and method were removed from
   `command/RpgStationsCommand`); `command/NpcPerformerSpike.java` stays in git, unreferenced.
-- **The `api` artifact is NOT frozen.** The freeze was always scoped to a 1.0.0 release, so at
-  0.1.0 the extension surface may still change. Anywhere this router or the code says
-  "frozen once 1.0.0 releases", that condition has NOT been met yet.
-- **The sibling `content-packs/skill-stations-pack` moved in lockstep** (also renumbered to
-  `0.1.0`, manifest floor `"Ziggfreed:RpgStations": ">=0.1.0"`): its Anvil, `AnvilWeaponPool`,
+- **The `api` artifact is NOT frozen.** The extension surface may still change, and freezing it is a
+  DELIBERATE decision the maintainer takes, never something a version number triggers. Anywhere this
+  router or the code ties the freeze to a release number, read it as not yet declared.
+- **The sibling `content-packs/skill-stations-pack` moved in lockstep** (also numbered
+  `1.0.0`, manifest floor `"Ziggfreed:RpgStations": ">=1.0.0"`): its Anvil, `AnvilWeaponPool`,
   `CookingProgression`, and the `Smithing`/`Cooking` custom skills are under its own `unreleased/`.
   Its `CookingProgression` targets THIS jar's `cookingfire`, so the two sides restore together.
 
@@ -266,8 +266,8 @@ cd 'D:\dev\business\hyMMO\additional-mods\rpg-stations'; .\build.ps1
 .\build.ps1 -Install:$false     # build only
 .\build.ps1 -ModsDir <path>     # explicit install target (else $env:HYTALE_MODS_DIR)
 ```
-Produces `build/libs/RpgStations-<version>.jar` (**version is `0.1.0`** - the maintainer-set first
-public release, a deliberate Sawmill-only scope; see the "0.1.0 release scope" section below) and
+Produces `build/libs/RpgStations-<version>.jar` (**version is `1.0.0`** - the maintainer-set first
+public release, a deliberate Sawmill-only scope; see the "1.0.0 release scope" section below) and
 copies the runtime jar into the Hytale `Mods/` folder. `.\gradlew.bat
 build`/`test` work too. The root hyMMO `rebuild.ps1 -Mods` (or `-Jar -Mods -Packs` for the full
 stack) drives this mod's own `build.ps1` alongside every other `additional-mods/` sibling,
@@ -286,7 +286,7 @@ would reverse that arrow is the failure this rule exists to prevent.
 ```
 settings.gradle / gradle.properties / build.gradle   RpgStations root module + the api submodule
 build.ps1                                             build + auto-install (self-locating, pins RpgStations-<version>.jar from gradle.properties)
-api/                                                   the extension-surface (freeze lands at 1.0.0; NOT frozen at 0.1.0)
+api/                                                   the extension-surface (NOT frozen; the freeze is a deliberate call, not a version)
   build.gradle                                         java-library, archivesName 'rpg-stations-api', BUNDLED into
                                                         the runtime jar AND builds standalone as
                                                         rpg-stations-api-<version>.jar for a consumer's compileOnly link
