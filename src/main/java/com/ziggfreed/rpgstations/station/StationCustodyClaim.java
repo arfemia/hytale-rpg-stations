@@ -387,11 +387,21 @@ final class StationCustodyClaim {
         return piles != null && !piles.isEmpty();
     }
 
-    /** The socket pile's metadata-bearing unique stack (see {@link #uniqueStack()}), or null. */
+    /**
+     * The socket pile's metadata-bearing unique stack (see {@link #uniqueStack()}), or null. A
+     * stack the tally no longer counts ({@link StationCustody#uniqueDrained}: the piece was
+     * consumed, or a pile saved with the stack dangling) reads as absent here - a Unique-only pile
+     * holds nothing, hands nothing back, and its stale leaf goes with the pile when the pile is
+     * removed or the next placement replaces it.
+     */
     @Nullable
     ItemStack uniqueStack(@Nonnull String socketId) {
         StashPile pile = stash.pile(socketId);
-        return pile != null ? pile.getUnique() : null;
+        ItemStack unique = pile != null ? pile.getUnique() : null;
+        if (unique == null) {
+            return null;
+        }
+        return StationCustody.uniqueDrained(uniqueItemId(unique), pile.getItems()) ? null : unique;
     }
 
     /** Sets/replaces the socket pile's metadata-preserving unique stack (creating the pile on first use). */
@@ -399,14 +409,45 @@ final class StationCustodyClaim {
         stash.ensurePile(socketId).setUnique(stack);
     }
 
-    /** One concrete {@link ItemStack} per tallied item id of ONE socket's pile - prefers its unique stack (metadata preserved). */
+    /**
+     * Takes the socket pile's unique stack OFF the pile when a drain has emptied the tally of its
+     * item (the custody consume fix: the piece is destroyed, so the stack that WAS the piece goes
+     * with it), answering the stack taken so the caller can ledger it for a refund. Null when the
+     * pile keeps its unique stack, or never had one. The caller marks dirty.
+     */
+    @Nullable
+    ItemStack takeUniqueIfDrained(@Nonnull String socketId) {
+        StashPile pile = stash.pile(socketId);
+        ItemStack unique = pile != null ? pile.getUnique() : null;
+        if (unique == null || !StationCustody.uniqueDrained(uniqueItemId(unique), pile.getItems())) {
+            return null;
+        }
+        pile.setUnique(null);
+        return unique;
+    }
+
+    /** The unique stack's item id, read through a guard so a stack the engine cannot read never breaks a drain. */
+    @Nullable
+    private static String uniqueItemId(@Nonnull ItemStack unique) {
+        try {
+            return unique.getItemId();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * One concrete {@link ItemStack} per tallied item id of ONE socket's pile - prefers its unique
+     * stack (metadata preserved) while the tally still counts it; a drained unique stack is not
+     * handed back (see {@link #uniqueStack(String)}).
+     */
     @Nonnull
     List<ItemStack> toItemStacks(@Nonnull String socketId) {
         StashPile pile = stash.pile(socketId);
         if (pile == null) {
             return List.of();
         }
-        ItemStack unique = pile.getUnique();
+        ItemStack unique = uniqueStack(socketId);
         if (unique != null) {
             return List.of(unique);
         }

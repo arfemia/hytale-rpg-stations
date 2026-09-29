@@ -43,10 +43,11 @@ reference (`Ref`). See [Actions & Step Programs](actions-and-steps.md).
 
 ## Steps
 
-An action either runs the **implicit program** (the classic convert-consume-produce-roll-present loop
-every plain station uses) or an authored **step program** - an ordered array of `StationStep`s. Each
-step composes any combination of independent phases (Walk, Consume, Stamp, Produce, Roll, Commands) in
-one fixed order, plus a post-phase `Duration` hold and an iteration `Repeat` count. A step authoring no
+An action either runs the **implicit program** (the classic convert-roll-present loop every plain
+station uses, its `Convert` phase consuming the recipe's inputs and producing its outputs) or an
+authored **step program** - an ordered array of `StationStep`s. Each step composes any combination of
+independent phases (Walk, Consume, Stamp, Convert, Produce, Roll, Commands) in one fixed order, plus a
+post-phase `Duration` hold and an iteration `Repeat` count. A step authoring no
 phase at all is a pure **beat** - just a clip, a presentation cue, and a hold, used for the anvil's
 hammer strikes. See [Actions & Step Programs](actions-and-steps.md).
 

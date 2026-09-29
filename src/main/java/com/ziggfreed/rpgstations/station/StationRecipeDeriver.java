@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -14,73 +13,86 @@ import java.util.Set;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.hypixel.hytale.assetstore.AssetRegistry;
-import com.hypixel.hytale.protocol.BenchRequirement;
-import com.hypixel.hytale.server.core.asset.type.item.config.CraftingRecipe;
-import com.hypixel.hytale.server.core.asset.type.item.config.Item;
-import com.hypixel.hytale.server.core.inventory.MaterialQuantity;
+import com.ziggfreed.common.recipe.NativeRecipe;
+import com.ziggfreed.common.recipe.RecipeBench;
+import com.ziggfreed.common.recipe.RecipeCatalog;
+import com.ziggfreed.common.recipe.RecipeIndex;
+import com.ziggfreed.common.recipe.RecipeMaterial;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * Derives station Convert conversions from the LIVE native crafting recipes
- * ({@link StationAsset.FromCrafting}), so a station that refines a whole native category
- * needs ZERO hardcoded per-item conversions.
+ * Derives station Convert conversions from the engine's OWN native recipes
+ * ({@link StationAsset.FromCrafting}), so a station that follows a whole native bench or category
+ * needs ZERO hardcoded per-item conversions: the Sawmill follows the plank categories, a
+ * salvage-shaped station follows the {@code Salvagebench}, and a third party whose content ships a
+ * native recipe at that bench is covered the moment its pack loads.
  *
  * <p><b>Two layers, one seam:</b> the PURE core ({@link #resolve} / {@link #deriveFromCrafting})
- * takes an injected {@link CraftingCandidate} collection so it is unit-testable without the
- * live {@code Item} asset map; the thin live adapter ({@link #liveCandidates}) walks
- * {@code Item.getAssetMap()} once.
+ * takes an injected {@link CraftingCandidate} collection so it is unit-testable without a live
+ * server; the thin live adapter ({@link #liveCandidates}) reads the shared recipe index
+ * ({@link RecipeIndex#live()}), which covers STANDALONE recipe files (vanilla's {@code Salvage_*}
+ * set) as well as the recipes authored inside items, at full native quantities on both sides.
+ * {@link #candidatesOf} is the pure half of that adapter, so a test hands it a hand-built
+ * {@link RecipeCatalog} and walks the identical code.
  *
- * <p><b>OutputQuantity caveat:</b> the native {@code CraftingRecipe.primaryOutputQuantity} is a
- * protected field with no public getter and is absent from the recipe's network packet, so it cannot
- * be read at this seam. A derived conversion therefore carries a quantity of 1, which is the verified
- * native yield for every wood plank/decorative/ornate recipe (all 11 species). Retuning a station's
- * yield is {@code Recipe.Yield}'s job ({@link StationYield}), NOT this deriver's: a yield that keys
- * off the worker's held tool has to resolve per cycle, and the retired {@code FromCrafting
- * .OutputPerInput} leaf could only bake one number in at fold time.
+ * <p><b>A derived row carries the recipe's FULL output list at native quantities.</b> An iron
+ * sword's salvage recipe gives back two ore, a hide and a scrap, and the row says exactly that.
+ * Retuning what a station yields is {@code Recipe.Yield}'s job ({@link StationYield}), never this
+ * deriver's.
  */
 public final class StationRecipeDeriver {
-
-    /**
-     * The output quantity a derived conversion carries. The native per-recipe quantity is unreadable
-     * at this seam (see the class javadoc), and 1 is its verified value for every recipe family the
-     * shipped content derives; a station retunes yield through {@code Recipe.Yield} instead.
-     */
-    static final int NATIVE_OUTPUT_QUANTITY = 1;
 
     private StationRecipeDeriver() {
     }
 
     /**
-     * A normalized read of one craftable item for the pure derivation core: the item's own id,
-     * every native bench-requirement category on its recipe (flattened), the native bench
-     * requirement ids + kinds (for the {@code Benches}/{@code Types} routes, seam wave decision
-     * 51c), the recipe's native {@code TimeSeconds} (for the {@code NativeTime} pacing transform,
-     * decision 52), and its recipe inputs.
+     * A normalized read of one native recipe for the pure derivation core: the recipe's own id (the
+     * deterministic tie-break when two recipes make the same item), its primary output item id, every
+     * native bench-requirement category on it (flattened), the native bench requirement ids + kinds
+     * (for the {@code Benches}/{@code Types} routes), the recipe's native {@code TimeSeconds} (for the
+     * {@code NativeTime} pacing transform), its inputs and its FULL outputs.
      */
     public static final class CraftingCandidate {
+        @Nonnull final String recipeId;
         @Nonnull final String itemId;
         @Nonnull final List<String> categories;
         @Nonnull final List<String> benchIds;
         @Nonnull final List<String> types;
         final float timeSeconds;
         @Nonnull final List<Ingredient> inputs;
+        @Nonnull final List<Ingredient> outputs;
 
-        /** Full constructor (seam wave): carries the bench-id/type/time reads the derived-recipe routes need. */
-        public CraftingCandidate(@Nonnull String itemId, @Nonnull List<String> categories,
+        /**
+         * The full shape: every read the derivation routes need, the recipe's whole output list
+         * included.
+         */
+        public CraftingCandidate(@Nonnull String recipeId, @Nonnull String itemId, @Nonnull List<String> categories,
                 @Nonnull List<String> benchIds, @Nonnull List<String> types, float timeSeconds,
-                @Nonnull List<Ingredient> inputs) {
+                @Nonnull List<Ingredient> inputs, @Nonnull List<Ingredient> outputs) {
+            this.recipeId = recipeId;
             this.itemId = itemId;
             this.categories = categories;
             this.benchIds = benchIds;
             this.types = types;
             this.timeSeconds = timeSeconds;
             this.inputs = inputs;
+            this.outputs = outputs;
         }
 
-        /** Categories-only constructor (pre-seam-wave shape) - benchIds/types empty, timeSeconds 0. */
+        /**
+         * The one-output shape: a recipe making one of {@code itemId}, identified by that item (the
+         * shape of every recipe authored inside an item, whose id the engine derives from the item's).
+         */
+        public CraftingCandidate(@Nonnull String itemId, @Nonnull List<String> categories,
+                @Nonnull List<String> benchIds, @Nonnull List<String> types, float timeSeconds,
+                @Nonnull List<Ingredient> inputs) {
+            this(itemId, itemId, categories, benchIds, types, timeSeconds, inputs,
+                    List.of(Ingredient.item(itemId, 1)));
+        }
+
+        /** Categories-only constructor: benchIds/types empty, timeSeconds 0, one output of one. */
         public CraftingCandidate(@Nonnull String itemId, @Nonnull List<String> categories,
                 @Nonnull List<Ingredient> inputs) {
             this(itemId, categories, List.of(), List.of(), 0f, inputs);
@@ -127,26 +139,32 @@ public final class StationRecipeDeriver {
     /**
      * Derive one Conversion per candidate that MATCHES the spec (category intersect OR bench-id
      * match, then filtered by the declared recipe kinds) and whose recipe carries at least one
-     * usable input. Deterministic order (sorted by output item id). Pure.
+     * usable input and one output. Deterministic order: sorted by primary output item id, then by
+     * recipe id, so two recipes making the same item keep one order on every boot. Pure.
      *
-     * <p><b>Multi-input (decision 73):</b> a native recipe's WHOLE {@code Input} array derives into
-     * the conversion's own {@code Ingredient[]} input, so a multi-material native recipe is a real
+     * <p><b>Multi-input:</b> a native recipe's WHOLE {@code Input} array derives into the
+     * conversion's own {@code Ingredient[]} input, so a multi-material native recipe is a real
      * derived conversion rather than a skipped candidate. A candidate is skipped only when it has NO
-     * inputs at all, or when one of them names neither an {@code ItemId} nor a {@code ResourceTypeId}.
+     * inputs at all, or when one of them names neither an {@code ItemId}, a resolvable tag nor a
+     * {@code ResourceTypeId}.
      *
-     * <p><b>Match rule (seam wave decision 51c):</b> a candidate matches when its
-     * {@code categories} intersect the spec's {@code Categories} (case-insensitive) OR its
-     * {@code benchIds} include one of the spec's {@code Benches} (case-insensitive) - the two
-     * routes are additive, so a station may scope by native category, by native bench id, or both.
-     * The match is then filtered by {@code Types}: absent/empty derives BOTH kinds, else only a
-     * candidate whose recipe kind is in the declared set survives.
+     * <p><b>Multi-output:</b> the recipe's WHOLE output list derives at native quantities (a
+     * salvage recipe's ore, hide and scrap are three output entries of one row); a candidate with
+     * no output at all makes nothing and is skipped.
      *
-     * <p><b>Native-time pacing (decision 52):</b> when the spec authors a {@code NativeTime} group,
-     * each derived conversion carries a baked {@code DurationMs} = {@code Scale * TimeSeconds*1000 +
-     * OffsetMs} (the linear transform over the recipe's own native time); with no {@code NativeTime}
-     * group the derived conversion carries a {@code null} {@code DurationMs} and the engine falls to
-     * {@code Work.CycleMs} - so a station that authors {@code Categories} alone (the shipped sawmill)
-     * derives byte-identically to before.
+     * <p><b>Match rule:</b> a candidate matches when its {@code categories} intersect the spec's
+     * {@code Categories} (case-insensitive) OR its {@code benchIds} include one of the spec's
+     * {@code Benches} (case-insensitive) - the two routes are additive, so a station may scope by
+     * native category, by native bench id, or both. The match is then filtered by {@code Types}:
+     * absent/empty derives BOTH kinds, else only a candidate whose recipe kind is in the declared
+     * set survives.
+     *
+     * <p><b>Native-time pacing:</b> when the spec authors a {@code NativeTime} group, each derived
+     * conversion carries a baked {@code DurationMs} = {@code Scale * TimeSeconds*1000 + OffsetMs}
+     * (the linear transform over the recipe's own native time); with no {@code NativeTime} group
+     * the derived conversion carries a {@code null} {@code DurationMs} and the engine falls to
+     * {@code Work.CycleMs} - so a station that authors {@code Categories} alone (the shipped
+     * Sawmill) derives byte-identically to before.
      */
     @Nonnull
     public static List<StationAsset.Conversion> deriveFromCrafting(@Nonnull StationAsset.FromCrafting spec,
@@ -161,7 +179,7 @@ public final class StationRecipeDeriver {
         }
         String[] wantTypes = spec.getTypes();
         StationAsset.FromCrafting.NativeTime nativeTime = spec.getNativeTime();
-        List<StationAsset.Conversion> derived = new ArrayList<>();
+        List<Derived> derived = new ArrayList<>();
         for (CraftingCandidate cand : candidates) {
             if (cand == null || cand.itemId == null || cand.itemId.isBlank()) {
                 continue;
@@ -174,11 +192,8 @@ public final class StationRecipeDeriver {
             if (!typesMatch(cand.types, wantTypes)) {
                 continue;
             }
-            // Decision 73: a native recipe's WHOLE Input array derives (the single-input restriction
-            // is gone) - Conversion.Input is the same Ingredient[] shape, so "2 planks + 1 nail"
-            // derives as one multi-input conversion instead of being skipped.
             if (cand.inputs == null || cand.inputs.isEmpty()) {
-                Log.fine("STATION FromCrafting skips '" + cand.itemId + "': native recipe has no inputs");
+                Log.fine("STATION FromCrafting skips '" + cand.recipeId + "': native recipe has no inputs");
                 continue;
             }
             List<Ingredient> inputs = new ArrayList<>(cand.inputs.size());
@@ -188,7 +203,7 @@ public final class StationRecipeDeriver {
                 // route the live adapter resolves from a native ItemTag). A route-less input here is
                 // an unusable native reference, never a derived match-any row.
                 if (nativeInput == null || nativeInput.routeCount() == 0) {
-                    Log.fine("STATION FromCrafting skips '" + cand.itemId
+                    Log.fine("STATION FromCrafting skips '" + cand.recipeId
                             + "': a native input has no usable ItemId / ItemTag / ResourceTypeId route");
                     everyInputUsable = false;
                     break;
@@ -206,29 +221,60 @@ public final class StationRecipeDeriver {
             if (!everyInputUsable) {
                 continue;
             }
-            Ingredient[] output = {Ingredient.item(cand.itemId, NATIVE_OUTPUT_QUANTITY)};
+            Ingredient[] output = derivedOutputs(cand);
+            if (output == null) {
+                Log.fine("STATION FromCrafting skips '" + cand.recipeId + "': native recipe has no output");
+                continue;
+            }
             Long durationMs = nativeDurationMs(nativeTime, cand.timeSeconds);
-            // Selection wave (decision 56): stamp the derived conversion with its native source
-            // category so a multi-output station can group the picker by it. The do-not-rework
-            // guard on this deriver lifts for exactly this addition.
+            // The derived row is stamped with its native source category so a multi-output station
+            // can group the picker by it.
             String category = deriveSourceCategory(cand, wantCategories, wantBenches, catMatch);
-            // Set-recipe wave: every derived row runs at Conversion.DERIVED_TIER (1), so a
-            // hand-authored row at the reader-default tier 0 outranks derivation with no authoring.
-            derived.add(StationAsset.Conversion.derivedRow(inputs.toArray(new Ingredient[0]), output,
-                    durationMs, category));
+            // Every derived row runs at Conversion.DERIVED_TIER (1), so a hand-authored row at the
+            // reader-default tier 0 outranks derivation with no authoring.
+            derived.add(new Derived(cand.recipeId, StationAsset.Conversion.derivedRow(
+                    inputs.toArray(new Ingredient[0]), output, durationMs, category)));
         }
-        derived.sort(Comparator.comparing(c -> c.getOutput()[0].getItemId(), String.CASE_INSENSITIVE_ORDER));
+        derived.sort(Comparator.comparing((Derived d) -> d.row.getOutput()[0].getItemId(), String.CASE_INSENSITIVE_ORDER)
+                .thenComparing(d -> d.recipeId, String.CASE_INSENSITIVE_ORDER));
         if (derived.isEmpty()) {
-            Log.warn("STATION FromCrafting matched no craftable items for Categories "
+            Log.warn("STATION FromCrafting matched no native recipes for Categories "
                     + Arrays.toString(wantCategories) + " / Benches " + Arrays.toString(wantBenches)
                     + "; deriving zero conversions");
         }
-        return derived;
+        List<StationAsset.Conversion> rows = new ArrayList<>(derived.size());
+        for (Derived d : derived) {
+            rows.add(d.row);
+        }
+        return rows;
+    }
+
+    /** One derived row beside the recipe id that breaks a same-output sort tie. */
+    private record Derived(@Nonnull String recipeId, @Nonnull StationAsset.Conversion row) {
+    }
+
+    /**
+     * The row's outputs: the candidate's FULL native output list, every entry at its authored
+     * quantity (reader-defaulted to 1). {@code null} when the recipe makes nothing.
+     */
+    @Nullable
+    private static Ingredient[] derivedOutputs(@Nonnull CraftingCandidate cand) {
+        if (cand.outputs == null || cand.outputs.isEmpty()) {
+            return null;
+        }
+        List<Ingredient> out = new ArrayList<>(cand.outputs.size());
+        for (Ingredient nativeOutput : cand.outputs) {
+            if (nativeOutput == null || !nativeOutput.hasItemRoute()) {
+                continue;
+            }
+            out.add(Ingredient.item(nativeOutput.getItemId(), nativeOutput.effectiveQuantity()));
+        }
+        return out.isEmpty() ? null : out.toArray(new Ingredient[0]);
     }
 
     /**
      * PURE: the baked per-conversion {@code DurationMs} for the {@code NativeTime} linear transform
-     * (decision 52, {@code y = Scale * (TimeSeconds in ms) + OffsetMs}), or {@code null} when no
+     * ({@code y = Scale * (TimeSeconds in ms) + OffsetMs}), or {@code null} when no
      * {@code NativeTime} group is authored (the derived conversion then falls to {@code Work.CycleMs}).
      * Reader-defaulted {@code Scale}/{@code OffsetMs} so even an empty {@code NativeTime: {}} stretches
      * native time rather than leaving it instant.
@@ -242,136 +288,96 @@ public final class StationRecipeDeriver {
         return Math.round(ms);
     }
 
-    // ==================== Live adapter (Item asset map) ====================
+    // ==================== Live adapter (the shared recipe index) ====================
 
     /**
-     * Extract a {@link CraftingCandidate} from every live {@code Item} that carries a native
-     * crafting recipe. Never throws; returns an empty list if the asset map is unreadable
-     * (e.g. a unit JVM).
-     *
-     * <p><b>The native {@code ItemTag} input route:</b> a recipe input selecting by item tag keeps
-     * only its registered tag INDEX at this seam ({@code MaterialQuantity} exposes no tag-name
-     * getter), and the registry maps name to index one way only - so {@link #liveTagNamesByIndex}
-     * rebuilds the reverse map from the item assets themselves: every raw tag KEY an item carries
-     * (the engine expands families, values and {@code family=value} pairs all into keys) is
-     * resolved through {@code AssetRegistry.getTagIndex} once per fold. A recipe tag that no item
-     * carries resolves to no name; the candidate is then skipped with ONE fold WARN naming its
-     * output item, never silently.
+     * Every candidate the shared recipe index holds right now ({@link RecipeIndex#live()}): one per
+     * native recipe, standalone files and item-authored recipes alike. Never throws; an index that
+     * cannot be read yet (a unit JVM) answers an empty list.
      */
     @Nonnull
     public static List<CraftingCandidate> liveCandidates() {
-        List<CraftingCandidate> out = new ArrayList<>();
         try {
-            Map<Integer, String> tagNames = liveTagNamesByIndex();
-            for (Item item : Item.getAssetMap().getAssetMap().values()) {
-                if (item == null || item.getId() == null || !item.hasRecipesToGenerate()) {
-                    continue;
+            return candidatesOf(RecipeIndex.live().catalog());
+        } catch (Throwable t) {
+            Log.warn("STATION could not read the recipe index for FromCrafting: " + t.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * PURE: one {@link CraftingCandidate} per recipe of {@code catalog} that can be scoped to at all
+     * (a native category or a bench id), in the catalog's own order. A recipe whose input line keeps
+     * no route (a native tag no loaded item carries, so nothing could satisfy it natively either) is
+     * skipped with ONE warn naming the recipe; a recipe with no input, or no output, is skipped
+     * quietly, since the derivation core would skip it anyway.
+     */
+    @Nonnull
+    public static List<CraftingCandidate> candidatesOf(@Nonnull RecipeCatalog catalog) {
+        List<CraftingCandidate> out = new ArrayList<>();
+        for (NativeRecipe recipe : catalog.all()) {
+            if (recipe == null || recipe.id().isEmpty()) {
+                continue;
+            }
+            List<String> categories = new ArrayList<>();
+            List<String> benchIds = new ArrayList<>();
+            List<String> types = new ArrayList<>();
+            for (RecipeBench bench : recipe.benches()) {
+                if (!bench.id().isEmpty()) {
+                    benchIds.add(bench.id());
                 }
-                List<CraftingRecipe> recipes = new ArrayList<>(1);
-                item.collectRecipesToGenerate(recipes);
-                for (CraftingRecipe recipe : recipes) {
-                    if (recipe == null) {
-                        continue;
-                    }
-                    List<String> categories = new ArrayList<>();
-                    List<String> benchIds = new ArrayList<>();
-                    List<String> types = new ArrayList<>();
-                    BenchRequirement[] benches = recipe.getBenchRequirement();
-                    if (benches != null) {
-                        for (BenchRequirement bench : benches) {
-                            if (bench == null) {
-                                continue;
-                            }
-                            if (bench.id != null && !bench.id.isBlank()) {
-                                benchIds.add(bench.id);
-                            }
-                            if (bench.type != null) {
-                                types.add(bench.type.name());
-                            }
-                            if (bench.categories != null) {
-                                for (String category : bench.categories) {
-                                    if (category != null && !category.isBlank()) {
-                                        categories.add(category);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // A candidate is derivable when the station can scope to it by native category
-                    // OR by native bench id; skip only when it offers neither route.
-                    if (categories.isEmpty() && benchIds.isEmpty()) {
-                        continue;
-                    }
-                    float timeSeconds = recipe.getTimeSeconds();
-                    List<Ingredient> inputs = new ArrayList<>();
-                    boolean everyInputResolvable = true;
-                    MaterialQuantity[] mqs = recipe.getInput();
-                    if (mqs != null) {
-                        for (MaterialQuantity mq : mqs) {
-                            if (mq == null) {
-                                continue;
-                            }
-                            // Native consumption precedence: exact ItemId, then the ItemTag, then
-                            // the resource family.
-                            if (mq.getItemId() != null) {
-                                inputs.add(Ingredient.item(mq.getItemId(), mq.getQuantity()));
-                            } else if (mq.getTagIndex() != AssetRegistry.TAG_NOT_FOUND) {
-                                String tagName = tagNames.get(mq.getTagIndex());
-                                if (tagName == null) {
-                                    Log.warn("STATION FromCrafting skips '" + item.getId()
-                                            + "': its native recipe selects an ItemTag (index "
-                                            + mq.getTagIndex() + ") that no loaded item carries, so"
-                                            + " the tag name cannot be resolved");
-                                    everyInputResolvable = false;
-                                    break;
-                                }
-                                inputs.add(Ingredient.tagged(
-                                        Map.of(tagName, new String[0]), mq.getQuantity()));
-                            } else {
-                                inputs.add(Ingredient.resource(mq.getResourceTypeId(), mq.getQuantity()));
-                            }
-                        }
-                    }
-                    if (!everyInputResolvable) {
-                        continue;
-                    }
-                    out.add(new CraftingCandidate(item.getId(), categories, benchIds, types,
-                            timeSeconds, inputs));
+                if (bench.type() != null) {
+                    types.add(bench.type());
+                }
+                categories.addAll(bench.categories());
+            }
+            // A candidate is derivable when the station can scope to it by native category OR by
+            // native bench id; skip only when it offers neither route.
+            if (categories.isEmpty() && benchIds.isEmpty()) {
+                continue;
+            }
+            List<Ingredient> inputs = new ArrayList<>(recipe.inputs().size());
+            boolean everyInputResolvable = true;
+            for (RecipeMaterial line : recipe.inputs()) {
+                if (!line.hasRoute()) {
+                    Log.warn("STATION FromCrafting skips recipe '" + recipe.id()
+                            + "': a native input names a tag no loaded item carries, so nothing can satisfy it");
+                    everyInputResolvable = false;
+                    break;
+                }
+                inputs.add(ingredientOf(line));
+            }
+            if (!everyInputResolvable) {
+                continue;
+            }
+            List<Ingredient> outputs = new ArrayList<>(recipe.outputs().size());
+            for (RecipeMaterial line : recipe.outputs()) {
+                if (line.itemId() != null) {
+                    outputs.add(Ingredient.item(line.itemId(), line.quantity()));
                 }
             }
-        } catch (Throwable t) {
-            Log.warn("STATION could not enumerate the Item asset map for FromCrafting: " + t.getMessage());
+            String primaryId = recipe.primaryOutput() != null && recipe.primaryOutput().itemId() != null
+                    ? recipe.primaryOutput().itemId()
+                    : outputs.isEmpty() ? null : outputs.get(0).getItemId();
+            if (primaryId == null) {
+                continue;
+            }
+            out.add(new CraftingCandidate(recipe.id(), primaryId, categories, benchIds, types,
+                    recipe.timeSeconds(), inputs, outputs));
         }
         return out;
     }
 
-    /**
-     * The reverse tag map (registered index -&gt; tag name), rebuilt per fold from every loaded
-     * item's raw tag keys. Complete for every tag a recipe can meaningfully select: a recipe tag
-     * matching NO item's expanded keys would consume nothing natively either.
-     */
+    /** One native recipe line as the {@link Ingredient} the derivation core reads, in the engine's own route order. */
     @Nonnull
-    private static Map<Integer, String> liveTagNamesByIndex() {
-        Map<Integer, String> names = new HashMap<>();
-        for (Item item : Item.getAssetMap().getAssetMap().values()) {
-            if (item == null || item.getData() == null) {
-                continue;
-            }
-            Map<String, String[]> raw = item.getData().getRawTags();
-            if (raw == null) {
-                continue;
-            }
-            for (String key : raw.keySet()) {
-                if (key == null) {
-                    continue;
-                }
-                int index = AssetRegistry.getTagIndex(key);
-                if (index != AssetRegistry.TAG_NOT_FOUND) {
-                    names.putIfAbsent(index, key);
-                }
-            }
+    private static Ingredient ingredientOf(@Nonnull RecipeMaterial line) {
+        if (line.itemId() != null) {
+            return Ingredient.item(line.itemId(), line.quantity());
         }
-        return names;
+        if (line.tag() != null) {
+            return Ingredient.tagged(Map.of(line.tag(), new String[0]), line.quantity());
+        }
+        return Ingredient.resource(line.resourceTypeId(), line.quantity());
     }
 
     // ==================== Helpers ====================
@@ -399,15 +405,14 @@ public final class StationRecipeDeriver {
     }
 
     /**
-     * PURE (selection wave, decision 56): the source-category tag stamped onto a derived
-     * conversion. Precedence: (1) a category-route match stamps the MATCHED native category (the
-     * first of the candidate's own categories that intersects the wanted set - the meaningful
-     * grouping key the picker shows); (2) failing that, if the candidate carries ANY native
-     * category, its first one (the recipe's own source category, even on a bench-route match);
-     * (3) only "when no category exists" does a bench-route match stamp the matched BENCH id.
-     * {@code null} only when a candidate matched with neither a category nor a resolvable bench id
-     * (unreachable given the caller already matched, but null-safe). Deterministic + testable
-     * without a live item map.
+     * PURE: the source-category tag stamped onto a derived conversion. Precedence: (1) a
+     * category-route match stamps the MATCHED native category (the first of the candidate's own
+     * categories that intersects the wanted set - the meaningful grouping key the picker shows);
+     * (2) failing that, if the candidate carries ANY native category, its first one (the recipe's
+     * own source category, even on a bench-route match); (3) only when no category exists does a
+     * bench-route match stamp the matched BENCH id. {@code null} only when a candidate matched with
+     * neither a category nor a resolvable bench id (unreachable given the caller already matched,
+     * but null-safe). Deterministic + testable without a live item map.
      */
     @Nullable
     static String deriveSourceCategory(@Nonnull CraftingCandidate cand, @Nullable String[] wantCategories,
@@ -465,8 +470,8 @@ public final class StationRecipeDeriver {
      * True when a candidate's recipe {@code kinds} are allowed by the spec's {@code Types} filter:
      * a null/empty {@code wantTypes} allows BOTH kinds (no filter); otherwise the candidate must
      * carry at least one recipe kind named in the set (case-insensitive). A candidate with no
-     * declared kinds (the pre-seam-wave categories-only shape) always passes so the shipped sawmill
-     * derives unchanged.
+     * declared kinds (the categories-only shape) always passes so the shipped Sawmill derives
+     * unchanged.
      */
     static boolean typesMatch(@Nonnull List<String> kinds, @Nullable String[] wantTypes) {
         if (wantTypes == null || wantTypes.length == 0) {

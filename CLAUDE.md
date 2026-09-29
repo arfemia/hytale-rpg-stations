@@ -266,15 +266,19 @@ cd 'D:\dev\business\hyMMO\additional-mods\rpg-stations'; .\build.ps1
 .\build.ps1 -Install:$false     # build only
 .\build.ps1 -ModsDir <path>     # explicit install target (else $env:HYTALE_MODS_DIR)
 ```
-Produces `build/libs/RpgStations-<version>.jar` (**version is `1.0.0`** - the maintainer-set first
-public release, a deliberate Sawmill-only scope; see the "1.0.0 release scope" section below) and
+Produces `build/libs/RpgStations-<version>.jar` (**version is `1.1.0`, HELD and unreleased**: the
+disenchanting wave's engine core - any-bench derivation with full outputs, the fallback routes,
+the `Convert` phase, the custody fixes, the item in the factors, the ritual queue and paced beats,
+see `CHANGELOG.md`'s `1.1.0 - unreleased` section; the last public release was `1.0.0`, the
+maintainer-set Sawmill-only scope described in the "1.0.0 release scope" section below) and
 copies the runtime jar into the Hytale `Mods/` folder. `.\gradlew.bat
 build`/`test` work too. The root hyMMO `rebuild.ps1 -Mods` (or `-Jar -Mods -Packs` for the full
 stack) drives this mod's own `build.ps1` alongside every other `additional-mods/` sibling,
 dependency-ordered (`ziggfreed-common` first).
 
 **`ziggfreed-common` is the ONLY dependency** (`manifest.json` `Dependencies:
-{"Ziggfreed:ZiggfreedCommon": ">=2.1.0"}`; `build.gradle` `compileOnly` + `testImplementation`
+{"Ziggfreed:ZiggfreedCommon": ">=2.2.0"}`, the `gradle.properties` pin `ziggfreedCommonVersion=2.2.0`
+being the version it is built against; `build.gradle` `compileOnly` + `testImplementation`
 against the sibling submodule's built jar, the sibling-relative path pattern -
 `${rootDir}/../ziggfreed-common/build/libs/ZiggfreedCommon-${ziggfreedCommonVersion}.jar`). **NO
 reference to any other mod's jar anywhere**, and that is load-bearing, not incidental: RpgStations

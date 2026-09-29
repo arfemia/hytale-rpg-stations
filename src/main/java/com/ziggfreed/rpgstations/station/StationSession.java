@@ -257,6 +257,16 @@ final class StationSession {
      */
     int stepRepeatCount;
 
+    /**
+     * The PACE scale the current step resolved at its fresh entry (the action's ladder times every
+     * matching extension's, held inside the action's clamp - {@code StationPacing}), cached here
+     * beside {@link #stepRepeatCount} under the same resolve-once rule: a {@code Duration} hold or
+     * a walk resume reads it back verbatim, so a committed deadline is never re-scaled and a
+     * repeating paced step keeps one pace for all its iterations. {@code 1.0} (neutral) for a
+     * step that is not paced, and for every program of an action that authors no {@code Pace}.
+     */
+    double stepPaceScale = 1.0;
+
     // The IN-FLIGHT program's rebuild-avoiding snapshot, set only while programSuspended (design
     // 9.3): a resume must NOT re-derive which conversion is running (the live inventory may have
     // changed since the program started), so the fresh-start path snapshots its built steps and
@@ -383,6 +393,26 @@ final class StationSession {
      */
     final Map<String, Map<String, Integer>> iterationConsumedCustody = new LinkedHashMap<>();
 
+    /**
+     * The UNIQUE-STACK half of the custody refund ledger, keyed like {@link #iterationConsumedCustody}
+     * by originating pile: the REAL metadata-bearing stack a custody consume took out of a
+     * single-item socket. An interrupted iteration puts that same stack back (wear and stamps
+     * intact) beside the counts, or hands it back in place of a bare fresh one when the pile can
+     * no longer be resolved. Cleared by the same commit boundaries.
+     */
+    final Map<String, ItemStack> iterationConsumedUnique = new LinkedHashMap<>();
+
+    /**
+     * The HOOK half of the iteration ledger: each consume since the last commit boundary, as the
+     * consumption the ONE input-consumed hook will report ({@link InputConsumption}, one per
+     * consume batch, the real stacks with their sockets). Every consume body records here beside
+     * the refund halves above; the commit ({@code StationService#commitIteration}: a committed
+     * produce, a committed conversion, a completed program pass) takes it and reports each entry
+     * once, and a refund at stop drops it unreported, so a listener never hears of a consumption
+     * the engine gave back.
+     */
+    final List<InputConsumption> iterationConsumedInputs = new ArrayList<>();
+
     // Item ledger (for the future standalone summary HUD, leg 3): consumedItems covers both
     // the exact-ItemId route AND the ResourceTypeId ("any log" family) route (tallying the
     // REAL item ids the transactional removal actually drained). luckItems covers both the
@@ -476,6 +506,24 @@ final class StationSession {
      * never persisted.
      */
     @Nullable String cycleOutputItemId;
+
+    /**
+     * The ITEM the running work is about, published as the factor context's item leaf on every
+     * build (the per-cycle snapshot, the completion pass, and a resume's rebuilt context alike):
+     * the metadata-bearing piece placed in the socket being worked, else a bare stack of the
+     * material the cycle consumes. Captured on the session because the factor context is rebuilt
+     * on resume and the piece may already have been consumed by then; a plain value, never a live
+     * handle. Null for an inventory-routed action with no exact-item input.
+     */
+    @Nullable ItemStack factorItem;
+
+    /**
+     * The custody socket the CURRENT program pass works ({@code Work.Queue}): set at the start of
+     * each pass to the next filled socket in authored order, so the Convert phase drains it and the
+     * factor item reads its piece. Null when the action does not queue (the classic first-socket
+     * addressing applies).
+     */
+    @Nullable String queueSocketId;
 
     /**
      * Committed enhancement stamps this session (design section 9.5, phase 2 round-7 D-6): appended

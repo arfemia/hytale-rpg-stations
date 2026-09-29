@@ -192,8 +192,9 @@ The pre-scope-2 engine dispatched a `StationStep.Type` union through a per-type 
 a discriminator.
 
 - [`StationStepRegistry`](StationStepRegistry.java) is now ONE composite handler walking
-  Conditions -> `Walk` -> `Consume` -> `Stamp` -> `Produce` -> `Roll` -> `Commands` ->
-  `Presentation`/`Puppet.Clip` -> `Duration` per step, still wrapped in the conditions-gate +
+  Conditions -> `Walk` -> `Consume` -> `Stamp` -> `Convert` -> `Produce` -> `Roll` (then a
+  `RollBonus` beat's Bonus pass) -> `Commands` -> `Presentation`/`Puppet.Clip` -> `Duration` per
+  step, still wrapped in the conditions-gate +
   throw-guard layer (design 9.3/M4's binding fix carries forward: a throwing phase degrades to a
   clean session `stop()`, never crashes the shared per-world frame drain) - never six independent
   per-type entries.
@@ -207,13 +208,48 @@ a discriminator.
   `Wait` type did).
 - [`StationStepContext`](StationStepContext.java)/[`StationStepResult`](StationStepResult.java)
   (the per-run bundle + sealed `Success`/`Suspend`/`Skip`/`Fail`) are unchanged in shape.
-- [`ImplicitProgram`](ImplicitProgram.java) COLLAPSES to ONE step
-  (`{Consume, Stamp:null, Produce, Roll, Presentation}` folded onto a single `StationStep`
-  instead of the old four-step `[Consume, Produce, Roll, Present]` array) - byte-equivalent
-  behavior (a station with no `Actions`/`Steps` authored runs identically), simpler anchor for
-  the phase model. Its `Roll` phase is where the action's own `Bonus` rides on THIS route, which
-  is why `dispatchProgram`'s completion-time `Bonus` pass is flagged off for it (see the cadence
-  section: one `Cycle` moment per completed pass, whichever program shape ran).
+- [`ImplicitProgram`](ImplicitProgram.java) is ONE step, `{Convert, Roll, Presentation}`: the
+  classic loop converts through the SAME `Convert` phase an authored beat runs
+  (`StationStepHandlers#convertPhase`: selection, `Yield`, the yield breakdown, the cycle output
+  item, the consume, the produce, and LAST the iteration commit `StationService#commitIteration`,
+  which clears the refund ledger and then reports the consumption to the ONE input-consumed hook
+  (see the hook bullet below; a no-op when the produce already committed, the one commit an
+  essence-only row gets); a failed produce returns before any commit), so a conversion has one
+  code path whichever program shape ran it. A piece no row covers is offered ONE fallback row,
+  the first route that applies (`StationFallbackRoutes#routeFor`), and selection hands the
+  runnable scan exactly the rows `StationFallbackRoutes#offeredRows` answers (at most one, pinned
+  at length one), so a crafting-share row with no room answers NO_ROOM and the essence-only row
+  never rescues it. Both routes are gated by [`StationMetadataGuard`](StationMetadataGuard.java),
+  pure station policy over ziggfreed-common's metadata read: a placed stack is refused when
+  `ItemReadings.undeclaredMetadataKeys` answers null (unreadable) or any key no mod declared on
+  the library's `DisposableItemMetadata` list. This mod declares and names no key; a stamper's
+  keys are declared when it registers, any other mod declares its own at setup, and a stamped
+  stack vouches for nothing beyond its declared keys. What the loop still does
+  BEFORE dispatch is choose the row (`runCycle` -> `selectConversion`): that pre-dispatch choice
+  drives idle practice, the OUT_OF_INPUTS / INVENTORY_FULL stops, the per-conversion pace and the
+  feedable-cycles count, and rides the dispatch as `StationStepContext.preselected`; an authored
+  `Convert` beat selects at the beat instead (`StationService#selectConversionForStep`, addressed to
+  the ritual queue's current socket). Its `Roll` phase is where the action's own `Bonus` rides on
+  THIS route, which is why `dispatchProgram`'s completion-time `Bonus` pass is flagged off for it
+  (see the cadence section: one `Cycle` moment per completed pass, whichever program shape ran);
+  an authored program with a `RollBonus` beat rolls it there and skips the completion pass too
+  (`StationStepDecisions#programRollsBonusAtBeat`).
+- **Paced beats** ([`StationPacing`](StationPacing.java)): the composite handler resolves a step's
+  pace ONCE at its fresh entry, beside the `Repeat` count (`StationSession.stepPaceScale`, the same
+  resolve-once rule), from `StationStepContext.pace` (`StationService#effectivePace`: the action's
+  own `Pace.Ladder` plus every matching extension's ladder from `ExtensionCatalog#paceLaddersFor`);
+  the ladders MULTIPLY and only the action's `Pace.Clamp` bounds the product (an extension's
+  `Pace` is typed `{Ladder}` only, `Pace.LADDER_ONLY_CODEC`, and the validator warns
+  `PACE_UNCLAMPED` on an action pace whose clamp is absent or one-sided, since that clamp is the
+  one bound there is). A `Paced` step's
+  `Duration.Ms` is stretched by it, and so is its entry presentation (`StationPacing.scaleInTime`:
+  the moment's `DelayMs`, each sound's, each burst's `DurationSeconds`); an unpaced step keeps its
+  authored length.
+- **The ritual queue** (`Work.Queue`): `runAuthoredProgram` sets `StationSession.queueSocketId` to
+  the next filled Item socket in authored order (`StationCustody#nextFilledSocket`) before each
+  pass, captures that socket's piece as the factor item, and the `Convert` phase drains that
+  socket; after a completed pass `dispatchProgram` starts the next pass on the next frame while
+  another filled socket waits, and falls to the ordinary end-of-pass rule once none does.
 - `StationSession` resume state (`programSuspended`/`programIndex`/`stepDeadlineMs`/
   `activeProgramSteps`) is UNCHANGED this wave - a `Duration` hold suspends/resumes through the
   exact same fields the old `Wait` type used. The design's two further resume fields landed with
@@ -224,10 +260,57 @@ a discriminator.
   parametric progress across ticks and cleared the instant the walk arrives or its path blocks).
 - **A step combining `Consume` + `Produce` is an ATOMIC transform** (no consumed-without-produced
   window across one iteration) - the design's transactional-edges rule (2.5/decision 38): a step's
-  commit (EITHER committed destination, `To:"Custody"` or `To:"Inventory"`) clears the CURRENT
-  iteration's consumed ledger, so refund and custody-return stay mutually exclusive per iteration.
+  commit (EITHER committed destination, `To:"Custody"` or `To:"Inventory"`, or a `Convert` phase
+  whether or not it produced anything) COMMITS the CURRENT iteration's consumed ledger, so refund
+  and custody-return stay mutually exclusive per iteration; a COMPLETED program pass commits it
+  too. Every commit point makes the ONE call `StationService#commitIteration` (its pure ledger
+  half is `commitIterationLedger`).
   A `Walk` phase can split a `Consume`+`Produce` pair across a suspend, which is exactly why the
-  `iterationConsumed` ledger refunds an in-flight iteration at `stop()`.
+  `iterationConsumed` ledger refunds an in-flight iteration at `stop()`. **The ledger has four
+  halves**: three REFUND halves (the inventory half, the per-pile custody half, and the
+  UNIQUE-STACK half) and the HOOK half (`StationSession.iterationConsumedInputs`, see the next
+  bullet). The unique half (`StationSession.iterationConsumedUnique`): a custody consume that takes the last of a
+  single-item socket's piece takes the pile's metadata-bearing `Unique` stack off the pile with it
+  (`StationCustodyClaim#takeUniqueIfDrained` - the piece is destroyed, its prop despawns in the
+  same tick through `StationService#onUniqueConsumed`) and ledgers that REAL stack, so an
+  interrupted iteration puts the same piece back, wear and stamps intact
+  (`StationCustodyLedger#countsBesideUnique` nets the count half so it goes back once). Only a
+  stack THIS drain took is ledgered (`StationCustodyLedger#pieceTaken`, the same
+  `drainTookPiece` decision the hook's report uses): a `Unique` left dangling on its pile before
+  the drain is cleared off the pile but never put back. A pile whose `Unique` outlived its count
+  reads as holding nothing (`StationCustody#uniqueDrained`).
+- **The ONE input-consumed hook** (`StationService#onInputConsumed(Store, InputConsumption)`,
+  session-free; the api's input-consumed event and `STATION_INPUT` objective fire from its body
+  once that leg lands, a `Log.fine` today). Every path on which a station consumes input reaches
+  it EXACTLY ONCE, AFTER the consumption commits, and a refunded consumption never reaches it.
+  The payload ([`InputConsumption`](InputConsumption.java)): the worker (`PlayerRef`, entity ref,
+  uuid; ALL null on an unattended settle, `hasWorker()`, and ALL set on an attended record, which
+  `attendedConsumption` requires so it never reads as unattended), the world uuid (the worker's
+  `PlayerRef` world, else the session's own world read off the worker's entity; an attended batch
+  whose session has lost part of its worker or can name no world is the one drop, teardown racing
+  the phase), the block the consumed
+  pile stood at (the `At` anchor's block for a remote pile, the station's own for inventory), the
+  station and action ids, and the REAL stacks, each with the socket it left
+  ([`ConsumedInput`](ConsumedInput.java); `fromPile` puts the piece's own stack first when a
+  single-item socket gave it up to THIS drain, `StationCustodyLedger#drainTookPiece`, and nets its
+  share off the bare per-id stacks, the refund's own split; an inventory stack is a bare stack of
+  the drained id).
+  The paths: (1) a SESSION consume (the `Consume` phase and the `Convert` phase's drain share
+  `StationStepHandlers#consumeItems`) records its batch into the ledger's HOOK half
+  (`StationService#recordIterationConsumedInputs`, built by `attendedConsumption`); the commit
+  (`commitIteration`: each `Produce` route, the `Convert` phase's end, `dispatchProgram`'s
+  completed pass) takes the ledger and THEN reports each batch; `refundIterationLedger` drops the
+  hook half unreported. (2) A `Stamp` phase's reagents report straight after the enhanced stack
+  commits (`reportCommittedConsumption`; they sit in no refund ledger, every earlier failure
+  restores them first). (3) An unattended settle reports after its transform's `markDirty`, with
+  no worker (`reportUnattendedConsumption` over `StationUnattended.Settle#drains`). Nothing else
+  consumes input: placement moves a stack INTO custody, a hand-back or gather moves it out, and a
+  doneness collapse degrades produced output, none of them an input consumption.
+  `InputConsumedHookOrderTest` pins each path's order on the source (land, commit, report) and the
+  hook's three call sites, one per commit shape, and exactly one `commitIteration` in
+  `convertPhase` and in `dispatchProgram`; `StationCustodyConsumeFixTest` pins the hook half's
+  take-once commit, the unique half's `pieceTaken` gate and `attendedConsumption`'s worker and
+  world rules.
 - **A committed produce phase reports ONE api `StationOutputProducedEvent`, and so does ONE
   committed grant pass** (both destinations for a produce; the inventory route excludes a stack
   that reached neither the inventory nor the ground), through the STATIC
@@ -511,8 +594,14 @@ hardwood log); `Tags` is the shared `TagMatch` map (an empty value list = family
 single-native-tag form). `ItemResourceType` exposes its id as a PUBLIC FIELD `.id` (no `getId()` -
 a protocol class quirk). **All route COMPARING is ziggfreed-common's `match.ItemMatch`**, reached
 through `StationCustody.ingredientEntryMatcher` (piles; `StationService.liveIngredientMatcher` is
-the live-resolver wiring) and `StationCustody.matchesIngredient`/`matchesInput` (held/placed
-acceptance) - `ActionInput` and `Ingredient` stay two leaves over ONE matcher, pinned by
+the live-resolver wiring) and `StationCustody.matchesIngredient` (a held/placed material against
+one `Ingredient`). **Held/placed acceptance against an `ActionInput` is ONE rule,
+`StationCustody.accepts`** (an absent or catch-all matcher accepts everything, a route set accepts
+what a route matches, the `Except` hole carved out either way; a route-less `Except` matches
+nothing and carves no hole): action selection, a socket's `Match` and an explicit `Custody.Input`
+at placement, a Block socket's match and a fallback's `Input` all ask it. `matchesInput` is NOT an
+acceptance site: it is the ROUTES-only seam behind `accepts` (a catch-all answers false there),
+kept so `ActionInput` and `Ingredient` stay two leaves over ONE route matcher, pinned by
 `IngredientActionInputRouteParityTest`. A `Tags` input consumed from INVENTORY counts/drains
 through `InventoryIngredients` (a slot walk over the same predicate; no native batch API speaks
 our tag-map shape).
@@ -534,28 +623,35 @@ conversion's whole arrays drive the implicit program's one atomic Consume/Produc
 convenience the picker preview, custody acceptance, and validator labels speak in, never the consume
 path).
 [`StationRecipeDeriver`](StationRecipeDeriver.java)'s `Recipe.FromCrafting` derives one
-`Conversion` per LIVE `Item` whose native `Recipe.BenchRequirement[].Categories` intersects the
-authored `Categories` (bench-TYPE-agnostic: a Crafting bench's category rows, e.g. the
-Cookingbench tabs, scope exactly like a Processing bench's), carrying that recipe's WHOLE native
-`Input` array (a multi-material recipe derives rather than being skipped; a native `ItemTag` input
-derives onto the `Ingredient.Tags` presence form, its tag NAME recovered from the items' own raw
-tag keys since `MaterialQuantity` exposes only the index - an unresolvable tag skips the candidate
-with ONE fold WARN naming the output item; only a recipe with no inputs at all, or one with no
-usable route, is skipped), zero hardcoding. The PURE core (`resolve`/`deriveFromCrafting`)
-takes injected `CraftingCandidate`s, unit-tested without a live item map. A derived conversion
-carries a quantity of 1: the native `CraftingRecipe.primaryOutputQuantity` is a protected field with
-no getter and is absent from the recipe packet, so it is unreadable at that seam (and is verified 1
-for every recipe family the shipped content derives).
+`Conversion` per native recipe in ziggfreed-common's RECIPE INDEX (`RecipeIndex.live()`, standalone
+recipe files and item-authored recipes alike) whose `BenchRequirement[].Categories` intersects the
+authored `Categories` OR whose bench id is in `Benches` (bench-TYPE-agnostic: a Crafting bench's
+category rows scope exactly like a Processing bench's, and `Benches: ["Salvagebench"]` derives the
+whole vanilla salvage set), carrying that recipe's WHOLE native `Input` array (a multi-material
+recipe derives rather than being skipped; a native `ItemTag` input derives onto the
+`Ingredient.Tags` presence form, its tag NAME recovered by the index from the items' own raw tag
+keys - a tag no item carries keeps no route and skips the recipe with ONE fold WARN naming it;
+a recipe with no inputs or no outputs is skipped) AND the recipe's WHOLE native `Output` list at
+native quantities (a salvage row's ore, hide and scrap are three outputs of one row), zero
+hardcoding. The PURE core (`resolve`/`deriveFromCrafting`) takes injected `CraftingCandidate`s and
+`candidatesOf(RecipeCatalog)` is the pure half of the live adapter, both unit-tested without a
+live server. Rows sort by primary output id, then recipe id, so two recipes making one item keep
+one order on every boot. `StationCatalog`'s derived-conversion cache re-derives when the index's
+`generation()` moves (a recipe or item reload). The Sawmill's 33 rows are pinned byte-identical by
+`SawmillDerivationParityTest`.
 
 **Yield is [`StationYield`](StationYield.java)'s job, not the deriver's - and it is PURELY
-DETERMINISTIC now, with zero factor/roll involvement.** `Recipe.Yield` (`../asset/CLAUDE.md`) is
-resolved PER CYCLE at the one point a chosen conversion becomes a live produce phase
-(`StationService#runRealCycle`), because even a purely deterministic `Base`/`Scale` still needs
-re-reading every cycle (a tool swap mid-session changes nothing about `Yield` itself, but the
-conversion driving it can). `StationYield` is now just `resolveQuantity`/`applyToOutputs` -
-`floor(base * Scale)` clamped into `[max(1, Min), Max]` - with NO ladder, NO roll, and NO
-`FactorSnapshot` dependency at all; a null `Yield` is the IDENTITY (the conversion's own authored
-quantity, untouched). **Everything probabilistic moved to the loot layer**: a `Roll` in the
+DETERMINISTIC, with zero factor/roll involvement.** `Recipe.Yield` (`../asset/CLAUDE.md`) is
+resolved PER CYCLE at the one point a chosen conversion becomes a live produce phase (the
+`Convert` phase, `StationStepHandlers#convertPhase`), because even a purely deterministic
+`Base`/`Scale` still needs re-reading every cycle (a tool swap mid-session changes nothing about
+`Yield` itself, but the conversion driving it can). `StationYield` is just
+`resolveQuantity`/`applyToOutputs` - `floor(base * Scale)` clamped into `[max(1, Min), Max]` -
+with NO ladder, NO roll, and NO `FactorSnapshot` dependency at all; a null `Yield` is the IDENTITY
+(the conversion's own authored quantity, untouched). **The composition rule over a multi-output
+row: `Base` replaces the PRIMARY (first) output's quantity and nothing else, every other output
+keeps its native quantity, and `Scale`/`Min`/`Max` apply to every output** (the unattended settle
+applies the same rule). **Everything probabilistic moved to the loot layer**: a `Roll` in the
 action's own `Bonus` (evaluated by `loot.StationLootEngine` over the shared roll core, off the SAME per-cycle
 `FactorSnapshot` `runRealCycle` builds once for the whole cycle - "one aggregation, several
 consumers") tallies `Grants.OutputItems`, and `StationService#grantBonusOutputItems` hands out
@@ -603,10 +699,11 @@ CAS guard passes, bringing the session row / item rows / lucky-find rows forward
 seconds later (`SESSION_ROW_FADE_MS`) instead of hanging on the panel or on the HELD linger's own
 never-expire clock. One-off notices (a denial, a seat unavailable, inventory full, the
 retrieve-when-everything-dropped toast) stay on the feed. An
-authored `Steps` program has no single "cycle output" for
-`OutputItems` to add to (`s.cycleOutputItemId` stays null, and `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT`
-warns on an action authoring `OutputItems` there - on its own `Bonus` or on a step's `Roll` phase
-alike). The three tool factors that make a `Bonus`/`ContributionScale`
+authored `Steps` program has a "cycle output" for `OutputItems` to add to only once a `Convert`
+beat has run its row (`s.cycleOutputItemId` is set there and stays null on a program with no
+Convert beat, which is what `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` warns about on an action
+authoring `OutputItems` - on its own `Bonus` or on a step's `Roll` phase alike). The three tool
+factors that make a `Bonus`/`ContributionScale`
 ladder authorable (`hytale:tool_quality`, `hytale:tool_item_level`, `hytale:tool_power`) are read
 by `StationService#resolveHeldToolQuality`/`#resolveHeldToolItemLevel`/`#resolveHeldToolPower`;
 the quality one is an asset-map index resolve, not a raw index compare - see its javadoc.
@@ -633,11 +730,12 @@ so `dispatchProgram` runs the pass itself on a COMPLETED walk
 A referenced table's POOL draws on the `Cycle` pass only - see `../loot/CLAUDE.md`.
 It fires BEFORE `onCycleCompleted`, so a `Grants.Contributions` find rides that same cycle's event
 on either route. Exactly one moment per completed pass: a suspend/resume pair is still ONE pass, and
-an idle-practice cycle rolls no loot at all by design. The one grant kind that still lands nowhere
-under an authored program is `Grants.OutputItems` - there is no single cycle output to add items to
-(`s.cycleOutputItemId` stays null and `grantBonusOutputItems` no-ops), which is what
-`LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` warns about at authoring time; every other kind (droplists,
-commands, effects, contributions, the reached floor's presentation) applies.
+an idle-practice cycle rolls no loot at all by design. The one grant kind that lands nowhere
+under an authored program WITHOUT a `Convert` beat is `Grants.OutputItems` - such a program never
+resolves a cycle output to add items to (`s.cycleOutputItemId` stays null and
+`grantBonusOutputItems` no-ops), which is what `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` warns about at
+authoring time; a program with a `Convert` beat has one from that beat on, and every other kind
+(droplists, commands, effects, contributions, the reached floor's presentation) applies either way.
 
 `emitMoment(store, s, momentId, presentation, targetPos)` in `StationService` is the ONE
 presentation-playback funnel every SESSION-scoped station moment goes through
@@ -1045,8 +1143,11 @@ stay standing with their props.
 [`StationCustody`](StationCustody.java) stays the PURE decision core (`placeableQuantity` incl.
 the socket-aware min-of-caps form, `available`/`drain` + the per-pile `availableInPile`/
 `drainFromPile` (each with a Predicate core the four-route `ingredientEntryMatcher` feeds),
-`matchesInput`/`matchesAnyConversionInput`/`matchesIngredient` (tags-aware overloads; comparing is
-zc `match.ItemMatch`), `exactSetSatisfied` (the `IsExactSet` per-drawn-pile check),
+`accepts` (THE one acceptance rule every `ActionInput` site asks: selection, a socket's `Match`,
+an explicit `Custody.Input`, a Block socket, a fallback's `Input`), `matchesAnyConversionInput`/
+`matchesIngredient` (tags-aware overloads; comparing is zc `match.ItemMatch`), `matchesInput` (the
+routes-only parity seam behind `accepts`, never asked by a site), `exactSetSatisfied` (the
+`IsExactSet` per-drawn-pile check),
 `acceptsFamily`/`pileAcceptsFamily` (per-socket, decision 89), the share cores, the block-socket
 cores, `routePlacement`) - zero
 engine touch, operating on the claim view (whose detached test constructor wraps a real
@@ -1334,7 +1435,9 @@ settling its recipe conversions while nobody is engaged. Three classes, three al
   inputs, room, `MaxCycles`, or no runnable row - forfeits the backlog so a top-up never
   burst-pays idle hours), the analytic `settle` (first runnable row by tier over per-pile
   availability + `IsExactSet` + NET-FLOW custody room, drained/produced/Yield-applied as one
-  batch, the produce pile inheriting the FIRST-consumed socket's owner per decision 82), the
+  batch, the produce pile inheriting the FIRST-consumed socket's owner per decision 82, and what
+  it drained reported per pile as `Settle#drains`, a drain that takes a single-item socket's last
+  taking the piece's stack off the pile with it as every custody consume does), the
   accrual namespace (`accrualKey` = `accrual:conversion:<resolvedIndex>` - the L7 picker row-key
   channel, NEVER inside the reserved `doneness:` prefix), and the gather plan (`gatherPlan`
   allocates the `MaxCycles` budget across accrued keys in pile order; `scaledByCycles` multiplies
@@ -1366,8 +1469,10 @@ settling its recipe conversions while nobody is engaged. Three classes, three al
   display refresh, resting-state flip, ONE `markDirty` for a TRANSFORM only (a clock-only stamp -
   first anchor or forfeited backlog - stays best-effort in the loaded section rather than flagging
   the chunk for a save every pass for every input-starved station; an unsaved unload costs at most
-  one MaxCycles-capped burst). TRANSFORM ONLY: no rolls, no commands, no
-  worker moments. Steps/Anchors actions run attended-only (`UNATTENDED_WITH_STEPS`/`_WITH_ANCHORS`
+  one MaxCycles-capped burst), and after that mark the transform's consumption reaches the ONE
+  input-consumed hook with no worker (`reportUnattendedConsumption`; a socket whose piece stack
+  the drain took loses its prop first, as an attended consume drops it). TRANSFORM ONLY: no
+  rolls, no commands, no worker moments. Steps/Anchors actions run attended-only (`UNATTENDED_WITH_STEPS`/`_WITH_ANCHORS`
   warn; `UNATTENDED_WITHOUT_CUSTODY` for the unplaceable case), and
   `DONENESS_WITHOUT_PRODUCE_SOCKET` is EXEMPT for an unattended action (its settle produces into
   custody by construction). **A Required BLOCK socket gates the settle** exactly as the attended
@@ -1658,8 +1763,9 @@ action's `Select` can never win because an earlier one's already matches every c
 `FromCrafting` - it can never run a cycle), `LOOT_OUTPUT_ITEMS_WRONG_TRIGGER` (
 an `rpgstations:output_items` reward authored under a `Completion` trigger, which has no cycle output to add
 to), `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` (its sibling for the other way a cycle can have no output:
-the action runs an authored `Steps` program - its OWN, or the one its `Ref` base authors, read
-through `ActionResolver.effectiveStepsOf` - so the roll evaluates but has nothing to multiply),
+the action runs an authored `Steps` program with no `Convert` beat - its OWN, or the one its `Ref`
+base authors, read through `ActionResolver.effectiveStepsOf` - so the roll evaluates but has
+nothing to multiply; the finding names the missing beat),
 and `CONTRIBUTION_SCALE_EMPTY`/`CONTRIBUTION_SCALE_FACTORS_WITHOUT_FLOORS`/
 `CONTRIBUTION_SCALE_FLOORS_WITHOUT_FACTORS` (an authored `ContributionScale` group that can never
 actually multiply anything). **Other schema checks**: `EXTENSION_CONTRIBUTION_DUPLICATE` (keyed

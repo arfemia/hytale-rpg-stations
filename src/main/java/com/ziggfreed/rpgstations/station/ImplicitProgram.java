@@ -10,21 +10,20 @@ import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**
- * The PURE builder for the "classic convert loop" implicit program (scope-2 design 2.1): an action
- * with no authored {@code Steps} runs ONE orthogonal-phase step composing {@code Consume} +
- * {@code Produce} + {@code Roll} + {@code Presentation}. This COLLAPSES the pre-scope-2 four-step
- * {@code [Consume, Produce, Roll, Present]} array onto a single step - byte-equivalent behavior
- * (the phases execute in the SAME order the composite handler walks: {@code Consume} -&gt;
- * {@code Produce} -&gt; {@code Roll} -&gt; {@code Presentation}), a simpler anchor for the phase
- * model. An action that authors no {@code Steps} resolves to this SAME shape from its own
- * {@code Recipe}, so {@code StationService#runRealCycle} runs through ONE engine (the
- * {@code station.step} kernel) whether an action authors a step program or not - "one engine, no
- * dual path".
+ * The PURE builder for the "classic convert loop" implicit program: an action with no authored
+ * {@code Steps} runs ONE orthogonal-phase step composing {@code Convert} + {@code Roll} +
+ * {@code Presentation}. The phases execute in the composite handler's fixed order ({@code Convert}
+ * -&gt; {@code Roll} -&gt; {@code Presentation}), and the {@code Convert} phase is the SAME phase an
+ * authored program's {@code Convert} beat runs - selection, yield, the yield breakdown, the cycle
+ * output, the consume, the produce and the input hook all live in that one phase, so a conversion
+ * has one code path whichever program shape ran it ("one engine, no dual path"). What the classic
+ * loop still does BEFORE dispatch is choose the row: its pre-dispatch selection drives idle
+ * practice, the out-of-inputs and inventory-full stops, the per-conversion pace and the
+ * feedable-cycles count, and the chosen row rides the dispatch as the phase's preselected check.
  *
- * <p>Zero engine/store touch - takes only already-resolved value objects
- * ({@link StationStep.Consume}/{@link StationStep.Produce} built from a live {@code ConversionCheck}
- * pick, the action's effective {@link LootRef}, and the resolved action's {@code Moments.Cycle}
- * {@link Presentation}) so it is unit-testable without a live server.
+ * <p>Zero engine/store touch - takes only already-resolved value objects (the action's effective
+ * {@link LootRef} and the resolved action's {@code Moments.Cycle} {@link Presentation}), so it is
+ * unit-testable without a live server.
  */
 final class ImplicitProgram {
 
@@ -42,11 +41,9 @@ final class ImplicitProgram {
      * too.
      */
     @Nonnull
-    static List<StationStep> build(@Nonnull StationStep.Consume consume, @Nonnull StationStep.Produce produce,
-            @Nullable LootRef bonus, @Nullable Presentation cyclePresentation) {
+    static List<StationStep> build(@Nullable LootRef bonus, @Nullable Presentation cyclePresentation) {
         StationStep step = StationStep.of(ID_WORK)
-                .withConsume(consume)
-                .withProduce(produce)
+                .withConvert(StationStep.Convert.on())
                 .withRoll(bonus)
                 .withPresentation(cyclePresentation);
         return List.of(step);

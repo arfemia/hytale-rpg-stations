@@ -250,8 +250,8 @@ public class StationAssetCodecTest {
     // ==================== Recipe: one per action, no per-recipe tool ====================
 
     @Test
-    void recipe_authorsConversionsFromCraftingYieldAndDonenessOnly() {
-        assertEquals(java.util.Set.of("Conversions", "FromCrafting", "Yield", "Doneness"),
+    void recipe_authorsConversionsFromCraftingFallbackYieldAndDonenessOnly() {
+        assertEquals(java.util.Set.of("Conversions", "FromCrafting", "Fallback", "Yield", "Doneness"),
                 StationAsset.Recipe.CODEC.getEntries().keySet(),
                 "the ACTION's Tool is the one gate; a recipe never carries its own");
     }
@@ -338,7 +338,7 @@ public class StationAssetCodecTest {
     @Test
     void work_carriesNoExclusiveLeaf() {
         assertEquals(java.util.Set.of("CycleMs", "MaxDurationMs", "MaxMoveMeters",
-                        "PerCycleContributions", "Idle", "Looping", "Unattended"),
+                        "PerCycleContributions", "Idle", "Looping", "Queue", "Unattended"),
                 StationAsset.Work.CODEC.getEntries().keySet(),
                 "one worker per placed block is a Block property, not a Work one");
     }

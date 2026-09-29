@@ -181,6 +181,59 @@ class UnattendedCatchUpTest {
     }
 
     @Test
+    void settle_reportsWhatItConsumed_perSocketPile_withTheRealDrainedIds() {
+        // What the ONE input-consumed hook is handed after an unattended transform commits: every
+        // pile the settle drained, the real ids oldest-first, every settled cycle's share at once.
+        StationCustodyClaim claim = pitClaim(UUID.randomUUID());
+        claim.addTo("ingredients", claim.ownerId, "Fixture_Boar", 1);
+        claim.addTo("ingredients", claim.ownerId, "Fixture_Deer", 5);
+        claim.addTo("spice", claim.ownerId, "Fixture_Salt", 4);
+        claim.setUnattendedLastGameTime(0L);
+        StationAsset.Conversion[] rows = {StationAsset.Conversion.of(
+                new Ingredient[] {
+                        Ingredient.of(null, "Fixture_Meat_Family", 2, "ingredients"),
+                        Ingredient.of("Fixture_Salt", null, 1, "spice")},
+                new Ingredient[] {Ingredient.of("Fixture_Stew", null, 1, "output")}, null, null)};
+        Function<String, String[]> meatFamily = id -> id.equals("Fixture_Boar") || id.equals("Fixture_Deer")
+                ? new String[] {"Fixture_Meat_Family"} : new String[0];
+
+        // 10_000ms at 5_000ms a cycle pays for 2 cycles: 4 meat and 2 salt.
+        StationUnattended.Settle settle = StationUnattended.settle(claim,
+                sockets(itemSocket("ingredients", 100), itemSocket("spice", 100), itemSocket("output", 100)),
+                rows, null, 100, unattended(null, null), 5_000L, 10_000L, meatFamily, NO_TAGS);
+
+        assertEquals(2, settle.settledCycles());
+        assertEquals(2, settle.drains().size(), "one entry per drained pile");
+        StationUnattended.PileDrain meat = settle.drains().get(0);
+        assertEquals("ingredients", meat.socketId());
+        assertEquals(Map.of("Fixture_Boar", 1, "Fixture_Deer", 3), meat.drained(),
+                "the family drains oldest-first, and each real id is reported with its count");
+        assertNull(meat.unique(), "a count pile gives up no piece stack");
+        StationUnattended.PileDrain salt = settle.drains().get(1);
+        assertEquals("spice", salt.socketId());
+        assertEquals(Map.of("Fixture_Salt", 2), salt.drained());
+        assertEquals(2, claim.totalQuantity("ingredients"), "the report matches what left the pile");
+        assertEquals(2, claim.totalQuantity("spice"));
+    }
+
+    @Test
+    void aSettleThatTransformsNothing_consumedNothing() {
+        assertTrue(StationUnattended.Settle.NOTHING.drains().isEmpty());
+        assertTrue(StationUnattended.Settle.CLOCK_ONLY.drains().isEmpty());
+        StationCustodyClaim claim = pitClaim(UUID.randomUUID());
+        claim.addTo("ingredients", claim.ownerId, "Food_Meat_Raw", 1);
+        claim.setUnattendedLastGameTime(0L);
+        StationAsset.Conversion[] rows = {StationAsset.Conversion.of(
+                Ingredient.of("Food_Meat_Raw", null, 2, "ingredients"),
+                Ingredient.of("Food_Stew", null, 1, "output"))};
+        StationUnattended.Settle starved = StationUnattended.settle(claim,
+                sockets(itemSocket("ingredients", 100), itemSocket("output", 100)),
+                rows, null, 100, unattended(null, null), 5_000L, 50_000L, NO_FAMILIES, NO_TAGS);
+        assertFalse(starved.transformed());
+        assertTrue(starved.drains().isEmpty(), "an input-starved settle reports no consumption");
+    }
+
+    @Test
     void settle_inputClamp_forfeitsTheLeftoverTime() {
         StationCustodyClaim claim = pitClaim(UUID.randomUUID());
         claim.addTo("ingredients", claim.ownerId, "Food_Meat_Raw", 3);

@@ -42,8 +42,9 @@ the `rpgstations:output_items` reward is fractional: `1.5` hands over one item e
 - `Trigger` - `Cycle` (default, once per completed work cycle) or `Completion` (once, at session
   stop). `Cycle` means THE action's cycle-completed moment whatever program shape it runs: an
   action driving the classic convert loop and one running an authored `Steps` program both fire it
-  once per completed pass. (the `rpgstations:output_items` reward is the one payload an authored program cannot
-  honour, since such a program has no single cycle output to add copies of - see the table below.)
+  once per completed pass. (The `rpgstations:output_items` reward is the one payload an authored
+  program honours only through a `Convert` beat, which is what gives such a program a cycle output
+  to add copies of; a program with no `Convert` beat drops it - see the table below.)
 - `Conditions` - a hard gate; every entry must pass a bounded factor check before the roll is even
   considered.
 - `Chance` - a probabilistic gate over the WHOLE roll (Ladder included):

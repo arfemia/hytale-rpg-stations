@@ -86,7 +86,11 @@ is the exact inverse of a permanently-opaque channel.
   (`rpgstations:session_seconds`/`rpgstations:cycle_count`) plus the native-vocabulary ones
   (`hytale:tool_power`/`hytale:tool_quality`/`hytale:tool_item_level`/
   `hytale:tool_durability_percent`, each answered from the SESSION's own tool snapshot, which is
-  the right answer at a station) and the mod-agnostic
+  the right answer at a station), the four portable ITEM readings (`hytale:item_quality`/
+  `hytale:item_level`/`hytale:item_durability_percent`/`hytale:item_stat`, which read the piece the
+  work is about - `FactorContext.item()`, the placed or consumed stack the session captures and
+  publishes into the shared context's item leaf at every build site, null when the moment has
+  none; an additive accessor plus `Builder.item(ItemStack)`) and the mod-agnostic
   `stat` factor, adopted wholesale from the shared portable standard library, whose `Param`
   addresses any registered native `EntityStatType`; an external id is
   namespace-prefixed by convention (`yourmod:reputation`). An unknown factor at runtime fails a

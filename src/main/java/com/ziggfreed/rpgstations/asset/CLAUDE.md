@@ -216,8 +216,9 @@ resolution section for the engine half.
     `Tool` (the held-tool gate, checked at engage and every heartbeat).
   - **What it makes**: `Recipe` - the ONE transform this action performs (below).
   - **How the loop runs**: `Work` (cycle cadence, duration/exit bounds, `PerCycleContributions[]`,
-    the `Looping` flag, optional `Idle` practice mode, optional `Unattended` group - the SAME group
-    `StationAsset.Work` used to be, now reached only through an action), `Custody` (placed-input
+    the `Looping` flag, the `Queue` flag, optional `Idle` practice mode, optional `Unattended`
+    group - the SAME group `StationAsset.Work` used to be, now reached only through an action),
+    `Custody` (placed-input
     custody, chunk-persisted; see [`Custody`](Custody.java) below). **`Work.Unattended`**
     (decision 90) opts the action into settling its conversions over placed custody with nobody
     engaged - group presence is the opt-in (`{}` suffices), `Enabled` exists so a native `Parent`
@@ -225,12 +226,17 @@ resolution section for the engine half.
     burst AND a gather's payout, and `CatchUpMaxMs` (reader default 86400000 = 24h, the native
     processing-bench ceiling) caps the elapsed game time one settle may consume. Every leaf
     `appendInherited`; the engine half lives in `station/CLAUDE.md`'s unattended section.
+    **`Work.Queue`** (Boolean, default false, orthogonal to `Looping`) runs the authored `Steps`
+    program once per FILLED custody socket in authored order, each pass working that one socket's
+    piece (the piece the factors read, the pile the `Convert` phase drains) until every socket is
+    empty; then `Looping` decides as usual (`false` ends the ritual). Meant for several single-item
+    sockets (`QUEUE_SOCKET_NOT_SINGLE`); a one-socket station is unaffected.
   - **Where it runs**: `Anchors` (named multi-station anchor declarations), `Steps` (an authored
     [`StationStep`](StationStep.java) program; absent = "build the implicit program from
     `Recipe`").
   - **What else it hands over**: `Bonus` (the shared `LootRef` - referenced `Lootables[]`
     plus inline `Rolls[]`; `Recipe.Yield` decides how much of the thing you made, `Bonus` decides
-    what else you got), `ContributionScale` (below).
+    what else you got), `ContributionScale` (below), `Pace` (below).
   - **How the person looks doing it**: `Worker` (below).
   - **What it sounds and looks like**: `Moments` (below).
 
@@ -253,10 +259,28 @@ resolution section for the engine half.
     never authored. DISCOVERY (nearest matching placed block within `MaxRadiusMeters`), CLAIMING,
     and a `StationStep.Walk`/`At` naming an anchor all EXECUTE - see `../station/CLAUDE.md`.
     `ANCHOR_STATION_UNKNOWN` warns an unknown `Station`.
-  - **`Recipe` - ONE transform, singular by design:** `{Conversions?, FromCrafting?, Yield?,
-    Doneness?}`. Its
+  - **`Recipe` - ONE transform, singular by design:** `{Conversions?, FromCrafting?, Fallback?,
+    Yield?, Doneness?}`. Its
     EFFECTIVE conversions (`StationCatalog.resolvedConversions`) are authored `Conversions` FIRST,
-    then any `FromCrafting`-derived ones. **One recipe per action.** Two transforms means two
+    then any `FromCrafting`-derived ones (the shared recipe index, standalone recipe files and
+    item-authored recipes alike, each row carrying the recipe's FULL outputs at native
+    quantities), then, PER PIECE at the beat and never in the catalog, the **`Fallback`** routes
+    for a placed piece no row covers: `{Input?: ActionInput, CraftingShare?: {Share},
+    EssenceOnly?: {Enabled?}}`. `CraftingShare` gives back `floor(Quantity x Share / OutputQuantity)`
+    of every exact-item line of the piece's OWN crafting recipe, `OutputQuantity` being how many
+    pieces that recipe makes per craft, so a batch recipe pays per piece (a line that rounds to
+    nothing is dropped, a recipe with no line left does not take the route, family and tag lines
+    name no item and are dropped); `EssenceOnly` consumes the piece and produces NOTHING (the
+    action's `Bonus` rolls are its whole payout - the ONE row shape allowed an empty output,
+    `Conversion.essenceOnlyRow`). A piece is offered ONE route, the first that applies
+    (`station.StationFallbackRoutes#routeFor`), never both to scan through.
+    Both are scoped by `Input` (the shared matcher and its `Except` hole) and by the engine's
+    METADATA GUARD (`station.StationMetadataGuard`: a stack carrying a metadata key no mod declared
+    on ziggfreed-common's `DisposableItemMetadata` list, or whose keys cannot be read, is refused;
+    wear is not metadata, and a stamper's keys are declared when it registers). Priority is
+    authored (tier 0) > derived (1) > crafting share (2) > essence only (3), so a fourth party
+    overrides any piece by authoring a row for it. Custody-routed only (`FALLBACK_WITHOUT_CUSTODY`).
+    **One recipe per action.** Two transforms means two
     actions, which is cheap because an action carries no boilerplate to repeat - there is
     deliberately no per-recipe `Tool` override any more: the ACTION's own `Tool` is the gate, so
     "which tool" and "which transform" are answered in the same place a reader is already looking.
@@ -287,9 +311,12 @@ resolution section for the engine half.
     Unauthored anywhere = deterministic exactly as before. Engine half: `../station/CLAUDE.md`'s
     doneness bullet (`StationDoneness` + the claim's window record + `StationService`'s one lazy
     settle core).
-  - **`Recipe.Yield` - purely DETERMINISTIC, four leaves:** `Base` (flat quantity; absent = each
-    conversion's own authored quantity), `Scale` (multiplier, floored to a whole item,
-    reader-default 1.0), `Min`/`Max` clamps. A floor of 1 output is ALWAYS enforced underneath - a
+  - **`Recipe.Yield` - purely DETERMINISTIC, four leaves:** `Base` (flat quantity for the PRIMARY,
+    first, output ONLY; absent = that output's own authored quantity; every other output of a
+    multi-output row keeps its native quantity), `Scale` (multiplier on EVERY output, floored to a
+    whole item, reader-default 1.0), `Min`/`Max` clamps on every output. That is the stated
+    composition rule: `Base` never flattens a salvage row's hide and scrap, and a single-output row
+    reads as it always has. A floor of 1 output is ALWAYS enforced underneath - a
     conversion that consumed its inputs and produced nothing is item loss, never a tuning outcome.
     Reading this group tells an author exactly how much a cycle makes, with nothing left to
     chance. `Yield` sits on the RECIPE (not inside `FromCrafting`, not up on the station) because
@@ -438,11 +465,33 @@ resolution section for the engine half.
   behave identically). `ResolvedSocket` is the flat per-socket view every runtime reader consumes;
   `Ingredient.Socket` + the `Consume`/`Produce` group-level `Socket` leaves address sockets from a
   recipe row / step phase (per-entry wins; absent = the first authored Item socket).
-- **[`ActionInput`](ActionInput.java)** - the diegetic action-selection matcher: `{ItemId?,
-  ResourceTypeId?, Tags?, Function?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, resolved against
-  the held item's live shape). `isCatchAll()` = no route authored. Live selection runs through
-  `station.ActionResolver.selectActionByFamily` - the FIRST action in AUTHORED ORDER whose
-  effective `Select` (its own, or its `Ref` base's) is absent, catch-all, or matches.
+- **[`ActionInput`](ActionInput.java)** - the shared INPUT MATCHER (an action's `Select`, a
+  `Custody.Input`, a socket's `Match`, a fallback's `Input`): `{ItemId?, ResourceTypeId?, Tags?,
+  Function?, Except?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, resolved against the held item's
+  live shape). `isCatchAll()` = no route authored. **`Except` is this same matcher one level down
+  (`ActionInput.EXCEPT_CODEC`, the same four routes, no further nesting)**: a material the routes
+  accept is REFUSED when the hole accepts it too, so a broad `Tags` match carves out ammunition
+  without listing every id; one codec definition serves both levels, every site asks the ONE
+  acceptance rule `station.StationCustody#accepts` (an absent or catch-all matcher accepts
+  everything, a route set accepts what a route matches, and the hole is carved out either way, so
+  a catch-all with an `Except` takes everything but the hole: action selection, a socket's
+  `Match` and an explicit `Custody.Input` at placement, a Block socket's match, a fallback's
+  `Input`). An `Except` with no route is INERT: it matches nothing, so it carves no hole and the
+  matcher accepts exactly what it would without it; the validator warns `EXCEPT_CATCH_ALL`
+  because such an `Except` does nothing (an authoring slip). Live
+  selection runs through `station.ActionResolver.selectActionByFamily` - the FIRST action in
+  AUTHORED ORDER whose effective `Select` (its own, or its `Ref` base's) accepts the held material.
+- **[`Pace`](Pace.java)** - `ActionDef.Pace {Ladder: ContributionScale, Clamp: {Min, Max}}`, the
+  pace of an action's `Steps` program: the ladder is the SAME `{Factors, Floors [{Min, Scale}]}`
+  codec a `ContributionScale` is (never a second ladder shape), its reached floor's `Scale`
+  multiplies the `Duration` of every step marked `Paced` (and stretches that beat's own
+  presentation timing with it), and `Clamp` (the shared clamp leaf) bounds the result at both
+  ends. An `ExtensionAsset`'s own `Pace` ladder MULTIPLIES in from its own thresholds, and only
+  the action's `Clamp` bounds the product (`station.StationPacing`): the extension payload is
+  typed `{Ladder}` only (`Pace.LADDER_ONLY_CODEC`, one codec definition for both shapes, the
+  `ActionInput`/`Except` technique), and the validator warns `PACE_UNCLAMPED` on an action pace
+  whose clamp is absent or one-sided, that clamp being the one bound on the composed pace
+  (`Pace#isFullyClamped`). Resolved once per step entry, cached on the session.
 - **[`StationStep`](StationStep.java)** - ONE step of a multi-action station's step PROGRAM: an
   ORTHOGONAL PHASE record. A step composes any combination of nullable phase groups in ONE fixed,
   documented execution order; a step with NO phase group is a pure BEAT (`isPureBeat()`). Every
@@ -467,15 +516,28 @@ resolution section for the engine half.
     Zero effect unless the resolved `Custody.States.Working` is authored.
   - **Phase groups** (all nullable): `Walk` (`{To, SpeedMps}`), `Consume`
     (`{Items: Ingredient[], From:Inventory|Custody}` - BOTH routes executable), `Stamp` (the
-    enhance-commit phase, below), `Produce` (`{Items: Ingredient[], To:Inventory|Custody}`), `Roll`
+    enhance-commit phase, below), **`Convert`** (`{Enabled?}`, group presence = on: run the
+    action's `Recipe` at this beat - the matched row selected exactly as the classic loop selects
+    one, its inputs consumed from custody when the action authors `Custody` else the inventory,
+    `Yield` applied, the cycle's output item set so `rpgstations:output_items` applies, the
+    outputs produced to the inventory, then the iteration committed and the consumption reported
+    to the ONE input-consumed hook, as every consuming phase's is; the implicit program is
+    this phase plus `Roll`, so a conversion has one code path), `Produce`
+    (`{Items: Ingredient[], To:Inventory|Custody}`), `Roll`
     (a `LootRef` - the SAME vocabulary an action's own `Bonus` group uses), `Commands`
-    (`String[]`, run through the shared `CommandRewardExecutor`). `Consume`/`Produce` take the
+    (`String[]`, run through the shared `CommandRewardExecutor`). Two more orthogonal step knobs:
+    **`Paced`** (Boolean, default false: this beat's `Duration.Ms`, and the `DelayMs` and burst
+    `DurationSeconds` of its own presentation, scale by the action's resolved `Pace`) and
+    **`RollBonus`** (Boolean, default false: the action's `Bonus`, extension tables included,
+    rolls at this beat once per iteration instead of at program completion; unset, nothing moves).
+    `Consume`/`Produce` take the
     native `CraftingRecipe.Input`/`Output` ARRAY shape (see the `Ingredient` bullet); both are
     all-or-nothing, and a mid-list failure is covered by the pre-existing iteration refund ledger.
   - **Execution order within ONE step iteration** (fixed, honored by `station.StationStepRegistry`):
-    Conditions gate -> `Walk` -> `Consume` -> `Stamp` -> `Produce` -> `Roll` ->
-    `Commands` -> `Presentation`/`Puppet.Clip` (fire at iteration entry) -> `Duration` hold
-    (suspend) -> next iteration or next step. A step combining `Consume` + `Produce` is an ATOMIC
+    Conditions gate -> `Walk` -> `Consume` -> `Stamp` -> `Convert` -> `Produce` -> `Roll` (then a
+    `RollBonus` beat's Bonus pass) -> `Commands` -> `Presentation`/`Puppet.Clip` (fire at
+    iteration entry) -> `Duration` hold (suspend; stretched by the pace on a `Paced` step) ->
+    next iteration or next step. A step combining `Consume` + `Produce` is an ATOMIC
     transform (no consumed-without-produced window); the anvil's strikes re-author as pure
     `Duration` beats (`{Id, Duration:{Ms}, Puppet:{Clip}, Presentation}`), and the stamp step's
     `Duration` + `Prop:None` closes the parked post-stamp empty-hands flourish.
@@ -688,7 +750,7 @@ resolution section for the engine half.
     | Target    | Extensible payload keys                                                              |
     |-----------|----------------------------------------------------------------------------------------|
     | Station   | `Actions[]` (append whole new actions)                                               |
-    | Action    | `Steps[]`, `Anchors{}` (new keys only), `Bonus` (LootRef append), `Conversions[]`, `PerCycleContributions[]`, `ContributionScale` (per-leaf overlay), `Puppet` (per-leaf overlay), `Custody` (per-leaf overlay) |
+    | Action    | `Steps[]`, `Anchors{}` (new keys only), `Bonus` (LootRef append), `Conversions[]`, `PerCycleContributions[]`, `Pace` (the extension's OWN ladder, multiplied in; its `Clamp` is ignored), `ContributionScale` (per-leaf overlay), `Puppet` (per-leaf overlay), `Custody` (per-leaf overlay) |
     | Action, scoped (`{Station, Action}`) | the same Action keys, applied only where THAT station resolves that action id |
     | Lootable  | `Rolls[]` (append)                                                                    |
     | RollPool  | `Entries[]` (append)                                                                  |

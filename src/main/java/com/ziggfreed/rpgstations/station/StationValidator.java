@@ -65,6 +65,7 @@ import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
 import com.ziggfreed.rpgstations.asset.Ingredient;
+import com.ziggfreed.rpgstations.asset.Pace;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.Puppet;
@@ -164,6 +165,22 @@ import com.ziggfreed.rpgstations.util.Log;
  * inert structure), {@code PATTERN_TOO_LARGE}, {@code PATTERN_CELL_DUPLICATE_OFFSET} (INFO), and
  * {@code PATTERN_REQUIRES_WITHOUT_NAME_KEY} (INFO). Derivation: {@code
  * DERIVED_ROW_DROPS_BENCH_FUEL} (INFO - a source bench's native Fuel slot never derives).
+ *
+ * <p><b>Disenchanting wave (1.1.0, the engine core):</b> {@code Recipe.Fallback}
+ * ({@link #checkFallback}): {@code FALLBACK_WITHOUT_CUSTODY}, {@code FALLBACK_NO_ROUTE},
+ * {@code FALLBACK_SHARE_OUT_OF_RANGE}, {@code FALLBACK_INPUT_CATCH_ALL} (INFO). The shared
+ * matcher's {@code Except} hole ({@link #checkExcept}, on a {@code Select}, a {@code Custody.Input},
+ * each resolved socket's {@code Match} and a fallback's {@code Input}): {@code EXCEPT_CATCH_ALL} (a route-less {@code Except} is inert:
+ * it carves no hole) and {@code UNKNOWN_ACTION_FUNCTION} for its {@code Function}. The
+ * {@code Convert} phase: {@code CONVERT_WITHOUT_RECIPE}, {@code CONVERT_WITH_CONSUME_PRODUCE},
+ * {@code CONVERT_REPEATED} (INFO), and {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT} now fires only
+ * for a program with no Convert beat. The ritual queue ({@code Work.Queue}):
+ * {@code QUEUE_WITHOUT_STEPS}, {@code QUEUE_WITHOUT_SOCKETS}, {@code QUEUE_SOCKET_NOT_SINGLE},
+ * {@code QUEUE_WITH_LOOPING} (INFO). The pace ({@code ActionDef.Pace}, an extension's
+ * {@code Pace}, a step's {@code Paced}): {@code PACE_WITHOUT_STEPS}, {@code PACE_NO_PACED_STEP},
+ * {@code PACE_UNCLAMPED}, {@code PACE_CLAMP_INVERTED}, {@code PACE_FLOOR_NONPOSITIVE},
+ * {@code PACE_EXTENSION_NO_LADDER}, {@code PACED_STEP_WITHOUT_PACE} (INFO). Finds on a beat
+ * ({@code RollBonus}): {@code BONUS_AT_BEAT_NO_BONUS}, {@code BONUS_AT_BEAT_REPEATED} (INFO).
  *
  * <p>Pure and side-effect-free (apart from {@link #runAndLog} and {@link #runHooks}); never throws.
  */
@@ -996,6 +1013,7 @@ public final class StationValidator {
                     targetType, label, extId, out);
             checkExtensionPayload(ext.getContributionScale() != null,
                     ExtensionAsset.PAYLOAD_CONTRIBUTION_SCALE, targetType, label, extId, out);
+            checkExtensionPayload(ext.getPace() != null, ExtensionAsset.PAYLOAD_PACE, targetType, label, extId, out);
             checkExtensionPayload(ext.getActions() != null && ext.getActions().length > 0,
                     ExtensionAsset.PAYLOAD_ACTIONS, targetType, label, extId, out);
             checkExtensionPayload(ext.getConversions() != null && ext.getConversions().length > 0,
@@ -1026,6 +1044,17 @@ public final class StationValidator {
             if (ext.getContributionScale() != null) {
                 checkContributionScale(ext.getContributionScale(), extId, label + ".ContributionScale",
                         factorKnown, out);
+            }
+            if (ext.getPace() != null) {
+                // An extension's Pace is its OWN ladder, multiplied into the action's; only the
+                // action's Clamp bounds the product, which is why the payload is typed {Ladder}
+                // alone (there is no Clamp leaf here to check).
+                checkPaceLadder(ext.getPace().getLadder(), label + ".Pace.Ladder", extId, factorKnown, out);
+                if (ext.getPace().getLadder() == null) {
+                    out.add(Finding.warning(DOMAIN, "PACE_EXTENSION_NO_LADDER",
+                            label + ".Pace authors no Ladder - an extension's Pace contributes only its"
+                                    + " ladder's scale, so this group multiplies nothing in", extId));
+                }
             }
 
             if (ext.getBonus() != null) {
@@ -2436,11 +2465,12 @@ public final class StationValidator {
 
     /**
      * {@code noCycleOutput}: does the action this roll belongs to run an authored {@code Steps}
-     * program? Such a program has no single "cycle output" for a {@code Grants.OutputItems} to add
-     * items TO, so the engine drops the grant - see
-     * {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT} below. {@code false} at every site with no action
-     * context (a lootable table, a standalone extension payload): those are checked where they are
-     * REFERENCED from an action instead, since the same table can be shared by both action shapes.
+     * program with NO {@code Convert} beat? Such a program never resolves a cycle output for a
+     * {@code Grants.OutputItems} to add items TO (a {@code Convert} beat is what gives a program
+     * one), so the engine drops the grant - see {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT} below.
+     * {@code false} at every site with no action context (a lootable table, a standalone extension
+     * payload): those are checked where they are REFERENCED from an action instead, since the same
+     * table can be shared by both action shapes.
      */
     private static void checkGrants(@Nullable LootGrants grants, @Nonnull String label, @Nonnull String id,
             @Nonnull String trigger, boolean noCycleOutput, @Nonnull Predicate<String> dropListKnown,
@@ -2478,9 +2508,9 @@ public final class StationValidator {
     /**
      * Extra units of the cycle's own primary output only mean something where there IS one: a
      * Completion roll fires from inside session stop with the cycle already paid out, and an
-     * authored {@code Steps} program produces whatever its phases individually author rather than
-     * one recipe-driven output. Either way the reward evaluates and then has nothing to add to, so
-     * without this the content is dead with no diagnostic.
+     * authored {@code Steps} program with no {@code Convert} beat produces whatever its phases
+     * individually author rather than one recipe-driven output. Either way the reward evaluates
+     * and then has nothing to add to, so without this the content is dead with no diagnostic.
      */
     private static void checkOutputItemsReward(@Nonnull RewardSpec spec, @Nonnull String label,
             @Nonnull String id, @Nonnull String trigger, boolean cycleTrigger, boolean noCycleOutput,
@@ -2496,9 +2526,10 @@ public final class StationValidator {
                             + "') - there is no cycle output to add items to, so the grant is dropped", id));
         } else if (noCycleOutput) {
             out.add(Finding.warning(DOMAIN, "LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT",
-                    label + " grants extra cycle output on an action that runs an authored Steps"
-                            + " program - such a program has no single cycle output to add items to,"
-                            + " so the grant is dropped; author a Produce phase or a drop list instead", id));
+                    label + " grants extra cycle output on an action whose authored Steps program"
+                            + " has no Convert beat - only a Convert beat gives a program a cycle output"
+                            + " to add items to, so the grant is dropped; author a Convert beat on the"
+                            + " program, or a drop list instead", id));
         }
     }
 
@@ -2595,6 +2626,278 @@ public final class StationValidator {
         }
         if (recipe.getYield() != null) {
             checkYield(recipe.getYield(), id, rLabel, out);
+        }
+        checkFallback(recipe.getFallback(), mayHaveCustody, id, rLabel, out);
+    }
+
+    /**
+     * {@code Recipe.Fallback} coverage, warn-only: {@code FALLBACK_WITHOUT_CUSTODY} (both routes
+     * read the REAL placed stack, so an inventory-routed action never falls back),
+     * {@code FALLBACK_NO_ROUTE} (neither CraftingShare nor EssenceOnly is on - the group does
+     * nothing), {@code FALLBACK_SHARE_OUT_OF_RANGE} (a share above 1 gives back more than went in),
+     * {@code FALLBACK_INPUT_CATCH_ALL} (INFO: no gear filter, so every placed piece the metadata
+     * guard accepts falls back) and the shared {@code EXCEPT_CATCH_ALL} on its filter.
+     */
+    private static void checkFallback(@Nullable StationAsset.Fallback fallback, boolean mayHaveCustody,
+            @Nonnull String id, @Nonnull String label, @Nonnull List<Finding> out) {
+        if (fallback == null) {
+            return;
+        }
+        String fLabel = label + ".Fallback";
+        if (!mayHaveCustody) {
+            out.add(Finding.warning(DOMAIN, "FALLBACK_WITHOUT_CUSTODY",
+                    fLabel + " is authored on an action with no Custody - both fallback routes read the"
+                            + " placed piece's own stack, so an inventory-routed action never falls back", id));
+        }
+        if (!fallback.hasAnyRoute()) {
+            out.add(Finding.warning(DOMAIN, "FALLBACK_NO_ROUTE",
+                    fLabel + " switches on neither CraftingShare nor EssenceOnly - the group does nothing", id));
+        }
+        StationAsset.Fallback.CraftingShare share = fallback.getCraftingShare();
+        if (share != null && share.getShare() != null
+                && (!Double.isFinite(share.getShare()) || share.getShare() > 1.0)) {
+            out.add(Finding.warning(DOMAIN, "FALLBACK_SHARE_OUT_OF_RANGE",
+                    fLabel + ".CraftingShare.Share is " + share.getShare()
+                            + " - a share above 1 gives back more than the piece took to make", id));
+        }
+        if (fallback.getInput() == null) {
+            out.add(Finding.info(DOMAIN, "FALLBACK_INPUT_CATCH_ALL",
+                    fLabel + " authors no Input filter, so every placed piece the metadata guard accepts"
+                            + " takes a fallback route; author Input to scope it to gear", id));
+        } else {
+            checkExcept(fallback.getInput(), fLabel + ".Input", id, out);
+        }
+    }
+
+    /**
+     * The shared matcher's {@code Except} hole: an {@code Except} that is itself catch-all (no
+     * route at all) matches nothing, so it carves NO hole and does nothing - the matcher accepts
+     * exactly what it would with no {@code Except} ({@code StationCustody#accepts}). Almost always
+     * an authoring slip (a route left out or misspelled), so {@code EXCEPT_CATCH_ALL} warns; an
+     * unknown {@code Except.Function} is the same slip the outer Function check catches.
+     */
+    private static void checkExcept(@Nonnull ActionInput matcher, @Nonnull String label, @Nonnull String id,
+            @Nonnull List<Finding> out) {
+        ActionInput except = matcher.getExcept();
+        if (except == null) {
+            return;
+        }
+        if (except.isCatchAll()) {
+            out.add(Finding.warning(DOMAIN, "EXCEPT_CATCH_ALL",
+                    label + ".Except authors no route at all, so it excludes nothing and does nothing - the"
+                            + " matcher accepts exactly what it would without it; author the ItemId, ResourceTypeId,"
+                            + " Tags or Function the hole should refuse", id));
+        }
+        String function = except.getFunction();
+        if (function != null && !function.isBlank() && !isKnownFunction(function)) {
+            out.add(Finding.warning(DOMAIN, "UNKNOWN_ACTION_FUNCTION",
+                    label + ".Except.Function '" + function + "' is not one of Weapon/Armor/Tool", id));
+        }
+    }
+
+    /**
+     * The {@code Except} hole on each resolved socket's {@code Match}, Item and Block routes alike.
+     * A socket-less custody's one synthetic socket matches through {@code Custody.Input}, which the
+     * caller already checked, so only authored sockets are walked here.
+     */
+    private static void checkSocketExcepts(@Nonnull Custody custody, @Nonnull String actionLabel,
+            @Nonnull String id, @Nonnull List<Finding> out) {
+        if (!custody.hasAuthoredSockets()) {
+            return;
+        }
+        for (Custody.ResolvedSocket socket : custody.effectiveSockets()) {
+            if (socket.match() != null) {
+                checkExcept(socket.match(), actionLabel + " Custody.Sockets['" + socket.id() + "'].Match", id, out);
+            }
+        }
+    }
+
+    /**
+     * {@code ActionDef.Pace} coverage, warn-only. {@code PACE_WITHOUT_STEPS}: a pace on an action
+     * that runs the classic convert loop scales nothing (no beat is Paced). {@code
+     * PACE_NO_PACED_STEP}: a pace whose program marks no step Paced is inert. {@code
+     * PACE_UNCLAMPED}: the action's Clamp is where the pace range lives (every extension ladder
+     * multiplies into it and nothing else bounds the product), so a pace with no Clamp, or a Clamp
+     * missing a side, leaves the composed pace open at that end. {@code PACE_CLAMP_INVERTED}: a
+     * Clamp whose Min sits above its Max. {@code PACE_FLOOR_NONPOSITIVE}: a floor Scale of 0 makes
+     * every paced beat instant. The ladder itself gets the same shape checks a ContributionScale
+     * gets. A {@code Ref}'d entry may inherit its steps, so {@code mayInherit} keeps the two
+     * program-shaped checks quiet there.
+     */
+    private static void checkPace(@Nullable Pace pace, @Nullable StationStep[] effectiveSteps, boolean mayInherit,
+            @Nonnull String label, @Nonnull String id, @Nonnull Predicate<String> factorKnown,
+            @Nonnull List<Finding> out) {
+        if (pace == null) {
+            return;
+        }
+        String pLabel = label + " Pace";
+        boolean hasSteps = effectiveSteps != null && effectiveSteps.length > 0;
+        if (!hasSteps && !mayInherit) {
+            out.add(Finding.warning(DOMAIN, "PACE_WITHOUT_STEPS",
+                    pLabel + " is authored on an action with no Steps program - only a step marked Paced"
+                            + " is scaled, so this pace scales nothing", id));
+        } else if (hasSteps && !anyPaced(effectiveSteps)) {
+            out.add(Finding.warning(DOMAIN, "PACE_NO_PACED_STEP",
+                    pLabel + " is authored but no step of the program is marked Paced - the pace scales"
+                            + " nothing; author Paced true on the elastic beats", id));
+        }
+        FactorFormula.Clamp clamp = pace.getClamp();
+        if (!pace.isFullyClamped()) {
+            out.add(Finding.warning(DOMAIN, "PACE_UNCLAMPED",
+                    pLabel + (clamp == null ? " authors no Clamp" : ".Clamp is missing a side")
+                            + " - the action's Clamp is the one bound on the composed pace (every extension"
+                            + " ladder multiplies into it), so author both Min and Max here", id));
+        }
+        if (clamp != null && clamp.isInverted()) {
+            out.add(Finding.warning(DOMAIN, "PACE_CLAMP_INVERTED",
+                    pLabel + ".Clamp.Min (" + clamp.getMin() + ") sits above Max (" + clamp.getMax() + ")", id));
+        }
+        checkPaceLadder(pace.getLadder(), pLabel + ".Ladder", id, factorKnown, out);
+    }
+
+    /** The ladder half of a {@code Pace}, on the action or an extension: the ContributionScale shape checks plus the zero-scale floor. */
+    private static void checkPaceLadder(@Nullable ContributionScale ladder, @Nonnull String label, @Nonnull String id,
+            @Nonnull Predicate<String> factorKnown, @Nonnull List<Finding> out) {
+        if (ladder == null) {
+            return;
+        }
+        checkContributionScale(ladder, id, label, factorKnown, out);
+        ContributionScale.Floor[] floors = ladder.getFloors();
+        if (floors == null) {
+            return;
+        }
+        for (int i = 0; i < floors.length; i++) {
+            if (floors[i] != null && floors[i].getScale() != null && floors[i].getScale() <= 0.0) {
+                out.add(Finding.warning(DOMAIN, "PACE_FLOOR_NONPOSITIVE",
+                        label + ".Floors[" + i + "].Scale is " + floors[i].getScale()
+                                + " - a pace of 0 makes every paced beat instant", id));
+            }
+        }
+    }
+
+    private static boolean anyPaced(@Nonnull StationStep[] steps) {
+        for (StationStep step : steps) {
+            if (step != null && step.effectivePaced()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * {@code Work.Queue} coverage, warn-only: {@code QUEUE_WITHOUT_STEPS} (the queue re-runs an
+     * authored program per socket; the classic loop already drains every pile),
+     * {@code QUEUE_WITHOUT_SOCKETS} (fewer than two Item sockets leave nothing to queue over),
+     * {@code QUEUE_SOCKET_NOT_SINGLE} (a socket holding more than one item is worked as one pass,
+     * which is not one piece per ritual) and {@code QUEUE_WITH_LOOPING} (INFO: with Looping true
+     * the session runs on after the queue drains and ends out of inputs at the next pass).
+     */
+    private static void checkQueue(@Nullable StationAsset.Work work, @Nullable Custody custody,
+            @Nullable StationStep[] effectiveSteps, boolean mayInherit, @Nonnull String label,
+            @Nonnull String id, @Nonnull List<Finding> out) {
+        if (work == null || !work.effectiveQueue()) {
+            return;
+        }
+        String qLabel = label + " Work.Queue";
+        boolean hasSteps = effectiveSteps != null && effectiveSteps.length > 0;
+        if (!hasSteps && !mayInherit) {
+            out.add(Finding.warning(DOMAIN, "QUEUE_WITHOUT_STEPS",
+                    qLabel + " is authored on an action with no Steps program - the queue re-runs an"
+                            + " authored program per filled socket, and the classic loop already drains"
+                            + " every pile", id));
+        }
+        if (custody == null) {
+            if (!mayInherit) {
+                out.add(Finding.warning(DOMAIN, "QUEUE_WITHOUT_SOCKETS",
+                        qLabel + " is authored on an action with no Custody - there are no sockets to"
+                                + " queue over", id));
+            }
+        } else {
+            int itemSockets = 0;
+            for (Custody.ResolvedSocket socket : custody.effectiveSockets()) {
+                if (!socket.itemRoute()) {
+                    continue;
+                }
+                itemSockets++;
+                if (socket.maxQuantity() > 1) {
+                    out.add(Finding.warning(DOMAIN, "QUEUE_SOCKET_NOT_SINGLE",
+                            qLabel + " queues over socket '" + socket.id() + "', whose effective MaxQuantity is "
+                                    + socket.maxQuantity() + " - a queue works one piece per pass, so give"
+                                    + " each socket a MaxQuantity of 1", id));
+                }
+            }
+            if (itemSockets < 2) {
+                out.add(Finding.warning(DOMAIN, "QUEUE_WITHOUT_SOCKETS",
+                        qLabel + " is authored with " + itemSockets + " Item socket(s) - a queue needs at"
+                                + " least two single-item sockets to work through", id));
+            }
+        }
+        if (work.effectiveLooping()) {
+            out.add(Finding.info(DOMAIN, "QUEUE_WITH_LOOPING",
+                    qLabel + " is authored beside Looping true (the default) - once the queue drains the"
+                            + " session runs on and ends out of inputs at its next pass; author Looping"
+                            + " false for a ritual that ends when the last piece is done", id));
+        }
+    }
+
+    /**
+     * The three beat-level knobs, checked against the action's own groups: {@code
+     * CONVERT_WITHOUT_RECIPE} (a Convert beat with no Recipe to run stops the session at that
+     * beat), {@code CONVERT_WITH_CONSUME_PRODUCE} (a beat authoring Convert beside Consume or
+     * Produce runs both, which is rarely meant), {@code CONVERT_REPEATED} (INFO: several Convert
+     * beats each run one row), {@code BONUS_AT_BEAT_NO_BONUS} (a RollBonus beat on an action with
+     * no Bonus rolls nothing), {@code BONUS_AT_BEAT_REPEATED} (INFO: the Bonus rolls once per such
+     * beat) and {@code PACED_STEP_WITHOUT_PACE} (INFO: a Paced beat on an action with no Pace keeps
+     * its authored length unless an extension supplies a ladder).
+     */
+    private static void checkStepKnobs(@Nonnull StationStep[] steps, boolean mayHaveRecipe, boolean mayHaveBonus,
+            boolean mayHavePace, @Nonnull String actionLabel, @Nonnull String id, @Nonnull List<Finding> out) {
+        int converts = 0;
+        int bonusBeats = 0;
+        boolean pacedWarned = false;
+        for (int i = 0; i < steps.length; i++) {
+            StationStep step = steps[i];
+            if (step == null) {
+                continue;
+            }
+            String stepLabel = actionLabel + ".Steps[" + i + "]";
+            if (step.getConvert() != null && step.getConvert().effectiveEnabled()) {
+                converts++;
+                if (!mayHaveRecipe) {
+                    out.add(Finding.warning(DOMAIN, "CONVERT_WITHOUT_RECIPE",
+                            stepLabel + " authors a Convert phase but the action has no Recipe to run - the"
+                                    + " beat finds no conversion and stops the session", id));
+                }
+                if (step.getConsume() != null || step.getProduce() != null) {
+                    out.add(Finding.warning(DOMAIN, "CONVERT_WITH_CONSUME_PRODUCE",
+                            stepLabel + " authors Convert beside a Consume or Produce phase - both run at this"
+                                    + " beat (the recipe's consume and produce, plus the authored ones)", id));
+                }
+            }
+            if (step.effectiveRollBonus()) {
+                bonusBeats++;
+                if (!mayHaveBonus) {
+                    out.add(Finding.warning(DOMAIN, "BONUS_AT_BEAT_NO_BONUS",
+                            stepLabel + " authors RollBonus but the action has no Bonus - nothing rolls at this"
+                                    + " beat (an extension's Bonus would)", id));
+                }
+            }
+            if (step.effectivePaced() && !mayHavePace && !pacedWarned) {
+                out.add(Finding.info(DOMAIN, "PACED_STEP_WITHOUT_PACE",
+                        stepLabel + " is marked Paced but the action authors no Pace - the beat keeps its"
+                                + " authored length unless an extension supplies a Pace ladder", id));
+                pacedWarned = true;
+            }
+        }
+        if (converts > 1) {
+            out.add(Finding.info(DOMAIN, "CONVERT_REPEATED",
+                    actionLabel + " authors " + converts + " Convert beats - each runs one conversion row"
+                            + " per iteration", id));
+        }
+        if (bonusBeats > 1) {
+            out.add(Finding.info(DOMAIN, "BONUS_AT_BEAT_REPEATED",
+                    actionLabel + " authors RollBonus on " + bonusBeats + " beats - the action's Bonus rolls"
+                            + " once at each of them", id));
         }
     }
 
@@ -3743,7 +4046,10 @@ public final class StationValidator {
         // rule) rather than the entry's own array: an inline entry that Refs a stepped action and
         // overrides only Bonus runs that program too, and used to escape this warning entirely.
         StationStep[] effectiveSteps = ActionResolver.effectiveStepsOf(def);
-        boolean noCycleOutput = effectiveSteps != null && effectiveSteps.length > 0;
+        // A program with a Convert beat HAS a cycle output the moment that beat runs its row, so
+        // an OutputItems grant on it lands; only a program with no Convert at all drops one.
+        boolean noCycleOutput = effectiveSteps != null && effectiveSteps.length > 0
+                && !StationStepDecisions.programConverts(effectiveSteps);
 
         // Custody presence feeds the match-any-input advisory below; a Ref'd entry may inherit its
         // Custody from the base action, so hasRef counts as "custody unknown" and never warns.
@@ -3764,8 +4070,17 @@ public final class StationValidator {
             checkContributionScale(def.getContributionScale(), id, actionLabel + " ContributionScale",
                     factorKnown, out);
         }
+        checkPace(def.getPace(), effectiveSteps, def.hasRef(), actionLabel, id, factorKnown, out);
+        checkQueue(effectiveWork, def.getCustody(), effectiveSteps, def.hasRef(), actionLabel, id, out);
+        if (def.getSelect() != null) {
+            checkExcept(def.getSelect(), actionLabel + " Select", id, out);
+        }
         if (def.getCustody() != null) {
             checkCustody(def.getCustody(), def.getRecipe(), false, actionLabel, id, out);
+            if (def.getCustody().getInput() != null) {
+                checkExcept(def.getCustody().getInput(), actionLabel + " Custody.Input", id, out);
+            }
+            checkSocketExcepts(def.getCustody(), actionLabel, id, out);
         }
         if (worker != null) {
             checkAnimation(animation, id, actionLabel, out);
@@ -3800,6 +4115,11 @@ public final class StationValidator {
             boolean puppetActive = puppet != null && puppet.effectiveEnabled();
             checkSteps(steps, actionLabel, id, dropListKnown, factorKnown, lootableKnown, rollPoolKnown,
                     puppetActive, knownAnchorIds, out);
+            // The beat-level knobs read the action's own groups: a Convert beat needs a Recipe to
+            // run, a RollBonus beat a Bonus to roll. A Ref'd entry may inherit either from its base,
+            // so hasRef counts as "may have one" and never false-flags.
+            checkStepKnobs(steps, def.getRecipe() != null || def.hasRef(), def.getBonus() != null || def.hasRef(),
+                    def.getPace() != null || def.hasRef(), actionLabel, id, out);
         }
         checkSocketAddresses(def, actionLabel, id, out);
         checkStampMainPile(def, steps, actionLabel, id, out);

@@ -152,7 +152,7 @@ public final class FactorRegistryImpl implements FactorRegistry {
      */
     @Nullable
     public Double resolve(@Nullable String factorId, @Nullable String param, @Nonnull FactorContext ctx) {
-        return core.resolve(factorId, param, ctx.store(), subjectOf(ctx), ctx);
+        return core.resolve(factorId, param, ctx.store(), subjectOf(ctx), ctx.item(), ctx);
     }
 
     /**
@@ -165,7 +165,7 @@ public final class FactorRegistryImpl implements FactorRegistry {
      */
     @Nonnull
     public FactorLookup snapshotFor(@Nonnull FactorContext ctx) {
-        return core.snapshot(ctx.store(), subjectOf(ctx), ctx);
+        return core.snapshot(ctx.store(), subjectOf(ctx), ctx.item(), ctx);
     }
 
     /**
@@ -176,7 +176,7 @@ public final class FactorRegistryImpl implements FactorRegistry {
      */
     @Nullable
     public String firstFailedCondition(@Nullable FactorCondition[] conditions, @Nonnull FactorContext ctx) {
-        return core.firstFailedCondition(conditions, ctx.store(), subjectOf(ctx), ctx);
+        return core.firstFailedCondition(conditions, ctx.store(), subjectOf(ctx), ctx.item(), ctx);
     }
 
     /** True when a provider is registered for {@code factorId} (the validator's known-factor check). */

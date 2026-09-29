@@ -2,10 +2,188 @@
 
 Developer changelog for RPG Stations. No em-dashes.
 
-**1.0.0 is RPG Stations' first public release.** Everything below shipped into this one version;
-there is no prior public release to diff against, so every entry is additive by definition.
+## 1.1.0 - unreleased
+
+Held until the maintainer releases it. Built against Ziggfreed Common 2.2.0 (the manifest floor
+moves to `>=2.2.0`); the Sawmill's derived rows, its `Yield.Base 1` outcome and its three tool
+readings are byte-identical to 1.0.0, each pinned by a test (`SawmillDerivationParityTest`,
+`StationYieldCompositionTest`, `StationToolReadingsTest`).
+
+- **A station derives from ANY vanilla bench, standalone recipes included, with each row's full
+  outputs.** `Recipe.FromCrafting` now reads Ziggfreed Common's native recipe index
+  (`RecipeIndex.live()`), which holds the standalone recipe files as well as the recipes authored
+  inside items, so `Benches: ["Salvagebench"]` derives one conversion per vanilla salvage recipe and
+  every row carries that recipe's whole output list at native quantities (an iron sword's two ore,
+  a hide and a scrap are three outputs of one row). The derived-conversion cache
+  (`StationCatalog`) re-derives the moment the index's `generation()` moves, so a recipe or item
+  reload never leaves a stale row behind. `StationRecipeDeriver.candidatesOf(RecipeCatalog)` is
+  the pure half of the live adapter, so a test walks the same code over a hand-built catalog. Two
+  recipes making the same item keep one order on every boot (the recipe id breaks the tie). The
+  Sawmill's 33 plank rows derive exactly as before: same rows, same order, same category stamps,
+  same quantities.
+- **`Recipe.Yield` states its composition rule over a multi-output row.** `Base` replaces the
+  PRIMARY (first) output's quantity and nothing else; every other output keeps the quantity its
+  recipe authored; `Scale`, `Min` and `Max` then apply to every output. A salvage row keeps its
+  hide and its scrap under `Yield.Base 1`, and a single-output row reads exactly as it always has
+  (`StationYield.resolveQuantity(yield, quantity, primary)`; the unattended settle applies the same
+  rule).
+- **Fallback routes for a placed piece no row covers** (`Recipe.Fallback`, custody-routed only).
+  Tried in order once the row scan finds nothing: `CraftingShare {Share}`, a share of the piece's
+  OWN crafting recipe (each exact-item line at `floor(Quantity x Share / OutputQuantity)`, where
+  `OutputQuantity` is how many pieces that recipe makes per craft, so a batch recipe pays per
+  piece and never the whole batch's share: one iron bar making four darts pays nothing back per
+  dart at a half share, five Life essence making two bait pay one per bait; a line that rounds to
+  nothing is dropped, a recipe with no line left does not take the route; family and tag lines
+  name no item to give back and are dropped), then `EssenceOnly {}` (the piece is consumed and
+  nothing is produced; the action's `Bonus` rolls are its whole payout - the ONE row shape allowed
+  to carry no output). Both are scoped by `Fallback.Input` (the shared matcher) and by the engine's
+  METADATA GUARD (`StationMetadataGuard`): a stack is refused when it carries a metadata key no mod
+  declared disposable, or when its keys cannot be read. The read and the declared-key list are
+  ziggfreed-common's (`ItemReadings.undeclaredMetadataKeys`, `DisposableItemMetadata`): a mod
+  declares its own disposable keys through `DisposableItemMetadata.declare` at setup, a registered
+  stamper's keys are declared when it registers, and a stamped stack vouches for nothing beyond its
+  declared keys. Wear rides the stack's durability leaves and never counts.
+  Priority is authored rows (tier 0) > salvage-derived (1) > crafting share (2) > essence only (3);
+  a fourth party overrides any piece by authoring a row for it, on the station or through an
+  extension's `Conversions` payload. A piece is offered ONE route, the first that applies
+  (`StationFallbackRoutes.routeFor`), a pile ONE row, its oldest falling-back piece's, and
+  selection hands the runnable scan exactly that row (`StationFallbackRoutes.offeredRows`, pinned
+  at length one), so a full inventory still answers inventory-full: a row scan
+  that found a covering row but no room never falls back, and a crafting-share row with no room
+  answers inventory-full rather than falling through to the essence-only row, so a full bag never
+  destroys a piece for nothing. Placement acceptance asks the same question the routes will, so
+  drop-only gear can be placed. Validator: `FALLBACK_WITHOUT_CUSTODY`, `FALLBACK_NO_ROUTE`,
+  `FALLBACK_SHARE_OUT_OF_RANGE`, `FALLBACK_INPUT_CATCH_ALL` (INFO).
+- **ONE `Except` hole on the shared input matcher.** `ActionInput` (an action's `Select`, a
+  `Custody.Input`, a socket's `Match`, a fallback's `Input`) gains `Except`, the same four routes
+  one level down: a material the routes accept is refused when the hole accepts it too, so
+  `{"Tags": {"Type": ["Weapon", "Tool"]}, "Except": {"Tags": {"Type": ["Ammo"]}}}` takes weapons
+  and tools but never ammunition without listing every id. One codec definition serves both
+  levels (`ActionInput.EXCEPT_CODEC`); an exclusion has no `Except` of its own. Every site asks ONE
+  acceptance rule, `StationCustody.accepts` (action selection, a socket's `Match` and an explicit
+  `Custody.Input` at placement, a Block socket's match, a fallback's `Input`): an absent or
+  catch-all matcher accepts everything, a route set accepts what a route matches, and the hole is
+  carved out either way, so a catch-all with an `Except` takes everything but the hole. An
+  `Except` that authors no route matches nothing, so it carves no hole: the matcher accepts
+  exactly what it would without it. An extension's `Custody.Input` overlay carries the leaf.
+  Validator: `EXCEPT_CATCH_ALL` (an `Except` with no route does nothing, almost always a route
+  left out), and an unknown `Except.Function` reports as `UNKNOWN_ACTION_FUNCTION`.
+- **A ritual can run a recipe: the `Convert` step phase.** `StationStep.Convert {Enabled?}` runs the
+  action's `Recipe` at that beat: the matched row is selected exactly as the classic loop selects
+  one (authored, derived, then the fallback routes; narrowed to the chosen output category), its
+  inputs are consumed (from custody when the action authors `Custody`, else the inventory),
+  `Recipe.Yield` is applied, the yield breakdown and the cycle's output item are recorded (so
+  `rpgstations:output_items` applies in a Steps program), the outputs are produced to the inventory
+  as ordinary rows, and only then does the conversion COMMIT (`StationService.commitIteration`:
+  the refund ledger clears and the consumption reaches the ONE input-consumed hook, below); a
+  produce that fails returns before the commit, so the inputs are still refunded at stop and no
+  listener hears of a consumption that was undone. The implicit program is
+  now `Convert` + `Roll` + `Presentation` on one step, so the classic loop and an authored beat
+  convert through ONE code path; the loop still chooses its row before dispatch (idle practice,
+  the OUT_OF_INPUTS / INVENTORY_FULL stops, the per-conversion pace and the feedable-cycles count
+  all ride that choice) and hands it to the phase as its preselected row. A switched-on convert IS
+  work (`IsWork` derives true; a `Convert {Enabled: false}` is not). Phase order is now Walk ->
+  Consume -> Stamp -> Convert -> Produce -> Roll -> Commands -> entry cues -> Duration.
+  `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` fires only on a program with no Convert beat, and names the
+  missing beat. Validator: `CONVERT_WITHOUT_RECIPE`, `CONVERT_WITH_CONSUME_PRODUCE`,
+  `CONVERT_REPEATED` (INFO).
+- **ONE input-consumed hook, reached from every path on which a station consumes input.**
+  `StationService.onInputConsumed(Store, InputConsumption)` is called exactly once per committed
+  consumption, after the commit, and never for a consumption the engine gave back. Its
+  session-free record (`InputConsumption`) carries the worker (null on an unattended settle, and
+  whole on an attended one: handle, entity ref and uuid), the world (the worker's, else the
+  session's own when the worker is between worlds), the block the consumed pile stood at, the
+  station and action ids, and the consumed stacks, each with the custody socket it left
+  (`ConsumedInput`: the placed piece's own stack when a single-item socket gave it up, else a
+  bare stack per drained item id and count). An attended batch whose session has lost part of its
+  worker, or can name no world either way, is not reported (teardown racing the phase). A session
+  consume (a `Consume` phase, or a `Convert` phase's drain) records its batch into a new hook half
+  of the iteration ledger (`StationSession.iterationConsumedInputs`); the iteration's commit
+  (`StationService.commitIteration`: a committed produce on either route, a committed conversion,
+  a completed program pass) clears the refund halves and then reports each batch once, and a
+  refund at stop drops it unreported. A
+  `Stamp` phase's reagents are reported the moment the enhanced stack commits, since no later stop
+  refunds them. An unattended settle reports what it drained, per socket pile
+  (`StationUnattended.Settle.drains`), once its transform is committed to the stash; like every
+  attended custody consume, a settle that takes a single-item socket's last now takes the piece's
+  stack off the pile with it and drops that socket's prop. The hook's body is a debug log; nothing
+  listens to it yet. `InputConsumedHookOrderTest` pins each path's order on the source (the
+  consumption lands, then commits, then reaches the hook) and the hook's three call sites, one per
+  commit shape.
+- **Custody correctness, three fixes.** A custody consume that takes the last of a single-item
+  socket's piece now takes the pile's metadata-bearing `Unique` stack with it
+  (`StationCustodyClaim.takeUniqueIfDrained`), so the placed piece is actually destroyed and its
+  prop despawns in the same tick; before, the stack stayed and was handed back at stop as a piece
+  that no longer existed. The refund ledger gained a unique-stack half
+  (`StationSession.iterationConsumedUnique`): an interrupted ritual puts the SAME stack back on its
+  pile, wear and stamps intact, or hands it to the player as itself when the pile is gone, never as
+  a bare fresh stack (`StationCustodyLedger.countsBesideUnique` nets the count half). Only a stack
+  the drain itself took is ledgered (`StationCustodyLedger.pieceTaken`), so a `Unique` already
+  left dangling on its pile is cleared off it and never put back. A completed
+  program pass now clears every half of the ledger (it commits through
+  `StationService.commitIteration`), not only the inventory half. A pile whose `Unique` outlived
+  its count (the shape the old consume left behind) reads as holding nothing, answers no unique
+  stack and hands nothing back for it; the decision behind that (`StationCustody.uniqueDrained`)
+  is what the tests pin, while a 1.0.0 stash of that shape loading through the engine is a
+  dev-server check, since no unit test can build one.
+- **The piece in the factors.** The session captures the piece the work is about
+  (`StationSession.factorItem`: the addressed socket's unique stack, else a bare stack of the
+  oldest matching material, else the inventory route's exact-item input) before every snapshot,
+  re-captured on each program pass and carried across a resume, and every factor-context build
+  site publishes it through the api `FactorContext.item()` into Ziggfreed Common's item leaf - the
+  sessionless gather twin included, and the engage-time `Requires` gate, which reads the piece
+  standing in the block's custody (the same first-socket capture a pass makes) so a gate over
+  `hytale:item_*` judges the placed piece; the inventory route's piece is unknown before a
+  conversion is chosen, so that gate reads no item. The four portable item factors (`hytale:item_quality`,
+  `hytale:item_level`, `hytale:item_durability_percent`, `hytale:item_stat`) are adopted into the
+  station vocabulary, and `ziggfreedcommon:item_stamp_points` reaches it through the library's
+  process-wide contribution. The three `hytale:tool_*` readings moved onto the shared item reader
+  (`StationToolReadings` over `ItemReadings`) with the station's own 0 / 100 defaults; `tool_quality`
+  reads the held ITEM's current quality, never the stack's copied index, so its values are the
+  1.0.0 ones.
+- **A ritual queue.** `Work.Queue: true` runs the authored `Steps` program once per FILLED custody
+  socket in authored order: each pass takes the next filled socket, captures its stack for the
+  factors, addresses it for the `Convert` phase's drain, and consumes it; while another filled
+  socket waits, the next pass starts on the next frame; once every socket is empty the ordinary
+  end-of-pass rule decides (`Looping false` ends the session). An interrupted pass refunds only the
+  socket in progress; the other pieces follow the station's standing custody-return rule at stop.
+  A pass's beat cues play where every step's cues play, at the block, whichever socket it works.
+  A one-socket station is unaffected. Validator: `QUEUE_WITHOUT_STEPS`, `QUEUE_WITHOUT_SOCKETS`,
+  `QUEUE_SOCKET_NOT_SINGLE`, `QUEUE_WITH_LOOPING` (INFO).
+- **Paced beats.** `ActionDef.Pace {Ladder, Clamp}`: the ladder is the `ContributionScale` codec
+  (`Factors` + `Floors [{Min, Scale}]`, never a second ladder shape) and `Clamp {Min, Max}` is the
+  shared clamp leaf. A step marked `Paced: true` has its `Duration.Ms` multiplied by the resolved
+  pace, and its own presentation's `DelayMs`, each sound's `DelayMs` and each burst's
+  `DurationSeconds` stretched with it, so its accents keep their place; an unpaced beat keeps its
+  authored length. Each matching `ExtensionAsset` may carry its OWN complete `Pace` ladder, typed
+  `{Ladder}` only (`Pace.LADDER_ONLY_CODEC`; there is no `Clamp` leaf on an extension's pace): the
+  scales MULTIPLY (each ladder from its own thresholds) and the action's `Clamp` alone bounds the
+  product, so a jar ladder over one factor and a pack ladder over another compose without either
+  restating the other (`StationPacing`). Because the action's clamp is the one bound on the
+  composed pace, an action's `Pace` should author BOTH sides of it; `PACE_UNCLAMPED` warns on a
+  missing clamp or a missing side. The pace resolves ONCE at step entry and is cached beside the
+  repeat count (`StationSession.stepPaceScale`), so a resume never re-scales a committed deadline.
+  Validator: `PACE_WITHOUT_STEPS`, `PACE_NO_PACED_STEP`, `PACE_UNCLAMPED`, `PACE_CLAMP_INVERTED`,
+  `PACE_FLOOR_NONPOSITIVE`, `PACE_EXTENSION_NO_LADDER`, `PACED_STEP_WITHOUT_PACE` (INFO).
+- **Finds on a beat.** `StationStep.RollBonus: true` rolls the action's `Bonus` (its own tables and
+  rolls plus every matching extension's) at that beat, once per iteration, and a program with such
+  a beat skips its completion-time pass so the Bonus never rolls twice. Unset, nothing moves.
+  Validator: `BONUS_AT_BEAT_NO_BONUS`, `BONUS_AT_BEAT_REPEATED` (INFO).
+- **Technical.** `SCHEMA.md` regenerated for every leaf above. The api `FactorContext` gains the
+  additive `item()` accessor and `Builder.item(ItemStack)` (the api version bump rides the next
+  leg). `StationService.ConversionCheck` carries the chosen row and is package-visible for the step
+  context; `StationStepContext` carries the station asset, the composed pace and the preselected
+  row. `ImplicitProgram.build` takes the Bonus and the cycle presentation only. A consume body
+  records `ConsumedInput`s (the real stack plus the socket it left) into the iteration ledger's
+  hook half beside its refund halves. The consumption paths run only against a live store, so
+  `InputConsumedHookOrderTest` and the fallback selection pin read the order off the source, one
+  method body at a time (`SourcePins`, a test-only reader that cuts a body at its matching brace).
 
 ## 1.0.0 - 2026-09-12 (first public release)
+
+**1.0.0 is RPG Stations' first public release.** Everything in this section shipped into this one
+version; there is no prior public release to diff against, so every entry below is additive by
+definition.
 
 - **The summary panel wears the colour every HUD card shares, or one of its own.** The
   end-of-session panel is a HUD card like Ziggfreed Common's bar panels and quest tracker, and it

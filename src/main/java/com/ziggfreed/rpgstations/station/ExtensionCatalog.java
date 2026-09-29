@@ -236,6 +236,26 @@ public final class ExtensionCatalog {
     }
 
     /**
+     * Every matching extension's OWN {@code Pace} ladder, in {@link ExtensionAsset#APPLY_ORDER}: the
+     * ladders that MULTIPLY into the action's pace (never an overlay of it - each resolves from its
+     * own thresholds; see {@link StationPacing}). Empty with no extension in play.
+     */
+    @Nonnull
+    public List<ContributionScale> paceLaddersFor(@Nullable String stationId, @Nonnull String actionId) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
+        if (exts.isEmpty()) {
+            return List.of();
+        }
+        List<ContributionScale> ladders = new ArrayList<>();
+        for (ExtensionAsset ext : exts) {
+            if (ext.getPace() != null && ext.getPace().getLadder() != null) {
+                ladders.add(ext.getPace().getLadder());
+            }
+        }
+        return ladders.isEmpty() ? List.of() : List.copyOf(ladders);
+    }
+
+    /**
      * An action's effective {@code Recipe.Conversions}: {@code base} plus every matching extension's
      * own {@code Conversions}, appended in {@link ExtensionAsset#APPLY_ORDER}. {@code base} is the
      * already-derived array (authored conversions plus any {@code FromCrafting}-derived ones), so an
@@ -705,7 +725,8 @@ public final class ExtensionCatalog {
                 firstNonNull(overlay.getItemId(), base.getItemId()),
                 firstNonNull(overlay.getResourceTypeId(), base.getResourceTypeId()),
                 firstNonNull(overlay.getTags(), base.getTags()),
-                firstNonNull(overlay.getFunction(), base.getFunction()));
+                firstNonNull(overlay.getFunction(), base.getFunction()),
+                firstNonNull(overlay.getExcept(), base.getExcept()));
     }
 
     /**
@@ -1012,6 +1033,9 @@ public final class ExtensionCatalog {
         }
         if (ext.getContributionScale() != null) {
             out.add(ExtensionAsset.PAYLOAD_CONTRIBUTION_SCALE);
+        }
+        if (ext.getPace() != null) {
+            out.add(ExtensionAsset.PAYLOAD_PACE);
         }
         if (ext.getActions() != null && ext.getActions().length > 0) {
             out.add(ExtensionAsset.PAYLOAD_ACTIONS);

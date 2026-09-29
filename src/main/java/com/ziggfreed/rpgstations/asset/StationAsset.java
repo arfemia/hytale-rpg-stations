@@ -319,6 +319,7 @@ public final class StationAsset
         @Nullable protected Contribution[] perCycleContributions;
         @Nullable protected Idle idle;
         @Nullable protected Boolean looping;
+        @Nullable protected Boolean queue;
         @Nullable protected Unattended unattended;
 
         public static final BuilderCodec<Work> CODEC = BuilderCodec.builder(Work.class, Work::new)
@@ -351,6 +352,10 @@ public final class StationAsset
                         (o, v) -> o.looping = v, o -> o.looping, (o, p) -> o.looping = p.looping)
                 .metadata(EditorSchema.defaultValue(true))
                 .documentation("Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape).").add()
+                .appendInherited(new KeyedCodec<>("Queue", Codec.BOOLEAN, false),
+                        (o, v) -> o.queue = v, o -> o.queue, (o, p) -> o.queue = p.queue)
+                .metadata(EditorSchema.defaultValue(false))
+                .documentation("Run the authored Steps program once per FILLED custody socket, in authored socket order, each run working that one socket's piece (it is the piece the factors read and the piece the Convert phase consumes) until every socket is empty. Default false. Meant for a Looping false ritual over several single-item sockets; a one-socket station is unaffected.").add()
                 .appendInherited(new KeyedCodec<>("Unattended", Unattended.CODEC, false),
                         (o, v) -> o.unattended = v, o -> o.unattended, (o, p) -> o.unattended = p.unattended)
                 .documentation("Opt-in unattended processing over placed custody: authoring this group at all turns it on (absent = attended-only). While nobody works the station, its recipe conversions keep settling against the placed piles on world game time - the transform happens immediately, and the loot rolls and contribution posts it would have earned accrue on the output pile and pay out to whoever gathers it.")
@@ -387,6 +392,13 @@ public final class StationAsset
         @Nonnull
         public Work withUnattended(@Nullable Unattended unattended) {
             this.unattended = unattended;
+            return this;
+        }
+
+        /** Java-side test/fixture helper for the queue flag; not part of any codec fold. */
+        @Nonnull
+        public Work withQueue(@Nullable Boolean queue) {
+            this.queue = queue;
             return this;
         }
 
@@ -440,6 +452,22 @@ public final class StationAsset
         /** {@link #looping}, reader-defaulted to {@code true} (the classic loop) when null. */
         public boolean effectiveLooping() {
             return looping == null || looping;
+        }
+
+        /**
+         * The ritual QUEUE knob: after a completed program pass, the next filled custody socket (in
+         * authored order) gets its own pass, until none is left. Orthogonal to {@link #looping}:
+         * the queue decides whether ANOTHER piece is waiting, looping decides what happens once
+         * nothing is. Null = off.
+         */
+        @Nullable
+        public Boolean getQueue() {
+            return queue;
+        }
+
+        /** {@link #queue}, reader-defaulted to {@code false} when null. */
+        public boolean effectiveQueue() {
+            return queue != null && queue;
         }
 
         /** The unattended-processing opt-in group, or {@code null} when the action is attended-only. */
@@ -620,6 +648,7 @@ public final class StationAsset
     public static final class Recipe {
         @Nullable protected Conversion[] conversions;
         @Nullable protected FromCrafting fromCrafting;
+        @Nullable protected Fallback fallback;
         @Nullable protected Yield yield;
         @Nullable protected Doneness doneness;
 
@@ -632,10 +661,14 @@ public final class StationAsset
                 .appendInherited(new KeyedCodec<>("FromCrafting", FromCrafting.CODEC, false),
                         (o, v) -> o.fromCrafting = v, o -> o.fromCrafting,
                         (o, p) -> o.fromCrafting = p.fromCrafting)
-                .documentation("Derive additional Conversions from the engine's own native crafting/processing recipes; null = no derivation.").add()
+                .documentation("Derive additional Conversions from the engine's own native recipes, standalone recipe files and item-authored ones alike, each row carrying that recipe's full outputs at native quantities; null = no derivation.").add()
+                .appendInherited(new KeyedCodec<>("Fallback", Fallback.CODEC, false),
+                        (o, v) -> o.fallback = v, o -> o.fallback, (o, p) -> o.fallback = p.fallback)
+                .documentation("What a placed piece that NO authored or derived row covers falls back to: a share of its own crafting recipe, then consumption with no conversion output (the action's Bonus rolls are its payout). Custody-routed only. Null = an uncovered piece is refused.")
+                .metadata(new UIEditorSectionStart("Fallback")).add()
                 .appendInherited(new KeyedCodec<>("Yield", Yield.CODEC, false),
                         (o, v) -> o.yield = v, o -> o.yield, (o, p) -> o.yield = p.yield)
-                .documentation("Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived); null = each conversion's own authored quantity, unchanged.").add()
+                .documentation("Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived): Base replaces the primary (first) output's quantity only, Scale/Min/Max apply to every output. Null = each conversion's own authored quantities, unchanged.").add()
                 .appendInherited(new KeyedCodec<>("Doneness", Doneness.CODEC, false),
                         (o, v) -> o.doneness = v, o -> o.doneness, (o, p) -> o.doneness = p.doneness)
                 .documentation("The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window.")
@@ -670,6 +703,13 @@ public final class StationAsset
             return r;
         }
 
+        /** Java-side test/fixture helper for the {@link Fallback} group; not part of any codec fold. */
+        @Nonnull
+        public Recipe withFallback(@Nullable Fallback fallback) {
+            this.fallback = fallback;
+            return this;
+        }
+
         @Nullable
         public Conversion[] getConversions() {
             return conversions;
@@ -678,6 +718,12 @@ public final class StationAsset
         @Nullable
         public FromCrafting getFromCrafting() {
             return fromCrafting;
+        }
+
+        /** The fallback routes for a placed piece no row covers; null = an uncovered piece is refused. */
+        @Nullable
+        public Fallback getFallback() {
+            return fallback;
         }
 
         /** The per-cycle output-quantity transform; null = no transform (authored quantities stand). */
@@ -695,6 +741,154 @@ public final class StationAsset
         /** True when this recipe can actually produce something (authored conversions or a derive rule). */
         public boolean isRunnable() {
             return (conversions != null && conversions.length > 0) || fromCrafting != null;
+        }
+    }
+
+    /**
+     * The FALLBACK ROUTES for a placed piece that no authored or derived row covers, tried in order
+     * once the row scan finds nothing for it: a {@link CraftingShare} of the piece's OWN crafting
+     * recipe (the tier-2 route), then {@link EssenceOnly} consumption with no conversion output at
+     * all (the tier-3 route, whose whole payout is the action's {@code Bonus} rolls). Authored rows
+     * (tier 0) and derived rows (tier 1) always outrank both, which is how a fourth party overrides
+     * any one piece: author a row for it, on the station or through an extension's
+     * {@code Conversions} payload.
+     *
+     * <p><b>Scoped twice.</b> {@link #input} is the gear filter (the shared matcher, its
+     * {@code Except} hole included): a piece outside it never falls back. And every fallback runs
+     * behind the engine's METADATA GUARD: a stack carrying a metadata key no mod declared
+     * disposable on the library's list (wear is not metadata, and a stamper's keys are declared
+     * when it registers), or whose keys cannot be read, is refused, so a container with something
+     * inside it is never unmade. Both routes read the REAL placed stack, so they are
+     * custody-routed only.
+     */
+    public static final class Fallback {
+        @Nullable protected ActionInput input;
+        @Nullable protected CraftingShare craftingShare;
+        @Nullable protected EssenceOnly essenceOnly;
+
+        public static final BuilderCodec<Fallback> CODEC = BuilderCodec.builder(Fallback.class, Fallback::new)
+                .appendInherited(new KeyedCodec<>("Input", ActionInput.CODEC, false),
+                        (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input)
+                .documentation("The gear filter both fallback routes are scoped to (ItemId | ResourceTypeId | Tags | Function, match = ANY, minus its Except hole). Absent = any placed piece the metadata guard accepts.").add()
+                .appendInherited(new KeyedCodec<>("CraftingShare", CraftingShare.CODEC, false),
+                        (o, v) -> o.craftingShare = v, o -> o.craftingShare, (o, p) -> o.craftingShare = p.craftingShare)
+                .documentation("Give back a share of the piece's OWN crafting recipe inputs (tier 2, tried before EssenceOnly). Absent = this route is off.").add()
+                .appendInherited(new KeyedCodec<>("EssenceOnly", EssenceOnly.CODEC, false),
+                        (o, v) -> o.essenceOnly = v, o -> o.essenceOnly, (o, p) -> o.essenceOnly = p.essenceOnly)
+                .documentation("Consume the piece with NO conversion output (tier 3, the last resort); the action's Bonus rolls are its whole payout. Authoring the group turns it on. Absent = this route is off.").add()
+                .build();
+
+        @Nonnull
+        public static Fallback of(@Nullable ActionInput input, @Nullable CraftingShare craftingShare,
+                @Nullable EssenceOnly essenceOnly) {
+            Fallback f = new Fallback();
+            f.input = input;
+            f.craftingShare = craftingShare;
+            f.essenceOnly = essenceOnly;
+            return f;
+        }
+
+        /** The gear filter; null = any piece the metadata guard accepts. */
+        @Nullable
+        public ActionInput getInput() {
+            return input;
+        }
+
+        @Nullable
+        public CraftingShare getCraftingShare() {
+            return craftingShare;
+        }
+
+        @Nullable
+        public EssenceOnly getEssenceOnly() {
+            return essenceOnly;
+        }
+
+        /** True when the crafting-share route is authored with a usable share. */
+        public boolean hasCraftingShare() {
+            return craftingShare != null && craftingShare.effectiveShare() > 0.0;
+        }
+
+        /** True when the essence-only route is on. */
+        public boolean hasEssenceOnly() {
+            return essenceOnly != null && essenceOnly.effectiveEnabled();
+        }
+
+        /** True when at least one route is on; a group with neither falls back to nothing. */
+        public boolean hasAnyRoute() {
+            return hasCraftingShare() || hasEssenceOnly();
+        }
+
+        /**
+         * The crafting-share route: the piece comes apart into {@link #share} of every exact-item
+         * line of its own crafting recipe. The rounding rule is stated once: each line's quantity is
+         * {@code floor(quantity * Share / OutputQuantity)}, where {@code OutputQuantity} is how many
+         * pieces that recipe makes per craft (so a batch recipe pays per piece, never the whole
+         * batch's share), a line that rounds to nothing is dropped, and a recipe whose every line
+         * rounds to nothing makes this route not apply (the piece falls through to
+         * {@link EssenceOnly}). A family or tag line names no item to give back and is dropped too.
+         */
+        public static final class CraftingShare {
+            @Nullable protected Double share;
+
+            public static final BuilderCodec<CraftingShare> CODEC =
+                    BuilderCodec.builder(CraftingShare.class, CraftingShare::new)
+                            .appendInherited(new KeyedCodec<>("Share", Codec.DOUBLE, false),
+                                    (o, v) -> o.share = v, o -> o.share, (o, p) -> o.share = p.share)
+                            .documentation("The fraction of each exact-item line of the piece's own crafting recipe given back, in (0, 1]: each line becomes floor(Quantity x Share / OutputQuantity), OutputQuantity being how many pieces the recipe makes per craft (a batch recipe pays per piece); a line that rounds to nothing is dropped, and a recipe with no line left does not take this route.")
+                            .addValidator(CodecWarnValidators.positive("Recipe.Fallback.CraftingShare.Share should be positive; a non-positive share switches the route off.")).add()
+                            .build();
+
+            @Nonnull
+            public static CraftingShare of(@Nullable Double share) {
+                CraftingShare c = new CraftingShare();
+                c.share = share;
+                return c;
+            }
+
+            @Nullable
+            public Double getShare() {
+                return share;
+            }
+
+            /** {@link #share} as a usable fraction: 0 when absent or non-positive (the route is off), else the authored value. */
+            public double effectiveShare() {
+                return share != null && Double.isFinite(share) && share > 0.0 ? share : 0.0;
+            }
+        }
+
+        /**
+         * The essence-only route: AUTHORING THIS GROUP AT ALL OPTS IN ({@link #enabled}
+         * reader-defaults to {@code true}, the group-presence-means-on idiom); the leaf survives so a
+         * native {@code Parent} child can switch the route off while inheriting the rest.
+         */
+        public static final class EssenceOnly {
+            @Nullable protected Boolean enabled;
+
+            public static final BuilderCodec<EssenceOnly> CODEC =
+                    BuilderCodec.builder(EssenceOnly.class, EssenceOnly::new)
+                            .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
+                                    (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled)
+                            .metadata(EditorSchema.defaultValue(true))
+                            .documentation("Whether the essence-only route applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's group with the route switched off.").add()
+                            .build();
+
+            @Nonnull
+            public static EssenceOnly of(@Nullable Boolean enabled) {
+                EssenceOnly e = new EssenceOnly();
+                e.enabled = enabled;
+                return e;
+            }
+
+            @Nullable
+            public Boolean getEnabled() {
+                return enabled;
+            }
+
+            /** {@link #enabled}, reader-defaulted to {@code true} when null (an authored group means on). */
+            public boolean effectiveEnabled() {
+                return enabled == null || enabled;
+            }
         }
     }
 
@@ -1063,6 +1257,14 @@ public final class StationAsset
         @Nullable protected Doneness doneness;
         /** Engine-side mark (never authored/encoded): true on a {@code FromCrafting}-derived row. */
         transient boolean derived;
+        /**
+         * Engine-side mark (never authored/encoded): true on the ESSENCE-ONLY fallback row, the one
+         * row shape allowed to carry no output at all - the piece is consumed and the action's
+         * {@code Bonus} rolls are its whole payout.
+         */
+        transient boolean essenceOnly;
+        /** Engine-side mark (never authored/encoded): true on either per-piece fallback row. */
+        transient boolean fallback;
 
         public static final BuilderCodec<Conversion> CODEC = BuilderCodec.builder(Conversion.class, Conversion::new)
                 .appendInherited(new KeyedCodec<>("Input", new ArrayCodec<>(Ingredient.CODEC, Ingredient[]::new), false),
@@ -1124,6 +1326,12 @@ public final class StationAsset
         /** The tier every {@code FromCrafting}-derived row runs at, so an unauthored (tier 0) hand-written row outranks derivation. */
         public static final int DERIVED_TIER = 1;
 
+        /** The tier the crafting-share fallback row runs at: behind every authored and derived row. */
+        public static final int CRAFTING_SHARE_TIER = 2;
+
+        /** The tier the essence-only fallback row runs at: the last resort, behind everything else. */
+        public static final int ESSENCE_ONLY_TIER = 3;
+
         /**
          * Deriver-only factory: a {@code FromCrafting}-derived row, stamped {@link #DERIVED_TIER}
          * and carrying the engine-side derived mark the picker reads. Content never authors this.
@@ -1134,6 +1342,33 @@ public final class StationAsset
             Conversion c = of(input, output, durationMs, category);
             c.tier = DERIVED_TIER;
             c.derived = true;
+            return c;
+        }
+
+        /**
+         * Engine-only factory: the crafting-share fallback row for one placed piece, stamped
+         * {@link #CRAFTING_SHARE_TIER}. Built per piece at selection time, never cached and never
+         * authored.
+         */
+        @Nonnull
+        public static Conversion craftingShareRow(@Nonnull Ingredient input, @Nonnull Ingredient[] output) {
+            Conversion c = of(new Ingredient[] {input}, output, null, null);
+            c.tier = CRAFTING_SHARE_TIER;
+            c.fallback = true;
+            return c;
+        }
+
+        /**
+         * Engine-only factory: the essence-only fallback row for one placed piece, stamped
+         * {@link #ESSENCE_ONLY_TIER} and carrying NO output - the one row shape
+         * {@link #isComplete()} accepts without one. Built per piece at selection time.
+         */
+        @Nonnull
+        public static Conversion essenceOnlyRow(@Nonnull Ingredient input) {
+            Conversion c = of(new Ingredient[] {input}, new Ingredient[0], null, null);
+            c.tier = ESSENCE_ONLY_TIER;
+            c.essenceOnly = true;
+            c.fallback = true;
             return c;
         }
 
@@ -1168,9 +1403,14 @@ public final class StationAsset
             return output != null && output.length > 0 ? output[0] : null;
         }
 
-        /** True when both sides carry at least one entry (an incomplete conversion never runs). */
+        /**
+         * True when the row can run: at least one input, and at least one output unless this is
+         * the essence-only fallback row, the one shape that consumes without producing. An
+         * incomplete conversion never runs.
+         */
         public boolean isComplete() {
-            return input != null && input.length > 0 && output != null && output.length > 0;
+            return input != null && input.length > 0
+                    && (essenceOnly || (output != null && output.length > 0));
         }
 
         /** The optional per-conversion pace override in ms (highest time precedence); null = none. */
@@ -1226,6 +1466,16 @@ public final class StationAsset
             return derived;
         }
 
+        /** True on the essence-only fallback row (engine mark, never authored): consumed, nothing produced. */
+        public boolean isEssenceOnly() {
+            return essenceOnly;
+        }
+
+        /** True on either fallback row (the crafting share or the essence-only route); engine mark, never authored. */
+        public boolean isFallback() {
+            return fallback;
+        }
+
         /** Copy-with: the same row carrying an explicit {@link #tier}; every other leaf and the derived mark are carried over. */
         @Nonnull
         public Conversion withTier(@Nullable Integer tier) {
@@ -1234,6 +1484,8 @@ public final class StationAsset
             c.isExactSet = isExactSet;
             c.doneness = doneness;
             c.derived = derived;
+            c.essenceOnly = essenceOnly;
+            c.fallback = fallback;
             return c;
         }
 
@@ -1245,6 +1497,8 @@ public final class StationAsset
             c.isExactSet = isExactSet;
             c.doneness = doneness;
             c.derived = derived;
+            c.essenceOnly = essenceOnly;
+            c.fallback = fallback;
             return c;
         }
 
@@ -1256,6 +1510,8 @@ public final class StationAsset
             c.isExactSet = isExactSet;
             c.doneness = doneness;
             c.derived = derived;
+            c.essenceOnly = essenceOnly;
+            c.fallback = fallback;
             return c;
         }
     }
