@@ -3,10 +3,13 @@ package com.ziggfreed.rpgstations.asset;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import java.util.Locale;
+
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
+import com.ziggfreed.common.asset.EditorSchema;
 import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.common.codec.Rotation;
 
@@ -33,6 +36,7 @@ public final class Presentation {
     /** The playback offset applied when {@link #delayMs} is not authored: none, play immediately. */
     public static final long NO_DELAY_MS = 0L;
 
+    @Nullable protected Target target;
     @Nullable protected SoundCue[] sounds;
     @Nullable protected ModelParticle[] particles;
     @Nullable protected Shake shake;
@@ -41,6 +45,9 @@ public final class Presentation {
     @Nullable protected Long delayMs;
 
     public static final BuilderCodec<Presentation> CODEC = BuilderCodec.builder(Presentation.class, Presentation::new)
+            .appendInherited(new KeyedCodec<>("Target", Target.CODEC, false),
+                    (o, v) -> o.target = v, o -> o.target, (o, p) -> o.target = p.target)
+            .documentation("Where this moment's sounds and particles play: 'Block' (the default, the station block's centre), 'Display' (the placed piece's prop, the socket a ritual queue is working; its resting position when the prop is gone, as after a Convert beat consumed it) or 'Puppet' (the worker's double, or the worker's own body when no double stands). A bare word, or {Kind, Node} to attach the particles to one named node of the double's model. A sound or a particle system at an entity target follows it and reaches only the players who see it; a burst there cannot be capped by DurationSeconds, so an endless system stays at the block. The shake, the interaction and the effect are not moved by this leaf.").add()
             .appendInherited(new KeyedCodec<>("Sounds",
                             new ArrayCodec<>(SoundCue.CODEC, SoundCue[]::new), false),
                     (o, v) -> o.sounds = v, o -> o.sounds, (o, p) -> o.sounds = p.sounds)
@@ -94,12 +101,21 @@ public final class Presentation {
         return of(sounds, particles, shake, interaction, effect, null);
     }
 
-    /** Fully-populated Java-side factory carrying the playback {@code DelayMs} leaf too. */
+    /** Fully-populated Java-side factory carrying the playback {@code DelayMs} leaf too (no {@code Target}: the block). */
     @Nonnull
     public static Presentation of(@Nullable SoundCue[] sounds, @Nullable ModelParticle[] particles,
             @Nullable Shake shake, @Nullable Interaction interaction, @Nullable EffectRef effect,
             @Nullable Long delayMs) {
+        return of(null, sounds, particles, shake, interaction, effect, delayMs);
+    }
+
+    /** Fully-populated Java-side factory carrying every leaf, the {@code Target} included. */
+    @Nonnull
+    public static Presentation of(@Nullable Target target, @Nullable SoundCue[] sounds,
+            @Nullable ModelParticle[] particles, @Nullable Shake shake, @Nullable Interaction interaction,
+            @Nullable EffectRef effect, @Nullable Long delayMs) {
         Presentation p = new Presentation();
+        p.target = target;
         p.sounds = sounds;
         p.particles = particles;
         p.shake = shake;
@@ -128,12 +144,25 @@ public final class Presentation {
         if (base == null) {
             return over;
         }
-        return of(over.sounds != null ? over.sounds : base.sounds,
+        return of(over.target != null ? over.target : base.target,
+                over.sounds != null ? over.sounds : base.sounds,
                 over.particles != null ? over.particles : base.particles,
                 over.shake != null ? over.shake : base.shake,
                 over.interaction != null ? over.interaction : base.interaction,
                 over.effect != null ? over.effect : base.effect,
                 over.delayMs != null ? over.delayMs : base.delayMs);
+    }
+
+    /** Where this moment's sounds and particles play; null = the block (see {@link Target}). */
+    @Nullable
+    public Target getTarget() {
+        return target;
+    }
+
+    /** {@link #target}'s kind, reader-defaulted to {@link Target.Kind#BLOCK} when unauthored or unreadable. */
+    @Nonnull
+    public Target.Kind effectiveTargetKind() {
+        return target != null ? target.effectiveKind() : Target.Kind.BLOCK;
     }
 
     /**
@@ -156,16 +185,16 @@ public final class Presentation {
                 || shake != null || interaction != null || effect != null;
     }
 
-    /** A copy carrying ONLY this moment's {@code Sounds} (no timing, nothing else); null when it has none. */
+    /** A copy carrying ONLY this moment's {@code Sounds} and their {@code Target} (no timing, nothing else); null when it has none. */
     @Nullable
     public Presentation soundsOnly() {
-        return sounds != null && sounds.length > 0 ? of(sounds, null, null, null, null, null) : null;
+        return sounds != null && sounds.length > 0 ? of(target, sounds, null, null, null, null, null) : null;
     }
 
-    /** A copy carrying everything EXCEPT {@code Sounds} (timing kept); null when nothing else is authored. */
+    /** A copy carrying everything EXCEPT {@code Sounds} (timing and target kept); null when nothing else is authored. */
     @Nullable
     public Presentation withoutSounds() {
-        return hasNonSoundCue() ? of(null, particles, shake, interaction, effect, delayMs) : null;
+        return hasNonSoundCue() ? of(target, null, particles, shake, interaction, effect, delayMs) : null;
     }
 
     /**
@@ -223,6 +252,130 @@ public final class Presentation {
     }
 
     /**
+     * WHERE a moment's sounds and particles play. Authorable as a bare word or as an object:
+     *
+     * <pre>{@code
+     * "Target": "Display"
+     * "Target": { "Kind": "Puppet", "Node": "Hand_R" }
+     * }</pre>
+     *
+     * <p>{@link Kind#BLOCK} (the default) is the station block's centre, where every moment has
+     * always played. {@link Kind#DISPLAY} is the placed piece's prop: under a ritual queue the
+     * socket the current pass is working, else the first socket that shows one; when the prop is
+     * gone (a {@code Convert} beat consumed the piece in the same tick its cues fire) the cue
+     * plays at that socket's resting display position instead. {@link Kind#PUPPET} is the
+     * worker's double, or the worker's own body when no double stands (the puppet group off, or
+     * the world's puppet ceiling reached, where the worker performs in their own body anyway).
+     *
+     * <p>At an entity target the sounds follow the entity and the particles ride it, delivered
+     * only to the players whose tracker shows that entity; {@link #node} names one node of the
+     * double's model to attach the particles to (a hand, the held item), and means nothing at the
+     * block. A freshly spawned prop or double has been shown to nobody yet, so a cue that lands
+     * in the same tick plays at its position instead; nothing is lost. The shake, the interaction
+     * and the effect never move: the shake is the worker's camera, the interaction fires on the
+     * worker, and the effect chooses its own target ({@link EffectRef#getTarget()}).
+     */
+    public static final class Target {
+
+        /** The three places a moment can play. */
+        public enum Kind {
+            /** The station block's centre, the default. */
+            BLOCK,
+            /** The placed piece's display prop, or its resting position when the prop is gone. */
+            DISPLAY,
+            /** The worker's double, or the worker's own body when none stands. */
+            PUPPET;
+
+            /** Parse a case-insensitive word, falling back to {@link #BLOCK} for null/unknown input. */
+            @Nonnull
+            public static Kind fromString(@Nullable String word) {
+                if (word == null) {
+                    return BLOCK;
+                }
+                try {
+                    return valueOf(word.trim().toUpperCase(Locale.ROOT));
+                } catch (IllegalArgumentException e) {
+                    return BLOCK;
+                }
+            }
+        }
+
+        @Nullable protected String kind;
+        @Nullable protected String node;
+
+        /** The OBJECT form's schema; {@link #CODEC} is what a {@code Target} leaf actually decodes through. */
+        public static final BuilderCodec<Target> BODY_CODEC = BuilderCodec.builder(Target.class, Target::new)
+                .appendInherited(new KeyedCodec<>("Kind", Codec.STRING, false),
+                        (o, v) -> o.kind = v, o -> o.kind, (o, p) -> o.kind = p.kind)
+                .metadata(EditorSchema.oneOfDocumented(
+                        "Block", "The station block's centre, the default",
+                        "Display", "The placed piece's prop (the socket a queue is working), or its resting position when the prop is gone",
+                        "Puppet", "The worker's double, or the worker's own body when no double stands"))
+                .metadata(EditorSchema.defaultValue("Block"))
+                .documentation("Where the moment plays: Block (the default), Display or Puppet. An unknown word reads as Block.").add()
+                .appendInherited(new KeyedCodec<>("Node", Codec.STRING, false),
+                        (o, v) -> o.node = v, o -> o.node, (o, p) -> o.node = p.node)
+                .documentation("A named node of the target entity's model the particles attach to (a hand, the held item); meaningful at an entity target only. Absent attaches them to the entity itself.").add()
+                .build();
+
+        /** The dual bare-word / {@code {Kind, Node}} codec (see {@link StringOrObjectCodec}). */
+        public static final StringOrObjectCodec<Target> CODEC =
+                new StringOrObjectCodec<>(BODY_CODEC, Target::of, Target::shorthandOrNull);
+
+        public Target() {
+        }
+
+        /** The shorthand shape: a bare kind word, no node. */
+        @Nonnull
+        public static Target of(@Nullable String kind) {
+            return of(kind, null);
+        }
+
+        /** Java-side factory; sets the same fields the codec fills. */
+        @Nonnull
+        public static Target of(@Nullable String kind, @Nullable String node) {
+            Target t = new Target();
+            t.kind = kind;
+            t.node = node;
+            return t;
+        }
+
+        /** The authored kind word, unparsed; {@link #effectiveKind()} is the read. */
+        @Nullable
+        public String getKind() {
+            return kind;
+        }
+
+        /** The named model node the particles attach to at an entity target, or null for the entity itself. */
+        @Nullable
+        public String getNode() {
+            return node;
+        }
+
+        /** {@link #kind}, reader-defaulted to {@link Kind#BLOCK} when unauthored or unreadable. */
+        @Nonnull
+        public Kind effectiveKind() {
+            return Kind.fromString(kind);
+        }
+
+        /** True when {@link #node} is authored (a non-blank node name). */
+        public boolean hasNode() {
+            return node != null && !node.isBlank();
+        }
+
+        /** True when this target is an entity (the display prop or the double), never the block. */
+        public boolean isEntity() {
+            return effectiveKind() != Kind.BLOCK;
+        }
+
+        /** The bare-word form, or null when a node makes the object form necessary. */
+        @Nullable
+        private static String shorthandOrNull(@Nonnull Target target) {
+            return target.node == null ? target.kind : null;
+        }
+    }
+
+    /**
      * ONE sound played at a moment. Authorable two ways, decoded to this one record either way:
      *
      * <pre>{@code
@@ -240,9 +393,11 @@ public final class Presentation {
      * the moment. Both are scheduled on the ONE playback queue, at a resolution of one server tick.
      *
      * <p><b>No {@code Volume} or {@code Pitch} leaf, deliberately.</b> The engine's one-shot
-     * positional sound call takes neither a gain nor a pitch argument, so either leaf would decode,
-     * validate, and then do nothing at all. Vary the loudness or tone by referencing a different
-     * {@code SoundEvent} asset, which is where those values are authored.
+     * positional sound call takes neither a gain nor a pitch argument (only its entity-following
+     * packet carries the two modifiers), so a leaf here would work at an entity target and do
+     * nothing at the block, the default. Vary the loudness or tone by referencing a different
+     * {@code SoundEvent} asset, which is where those values are authored and where a one-line
+     * {@code Parent} copy with its own {@code Volume} or {@code Pitch} lives.
      */
     public static final class SoundCue {
 
@@ -347,10 +502,11 @@ public final class Presentation {
      * DEGREES, passed straight to the engine's yaw/pitch/roll particle arguments (it is NOT composed
      * with the block facing - a rotated burst is authored relative to the burst itself).
      *
-     * <p><b>No {@code Color} leaf.</b> The only colour-capable engine overload takes no playback cap,
-     * so a tinted burst could not carry {@link #durationSeconds} - and the unbounded-spawner leak
-     * that cap closes must never be reintroduced. Vary the tint by referencing a different particle
-     * system id.
+     * <p><b>{@link #color} tints the system</b> through the engine's own colour argument, the one
+     * leaf that lets a tintable vanilla system (a spark, a mote) take the moment's palette without
+     * a copied spawner. It rides the ONE engine overload that carries both a colour and the
+     * playback cap, so a tinted burst keeps {@link #durationSeconds}' leak guard at the block; at
+     * an entity target the colour rides the attached particle leaf, which has no cap at all.
      */
     public static final class ModelParticle {
 
@@ -365,6 +521,7 @@ public final class Presentation {
         @Nullable protected Double durationSeconds;
         @Nullable protected Rotation rotationOffset;
         @Nullable protected Vec3 positionOffset;
+        @Nullable protected String color;
 
         public static final BuilderCodec<ModelParticle> CODEC =
                 BuilderCodec.builder(ModelParticle.class, ModelParticle::new)
@@ -374,6 +531,9 @@ public final class Presentation {
                         .appendInherited(new KeyedCodec<>("Scale", Codec.DOUBLE, false),
                                 (o, v) -> o.scale = v, o -> o.scale, (o, p) -> o.scale = p.scale)
                         .documentation("Uniform burst scale; defaults to 1.0 when absent or non-positive.").add()
+                        .appendInherited(new KeyedCodec<>("Color", Codec.STRING, false),
+                                (o, v) -> o.color = v, o -> o.color, (o, p) -> o.color = p.color)
+                        .documentation("A tint for the whole system as a #rrggbb hex, applied through the engine's own colour argument, so a tintable vanilla system takes this moment's palette without a copied spawner. Absent plays the system's authored colours; a value that is not a six-digit hex is ignored with one line in the log.").add()
                         .appendInherited(new KeyedCodec<>("DurationSeconds", Codec.DOUBLE, false),
                                 (o, v) -> o.durationSeconds = v, o -> o.durationSeconds,
                                 (o, p) -> o.durationSeconds = p.durationSeconds)
@@ -397,18 +557,33 @@ public final class Presentation {
             return of(systemId, null, null, null, null);
         }
 
-        /** Java-side factory; sets the same fields the codec fills. */
+        /** Java-side factory; sets the same fields the codec fills (no tint). */
         @Nonnull
         public static ModelParticle of(@Nullable String systemId, @Nullable Double scale,
                 @Nullable Double durationSeconds, @Nullable Rotation rotationOffset,
                 @Nullable Vec3 positionOffset) {
+            return of(systemId, scale, durationSeconds, rotationOffset, positionOffset, null);
+        }
+
+        /** Java-side factory carrying the {@code Color} tint too. */
+        @Nonnull
+        public static ModelParticle of(@Nullable String systemId, @Nullable Double scale,
+                @Nullable Double durationSeconds, @Nullable Rotation rotationOffset,
+                @Nullable Vec3 positionOffset, @Nullable String color) {
             ModelParticle m = new ModelParticle();
             m.systemId = systemId;
             m.scale = scale;
             m.durationSeconds = durationSeconds;
             m.rotationOffset = rotationOffset;
             m.positionOffset = positionOffset;
+            m.color = color;
             return m;
+        }
+
+        /** The authored tint as written, or null for the system's own colours. */
+        @Nullable
+        public String getColor() {
+            return color;
         }
 
         @Nullable

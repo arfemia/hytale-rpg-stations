@@ -196,6 +196,8 @@ every step regardless of which phases it authors.
 | `RollBonus` | `true` rolls the action's own `Bonus` (its tables and rolls plus every matching extension's) at this beat, once per iteration, instead of once when the program completes. Default false. |
 | `Commands` | Console commands run with the usual placeholder substitutions. |
 | `IsWork` | Does this step count as WORK at its `At`-anchor block (driving that block's `Custody.States.Working` look)? Defaults to true for a switched-on `Convert` step or a `Consume`+`Produce` convert step, false otherwise - author it explicitly true on a pure beat that IS the work. |
+| `State` | A block `State.Definitions` name this work beat holds its `At` block in INSTEAD of the custody's `Working` name: a deeper look for a later beat of one ritual (a table that glows brighter as the ritual reaches its peak). It needs the custody's `States` group (the resting look is read off it), applies on a work step only, and must exist in the block's own definitions. The block re-flips in place from one beat's name to the next, never through the resting look between. Absent, a work step wears `Working`. |
+| `Display` | A per-beat overlay on the worked piece's prop (the socket a ritual queue is working, else the first socket that shows one): the same `{Offset, Scale, Rotation, Animated}` leaves as [`Custody.Display`](custody-and-placed-display.md), each one authored here replacing the socket's own for this beat, so a beat can lift the piece, set it turning or enlarge it. The prop is respawned with the overlay at iteration entry and keeps it until another beat overlays it or the piece leaves. |
 | `Paced` | `true` lets the action's `Pace` scale this step: its `Duration.Ms`, and the `DelayMs` and each burst's `DurationSeconds` of its own presentation, are multiplied by the resolved pace. Default false: the beat keeps its authored length whatever the pace. |
 
 ### Execution order
@@ -203,12 +205,16 @@ every step regardless of which phases it authors.
 Every step iteration runs the SAME fixed order, regardless of which phases it authors:
 
 ```
-Conditions gate -> Walk -> Consume -> Stamp -> Convert -> Produce -> Roll
+Conditions gate -> Walk -> the block state (Working, or the step's own State) and the step's
+  Display overlay on the worked piece -> Consume -> Stamp -> Convert -> Produce -> Roll
   -> the action's Bonus pass (on a RollBonus beat) -> Commands
   -> Presentation / Puppet clip (fire at iteration entry)
   -> Duration hold (suspend; stretched by the pace on a Paced beat)
   -> next iteration or next step
 ```
+
+A `Convert` beat consumes the piece and drops its prop before its own entry cues fire, so a cue on
+that beat aimed at the piece (`Presentation.Target: "Display"`) plays where the piece stood.
 
 A step combining `Consume` and `Produce` in the same step is an **atomic transform** - there is no
 window where inputs are consumed but nothing has been produced yet. When a program deliberately needs
@@ -269,4 +275,4 @@ dispatch - no cycle-cadence latency eaten before its one and only cycle.
 
 ---
 
-Previous: [Your First Station](your-first-station.md) · Next: [Multi-Station Programs](multi-station-programs.md)
+Previous: [Disenchanting](disenchanting.md) · Next: [Multi-Station Programs](multi-station-programs.md)

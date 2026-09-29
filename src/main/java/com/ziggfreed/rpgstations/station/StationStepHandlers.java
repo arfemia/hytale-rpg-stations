@@ -172,10 +172,19 @@ final class StationStepHandlers {
             // NOT cleared when the step SUCCEEDS: the next step (or stop()) owns the exit, so the
             // implicit convert program - one working step re-dispatched every cycle at the same
             // block - holds a steady look instead of flickering once per cycle.
+            // A step's own State names the look for THIS beat (a deeper state of one ritual); an
+            // unauthored one wears the custody's Working name. Entering the same block under a
+            // different name re-flips the block without darkening it in between.
             if (step.effectiveIsWork()) {
-                StationService.getInstance().enterWorkingState(s, step.getAt());
+                StationService.getInstance().enterWorkingState(s, step.getAt(), step.getState());
             } else {
                 StationService.getInstance().exitWorkingState(s);
+            }
+            // A step's Display overlay re-dresses the worked piece's prop for this beat (lifted,
+            // turning, enlarged) BEFORE the phases and the cues, so a Convert beat's despawn and a
+            // Display-targeted cue both find the prop as the beat authored it.
+            if (step.getDisplay() != null) {
+                StationService.getInstance().applyStepDisplay(s, step, ctx.commandBuffer);
             }
 
             StationStepResult phase;

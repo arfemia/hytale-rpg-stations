@@ -1,12 +1,14 @@
-# api/ - the extension surface (frozen at 1.0.0 release)
+# api/ - the extension surface (additive, versioned with the mod)
 
 Router for the `api` Gradle submodule (`additional-mods/rpg-stations/api/`), package
 `com.ziggfreed.rpgstations.api` (+ `.api.event`). This is the ONE contract another mod compiles
 against to reach the station engine - a typed `compileOnly` api jar + a manifest
 `OptionalDependencies` entry. Bundled into the runtime `RpgStations-*.jar`
 (minus `META-INF/services`, the kweebec api-bundling mechanic) AND published standalone as
-`rpg-stations-api-<version>.jar` for a compile-time consumer. **Everything here is FROZEN once
-RpgStations 1.0.0 releases** - until then it is free to reshape; do not treat it as stable yet.
+`rpg-stations-api-<version>.jar` for a compile-time consumer. **Everything here grows
+ADDITIVELY** (the growth policy below); whether the surface is ever declared frozen is a decision
+the maintainer takes, never something a release number triggers, and no such decision has been
+taken.
 
 Split by shape (root hyMMO CLAUDE.md's native-events rule): **observe-only moments are native
 Hytale events** (`event/` subpackage); **request/response points are typed registries** on the
@@ -204,10 +206,10 @@ is the exact inverse of a permanently-opaque channel.
   receiving socket id, the degenerate socket-less pile under `"main"`; a cycle whose produce went
   to the worker's inventory (or produced nothing, e.g. idle) reports an EMPTY immutable map,
   never null.
-- **`event/`** - the nine `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
+- **`event/`** - the ten `IEvent<Void>` POJOs (`StationSessionStartedEvent`/
   `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`/
   `StationEnhanceCompletedEvent`/`StationUnattendedGatheredEvent`/`StationOutputProducedEvent`/
-  `StationStructureChangedEvent`/`StationRefusedEvent`), immutable,
+  `StationStructureChangedEvent`/`StationRefusedEvent`/`StationInputConsumedEvent`), immutable,
   dispatched via `HytaleServer.get().getEventBus().dispatchFor(...)` + `hasListener()` on the
   owning world thread - see `src/main/java/com/ziggfreed/rpgstations/station/CLAUDE.md` for the concrete firing rules and
   `com.ziggfreed.rpgstations.station.StationEvents` (the implementation). Each event's javadoc
@@ -250,12 +252,11 @@ api `compileOnly` deps: the Hytale server jar (`IEvent`, `Store`/`Ref`/`CommandB
 `UICommandBuilder`, `Message`, `ItemStack`) + the `ziggfreed-common` jar (`SummaryRow`). jsr305
 ships `api` (a consumer's `@Nonnull`/`@Nullable` annotations resolve without a separate dependency).
 
-## Additive growth policy (post-1.0.0)
+## Additive growth policy
 
 Set by the 2026-08-05 pre-release schema/DX review (ruling 77, `stations-schema-dx-review.md`
-proposal P4 as amended). Everything reachable from `RpgStationsApi` is FROZEN once RpgStations
-1.0.0 releases - after that point a change here must be one of exactly three shapes, or it is not
-a valid post-freeze addition:
+proposal P4 as amended). Everything reachable from `RpgStationsApi` grows additively - a change
+here must be one of exactly three shapes, or it is not a valid addition:
 
 1. A new **default-bodied** interface method on `RpgStationsApi` (or any other api interface). A
    method with no default body forces every existing implementation (there is exactly one,
@@ -266,14 +267,19 @@ a valid post-freeze addition:
 3. A new **additive getter** on an existing event class or record type (e.g. a new field on
    `SummaryContext`), never a change to an existing getter's return type or removal of one.
 
-**No signature changes to an existing method, ever, post-freeze.** No removed methods, no renamed
-methods, no changed parameter or return types. `apiVersion()` (added pre-freeze, this same round)
-exists specifically so a consumer can detect which additive members are present without
-reflection: bump it by exactly one integer per addition batch that lands under this policy (not
-per individual method - a coordinated wave of additions is one bump), never on its own.
-`apiVersion()` itself is exempt from "default-bodied only" since it shipped before the freeze; it
-will never change again once RpgStations reaches 1.0.0. Current value is **9**: the
-`StationRefusedEvent` event class (a station turned a press away - player, world and block
+**No signature changes to an existing method, ever.** No removed methods, no renamed methods, no
+changed parameter or return types. `apiVersion()` exists specifically so a consumer can detect
+which additive members are present without reflection: bump it by exactly one integer per
+addition batch that lands under this policy (not per individual method - a coordinated wave of
+additions is one bump), never on its own. `apiVersion()` itself is exempt from "default-bodied
+only" since it shipped before the policy and will never change again. Current value is **10**:
+one batch carrying the `StationInputConsumedEvent` event class (a station consumed input, once
+per committed batch and never for one the engine gave back: the worker, null on an unattended
+settle, the world and block, the station and action ids, and each consumed stack as an immutable
+copy with its custody socket and its quality index and item level, read off the stack) AND the
+`FactorContext.item()` accessor with its `Builder.item(ItemStack)` leaf (the piece a moment is
+ABOUT, published into Ziggfreed Common's item leaf so the `hytale:item_*` factors read it) - from
+9, the `StationRefusedEvent` event class (a station turned a press away - player, world and block
 position, station id, the action id when one had been chosen, and the reason as an `Is_Like_This`
 id; fired from the world thread AFTER the engine's own notice and cue, and ONLY for a refusal the
 settings' repeat window let through, so one dispatch is one refusal worth reacting to) - from 8, the
@@ -290,10 +296,13 @@ bump for the multi-placement wave's api batch - the `StationOutputProducedEvent`
 (with its `Builder.socketsFilled` leaf -
 the engine-computed plain-data readings behind the `rpgstations:socket_filled` built-in) had
 reached from 4, itself the `StationUnattendedGatheredEvent` event class's bump (from the
-`stationCount()` default-bodied addition's 3). **The api ARTIFACT's semver tracks this integer:
-`apiVersion()` N ships as artifact `0.N.0`** (`gradle.properties` `api_version`, currently
-`0.9.0`), so the number a consumer branches on and the number on the jar they compile against can
-never disagree; a bump of one is a bump of the other, in the same change.
+`stationCount()` default-bodied addition's 3). **The api ARTIFACT is versioned WITH the mod**: the
+api jar a consumer compiles against carries the number of the RpgStations release it shipped in
+(`gradle.properties` `api_version`, `1.1.0` today; 1.0.0 carried contract 9, 1.1.0 carries 10),
+which is the number a consumer pins in its own build against the mod it targets, while
+`apiVersion()` stays the runtime contract number on its own scale. A release that adds nothing to
+the api still ships an api jar under its own number; a contract bump lands in the release it
+ships with.
 
 `RpgStationsApi.isAvailable()`/`find()` (added the same round) are convenience, not a way around
 this policy - see their own javadoc for what they do and do not solve.

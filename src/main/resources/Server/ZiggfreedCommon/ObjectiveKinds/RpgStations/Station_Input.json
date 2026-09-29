@@ -1,0 +1,14 @@
+{
+  "$Comment": "Feeding a station. The Target is the item id and the amount is the stack's quantity, counted the moment a station consumes it: a piece a ritual takes apart, a material a work cycle drains from the pile, a reagent an enhancement spends. Every consuming path counts once, when the consumption is final; an interrupted ritual hands its piece back and counts nothing. The Qualifier is the station id ('sawmill' for this jar's mill); name one to count only that station's input, leave it off to count the same item at any station, or author QualifierMatchMode PREFIX to count a family of stations by their shared name. Work a station settles with nobody standing at it counts for nobody: progress belongs to a player who was there. The Icon is the picture a step gets when its target has none of its own; a step naming an item is drawn with that item.",
+  "ValueBased": false,
+  "Producible": true,
+  "TargetNames": {
+    "Item": true
+  },
+  "Presentation": {
+    "TextKey": "objective.text.station_input",
+    "Icon": {
+      "ItemId": "RPG_Station_Sawmill"
+    }
+  }
+}

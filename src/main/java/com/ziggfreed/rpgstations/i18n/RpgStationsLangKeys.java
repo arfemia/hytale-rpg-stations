@@ -83,6 +83,13 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.server_busy",
             "rpgstations.ui.station.storage_full",
             "rpgstations.ui.station.no_materials",
+            // The owner protect-list and a station's own Except hole both answer a placement with this
+            // one refusal, whatever the socket shape.
+            "rpgstations.ui.station.protected",
+            // The placed-piece preview a Custody.Preview station toasts on placement: what the piece
+            // will give back, or that it gives nothing back on its own.
+            "rpgstations.ui.station.preview.returns",
+            "rpgstations.ui.station.preview.nothing_back",
             "rpgstations.ui.station.custody.placed",
             "rpgstations.ui.station.custody.topped_up",
             "rpgstations.ui.station.retrieve.busy",

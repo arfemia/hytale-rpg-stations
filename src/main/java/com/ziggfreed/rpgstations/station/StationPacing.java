@@ -121,10 +121,10 @@ public final class StationPacing {
                 scaledParticles[i] = burst == null ? null
                         : Presentation.ModelParticle.of(burst.getSystemId(), burst.getScale(),
                                 scaledSeconds(burst.getDurationSeconds(), scale),
-                                burst.getRotationOffset(), burst.getPositionOffset());
+                                burst.getRotationOffset(), burst.getPositionOffset(), burst.getColor());
             }
         }
-        return Presentation.of(scaledSounds, scaledParticles, presentation.getShake(),
+        return Presentation.of(presentation.getTarget(), scaledSounds, scaledParticles, presentation.getShake(),
                 presentation.getInteraction(), presentation.getEffect(),
                 scaledDelay(presentation.getDelayMs(), scale));
     }

@@ -50,11 +50,12 @@ public class StationFlairsLeafParityTest {
     /** Every leaf a Presentation has, authored. The parity assertions below check that claim. */
     private static final String EVERY_LEAF_BASE = """
             {
+              "Target": "Display",
               "Sounds": ["Fixture_Base_Sound"],
-              "Particles": [{ "SystemId": "Fixture_Base_Particles", "Scale": 1.5 }],
+              "Particles": [{ "SystemId": "Fixture_Base_Particles", "Scale": 1.5, "Color": "#112233" }],
               "Shake": { "EffectId": "Fixture_Base_Shake", "Intensity": 0.25 },
               "Interaction": { "Id": "fixture_base_interaction" },
-              "Effect": { "Id": "Fixture_Base_Effect", "DurationMs": 800 },
+              "Effect": { "Id": "Fixture_Base_Effect", "DurationMs": 800, "Target": "Player" },
               "DelayMs": 120
             }
             """;
@@ -62,11 +63,12 @@ public class StationFlairsLeafParityTest {
     /** The same leaf set, every value DIFFERENT, so an unread leaf shows up as a base value surviving. */
     private static final String EVERY_LEAF_FLAIR = """
             {
+              "Target": { "Kind": "Puppet", "Node": "Fixture_Node" },
               "Sounds": ["Fixture_Flair_Sound"],
-              "Particles": [{ "SystemId": "Fixture_Flair_Particles", "Scale": 3.0 }],
+              "Particles": [{ "SystemId": "Fixture_Flair_Particles", "Scale": 3.0, "Color": "#445566" }],
               "Shake": { "EffectId": "Fixture_Flair_Shake", "Intensity": 0.75 },
               "Interaction": { "Id": "fixture_flair_interaction" },
-              "Effect": { "Id": "Fixture_Flair_Effect", "DurationMs": 200 },
+              "Effect": { "Id": "Fixture_Flair_Effect", "DurationMs": 200, "Target": "Puppet" },
               "DelayMs": 640
             }
             """;

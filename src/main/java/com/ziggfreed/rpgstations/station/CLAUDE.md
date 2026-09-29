@@ -163,6 +163,9 @@ its own `Moments` via `patternMoments`, which also switches the flair overlay of
   casing (`reasonOf`: `no_materials` is `No_Materials`, `retrieve.busy` is `Retrieve_Busy`, a
   `_named` variant collapses to its base), and the moment id is `Refused:<Reason>`
   (`StationFlairs.refusedMomentId`); `Refused` is the blanket, `Refused:` a recognized prefix.
+  `Refused:Protected` (`ui.station.protected`) is the placement of a piece on the owner's
+  protect-list or in a station's own `Except` hole, the one placement denial that keeps its own
+  key whatever the socket shape.
 - **Resolution, nearest wins per leaf** (`resolveCue`, pure): the action's `Refused:<Reason>`, the
   action's `Refused`, the settings' `Refused:<Reason>`, the settings' `Refused`
   (`SettingsCatalog.defaultMoments`, the `Settings.Moments` map). Every layer folds through
@@ -280,15 +283,20 @@ a discriminator.
   the drain is cleared off the pile but never put back. A pile whose `Unique` outlived its count
   reads as holding nothing (`StationCustody#uniqueDrained`).
 - **The ONE input-consumed hook** (`StationService#onInputConsumed(Store, InputConsumption)`,
-  session-free; the api's input-consumed event and `STATION_INPUT` objective fire from its body
-  once that leg lands, a `Log.fine` today). Every path on which a station consumes input reaches
+  session-free). Its body fires the api's `StationInputConsumedEvent`
+  (`StationEvents#fireInputConsumed`: each consumed stack as an immutable copy with its socket and
+  the quality index and item level read off it through zc's `ItemReadings`, null where the stack
+  cannot tell), and the `STATION_INPUT` objective kind rides that event through
+  `../progression/StationProgressProducers`, which credits the worker and nobody on an unattended
+  settle. Every path on which a station consumes input reaches
   it EXACTLY ONCE, AFTER the consumption commits, and a refunded consumption never reaches it.
   The payload ([`InputConsumption`](InputConsumption.java)): the worker (`PlayerRef`, entity ref,
   uuid; ALL null on an unattended settle, `hasWorker()`, and ALL set on an attended record, which
-  `attendedConsumption` requires so it never reads as unattended), the world uuid (the worker's
-  `PlayerRef` world, else the session's own world read off the worker's entity; an attended batch
-  whose session has lost part of its worker or can name no world is the one drop, teardown racing
-  the phase), the block the consumed
+  `attendedConsumption` requires so it never reads as unattended), the world uuid (the STATION's
+  own world, read off the worker's entity through `sessionWorld`: a `PlayerRef` names no world
+  only before its first join, never between worlds, so it is not consulted; an attended batch
+  whose session has lost part of its worker or whose entity is gone is the one drop, teardown
+  racing the phase), the block the consumed
   pile stood at (the `At` anchor's block for a remote pile, the station's own for inventory), the
   station and action ids, and the REAL stacks, each with the socket it left
   ([`ConsumedInput`](ConsumedInput.java); `fromPile` puts the piece's own stack first when a
@@ -597,9 +605,20 @@ through `StationCustody.ingredientEntryMatcher` (piles; `StationService.liveIngr
 the live-resolver wiring) and `StationCustody.matchesIngredient` (a held/placed material against
 one `Ingredient`). **Held/placed acceptance against an `ActionInput` is ONE rule,
 `StationCustody.accepts`** (an absent or catch-all matcher accepts everything, a route set accepts
-what a route matches, the `Except` hole carved out either way; a route-less `Except` matches
-nothing and carves no hole): action selection, a socket's `Match` and an explicit `Custody.Input`
-at placement, a Block socket's match and a fallback's `Input` all ask it. `matchesInput` is NOT an
+what a route matches, the `Except` holes carved out either way, one entry or several; a
+route-less entry matches nothing and carves no hole): action selection, a socket's `Match` and an
+explicit `Custody.Input` at placement, a Block socket's match and a fallback's `Input` all ask it.
+PLACEMENT layers three station rules over it in `StationService.socketAcceptsInput` /
+`routeStack`: a route-less matcher's holes are carved out of what the station DERIVES (its
+conversion inputs and fallback routes), never out of everything, so an `Input` that authors only
+`Except` narrows the derived acceptance; a material a hole refused, or one on the owner's
+protect-list (`Settings.Protected`, `StationCustody.isProtected`, checked before any socket is
+offered it), is `PlacementDenial.PROTECTED` (first in the enum, so it outranks every other reason
+and keeps its own `ui.station.protected` key on a socket-less custody, `placementDenyKey`; a
+protected piece is refused outright, loaded station or not); and a COUNT pile (capacity above
+one) refuses a stack carrying per-instance data (`StationCustody.carriesInstanceData`: wear
+tracked, or metadata), since it would come back as a bare fresh stack. `Custody.HeldOnly` skips
+the inventory scan (`findFirstCustodyMatchInInventory`) altogether. `matchesInput` is NOT an
 acceptance site: it is the ROUTES-only seam behind `accepts` (a catch-all answers false there),
 kept so `ActionInput` and `Ingredient` stay two leaves over ONE route matcher, pinned by
 `IngredientActionInputRouteParityTest`. A `Tags` input consumed from INVENTORY counts/drains
@@ -859,12 +878,36 @@ shared [`StationBlockFacing`](StationBlockFacing.java) reader. **The per-burst d
 (`Block_Gem_Sparks`) authors an UNBOUNDED spawner (`TotalParticles < 0`) that, fired uncapped,
 never stops spawning; authoring `DurationSeconds: 0` deliberately means uncapped, so only do it for
 a system whose own spawner budget terminates. That spawn reaches the engine's full-arity
-`ParticleUtil` overload directly rather than ziggfreed-common's `ModelParticleService.spawnAt`,
-whose signature hardcodes exactly the rotation/scale arguments this schema now authors - the
-convergence target is a common-side overload taking the full argument set; lift the call when one
-exists. Route a new moment call site through `emitMoment` - never spawn particles at a station
-moment yourself, or you lose the flair overlay AND the leak guard (this bug was found in-game; do
-not reintroduce it).
+ziggfreed-common's full-arity `ModelParticleService.spawnAt` (rotation, scale, the `Color` tint
+and the playback cap together, the one engine overload that carries both a colour and a cap;
+`ModelParticleService.tint` reads the `#rrggbb` leaf). Route a new moment call site through
+`emitMoment` - never spawn particles at a station moment yourself, or you lose the flair overlay
+AND the leak guard (this bug was found in-game; do not reintroduce it).
+
+**The presentation `Target` is resolved at PLAY time** (`playMoment` -> `resolveAim`, an
+`Aim(entity, position, node)`), never at emit time, so a delayed cue lands where its target IS
+when it comes due: `Block` (or none) is the block centre `emitMoment` was handed; `Display` is
+the worked socket's prop (`displaySocketIdFor`: the ritual queue's `StationSession.queueSocketId`,
+else the first Item socket authoring a `Display`) while it stands, else that socket's resting
+display position (`displayRestingPosition` over `StationCustodyDisplay.resolvePosition`), which is
+where a `Convert` beat's cues land after the beat consumed the piece and `onUniqueConsumed`
+dropped its prop in the same tick; `Puppet` is the double while one stands, else the worker's
+own body (`s.ref`), which performs the work then. At an entity aim the sounds go through zc
+`Sound3D.playOn` (the entity-following packet, delivered to the players whose tracker shows the
+entity, never the engine's world-wide broadcast) and the particles through
+`ModelParticleService.spawnOn` (`SpawnModelParticles` on the entity's `NetworkId`, riding the
+entity or the `Node` of its model; no cap exists on that route), and BOTH fall back to the aim's
+position when nobody received them: a freshly spawned prop or double has been shown to nobody
+until the tracker's next tick, so a cue in the same beat plays at its place, never lost. The
+shake stays on the worker's camera and the interaction on the worker; the effect chooses its own
+target (`applyMomentEffect`): `EffectRef.Target "Puppet"` puts it on the double with NO expiry
+(zc `NativeEffectUtil.applyInfinite`, since the double carries no `EntityStatMap` and the
+engine's effect timer never runs on it) and an authored `DurationMs` is kept by this engine's own
+cue clock (`queueEffectRemoval`: a `PendingMoment` carrying the ref and effect id instead of a
+presentation, drained by `drainPendingMoments` into `NativeEffectUtil.remove`), every effect
+tracked on the session either way so the teardown strips whatever is still on. The sessionless
+`playPresentationAt` (refusals, structures, the gather) has no session to aim through and plays
+at the block whatever the `Target` says.
 
 ## Per-swing cadence
 
@@ -1175,7 +1218,9 @@ touch chunk state anyway. `releaseAnchorClaims` threads the same flag for remote
 `BreakBlockEvent` for fire/physics/unattributed explosions), the actor-less break: both funnel
 into `onCustodyBlockBroken` (remove stash + drop once + despawn display, no player attribution on
 the environment route). Block-state flip (`flipCustodyState` over the extracted `setBlockState`,
-reading + writing through zc's `BlockOps`) is HINT-ONLY and self-heals AGAINST THE STASH: a
+reading + writing through zc's `BlockOps`) SWAPS the block to the state's own child `BlockType`,
+so the new state's texture, model animation, light, ambient loop and particles all come on and
+the old state's stop (never hint text alone), and it self-heals AGAINST THE STASH: a
 Loaded state whose stash is truly empty resets to Empty on the next interaction, while a
 NON-EMPTY surviving stash makes the Loaded look CORRECT after a restart (the inversion
 persistence buys). **Precedence rule (gate m5)**: a block busy with its OWN session OR a
@@ -1309,13 +1354,17 @@ fire's flames) must be on ONLY while work is genuinely running there, never mere
 was placed. That is `asset.Custody.States`' nullable `Working` leaf (`../asset/CLAUDE.md`), driven by
 two package-private seams on `StationService`:
 
-- **`enterWorkingState(session, anchorId)`** resolves the anchor through the SAME
+- **`enterWorkingState(session, anchorId[, stepState])`** resolves the anchor through the SAME
   `anchorBlockKeyFor` the step phases use, so ONE call covers both altitudes: the PRIMARY block
-  (absent/`"Self"`) and a CLAIMED REMOTE ANCHOR. It is IDEMPOTENT per block (re-entering the same
-  block never re-writes the state, so a repeating single-step convert program holds a steady look
-  instead of flickering once per cycle) and exits any previously-working block first, so at most
-  one block per player is ever left working (`workingByPlayer`, a transient `UUID -> WorkingFlip`
-  map, never persisted).
+  (absent/`"Self"`) and a CLAIMED REMOTE ANCHOR. It is IDEMPOTENT per block AND state name
+  (re-entering the same block under the same name never re-writes the state, so a repeating
+  single-step convert program holds a steady look instead of flickering once per cycle; re-entering
+  it under a DIFFERENT name, a step's own `State`, re-flips the block in place without the resting
+  look between) and exits any previously-working block first, so at most one block per player is
+  ever left working (`workingByPlayer`, a transient `UUID -> WorkingFlip` map carrying the state
+  NAME it wears, never persisted). The name a work beat wears is the pure `workingStateName`: the
+  step's `State` when it authors one and the custody authors `States` (the exit needs that group
+  for the resting look), else the custody's `Working` name, else no flip.
 - **`exitWorkingState(session)`** returns the block to its RESTING look
   (`StationDoneness.restingStateName`): `Loaded` (a claim still stands there), `Ready` (an open
   doneness window's batch waits), `Overdone` (a collapsed pile), or `Empty`. Idempotent, so every
@@ -1329,7 +1378,7 @@ two package-private seams on `StationService`:
    authored step to light on entry and its first conversion only commits a full `CycleMs` later,
    but that whole `CycleMs` IS the work, so it lights from engage rather than a cycle late.
 2. `StationStepHandlers.runIterations`, per iteration, POST-walk: a working step enters at its
-   `At` anchor, any other step exits.
+   `At` anchor under its own `State` when it authors one, any other step exits.
 3. `runIterations` again, at a `Walk` phase's departure (dark while travelling, per the ruling).
 4. `stop()`, unconditionally, AFTER `releaseAnchorClaims` + `returnCustody` so the Loaded-vs-Empty
    read sees the post-return truth. This ONE call is what covers every stop reason with no
@@ -1510,9 +1559,15 @@ end to end.
 
 [`StationCustodyDisplay`](StationCustodyDisplay.java) spawns a static, network-replicated,
 pickup-immune, physics-free prop entity rendering a pile's placed item at the station's
-block-top anchor, gated on the SOCKET's own `Display` group (the custody-level `Display` IS the
-degenerate socket's). Each socket with a `Display` renders its OWN prop; a socket without one
-renders nothing. Block-shaped items (the sawmill's placed logs) spawn a real `BlockEntity`;
+block-CENTRE anchor (`blockX+0.5, blockY+0.5, blockZ+0.5`, offset-adjustable), gated on the
+SOCKET's own `Display` group (the custody-level `Display` IS the degenerate socket's). Each socket
+with a `Display` renders its OWN prop; a socket without one renders nothing. `Display.Animated`
+spawns the prop with the client's own dropped-item turn and bob (zc
+`ItemPropEntityService.Options.withDroppedItemAnimation()`, a spawn-time option); a step's
+per-beat `Display` overlay (`StationService#applyStepDisplay`, from `runIterations` before the
+phases and the entry cues) RESPAWNS the worked socket's prop with `Custody.Display.overlaid(socket,
+step)` when `sameLook` says the look changed, and the `DisplayHandle` records the group it was
+spawned with (`shown`) so the same overlay twice never respawns. Block-shaped items (the sawmill's placed logs) spawn a real `BlockEntity`;
 everything else (the anvil's placed weapon) spawns a bare `ItemComponent` prop. Both routes
 `ensureComponent(EntityStore.REGISTRY.getNonSerializedComponentType())` - the PROP never survives
 a restart, and the persisted stash does, which is why `StationService#respawnDisplayIfMissing`
@@ -1623,7 +1678,7 @@ runs a once-per-world `PerformerReconciler.sweep(bootDespawnAll)` at first ready
 sweep (`reconcileStalePerformersAtEngage`, via `world.execute` so the native sweep runs outside the
 processing lock). **Legacy mechanics carry over below.** **Spawn + hide, at engage**
 (`spawnAndHide`, called from `toggle` AFTER the mount-attach block): resolves `Puppet.Offset` (the
-shared `Vec3`) / `Puppet.Rotation` off the block-top anchor + the initial `Puppet.Prop`, spawns via
+shared `Vec3`) / `Puppet.Rotation` off the block-centre anchor + the initial `Puppet.Prop`, spawns via
 `PlayerPuppetService.spawn`; a null spawn is non-fatal (session continues in-body).
 **`Offset`/`Rotation.Yaw` are
 FACING-RELATIVE to the placed block's own yaw** - authored `+Z` = the

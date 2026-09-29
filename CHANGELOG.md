@@ -5,9 +5,10 @@ Developer changelog for RPG Stations. No em-dashes.
 ## 1.1.0 - unreleased
 
 Held until the maintainer releases it. Built against Ziggfreed Common 2.2.0 (the manifest floor
-moves to `>=2.2.0`); the Sawmill's derived rows, its `Yield.Base 1` outcome and its three tool
-readings are byte-identical to 1.0.0, each pinned by a test (`SawmillDerivationParityTest`,
-`StationYieldCompositionTest`, `StationToolReadingsTest`).
+moves to `>=2.2.0`); the Sawmill's derived rows, its `Yield.Base 1` outcome, its three tool
+readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned by a test
+(`SawmillDerivationParityTest`, `StationYieldCompositionTest`, `StationToolReadingsTest`,
+`StationLootOriginTest`). The api artifact ships as 1.1.0 with the contract at 10.
 
 - **A station derives from ANY vanilla bench, standalone recipes included, with each row's full
   outputs.** `Recipe.FromCrafting` now reads Ziggfreed Common's native recipe index
@@ -35,81 +36,190 @@ readings are byte-identical to 1.0.0, each pinned by a test (`SawmillDerivationP
   dart at a half share, five Life essence making two bait pay one per bait; a line that rounds to
   nothing is dropped, a recipe with no line left does not take the route; family and tag lines
   name no item to give back and are dropped), then `EssenceOnly {}` (the piece is consumed and
-  nothing is produced; the action's `Bonus` rolls are its whole payout - the ONE row shape allowed
+  nothing is produced; the action's `Bonus` rolls are its whole payout, the ONE row shape allowed
   to carry no output). Both are scoped by `Fallback.Input` (the shared matcher) and by the engine's
   METADATA GUARD (`StationMetadataGuard`): a stack is refused when it carries a metadata key no mod
   declared disposable, or when its keys cannot be read. The read and the declared-key list are
   ziggfreed-common's (`ItemReadings.undeclaredMetadataKeys`, `DisposableItemMetadata`): a mod
   declares its own disposable keys through `DisposableItemMetadata.declare` at setup, a registered
   stamper's keys are declared when it registers, and a stamped stack vouches for nothing beyond its
-  declared keys. Wear rides the stack's durability leaves and never counts.
-  Priority is authored rows (tier 0) > salvage-derived (1) > crafting share (2) > essence only (3);
-  a fourth party overrides any piece by authoring a row for it, on the station or through an
-  extension's `Conversions` payload. A piece is offered ONE route, the first that applies
+  declared keys. Wear rides the stack's durability leaves and never counts. Priority is authored
+  rows (tier 0) > salvage-derived (1) > crafting share (2) > essence only (3); a fourth party
+  overrides any piece by authoring a row for it, on the station or through an extension's
+  `Conversions` payload. A piece is offered ONE route, the first that applies
   (`StationFallbackRoutes.routeFor`), a pile ONE row, its oldest falling-back piece's, and
   selection hands the runnable scan exactly that row (`StationFallbackRoutes.offeredRows`, pinned
-  at length one), so a full inventory still answers inventory-full: a row scan
-  that found a covering row but no room never falls back, and a crafting-share row with no room
-  answers inventory-full rather than falling through to the essence-only row, so a full bag never
+  at length one), so a full inventory still answers inventory-full: a row scan that found a
+  covering row but no room never falls back, and a crafting-share row with no room answers
+  inventory-full rather than falling through to the essence-only row, so a full bag never
   destroys a piece for nothing. Placement acceptance asks the same question the routes will, so
   drop-only gear can be placed. Validator: `FALLBACK_WITHOUT_CUSTODY`, `FALLBACK_NO_ROUTE`,
   `FALLBACK_SHARE_OUT_OF_RANGE`, `FALLBACK_INPUT_CATCH_ALL` (INFO).
-- **ONE `Except` hole on the shared input matcher.** `ActionInput` (an action's `Select`, a
-  `Custody.Input`, a socket's `Match`, a fallback's `Input`) gains `Except`, the same four routes
-  one level down: a material the routes accept is refused when the hole accepts it too, so
-  `{"Tags": {"Type": ["Weapon", "Tool"]}, "Except": {"Tags": {"Type": ["Ammo"]}}}` takes weapons
-  and tools but never ammunition without listing every id. One codec definition serves both
-  levels (`ActionInput.EXCEPT_CODEC`); an exclusion has no `Except` of its own. Every site asks ONE
-  acceptance rule, `StationCustody.accepts` (action selection, a socket's `Match` and an explicit
-  `Custody.Input` at placement, a Block socket's match, a fallback's `Input`): an absent or
-  catch-all matcher accepts everything, a route set accepts what a route matches, and the hole is
-  carved out either way, so a catch-all with an `Except` takes everything but the hole. An
-  `Except` that authors no route matches nothing, so it carves no hole: the matcher accepts
-  exactly what it would without it. An extension's `Custody.Input` overlay carries the leaf.
-  Validator: `EXCEPT_CATCH_ALL` (an `Except` with no route does nothing, almost always a route
-  left out), and an unknown `Except.Function` reports as `UNKNOWN_ACTION_FUNCTION`.
-- **A ritual can run a recipe: the `Convert` step phase.** `StationStep.Convert {Enabled?}` runs the
-  action's `Recipe` at that beat: the matched row is selected exactly as the classic loop selects
-  one (authored, derived, then the fallback routes; narrowed to the chosen output category), its
-  inputs are consumed (from custody when the action authors `Custody`, else the inventory),
-  `Recipe.Yield` is applied, the yield breakdown and the cycle's output item are recorded (so
-  `rpgstations:output_items` applies in a Steps program), the outputs are produced to the inventory
-  as ordinary rows, and only then does the conversion COMMIT (`StationService.commitIteration`:
-  the refund ledger clears and the consumption reaches the ONE input-consumed hook, below); a
-  produce that fails returns before the commit, so the inputs are still refunded at stop and no
-  listener hears of a consumption that was undone. The implicit program is
-  now `Convert` + `Roll` + `Presentation` on one step, so the classic loop and an authored beat
-  convert through ONE code path; the loop still chooses its row before dispatch (idle practice,
-  the OUT_OF_INPUTS / INVENTORY_FULL stops, the per-conversion pace and the feedable-cycles count
-  all ride that choice) and hands it to the phase as its preselected row. A switched-on convert IS
-  work (`IsWork` derives true; a `Convert {Enabled: false}` is not). Phase order is now Walk ->
-  Consume -> Stamp -> Convert -> Produce -> Roll -> Commands -> entry cues -> Duration.
+- **`Except` holes on the shared input matcher, one or several.** `ActionInput` (an action's
+  `Select`, a `Custody.Input`, a socket's `Match`, a fallback's `Input`) gains `Except`, the same
+  four routes one level down: a material the routes accept is refused when a hole accepts it too,
+  so `{"Tags": {"Type": ["Weapon", "Tool"]}, "Except": {"Tags": {"Type": ["Ammo"]}}}` takes
+  weapons and tools but never ammunition without listing every id. `Except` is authored as ONE
+  matcher or as an ARRAY of them (`ActionInput.EXCEPTS_CODEC`, the dual-shape
+  `ObjectOrArrayCodec`; a one-entry array re-encodes as the bare object), and an extension's
+  `Custody.Input` overlay ADDS its entries beside the base's (`ExtensionCatalog.concatExcepts`),
+  never in their place, so a pack protects its own item from a station without restating what the
+  jar protects. One codec definition serves both levels (`ActionInput.EXCEPT_CODEC`); an entry has
+  no `Except` of its own. Every site asks ONE acceptance rule, `StationCustody.accepts` (action
+  selection, a socket's `Match` and an explicit `Custody.Input` at placement, a Block socket's
+  match, a fallback's `Input`): an absent or catch-all matcher accepts everything, a route set
+  accepts what a route matches, and the holes are carved out either way. At PLACEMENT a
+  route-less matcher's holes are carved out of what the station DERIVES (its conversion inputs and
+  fallback routes), never out of everything: an `Input` that authors only `Except` narrows what
+  the station would otherwise take rather than turning it into everything but the hole, while an
+  `Input` that authors routes replaces the derivation as before. An entry that authors no route
+  matches nothing, so it carves no hole: the matcher accepts exactly what it would without it.
+  Validator: `EXCEPT_CATCH_ALL` (an entry with no route does nothing, almost always a route left
+  out; an extension's `Custody` overlay gets the same check on its `Input` and each socket's
+  `Match`), and an unknown `Except.Function` reports as `UNKNOWN_ACTION_FUNCTION`.
+- **A ritual can run a recipe: the `Convert` step phase.** `StationStep.Convert {Enabled?}` runs
+  the action's `Recipe` at that beat: the matched row is selected exactly as the classic loop
+  selects one (authored, derived, then the fallback routes; narrowed to the chosen output
+  category), its inputs are consumed (from custody when the action authors `Custody`, else the
+  inventory), `Recipe.Yield` is applied, the yield breakdown and the cycle's output item are
+  recorded (so `rpgstations:output_items` applies in a Steps program), the outputs are produced to
+  the inventory as ordinary rows, and only then does the conversion COMMIT
+  (`StationService.commitIteration`: the refund ledger clears and the consumption reaches the ONE
+  input-consumed hook, below); a produce that fails returns before the commit, so the inputs are
+  still refunded at stop and no listener hears of a consumption that was undone. The implicit
+  program is now `Convert` + `Roll` + `Presentation` on one step, so the classic loop and an
+  authored beat convert through ONE code path; the loop still chooses its row before dispatch
+  (idle practice, the OUT_OF_INPUTS / INVENTORY_FULL stops, the per-conversion pace and the
+  feedable-cycles count all ride that choice) and hands it to the phase as its preselected row. A
+  switched-on convert IS work (`IsWork` derives true; a `Convert {Enabled: false}` is not). Phase
+  order is now Walk -> the block state and the step's display overlay -> Consume -> Stamp ->
+  Convert -> Produce -> Roll -> Commands -> entry cues -> Duration.
   `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` fires only on a program with no Convert beat, and names the
   missing beat. Validator: `CONVERT_WITHOUT_RECIPE`, `CONVERT_WITH_CONSUME_PRODUCE`,
   `CONVERT_REPEATED` (INFO).
-- **ONE input-consumed hook, reached from every path on which a station consumes input.**
-  `StationService.onInputConsumed(Store, InputConsumption)` is called exactly once per committed
-  consumption, after the commit, and never for a consumption the engine gave back. Its
-  session-free record (`InputConsumption`) carries the worker (null on an unattended settle, and
-  whole on an attended one: handle, entity ref and uuid), the world (the worker's, else the
-  session's own when the worker is between worlds), the block the consumed pile stood at, the
-  station and action ids, and the consumed stacks, each with the custody socket it left
-  (`ConsumedInput`: the placed piece's own stack when a single-item socket gave it up, else a
-  bare stack per drained item id and count). An attended batch whose session has lost part of its
-  worker, or can name no world either way, is not reported (teardown racing the phase). A session
-  consume (a `Consume` phase, or a `Convert` phase's drain) records its batch into a new hook half
-  of the iteration ledger (`StationSession.iterationConsumedInputs`); the iteration's commit
+- **ONE input-consumed hook, reached from every path on which a station consumes input, and the
+  api event it fires.** `StationService.onInputConsumed(Store, InputConsumption)` is called exactly
+  once per committed consumption, after the commit, and never for a consumption the engine gave
+  back. Its session-free record (`InputConsumption`) carries the worker (null on an unattended
+  settle, and whole on an attended one: handle, entity ref and uuid), the world (the STATION's own,
+  read off the worker's entity; a `PlayerRef` names no world only before its first join, never
+  between worlds, so it is not consulted), the block the consumed pile stood at, the station and
+  action ids, and the consumed stacks, each with the custody socket it left (`ConsumedInput`: the
+  placed piece's own stack when a single-item socket gave it up, else a bare stack per drained item
+  id and count). An attended batch whose session has lost part of its worker, or whose entity is
+  gone, is not reported (teardown racing the phase). A session consume (a `Consume` phase, or a
+  `Convert` phase's drain) records its batch into a new hook half of the iteration ledger
+  (`StationSession.iterationConsumedInputs`); the iteration's commit
   (`StationService.commitIteration`: a committed produce on either route, a committed conversion,
   a completed program pass) clears the refund halves and then reports each batch once, and a
-  refund at stop drops it unreported. A
-  `Stamp` phase's reagents are reported the moment the enhanced stack commits, since no later stop
-  refunds them. An unattended settle reports what it drained, per socket pile
-  (`StationUnattended.Settle.drains`), once its transform is committed to the stash; like every
-  attended custody consume, a settle that takes a single-item socket's last now takes the piece's
-  stack off the pile with it and drops that socket's prop. The hook's body is a debug log; nothing
-  listens to it yet. `InputConsumedHookOrderTest` pins each path's order on the source (the
+  refund at stop drops it unreported. A `Stamp` phase's reagents are reported the moment the
+  enhanced stack commits, since no later stop refunds them. An unattended settle reports what it
+  drained, per socket pile (`StationUnattended.Settle.drains`), once its transform is committed to
+  the stash; like every attended custody consume, a settle that takes a single-item socket's last
+  now takes the piece's stack off the pile with it and drops that socket's prop. The hook's body
+  fires the api's new **`StationInputConsumedEvent`** (`StationEvents.fireInputConsumed`): the
+  worker (null on an unattended settle, the one shape with none; `attended()`), the world and
+  block, the station and action ids, and each consumed stack as an immutable copy with its socket
+  and the quality index and item level read off it through Ziggfreed Common's `ItemReadings`
+  (null where the stack cannot tell; an inventory-route stack is a bare id and count, so wear and
+  metadata are not on it). `InputConsumedHookOrderTest` pins each path's order on the source (the
   consumption lands, then commits, then reaches the hook) and the hook's three call sites, one per
   commit shape.
+- **The `STATION_INPUT` objective kind.** `Server/ZiggfreedCommon/ObjectiveKinds/RpgStations/
+  Station_Input.json` sits beside `Work_Station` and `Station_Output` with the same `Target` /
+  `Qualifier` / `MatchMode` semantics: target the item id, qualifier the station id, amount the
+  stack's quantity, one moment per stack the input event carries
+  (`progression.StationProgressProducers.onInputConsumedEvent`, riding the api event like the
+  other two producers, with `StationInputPayload` on the moment). An unattended settle names no
+  worker, so it credits nobody: progress belongs to a player who was there. The step sentences
+  `objective.text.station_input` and `.any` ship in `rpgstations.lang` (en-US authored here; the
+  other locales follow). A step that should count one station and its greater tier authors the
+  shared stem with Ziggfreed Common's new `QualifierMatchMode: "PREFIX"`.
+- **Placement safety.** `Custody.HeldOnly` (default false) places only what the player holds: the
+  hotbar and backpack are never scanned for a match, so a press at a station that takes one
+  valuable piece can never pull gear out of the bag unasked. A COUNT pile (a socket capacity above
+  one) refuses a stack carrying per-instance data, a tool that tracks wear or a stack with
+  metadata (`StationCustody.carriesInstanceData`), since a pile keeps ids and counts only and
+  would hand it back as a bare fresh stack: a free repair, or a lost enhancement; a single-item
+  socket keeps the real stack and takes it. The owner PROTECT-LIST, `Settings.Protected {Items[],
+  Tags}`, names item ids and item tags no station may take as placed input, whatever its own
+  matcher says (`StationCustody.isProtected`, checked before any socket is offered the material).
+  A protected piece, on that list or in a station's own `Except` hole, is refused outright with
+  its own reason: `PlacementDenial.PROTECTED` (first in the enum, so it outranks every other
+  denial), the `ui.station.protected` key in `rpgstations.lang` (en-US; the other locales follow)
+  and `RpgStationsLangKeys`, and the moment `Refused:Protected` through `StationRefusals`; it is
+  the one placement denial that keeps its own key on a socket-less custody, where every other
+  denial folds to `no_materials`. Validator: `PROTECTED_UNKNOWN_ITEM` (INFO), `PROTECTED_EMPTY`
+  (INFO).
+- **Expected versus found loot rows.** A roll authored `Expected: true` (Ziggfreed Common's new
+  `Roll` leaf) pays the moment's EXPECTED payout, a wage or a return, and its items read as
+  ORDINARY produced output: the plain item row on the HUD and the produced ledger row on the
+  summary, exactly like the cycle's own output; everything else a pass pays stays the gold find
+  row. The origin rides the shared engine's per-roll split (`LootEngine.Result.getExpectedItems` /
+  `getFoundItems`) into `StationLootEngine.GrantResult` (`getExpectedItems` / `getFoundItems`
+  beside the unchanged merged `getDropListItems`), and both grant routes (`applyGrantResult`,
+  `applyGatherGrantResult`) split on it. No shipped Sawmill table authors the knob, so every
+  Sawmill row is what it was (`StationLootOriginTest` pins the shipped files).
+- **The presentation `Target`.** A `Presentation` names where its sounds and particles play:
+  `"Block"` (the default, the block centre, where every moment has always played), `"Display"`
+  (the placed piece's prop, the socket a ritual queue is working, else the first socket showing
+  one; that socket's resting display position when the prop is gone, which is where a `Convert`
+  beat's cues land after the beat consumed the piece and dropped its prop) or `"Puppet"` (the
+  worker's double, or the worker's own body when no double stands), a bare word or `{Kind, Node}`
+  to attach the particles to one named node of the double's model. The target is resolved when
+  the cue PLAYS (`StationService.resolveAim`), so a delayed cue lands where its target is when it
+  comes due. At an entity target the sounds follow the entity (Ziggfreed Common's `Sound3D.playOn`)
+  and the particles ride it (`ModelParticleService.spawnOn`), delivered only to the players whose
+  tracker shows the entity, never the engine's world-wide broadcast; a freshly spawned prop or
+  double has been shown to nobody until the tracker's next tick, so a cue in the same beat falls
+  back to its position and no cue is lost. A burst at an entity target has no playback cap, so an
+  endless system stays at the block. The shake stays on the worker's camera and the interaction
+  on the worker. A queued pass's beat cues therefore play at the current socket's prop once a
+  `Target: "Display"` is authored; unauthored, they play at the block as before. The sessionless
+  route (refusals, structures, the gather) has no session to aim through and plays at the block.
+  Validator: `PRESENTATION_TARGET_UNKNOWN_KIND`, `PRESENTATION_TARGET_NODE_AT_BLOCK` (INFO),
+  `PRESENTATION_DISPLAY_TARGET_NO_DISPLAY`, `PRESENTATION_PUPPET_TARGET_NO_PUPPET` (INFO),
+  `PRESENTATION_ENTITY_TARGET_CAP_IGNORED` (INFO).
+- **An effect on the double.** `EffectRef.Target` is `"Player"` (the default, the worker's own
+  body, what a `LocalSoundEventId` sting or a screen effect needs) or `"Puppet"` (the worker's
+  double, for an aura or a ModelVFX the onlookers see on the performer; the worker's own body when
+  no double stands). The double carries no `EntityStatMap`, so the engine's effect timer never runs
+  on it: an effect there is put on with NO expiry (Ziggfreed Common's
+  `NativeEffectUtil.applyInfinite`, the double's effect controller added before its spawn by
+  `PlayerPuppetService`) and an authored
+  `DurationMs` is kept by this engine's own cue clock (`StationService.queueEffectRemoval`, a
+  removal parked on the one delayed-cue queue and drained into `NativeEffectUtil.remove`); every
+  effect is tracked on the session either way, so the teardown strips whatever is still on.
+  Validator: `EFFECT_TARGET_UNKNOWN`, `EFFECT_PUPPET_TARGET_NO_PUPPET` (INFO).
+- **A `Color` on a presentation burst.** `Presentation.Particles[].Color` is a `#rrggbb` tint
+  applied through the engine's own colour argument, so a tintable vanilla system takes a moment's
+  palette without a copied spawner file. Every block-positioned burst now spawns through Ziggfreed
+  Common's full-arity `ModelParticleService.spawnAt` (rotation, scale, the tint and the playback cap
+  together, the one engine overload that carries both a colour and a cap), so a tinted burst keeps
+  its leak guard. Validator: `PRESENTATION_PARTICLE_BAD_COLOR`.
+- **A per-step block state.** `StationStep.State` names a block `State.Definitions` name a work
+  beat holds its `At` block in INSTEAD of the custody's `Working` name, a deeper look of one
+  ritual. It needs the custody's `States` group (the exit reads the resting look off it), applies
+  on a work step only, and must exist in the block's own definitions; the working flip now
+  tracks the state NAME it wears (`WorkingFlip.stateName`), so the same block re-flips in place
+  from one beat's name to the next and never shows the resting look between. Validator:
+  `STEP_STATE_WITHOUT_STATES`, `STEP_STATE_NOT_WORK` (INFO).
+- **Display motion and a per-beat display overlay.** `Custody.Display.Animated` (default false)
+  spawns the prop with the client's own dropped-item turn and bob, a spawn-time option of the
+  shared prop primitive. `StationStep.Display` overlays the worked piece's `Display` for one beat
+  (`Custody.Display.overlaid`, the same per-leaf overlay an extension's `Custody` uses; `Offset`,
+  `Scale`, `Rotation` and `Animated`, each authored leaf replacing the socket's own), respawning
+  the prop at iteration entry when the look changed (`StationService.applyStepDisplay`; the
+  display handle records the group it was spawned with, so the same overlay twice never
+  respawns), so a beat can lift the piece, set it turning or enlarge it. Validator:
+  `STEP_DISPLAY_WITHOUT_DISPLAY`.
+- **The placed-piece preview.** `Custody.Preview` (default false) toasts, on placement, what the
+  piece will give back: the row the recipe would run for it right now (authored, derived, or a
+  fallback route's), listed as count and name (`ui.station.preview.returns`), or that it gives
+  nothing back on its own when only the essence-only route takes it
+  (`ui.station.preview.nothing_back`); a piece no row runs for right now says nothing. The
+  selection is the one a cycle or a Convert beat makes, addressed to the socket the piece landed
+  in. Validator: `CUSTODY_PREVIEW_WITHOUT_RECIPE`.
 - **Custody correctness, three fixes.** A custody consume that takes the last of a single-item
   socket's piece now takes the pile's metadata-bearing `Unique` stack with it
   (`StationCustodyClaim.takeUniqueIfDrained`), so the placed piece is actually destroyed and its
@@ -119,37 +229,39 @@ readings are byte-identical to 1.0.0, each pinned by a test (`SawmillDerivationP
   pile, wear and stamps intact, or hands it to the player as itself when the pile is gone, never as
   a bare fresh stack (`StationCustodyLedger.countsBesideUnique` nets the count half). Only a stack
   the drain itself took is ledgered (`StationCustodyLedger.pieceTaken`), so a `Unique` already
-  left dangling on its pile is cleared off it and never put back. A completed
-  program pass now clears every half of the ledger (it commits through
-  `StationService.commitIteration`), not only the inventory half. A pile whose `Unique` outlived
-  its count (the shape the old consume left behind) reads as holding nothing, answers no unique
-  stack and hands nothing back for it; the decision behind that (`StationCustody.uniqueDrained`)
-  is what the tests pin, while a 1.0.0 stash of that shape loading through the engine is a
-  dev-server check, since no unit test can build one.
+  left dangling on its pile is cleared off it and never put back. A completed program pass now
+  clears every half of the ledger (it commits through `StationService.commitIteration`), not only
+  the inventory half. A pile whose `Unique` outlived its count (the shape the old consume left
+  behind) reads as holding nothing, answers no unique stack and hands nothing back for it; the
+  decision behind that (`StationCustody.uniqueDrained`) is what the tests pin, while a 1.0.0
+  stash of that shape loading through the engine is a dev-server check, since no unit test can
+  build one.
 - **The piece in the factors.** The session captures the piece the work is about
   (`StationSession.factorItem`: the addressed socket's unique stack, else a bare stack of the
   oldest matching material, else the inventory route's exact-item input) before every snapshot,
   re-captured on each program pass and carried across a resume, and every factor-context build
-  site publishes it through the api `FactorContext.item()` into Ziggfreed Common's item leaf - the
+  site publishes it through the api `FactorContext.item()` into Ziggfreed Common's item leaf, the
   sessionless gather twin included, and the engage-time `Requires` gate, which reads the piece
   standing in the block's custody (the same first-socket capture a pass makes) so a gate over
   `hytale:item_*` judges the placed piece; the inventory route's piece is unknown before a
-  conversion is chosen, so that gate reads no item. The four portable item factors (`hytale:item_quality`,
-  `hytale:item_level`, `hytale:item_durability_percent`, `hytale:item_stat`) are adopted into the
-  station vocabulary, and `ziggfreedcommon:item_stamp_points` reaches it through the library's
-  process-wide contribution. The three `hytale:tool_*` readings moved onto the shared item reader
-  (`StationToolReadings` over `ItemReadings`) with the station's own 0 / 100 defaults; `tool_quality`
-  reads the held ITEM's current quality, never the stack's copied index, so its values are the
-  1.0.0 ones.
+  conversion is chosen, so that gate reads no item. The four portable item factors
+  (`hytale:item_quality`, `hytale:item_level`, `hytale:item_durability_percent`,
+  `hytale:item_stat`) are adopted into the station vocabulary, and
+  `ziggfreedcommon:item_stamp_points` reaches it through the library's process-wide contribution.
+  The three `hytale:tool_*` readings moved onto the shared item reader (`StationToolReadings` over
+  `ItemReadings`) with the station's own 0 / 100 defaults; `tool_quality` reads the held ITEM's
+  current quality, never the stack's copied index, so its values are the 1.0.0 ones.
 - **A ritual queue.** `Work.Queue: true` runs the authored `Steps` program once per FILLED custody
   socket in authored order: each pass takes the next filled socket, captures its stack for the
   factors, addresses it for the `Convert` phase's drain, and consumes it; while another filled
   socket waits, the next pass starts on the next frame; once every socket is empty the ordinary
   end-of-pass rule decides (`Looping false` ends the session). An interrupted pass refunds only the
   socket in progress; the other pieces follow the station's standing custody-return rule at stop.
-  A pass's beat cues play where every step's cues play, at the block, whichever socket it works.
-  A one-socket station is unaffected. Validator: `QUEUE_WITHOUT_STEPS`, `QUEUE_WITHOUT_SOCKETS`,
-  `QUEUE_SOCKET_NOT_SINGLE`, `QUEUE_WITH_LOOPING` (INFO).
+  A pass's beat cues play at the socket it works once the beat's presentation authors
+  `Target: "Display"` (the current socket's prop, or its resting position after the Convert beat
+  dropped it); unauthored, they play at the block. A one-socket station is unaffected. Validator:
+  `QUEUE_WITHOUT_STEPS`, `QUEUE_WITHOUT_SOCKETS`, `QUEUE_SOCKET_NOT_SINGLE`, `QUEUE_WITH_LOOPING`
+  (INFO).
 - **Paced beats.** `ActionDef.Pace {Ladder, Clamp}`: the ladder is the `ContributionScale` codec
   (`Factors` + `Floors [{Min, Scale}]`, never a second ladder shape) and `Clamp {Min, Max}` is the
   shared clamp leaf. A step marked `Paced: true` has its `Duration.Ms` multiplied by the resolved
@@ -169,15 +281,35 @@ readings are byte-identical to 1.0.0, each pinned by a test (`SawmillDerivationP
   rolls plus every matching extension's) at that beat, once per iteration, and a program with such
   a beat skips its completion-time pass so the Bonus never rolls twice. Unset, nothing moves.
   Validator: `BONUS_AT_BEAT_NO_BONUS`, `BONUS_AT_BEAT_REPEATED` (INFO).
-- **Technical.** `SCHEMA.md` regenerated for every leaf above. The api `FactorContext` gains the
-  additive `item()` accessor and `Builder.item(ItemStack)` (the api version bump rides the next
-  leg). `StationService.ConversionCheck` carries the chosen row and is package-visible for the step
+- **Docs.** `SCHEMA.md` regenerated for every leaf above. New guides:
+  `docs/derive-from-any-bench.md` (the Sawmill and the Disenchanting Table as the two worked
+  examples) and `docs/disenchanting.md`
+  (the staged ritual, end to end). `docs/loot-and-factors.md` names the item factors and corrects
+  its Grants table (`Effects` and `Contributions` are the `rpgstations:effect` and
+  `rpgstations:contribution` reward kinds, never keys of `Grants`); `docs/integrations.md` carries
+  the tenth event, the third kind and the api version scheme; the custody, presentation and
+  settings guides carry the leaves above. Three claims the docs made against the code are
+  corrected everywhere they appeared (the routers, the javadoc, the codec documentation and so
+  `SCHEMA.md`): a custody state flip is not hint-only (it swaps the block to the state's own
+  variant, so the state's texture, animation, light, ambient loop and particles come with it),
+  the display and puppet anchor is the block CENTRE, not the block top, and the engine does have a
+  colour call for particles (the sound call still takes no volume or pitch, and the entity-following
+  packet's two modifiers would work at one target and not the other, so neither is a leaf).
+- **Technical.** The api artifact is versioned WITH the mod (`api_version=1.1.0`; 1.0.0 carried
+  contract 9, 1.1.0 carries 10), and `RpgStationsApi.apiVersion()` moves to **10** for ONE batch:
+  the `StationInputConsumedEvent` event class and the `FactorContext.item()` accessor with its
+  `Builder.item(ItemStack)` leaf (the piece a moment is about); the api router and the interface
+  javadoc no longer tie a freeze to a release number, since none was declared.
+  `StationService.ConversionCheck` carries the chosen row and is package-visible for the step
   context; `StationStepContext` carries the station asset, the composed pace and the preselected
   row. `ImplicitProgram.build` takes the Bonus and the cycle presentation only. A consume body
   records `ConsumedInput`s (the real stack plus the socket it left) into the iteration ledger's
   hook half beside its refund halves. The consumption paths run only against a live store, so
   `InputConsumedHookOrderTest` and the fallback selection pin read the order off the source, one
   method body at a time (`SourcePins`, a test-only reader that cuts a body at its matching brace).
+  `StationService.placementDenyKey` and `workingStateName` are package-visible pure cores, and
+  `Presentation.of` gained the `Target`-carrying overload every rebuild site uses
+  (`StationPacing.scaleInTime`, the offset-sound split, `Presentation.overlaid`).
 
 ## 1.0.0 - 2026-09-12 (first public release)
 

@@ -21,7 +21,7 @@ actually run: diegetic action selection at engage, an authored-`Steps` program d
 `Slot` enum retired for open string moment ids, a new standalone `FlairAsset` type ANY mod can
 ship, `FlairCatalog` as the ONE merge point), and **leg G (the placed-input PLACED-AS-ENTITY
 visual - a new `Custody.Display` group spawning a static, network-replicated, pickup-immune,
-physics-free prop entity at the station's block-top anchor via `StationCustodyDisplay`, the
+physics-free prop entity at the station's block-centre anchor via `StationCustodyDisplay`, the
 maintainer's directed route over a Blockbench baked-node model swap) - see the "Phase 2" section
 below); **leg H (the phase-2 smoke round) is DOCS-LANDED** - the smoke checklist itself is
 assembled (`../../.claude/plans/work-stations-mod-extraction-prompt.md`'s PHASE-2 SMOKE
@@ -267,9 +267,12 @@ cd 'D:\dev\business\hyMMO\additional-mods\rpg-stations'; .\build.ps1
 .\build.ps1 -ModsDir <path>     # explicit install target (else $env:HYTALE_MODS_DIR)
 ```
 Produces `build/libs/RpgStations-<version>.jar` (**version is `1.1.0`, HELD and unreleased**: the
-disenchanting wave's engine core - any-bench derivation with full outputs, the fallback routes,
-the `Convert` phase, the custody fixes, the item in the factors, the ritual queue and paced beats,
-see `CHANGELOG.md`'s `1.1.0 - unreleased` section; the last public release was `1.0.0`, the
+disenchanting wave's engine core (any-bench derivation with full outputs, the fallback routes,
+the `Convert` phase, the custody fixes, the item in the factors, the ritual queue and paced beats)
+and its engine surface (placement safety and the owner protect-list, the input-consumed event and
+the `STATION_INPUT` kind, expected-versus-found loot rows, the presentation `Target`, the per-step
+block state and display overlay, the placed-piece preview, api 1.1.0 at contract 10), see
+`CHANGELOG.md`'s `1.1.0 - unreleased` section; the last public release was `1.0.0`, the
 maintainer-set Sawmill-only scope described in the "1.0.0 release scope" section below) and
 copies the runtime jar into the Hytale `Mods/` folder. `.\gradlew.bat
 build`/`test` work too. The root hyMMO `rebuild.ps1 -Mods` (or `-Jar -Mods -Packs` for the full
@@ -300,8 +303,8 @@ src/main/resources/
   Server/RpgStations/{Stations,Actions,Patterns,Flairs,Extensions,Settings}/
                                                         the six Pattern A asset stores this mod registers
   Server/ZiggfreedCommon/Lootables/                      the Sawmill's loot tables (the SHARED library's store)
-  Server/ZiggfreedCommon/ObjectiveKinds/RpgStations/     the two objective kinds this engine fires (WORK_STATION /
-                                                        STATION_OUTPUT), in the SHARED library's store; see progression/
+  Server/ZiggfreedCommon/ObjectiveKinds/RpgStations/     the three objective kinds this engine fires (WORK_STATION /
+                                                        STATION_OUTPUT / STATION_INPUT), in the SHARED library's store; see progression/
   Server/Item/{Items,RootInteractions}/                 the jar's OWN default blocks + their RootInteractions: the Sawmill
                                                         (+ its trophy hatchet) and the shared RPG_Station_Retrieve
                                                         (the cooking-pit family's blocks and Use chain are held
@@ -465,12 +468,12 @@ the block item id. See `interaction/CLAUDE.md` for the `rpg_station_use` interac
 
 ## The extension surface (api/, live)
 
-Package `com.ziggfreed.rpgstations.api` (+ `.api.event`), the freeze-at-1.0.0 (so NOT yet frozen) contract
-between this engine and any mod that wants to hook it. Split by shape, per the native-events rule:
+Package `com.ziggfreed.rpgstations.api` (+ `.api.event`), the additive contract (versioned with the
+mod, never declared frozen) between this engine and any mod that wants to hook it. Split by shape, per the native-events rule:
 **observe-only moments are native Hytale events** (`StationSessionStartedEvent`/
 `StationCycleCompletedEvent`/`StationSessionCompletedEvent`/`StationToolBrokeEvent`/
 `StationEnhanceCompletedEvent`/`StationUnattendedGatheredEvent`/`StationOutputProducedEvent`/
-`StationStructureChangedEvent`/`StationRefusedEvent`, nine POJOs
+`StationStructureChangedEvent`/`StationRefusedEvent`/`StationInputConsumedEvent`, ten POJOs
 `implements IEvent<Void>`, dispatched `HytaleServer.get().getEventBus().dispatchFor(...)` +
 `hasListener()` on the world thread, fired from `station.StationEvents`); **request/response
 points are typed registries** on the static `RpgStationsApi` holder (`FactorRegistry` - the one
@@ -547,8 +550,8 @@ fix layers on cleanly.
   `StationCustody.shouldReturnToInventory` all-or-nothing batch check); a NEW
   `StationCustodyBreakSystem` (`BreakBlockEvent`) covers the
   no-active-session case (placed input, block broken before a session ever starts). Block-state
-  flips (the kweebec shrine-furnace precedent) are HINT-ONLY
-  this leg (mechanism-first ruling; visuals land in a later leg) and self-heal (this leg's
+  flips (the kweebec shrine-furnace precedent) swap the block to the state's own variant, so its
+  texture, animation, light, ambient loop and particles come with it, and self-heal (this leg's
   "custody is never persisted, a crash loses it" posture was REVERSED by the 2026-09-01
   custody-persistence wave: the self-heal now settles against the surviving stash). The shipped
   sawmill (both the jar
@@ -655,7 +658,7 @@ fix layers on cleanly.
   sanctioned admin "Entity Spawn Page" Items-tab exemplar) over a Blockbench baked-node model swap.
   A new nullable `asset.Custody.Display` group (`{Offset{X,Y,Z}, Scale, Rotation}`, every leaf
   `appendInherited`) opts a `Custody`-governed action into a spawned prop entity rendering the
-  placed item at the station's block-top anchor - `station.StationCustodyDisplay` (new class):
+  placed item at the station's block-centre anchor - `station.StationCustodyDisplay` (new class):
   block-shaped items (the sawmill's placed logs) spawn a real `BlockEntity` (the actual block
   model, not a flat icon), everything else (the anvil's placed weapon) spawns a bare `ItemComponent`
   prop (the generic "dropped item minus physics" shape). Both routes

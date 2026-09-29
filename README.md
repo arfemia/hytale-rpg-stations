@@ -21,7 +21,7 @@ work into its own rewards, without either mod hard-depending on the other. See
 
 ## Install
 
-Requires **ZiggfreedCommon** (`>=2.1.0`), the one hard dependency - drop its jar into your server's
+Requires **ZiggfreedCommon** (`>=2.2.0`), the one hard dependency - drop its jar into your server's
 `Mods/` folder first, then drop the RPG Stations jar into the same folder and restart. See
 [Getting Started](docs/getting-started.md) for the full walkthrough.
 
@@ -40,7 +40,10 @@ for the developer guide.
 - [Getting Started](docs/getting-started.md) and [Concepts](docs/concepts.md) - install and the core
   vocabulary (station, session, action, step, custody, puppet).
 - [Your First Station](docs/your-first-station.md) - a worked walkthrough authoring one station end
-  to end, followed by [Actions & Step Programs](docs/actions-and-steps.md),
+  to end, and [Derive from Any Bench](docs/derive-from-any-bench.md) plus
+  [Disenchanting](docs/disenchanting.md), the two worked examples of a station that stands in for a
+  vanilla bench (the Sawmill for the Builders bench, the Disenchanting Table for the Salvage bench),
+  followed by [Actions & Step Programs](docs/actions-and-steps.md),
   [Multi-Station Programs](docs/multi-station-programs.md),
   [Custody & Placed Display](docs/custody-and-placed-display.md),
   [Unattended Work](docs/unattended-work.md),

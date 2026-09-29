@@ -182,11 +182,12 @@ public class StationCustodyConsumeFixTest {
     }
 
     @Test
-    void anAttendedRecord_namesItsWholeWorker_andFallsBackToTheSessionsOwnWorld() throws IOException {
+    void anAttendedRecord_namesItsWholeWorker_andReadsTheStationsOwnWorld() throws IOException {
         // No PlayerRef can be built in this JVM, so the record's two rules are pinned on the
         // source: every worker field InputConsumption.hasWorker reads is required (an attended
-        // record never reads as unattended), and a PlayerRef between worlds falls back to the
-        // session's own world instead of dropping a committed consumption.
+        // record never reads as unattended), and the record's world is the STATION's own, read off
+        // the worker's entity (a PlayerRef names no world only before its first join, never
+        // between worlds, so it is not consulted at all).
         String body = SourcePins.methodBody(SourcePins.read("StationService.java"),
                 "static InputConsumption attendedConsumption(");
         for (String required : new String[] {"s.playerRef == null", "s.ref == null", "s.playerUuid == null"}) {
@@ -195,11 +196,12 @@ public class StationCustodyConsumeFixTest {
         int guard = body.indexOf("s.playerUuid == null");
         int record = body.indexOf("new InputConsumption(s.playerRef, s.ref, s.playerUuid, worldUuid,");
         assertTrue(guard >= 0 && record > guard, "the worker is required before the record is built");
-        int playerWorld = body.indexOf("s.playerRef.getWorldUuid()");
-        int sessionWorld = body.indexOf("worldUuidOf(world)", playerWorld);
-        assertTrue(playerWorld >= 0 && body.indexOf("sessionWorld(s)", playerWorld) > playerWorld
-                && sessionWorld > playerWorld && record > sessionWorld,
-                "the session's own world answers when the PlayerRef names none, before the record is built");
+        assertFalse(body.contains("getWorldUuid()"),
+                "the worker's PlayerRef is not the authority on the station's world");
+        int sessionWorld = body.indexOf("sessionWorld(s)");
+        int worldUuid = body.indexOf("worldUuidOf(world)", sessionWorld);
+        assertTrue(sessionWorld >= 0 && worldUuid > sessionWorld && record > worldUuid,
+                "the station's own world is read off the worker's entity before the record is built");
     }
 
     @Test

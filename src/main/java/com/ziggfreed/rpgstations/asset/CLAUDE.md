@@ -140,7 +140,14 @@ resolution section for the engine half.
   value carries nothing the shorthand cannot express. **Generic, and a lift candidate** for
   `ziggfreed-common`'s `codec/` package the moment a second mod wants one.
 - **[`EffectRef`](EffectRef.java)** - the ONE native-EntityEffect
-  reference leaf (`{Id, DurationMs?}`, id-ref-only, never inlines the effect body).
+  reference leaf (`{Id, DurationMs?, Target?}`, id-ref-only, never inlines the effect body).
+  `Target` is `"Player"` (the default, the worker's own body, what a `LocalSoundEventId` sting or
+  a screen effect needs) or `"Puppet"` (the worker's double, for an aura or a ModelVFX the
+  onlookers see on the performer; the worker's own body again when no double stands). On the
+  double the engine applies the effect with NO expiry (the double carries no `EntityStatMap`, so
+  the engine's effect timer never runs there) and keeps an authored `DurationMs` on its own cue
+  clock (`station.StationService#applyMomentEffect` / `queueEffectRemoval`), tracking every
+  effect on the session so the teardown strips whatever is still on.
   Reused at every altitude an effect payload lands: `Presentation.Effect` (a single per-moment
   effect group), a `rpgstations:effect` reward's own `Id`/`DurationMs` params, and `Puppet.Hide.Effect` (the
   `Hide.Route: "Effect"` arm's configuration). Two effect-shaped leaves deliberately STAY bare ids:
@@ -413,12 +420,25 @@ resolution section for the engine half.
   held back with the CookingFire/CuttingBoard pair at 0.1.0) for the flagship authoring shape.
 - **[`Custody`](Custody.java)** - placed-input custody (chunk-persisted: the placed piles live on
   the block's own chunk section and survive restarts), opted into per-action:
-  `{MaxQuantity?, SingleFamily?, Input?, States?, Display?, Share?, Sockets?}`. `MaxQuantity`
-  defaults to **100**.
+  `{MaxQuantity?, SingleFamily?, HeldOnly?, Preview?, Input?, States?, Display?, Share?, Sockets?}`.
+  `MaxQuantity` defaults to **100**.
   `Input` (reusing [`ActionInput`](ActionInput.java)'s ItemId/ResourceTypeId/Tags/Function routes)
-  is the explicit placement-acceptance matcher; absent derives acceptance from the resolved
-  action's own `Recipe.Conversions` inputs instead (ANY of a multi-input conversion's materials is
-  accepted - a multi-material station is loaded one material at a time). **`SingleFamily`**
+  is the explicit placement-acceptance matcher; authored ROUTES replace the derivation, while an
+  `Input` that authors only `Except` keeps it and carves the holes out of it (a station refuses a
+  short list of ids without restating what it takes; `station.StationService#socketAcceptsInput`).
+  Absent derives acceptance from the resolved action's own `Recipe.Conversions` inputs and its
+  fallback routes instead (ANY of a multi-input conversion's materials is accepted - a
+  multi-material station is loaded one material at a time). **`HeldOnly`** (Boolean, default false)
+  places only what the player HOLDS: the hotbar and backpack are never scanned for a match, so a
+  press at a station that takes one valuable piece can never pull gear out of the bag unasked.
+  **`Preview`** (Boolean, default false) toasts, on placement, what the piece will give back: the
+  row the recipe would run for it right now (authored, derived, or a fallback route's), or that it
+  gives nothing back on its own when only the essence-only route takes it
+  (`station.StationService#previewPlacedReturn`, keys `ui.station.preview.returns` /
+  `.nothing_back`; `CUSTODY_PREVIEW_WITHOUT_RECIPE` warns on an action with no recipe). A COUNT
+  pile (a socket capacity above one) refuses a stack carrying per-instance data, a tool that
+  tracks wear or a stack with metadata (`station.StationCustody#carriesInstanceData`), since a
+  pile keeps ids and counts only and would hand it back as a bare fresh stack. **`SingleFamily`**
   (Boolean, default false) locks a non-empty claim to the FIRST-placed item's resource family: a
   later placement outside that family is refused until the claim empties again ("50 oak OR 50
   pine, never 100 mixed"). Enforced in the ONE acceptance choke point, so both the held-item route
@@ -438,10 +458,13 @@ resolution section for the engine half.
   never add a state (`States` has no collection, so it was never in D37-conflict, unlike the
   additively-extensible `Sockets` map below). Omitting any leaf is byte-identical to pre-knob
   behavior for that flip. `Display`
-  (`{Offset: Vec3, Scale, Rotation: Rotation}`, FACING-RELATIVE to the placed block's own yaw, every
-  leaf `appendInherited`; the block yaw folds into `Rotation.Yaw`) opts the placed input into a
+  (`{Offset: Vec3, Scale, Rotation: Rotation, Animated?}`, FACING-RELATIVE to the placed block's own
+  yaw, every leaf `appendInherited`; the block yaw folds into `Rotation.Yaw`; `Animated` true gives
+  the prop the client's own dropped-item turn and bob, set at spawn) opts the placed input into a
   PLACED-AS-ENTITY visual - see `../station/CLAUDE.md`'s dedicated bullet for the full engine-side
-  mechanism. The jar's own `Stations/Sawmill.json` authors `Display {Offset{Y:-0.1}, Scale:0.46}`
+  mechanism. `Custody.Display.overlaid` is the ONE per-leaf `Display` overlay (an extension's
+  `Custody` overlay and a step's per-beat `Display` both run on it) and `sameLook` tells two groups
+  that would spawn the same prop apart. The jar's own `Stations/Sawmill.json` authors `Display {Offset{Y:-0.1}, Scale:0.46}`
   as the shipped standalone default; a pack re-tunes it through an `ExtensionAsset`'s `Custody`
   per-leaf overlay (rule 5 below) rather than a full-file station override.
   **`Sockets` (the multi-placement model)** is an `InheritMapCodec` map keyed by socket id (author
@@ -469,16 +492,24 @@ resolution section for the engine half.
   `Custody.Input`, a socket's `Match`, a fallback's `Input`): `{ItemId?, ResourceTypeId?, Tags?,
   Function?, Except?}` (`Function` is `"Weapon"|"Armor"|"Tool"`, resolved against the held item's
   live shape). `isCatchAll()` = no route authored. **`Except` is this same matcher one level down
-  (`ActionInput.EXCEPT_CODEC`, the same four routes, no further nesting)**: a material the routes
-  accept is REFUSED when the hole accepts it too, so a broad `Tags` match carves out ammunition
-  without listing every id; one codec definition serves both levels, every site asks the ONE
-  acceptance rule `station.StationCustody#accepts` (an absent or catch-all matcher accepts
-  everything, a route set accepts what a route matches, and the hole is carved out either way, so
-  a catch-all with an `Except` takes everything but the hole: action selection, a socket's
-  `Match` and an explicit `Custody.Input` at placement, a Block socket's match, a fallback's
-  `Input`). An `Except` with no route is INERT: it matches nothing, so it carves no hole and the
-  matcher accepts exactly what it would without it; the validator warns `EXCEPT_CATCH_ALL`
-  because such an `Except` does nothing (an authoring slip). Live
+  (`ActionInput.EXCEPT_CODEC`, the same four routes, no further nesting), authored as ONE object
+  or an ARRAY of them (`ActionInput.EXCEPTS_CODEC`, the dual-shape
+  [`ObjectOrArrayCodec`](ObjectOrArrayCodec.java); `getExcepts()`, `hasExcept()`)**: a material
+  the routes accept is REFUSED when any entry's routes accept it too, so a broad `Tags` match
+  carves out ammunition without listing every id; one codec definition serves both levels, every
+  site asks the ONE acceptance rule `station.StationCustody#accepts` (an absent or catch-all
+  matcher accepts everything, a route set accepts what a route matches, and the holes are carved
+  out either way: action selection, a socket's `Match` and an explicit `Custody.Input` at
+  placement, a Block socket's match, a fallback's `Input`). At PLACEMENT a route-less matcher's
+  holes are carved out of what the station DERIVES (its conversion inputs and fallback routes),
+  never out of everything (`station.StationService#socketAcceptsInput`), and a material a hole
+  refused is answered `Refused:Protected` rather than "wrong input"
+  (`station.StationCustody#exceptRefuses`). **An extension's `Custody.Input` overlay ADDS its
+  `Except` entries beside the base's** (`station.ExtensionCatalog#concatExcepts`), never in their
+  place, so a pack protects its own item from a station without restating what the jar protects.
+  An entry with no route is INERT: it matches nothing, so it carves no hole and the matcher accepts
+  exactly what it would without it; the validator warns `EXCEPT_CATCH_ALL` because such an entry
+  does nothing (an authoring slip). Live
   selection runs through `station.ActionResolver.selectActionByFamily` - the FIRST action in
   AUTHORED ORDER whose effective `Select` (its own, or its `Ref` base's) accepts the held material.
 - **[`Pace`](Pace.java)** - `ActionDef.Pace {Ladder: ContributionScale, Clamp: {Min, Max}}`, the
@@ -505,7 +536,15 @@ resolution section for the engine half.
     the four sibling exactly-one-of groups, since the fixed `Times` silently wins), `Duration`
     (`{Ms}`, a post-phase hold; prop/presentation persist across it), `Puppet` (per-step
     `{Clip?, Prop?}` override, reusing `Puppet.Prop`'s exact codec), `Presentation` (fires once at
-    step ITERATION entry, so a `Repeat`ed step cues once PER BEAT), and **`IsWork`** (a nullable
+    step ITERATION entry, so a `Repeat`ed step cues once PER BEAT), **`State`** (a block
+    `State.Definitions` name this work beat holds its `At` block in INSTEAD of the custody's
+    `Working` name, a deeper look of one ritual; needs the custody's `States` group, applies on a
+    work step only, and the same block re-flips in place from one beat's name to the next without
+    the resting look between; `STEP_STATE_WITHOUT_STATES` / `STEP_STATE_NOT_WORK`), **`Display`**
+    (a per-beat `Custody.Display` overlay on the worked piece's prop, laid over the socket's own
+    group through `Custody.Display.overlaid` and RESPAWNING the prop at iteration entry when the
+    look changed, so a beat lifts, turns or enlarges the piece; `STEP_DISPLAY_WITHOUT_DISPLAY`),
+    and **`IsWork`** (a nullable
     Boolean: does this step drive its `At`-anchor block's `Custody.States.Working` look?). `IsWork`'s
     reader-default is DERIVED, never a mode flag - `effectiveIsWork()` returns true for a step
     that both `Consume`s AND `Produce`s, i.e. the phase model's own atomic-transform CONVERT, so
@@ -577,19 +616,31 @@ resolution section for the engine half.
   hand-authored file on the same bytes. `DelayMs` there holds THAT sound and ADDS to the group's own
   (the moment delay offsets the moment, the entry delay offsets that sound inside it); the engine
   splits an offset entry off into its own sound-only queued cue, so both land on the ONE scheduler.
-  Still deliberately NO `Volume`/`Pitch`: the 3D-sound primitive takes neither argument, so those
-  leaves would decode and then do nothing - vary them by referencing a different `SoundEvent`
-  asset), **`Particles`** (an
+  Still deliberately NO `Volume`/`Pitch`: the positional one-shot call takes neither argument
+  (only the entity-following packet carries the two modifiers), so a leaf would work at an entity
+  target and do nothing at the block, the default - vary them by referencing a different
+  `SoundEvent` asset, where a one-line `Parent` copy carries its own `Volume` or `Pitch`),
+  **`Target`** (WHERE the sounds and particles play, a bare word or `{Kind, Node}` through the
+  same `StringOrObjectCodec` a `Sounds` entry uses: `Block` (the default, the block centre),
+  `Display` (the placed piece's prop, the socket a ritual queue is working, else its resting
+  position when the prop is gone) or `Puppet` (the worker's double, else the worker's own body);
+  at an entity target the sounds follow the entity and the particles ride it, or the named `Node`
+  of its model, delivered only to the players whose tracker shows it, and a freshly spawned entity
+  nobody has been shown yet falls back to its position, so no cue is lost. The shake, the
+  interaction and the effect are not moved by it), **`Particles`** (an
   ARRAY of `ModelParticle`-shaped bursts matching native `InteractionEffects.Particles` - each
   entry is `{SystemId, Scale?, DurationSeconds?, RotationOffset{Yaw,Pitch,Roll}?,
-  PositionOffset{X,Y,Z}?}`, every knob nullable with reader-defaults that reproduce the old
+  PositionOffset{X,Y,Z}?, Color?}`, every knob nullable with reader-defaults that reproduce the old
   single-string playback byte for byte: scale 1.0, a 4-second client-playback cap, zero rotation,
-  no offset. `PositionOffset` is FACING-RELATIVE through the same `station.StationBlockFacing`
+  no offset, no tint. `PositionOffset` is FACING-RELATIVE through the same `station.StationBlockFacing`
   reader `Custody.Display`/`Puppet` use; `RotationOffset` is the burst's own emission rotation in
   DEGREES and is NOT composed with the block facing. The `DurationSeconds` cap is a LEAK GUARD,
-  not decoration - an unbounded-spawner system fired uncapped never stops. There is deliberately
-  **no `Color` leaf**: the only colour-capable engine overload takes no playback cap, and that
-  leak must never be reintroduced), `Shake` (nested `{EffectId, Intensity}`), plus TWO
+  not decoration - an unbounded-spawner system fired uncapped never stops. **`Color`** is a
+  `#rrggbb` tint through the engine's own colour argument, riding the ONE engine overload that
+  carries both a colour and the playback cap (ziggfreed-common's full-arity
+  `ModelParticleService.spawnAt`), so a tinted burst keeps the leak guard; at an entity target it
+  rides the attached leaf, which has no cap at all, which `PRESENTATION_ENTITY_TARGET_CAP_IGNORED`
+  notes), `Shake` (nested `{EffectId, Intensity}`), plus TWO
   native-composition groups: `Interaction` (`{Id}`, an inner class - fires a native RootInteraction
   chain by id) and `Effect` (an [`EffectRef`](EffectRef.java) - applies a native EntityEffect by
   id). Both id-ref-only. Plus **`DelayMs`** (nullable `Long`), the one leaf that is not itself a
@@ -616,7 +667,7 @@ resolution section for the engine half.
   in-game-crowned default (hides the puppeteer's own body via `ziggfreed-common`'s
   `entity.PlayerPuppetService`); `"Effect"` is schema-reserved future work; `"None"` is the
   deliberate degraded fallback. `Look.Source` defaults `"PlayerClone"`, with `"Model"` an open
-  performer seam. `Offset`/`Rotation` place the puppet relative to the station's block-top anchor: authored `+Z` is
+  performer seam. `Offset`/`Rotation` place the puppet relative to the station's block-centre anchor: authored `+Z` is
   the block's FRONT, `+X` its right, `Offset.Y` stays vertical, and the block yaw folds additively
   into `Rotation.Yaw` (so `Yaw: 0` means "faces the same way the block does"). **`Rotation.Pitch`/
   `.Roll` are the puppet's OWN tilt and are NOT block-composed**, the same rule
@@ -837,7 +888,16 @@ resolution section for the engine half.
   Settings.json`, a single id (`settings`), jar default + pack-overridable: `{Enabled,
   SummaryHud:{Enabled, Position, OffsetX, OffsetY, TtlMs, MaxRows, Color}, Limits:{MaxSessionsPerWorld,
   MaxPuppetsPerWorld, MaxStashesPerSection, UnattendedIntervalMs,
-  MaxUnattendedGatherCycles}, Moments:{<momentId>: Presentation}, Refusals:{RepeatWindowMs}}`.
+  MaxUnattendedGatherCycles}, Moments:{<momentId>: Presentation}, Refusals:{RepeatWindowMs},
+  Protected:{Items[], Tags}}`. **`Protected`** is the server-wide PROTECT-LIST: item ids
+  (matched without regard to case) and item tags (the shared `TagMatch` map) no station may take
+  as placed input, whatever its own matcher says; checked first at placement
+  (`station.StationCustody#isProtected`, from `StationService#routeStack`) and answered
+  `Refused:Protected` (`ui.station.protected`), the one denial that keeps its own key on a
+  socket-less custody. `SettingsCatalog.fold` keeps ONE surviving settings instance, so a pack's
+  `Settings.json` replaces the jar's whole and an owner who wants both lists authors both;
+  `validateSettings` notes an id no loaded item answers to (`PROTECTED_UNKNOWN_ITEM`, INFO) and a
+  group naming nothing (`PROTECTED_EMPTY`, INFO).
   **`Moments`** is the ENGINE-WIDE default cue layer (an `InheritMapCodec` over `Presentation`,
   merged per moment id under `Parent`): it sits UNDER every action's own entry for the same id, per
   leaf via `Presentation.overlaid`, and the jar ships exactly one entry, `Refused` playing

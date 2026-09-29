@@ -112,11 +112,13 @@ public class StationStepConvertCodecTest {
         ActionInput filter = fallback.getInput();
         assertNotNull(filter);
         assertEquals(3, filter.getTags().get("Type").length);
-        ActionInput except = filter.getExcept();
-        assertNotNull(except);
+        ActionInput[] excepts = filter.getExcepts();
+        assertNotNull(excepts);
+        assertEquals(1, excepts.length, "one authored object reads as a one-entry hole list");
+        ActionInput except = excepts[0];
         assertEquals("Fixture_Crate", except.getItemId());
         assertEquals("Ammo", except.getTags().get("Type")[0]);
-        assertNull(except.getExcept(), "an exclusion carves no hole of its own");
+        assertNull(except.getExcepts(), "an exclusion carves no hole of its own");
     }
 
     @Test
@@ -136,8 +138,8 @@ public class StationStepConvertCodecTest {
                 + " \"Select\": { \"Function\": \"Weapon\", \"Except\": { \"ItemId\": \"Fixture_Dagger\" } },"
                 + " \"Custody\": { \"Sockets\": { \"slot_a\": { \"Item\": { \"Match\": { \"Function\": \"Tool\","
                 + " \"Except\": { \"ResourceTypeId\": \"Fixture_Family\" } } }, \"MaxQuantity\": 1 } } } }");
-        assertEquals("Fixture_Dagger", a.getSelect().getExcept().getItemId());
-        assertEquals("Fixture_Family", a.getCustody().effectiveSockets().get(0).match().getExcept().getResourceTypeId());
+        assertEquals("Fixture_Dagger", a.getSelect().getExcepts()[0].getItemId());
+        assertEquals("Fixture_Family", a.getCustody().effectiveSockets().get(0).match().getExcepts()[0].getResourceTypeId());
     }
 
     @Test

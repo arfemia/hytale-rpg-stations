@@ -1,5 +1,6 @@
 package com.ziggfreed.rpgstations.station;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,9 +24,11 @@ import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
+import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.Pace;
+import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
@@ -109,6 +112,94 @@ public class StationValidatorConvertPaceTest {
                 "LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT")) {
             assertFalse(codes.contains(code), code + " must not fire on a clean ritual, got " + codes);
         }
+    }
+
+    @Test
+    void presentationTargets_needWhatTheyPointAt() throws Exception {
+        // A Display target on an action whose sockets show no prop plays at the block; a Puppet
+        // target with no active puppet plays on the worker's own body; a Node at the block means
+        // nothing; an unknown kind reads as Block; a bad Color is ignored.
+        ActionDef a = ActionDef.of("Unmake")
+                .withRecipe(recipe())
+                .withCustody(twoSingleSockets())
+                .withSteps(new StationStep[] {
+                        beat("Open").withPresentation(Presentation.of(Presentation.Target.of("Display"), null,
+                                new Presentation.ModelParticle[] {Presentation.ModelParticle.of("Fixture_Burst", null,
+                                        2.0, null, null, "not-a-hex")}, null, null, null, null)),
+                        beat("Kindle").withPresentation(Presentation.of(Presentation.Target.of("Puppet", "Hand_R"),
+                                null, null, null, null, EffectRef.of("Fixture_Aura", 500L, "Puppet"), null)),
+                        beat("Draw").withPresentation(Presentation.of(Presentation.Target.of("Block", "Hand_R"),
+                                null, null, null, null, EffectRef.of("Fixture_Sting", null, "Camera"), null)),
+                        beat("Surge").withPresentation(Presentation.of(Presentation.Target.of("Ceiling"),
+                                null, null, null, null, null, null))});
+        Set<String> codes = validate(station("fixture_targets", a));
+        assertTrue(codes.contains("PRESENTATION_DISPLAY_TARGET_NO_DISPLAY"), codes.toString());
+        assertTrue(codes.contains("PRESENTATION_PARTICLE_BAD_COLOR"), codes.toString());
+        assertTrue(codes.contains("PRESENTATION_ENTITY_TARGET_CAP_IGNORED"), codes.toString());
+        assertTrue(codes.contains("PRESENTATION_PUPPET_TARGET_NO_PUPPET"), codes.toString());
+        assertTrue(codes.contains("EFFECT_PUPPET_TARGET_NO_PUPPET"), codes.toString());
+        assertTrue(codes.contains("PRESENTATION_TARGET_NODE_AT_BLOCK"), codes.toString());
+        assertTrue(codes.contains("EFFECT_TARGET_UNKNOWN"), codes.toString());
+        assertTrue(codes.contains("PRESENTATION_TARGET_UNKNOWN_KIND"), codes.toString());
+    }
+
+    @Test
+    void aDisplayTarget_isQuietWhenASocketShowsAProp() throws Exception {
+        String body = "{ \"MaxQuantity\": 1, \"Sockets\": { \"slot_a\": { \"Item\": {}, \"MaxQuantity\": 1,"
+                + " \"Display\": { \"Offset\": { \"Y\": 0.5 } } } } }";
+        Custody withProp = Custody.CODEC.decodeJson(RawJsonReader.fromJsonString(body),
+                new AssetExtraInfo<>(new AssetExtraInfo.Data(StationAsset.class, "fixture", null)));
+        ActionDef a = ActionDef.of("Unmake").withRecipe(recipe()).withCustody(withProp)
+                .withSteps(new StationStep[] {
+                        beat("Draw").withPresentation(Presentation.of(Presentation.Target.of("Display"), null,
+                                null, null, null, null, null)).withDisplay(Custody.Display.of(null, null, null, true))});
+        Set<String> codes = validate(station("fixture_prop", a));
+        assertFalse(codes.contains("PRESENTATION_DISPLAY_TARGET_NO_DISPLAY"), codes.toString());
+        assertFalse(codes.contains("STEP_DISPLAY_WITHOUT_DISPLAY"), codes.toString());
+    }
+
+    @Test
+    void aStepsState_needsStatesAndAWorkBeat_andAStepsDisplayNeedsAProp() throws Exception {
+        ActionDef a = ActionDef.of("Unmake")
+                .withRecipe(recipe())
+                .withCustody(twoSingleSockets())
+                .withSteps(new StationStep[] {
+                        beat("Draw").withState("Drawing").withDisplay(Custody.Display.of(null, null, null, true))});
+        Set<String> codes = validate(station("fixture_state", a));
+        assertTrue(codes.contains("STEP_STATE_WITHOUT_STATES"), codes.toString());
+        assertTrue(codes.contains("STEP_DISPLAY_WITHOUT_DISPLAY"), codes.toString());
+
+        Custody withStates = Custody.of(1, null, null, Custody.States.of("Default", "Loaded", "Working"), null);
+        ActionDef b = ActionDef.of("Unmake").withRecipe(recipe()).withCustody(withStates)
+                .withSteps(new StationStep[] {
+                        StationStep.of("Settle").withDuration(StationStep.Duration.of(1000L)).withState("Drawing"),
+                        beat("Draw").withState("Drawing")});
+        Set<String> codesB = validate(station("fixture_state_b", b));
+        assertFalse(codesB.contains("STEP_STATE_WITHOUT_STATES"), codesB.toString());
+        assertTrue(codesB.contains("STEP_STATE_NOT_WORK"), codesB.toString());
+    }
+
+    @Test
+    void aPreviewNeedsARecipe() {
+        Custody preview = Custody.of(1, null, null, true, null, null, null, null, null);
+        Set<String> codes = validate(station("fixture_preview", ActionDef.of("Look").withCustody(preview)
+                .withSteps(new StationStep[] {beat("Open")})));
+        assertTrue(codes.contains("CUSTODY_PREVIEW_WITHOUT_RECIPE"), codes.toString());
+        Set<String> quiet = validate(station("fixture_preview_ok", ActionDef.of("Unmake").withRecipe(recipe())
+                .withCustody(preview).withSteps(new StationStep[] {beat("Unmake").withConvert(StationStep.Convert.on())})));
+        assertFalse(quiet.contains("CUSTODY_PREVIEW_WITHOUT_RECIPE"), quiet.toString());
+    }
+
+    @Test
+    void anExtensionsCustodyOverlay_getsTheSameExceptChecksTheActionGets() throws Exception {
+        ExtensionAsset hollow = extension("fixture_hollow", "{ \"Target\": { \"Action\": \"Unmake\" },"
+                + " \"Custody\": { \"Input\": { \"Except\": { } },"
+                + " \"Sockets\": { \"slot_a\": { \"Item\": { \"Match\": { \"Except\": { } } } } } } }");
+        List<Finding> findings = StationValidator.validateExtensions(List.of(hollow), List.of(), List.of(), ANY, ANY, ANY, ANY);
+        Set<String> codes = codes(findings);
+        assertEquals(2L, findings.stream()
+                .filter(f -> "EXCEPT_CATCH_ALL".equals(f.code())).count(),
+                "the overlay's Input hole and its socket's Match hole are each checked: " + codes);
     }
 
     @Test

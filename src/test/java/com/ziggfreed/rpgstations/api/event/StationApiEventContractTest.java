@@ -59,6 +59,41 @@ class StationApiEventContractTest {
     }
 
     @Test
+    void inputConsumed_plainDataPassesThrough() {
+        StationInputConsumedEvent e = new StationInputConsumedEvent(null, null, null, PLAYER_ID,
+                WORLD_ID, 3, 64, -7, "sawmill", "Mill", List.of());
+
+        assertEquals(PLAYER_ID, e.workerId());
+        assertEquals(WORLD_ID, e.worldUuid());
+        assertEquals(3, e.blockX());
+        assertEquals(64, e.blockY());
+        assertEquals(-7, e.blockZ());
+        assertEquals("sawmill", e.stationId());
+        assertEquals("Mill", e.actionId());
+        assertTrue(e.inputs().isEmpty());
+    }
+
+    @Test
+    void inputConsumed_unattendedSettle_namesNoWorker() {
+        StationInputConsumedEvent e = new StationInputConsumedEvent(null, null, null, null,
+                WORLD_ID, 0, 64, 0, "sawmill", "Mill", List.of());
+
+        assertNull(e.playerRef());
+        assertNull(e.worker());
+        assertNull(e.workerId());
+        assertFalse(e.attended(), "an unattended settle is the one shape with no worker");
+    }
+
+    @Test
+    void inputConsumed_inputsListIsImmutable() {
+        StationInputConsumedEvent e = new StationInputConsumedEvent(null, null, null, PLAYER_ID,
+                WORLD_ID, 0, 64, 0, "sawmill", "Mill", List.of());
+
+        assertThrows(UnsupportedOperationException.class, () -> e.inputs().add(null),
+                "a listener must not be able to mutate the committed batch");
+    }
+
+    @Test
     void structureChanged_activation_carriesTheActor() {
         StationStructureChangedEvent e = new StationStructureChangedEvent(WORLD_ID, 1, 65, 2,
                 "cookingpit", "RPG_Station_CookingPit", true, PLAYER_ID, null);

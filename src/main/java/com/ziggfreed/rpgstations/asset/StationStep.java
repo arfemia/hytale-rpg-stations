@@ -71,6 +71,8 @@ public final class StationStep {
     @Nullable protected Boolean isWork;
     @Nullable protected Boolean paced;
     @Nullable protected Boolean rollBonus;
+    @Nullable protected String state;
+    @Nullable protected Custody.Display display;
 
     public static final BuilderCodec<StationStep> CODEC = BuilderCodec.builder(StationStep.class, StationStep::new)
             .appendInherited(new KeyedCodec<>("Id", Codec.STRING, false),
@@ -130,6 +132,12 @@ public final class StationStep {
                     (o, v) -> o.rollBonus = v, o -> o.rollBonus, (o, p) -> o.rollBonus = p.rollBonus)
             .metadata(EditorSchema.defaultValue(false))
             .documentation("Roll the action's Bonus (its own Lootables and Rolls plus every matching extension's) at this beat, once per iteration, instead of once when the program completes. Default false. A program with no step authoring this rolls the Bonus at completion as before.").add()
+            .appendInherited(new KeyedCodec<>("State", Codec.STRING, false),
+                    (o, v) -> o.state = v, o -> o.state, (o, p) -> o.state = p.state)
+            .documentation("The block State.Definitions name this beat holds its At-anchor block in while it runs, instead of the Custody.States.Working name: a deeper look for a later beat of one ritual. It applies only on a step that counts as work (IsWork) at a block whose Custody authors States, must exist in the block's own definitions (an unknown name is a silent no-op), and gives way to the resting look on the next non-work step and every session stop, exactly as Working does. Absent, a work step wears Working.").add()
+            .appendInherited(new KeyedCodec<>("Display", Custody.Display.CODEC, false),
+                    (o, v) -> o.display = v, o -> o.display, (o, p) -> o.display = p.display)
+            .documentation("A per-beat overlay on the placed piece's Display (the socket a ritual queue is working, else the first socket that shows a prop): the leaves it authors replace the socket's own for this beat, so a beat can lift the piece (Offset), turn it (Animated) or enlarge it (Scale). The prop is respawned with the overlay at iteration entry and stays that way until another beat overlays it or the piece leaves; a freshly respawned prop is seen by nobody until the next tick, so a cue targeting it in the same beat plays at its position. Absent leaves the prop as it stands.").add()
             .build();
 
     public StationStep() {
@@ -244,6 +252,37 @@ public final class StationStep {
     @Nonnull
     public StationStep withAt(@Nullable String v) {
         this.at = v;
+        return this;
+    }
+
+    /** The block state this beat holds its anchor block in while it runs; null = the custody's Working name. */
+    @Nullable
+    public String getState() {
+        return state;
+    }
+
+    /** True when {@link #state} is authored (a non-blank state name). */
+    public boolean hasState() {
+        return state != null && !state.isBlank();
+    }
+
+    /** Java-side setter for a procedurally-built program (mirrors the {@code with*} phase setters). */
+    @Nonnull
+    public StationStep withState(@Nullable String v) {
+        this.state = v;
+        return this;
+    }
+
+    /** The per-beat overlay on the worked piece's display prop; null = the prop stays as it stands. */
+    @Nullable
+    public Custody.Display getDisplay() {
+        return display;
+    }
+
+    /** Java-side setter for a procedurally-built program (mirrors the {@code with*} phase setters). */
+    @Nonnull
+    public StationStep withDisplay(@Nullable Custody.Display v) {
+        this.display = v;
         return this;
     }
 

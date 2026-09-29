@@ -14,6 +14,7 @@ import com.hypixel.hytale.codec.ExtraInfo;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditorSectionStart;
+import com.ziggfreed.common.asset.EditorSchema;
 import com.ziggfreed.common.codec.InheritMapCodec;
 import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.common.codec.Vec3i;
@@ -73,6 +74,8 @@ public final class Custody {
 
     @Nullable protected Integer maxQuantity;
     @Nullable protected Boolean singleFamily;
+    @Nullable protected Boolean heldOnly;
+    @Nullable protected Boolean preview;
     @Nullable protected ActionInput input;
     @Nullable protected States states;
     @Nullable protected Display display;
@@ -87,15 +90,23 @@ public final class Custody {
             .appendInherited(new KeyedCodec<>("SingleFamily", Codec.BOOLEAN, false),
                     (o, v) -> o.singleFamily = v, o -> o.singleFamily, (o, p) -> o.singleFamily = p.singleFamily)
             .documentation("When true the claim locks to the FIRST placed item's resource family: a later placement of a different family is refused until the claim empties. Default false (any accepted material mixes freely).").add()
+            .appendInherited(new KeyedCodec<>("HeldOnly", Codec.BOOLEAN, false),
+                    (o, v) -> o.heldOnly = v, o -> o.heldOnly, (o, p) -> o.heldOnly = p.heldOnly)
+            .metadata(EditorSchema.defaultValue(false))
+            .documentation("When true a press places only what the player HOLDS: an empty hand, or a held item the station refuses, places nothing, and the hotbar and backpack are never searched for a match. Author it on a station that takes one valuable piece at a time, so a press can never pull gear out of the bag unasked. Default false, the classic held-else-inventory placement.").add()
+            .appendInherited(new KeyedCodec<>("Preview", Codec.BOOLEAN, false),
+                    (o, v) -> o.preview = v, o -> o.preview, (o, p) -> o.preview = p.preview)
+            .metadata(EditorSchema.defaultValue(false))
+            .documentation("When true, placing a piece tells the player what it will give back before any work starts: the outputs of the row the recipe matches for it (an authored or derived row, or a fallback route's), or that it gives nothing back on its own when only the essence-only route takes it. Default false, no preview. A station with no Recipe has nothing to preview.").add()
             .appendInherited(new KeyedCodec<>("Input", ActionInput.CODEC, false),
                     (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input)
-            .documentation("The explicit placement-acceptance matcher; absent derives acceptance from the resolved action's Recipe.Conversions inputs.").add()
+            .documentation("The explicit placement-acceptance matcher. Authored routes REPLACE the derivation from the resolved action's Recipe (its conversion inputs and its fallback routes); an Input that authors only Except keeps that derivation and carves the holes out of it, so a station can refuse a short list of ids without restating what it takes. Absent derives acceptance from the recipe alone.").add()
             .appendInherited(new KeyedCodec<>("States", States.CODEC, false),
                     (o, v) -> o.states = v, o -> o.states, (o, p) -> o.states = p.states)
             .documentation("The block State.Definitions names custody flips between; null = no visual/hint flip.").add()
             .appendInherited(new KeyedCodec<>("Display", Display.CODEC, false),
                     (o, v) -> o.display = v, o -> o.display, (o, p) -> o.display = p.display)
-            .documentation("Opts the placed input into a placed-as-entity prop visual at the block-top anchor; null = no visual.").add()
+            .documentation("Opts the placed input into a placed-as-entity prop visual at the block-centre anchor; null = no visual.").add()
             .appendInherited(new KeyedCodec<>("Share", Share.CODEC, false),
                     (o, v) -> o.share = v, o -> o.share, (o, p) -> o.share = p.share)
             .documentation("Who besides an owner may place, work from, or take back placed materials here; every leaf defaults false (owner-only). A socket may override any leaf for its own pile.")
@@ -149,14 +160,25 @@ public final class Custody {
         return of(maxQuantity, singleFamily, input, states, display, null, null);
     }
 
-    /** Java-side factory carrying EVERY leaf ({@link #share} + {@link #sockets} included); sets the same fields the codec fills. */
+    /** Java-side factory carrying every leaf but the two placement knobs ({@link #heldOnly}, {@link #preview}); sets the same fields the codec fills. */
     @Nonnull
     public static Custody of(@Nullable Integer maxQuantity, @Nullable Boolean singleFamily,
+            @Nullable ActionInput input, @Nullable States states, @Nullable Display display,
+            @Nullable Share share, @Nullable Map<String, Socket> sockets) {
+        return of(maxQuantity, singleFamily, null, null, input, states, display, share, sockets);
+    }
+
+    /** Java-side factory carrying EVERY leaf; sets the same fields the codec fills. */
+    @Nonnull
+    public static Custody of(@Nullable Integer maxQuantity, @Nullable Boolean singleFamily,
+            @Nullable Boolean heldOnly, @Nullable Boolean preview,
             @Nullable ActionInput input, @Nullable States states, @Nullable Display display,
             @Nullable Share share, @Nullable Map<String, Socket> sockets) {
         Custody c = new Custody();
         c.maxQuantity = maxQuantity;
         c.singleFamily = singleFamily;
+        c.heldOnly = heldOnly;
+        c.preview = preview;
         c.input = input;
         c.states = states;
         c.display = display;
@@ -168,6 +190,28 @@ public final class Custody {
     @Nullable
     public Integer getMaxQuantity() {
         return maxQuantity;
+    }
+
+    /** The raw authored {@code HeldOnly} knob; null = the classic held-else-inventory placement. */
+    @Nullable
+    public Boolean getHeldOnly() {
+        return heldOnly;
+    }
+
+    /** {@link #heldOnly}, reader-defaulted to {@code false}: a press may pull a match out of the bag. */
+    public boolean effectiveHeldOnly() {
+        return heldOnly != null && heldOnly;
+    }
+
+    /** The raw authored {@code Preview} knob; null = no preview. */
+    @Nullable
+    public Boolean getPreview() {
+        return preview;
+    }
+
+    /** {@link #preview}, reader-defaulted to {@code false}. */
+    public boolean effectivePreview() {
+        return preview != null && preview;
     }
 
     /** {@link #maxQuantity}, reader-defaulted to {@link #DEFAULT_MAX_QUANTITY} when null/non-positive. */
@@ -401,7 +445,7 @@ public final class Custody {
 
     /**
      * The placed-input PLACED-AS-ENTITY visual (design section 9, phase 2 leg G): per-station
-     * asset-authored knobs for the display prop's spatial fit relative to the station's block-top
+     * asset-authored knobs for the display prop's spatial fit relative to the station's block-centre
      * anchor - the same point every cycle/swing/impact/rare-find moment already targets
      * ({@code blockX+0.5, blockY+0.5, blockZ+0.5}). All three leaves are nullable/orthogonal
      * (independently composable, never a mode): {@link #offset} (the shared {@link Vec3}
@@ -446,31 +490,130 @@ public final class Custody {
         @Nullable protected Vec3 offset;
         @Nullable protected Double scale;
         @Nullable protected Rotation rotation;
+        @Nullable protected Boolean animated;
 
         public static final BuilderCodec<Display> CODEC = BuilderCodec.builder(Display.class, Display::new)
                 .appendInherited(new KeyedCodec<>("Offset", Vec3.CODEC, false),
                         (o, v) -> o.offset = v, o -> o.offset, (o, p) -> o.offset = p.offset)
-                .documentation("Facing-relative shift off the block-top anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical.").add()
+                .documentation("Facing-relative shift off the block-centre anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical.").add()
                 .appendInherited(new KeyedCodec<>("Scale", Codec.DOUBLE, false),
                         (o, v) -> o.scale = v, o -> o.scale, (o, p) -> o.scale = p.scale)
                 .documentation("Uniform prop scale, a fraction of a real block for a block-shaped item; defaults to 1.0 (full block size) when absent or non-positive.").add()
                 .appendInherited(new KeyedCodec<>("Rotation", Rotation.CODEC, false),
                         (o, v) -> o.rotation = v, o -> o.rotation, (o, p) -> o.rotation = p.rotation)
                 .documentation("Facing-relative rotation in degrees; the placed block's own facing is added into Yaw at spawn.").add()
+                .appendInherited(new KeyedCodec<>("Animated", Codec.BOOLEAN, false),
+                        (o, v) -> o.animated = v, o -> o.animated, (o, p) -> o.animated = p.animated)
+                .metadata(EditorSchema.defaultValue(false))
+                .documentation("When true the prop turns and bobs the way a dropped item does (the client's own motion); default false, a still prop. Set at spawn: a beat that switches it on mid-ritual (a step's Display overlay) respawns the prop.").add()
                 .build();
 
         @Nonnull
         public static Display of(@Nullable Vec3 offset, @Nullable Double scale, @Nullable Rotation rotation) {
+            return of(offset, scale, rotation, null);
+        }
+
+        /** Java-side factory carrying the {@code Animated} knob too. */
+        @Nonnull
+        public static Display of(@Nullable Vec3 offset, @Nullable Double scale, @Nullable Rotation rotation,
+                @Nullable Boolean animated) {
             Display d = new Display();
             d.offset = offset;
             d.scale = scale;
             d.rotation = rotation;
+            d.animated = animated;
             return d;
+        }
+
+        /**
+         * PURE, the per-leaf overlay every layered {@code Display} resolves through (an extension's
+         * Custody overlay, a step's per-beat overlay): {@code over}'s authored leaves replace
+         * {@code base}'s, and a leaf {@code over} omits falls through; inside {@code Offset} and
+         * {@code Rotation} each axis overlays on its own. Identity-preserving at the edges: a null
+         * {@code over} answers {@code base} itself, a null {@code base} answers {@code over} itself.
+         */
+        @Nullable
+        public static Display overlaid(@Nullable Display base, @Nullable Display over) {
+            if (over == null) {
+                return base;
+            }
+            if (base == null) {
+                return over;
+            }
+            return of(overlaidOffset(base.offset, over.offset),
+                    over.scale != null ? over.scale : base.scale,
+                    overlaidRotation(base.rotation, over.rotation),
+                    over.animated != null ? over.animated : base.animated);
+        }
+
+        @Nullable
+        private static Vec3 overlaidOffset(@Nullable Vec3 base, @Nullable Vec3 over) {
+            if (over == null) {
+                return base;
+            }
+            if (base == null) {
+                return over;
+            }
+            return Vec3.of(over.getX() != null ? over.getX() : base.getX(),
+                    over.getY() != null ? over.getY() : base.getY(),
+                    over.getZ() != null ? over.getZ() : base.getZ());
+        }
+
+        @Nullable
+        private static Rotation overlaidRotation(@Nullable Rotation base, @Nullable Rotation over) {
+            if (over == null) {
+                return base;
+            }
+            if (base == null) {
+                return over;
+            }
+            return Rotation.of(over.getYaw() != null ? over.getYaw() : base.getYaw(),
+                    over.getPitch() != null ? over.getPitch() : base.getPitch(),
+                    over.getRoll() != null ? over.getRoll() : base.getRoll());
+        }
+
+        /** Whether two display groups would spawn the same prop (every leaf equal by value). */
+        public static boolean sameLook(@Nullable Display a, @Nullable Display b) {
+            if (a == b) {
+                return true;
+            }
+            if (a == null || b == null) {
+                return false;
+            }
+            return a.effectiveScale() == b.effectiveScale() && a.effectiveAnimated() == b.effectiveAnimated()
+                    && sameVec(a.offset, b.offset) && sameRotation(a.rotation, b.rotation);
+        }
+
+        private static boolean sameVec(@Nullable Vec3 a, @Nullable Vec3 b) {
+            return axis(a != null ? a.getX() : null) == axis(b != null ? b.getX() : null)
+                    && axis(a != null ? a.getY() : null) == axis(b != null ? b.getY() : null)
+                    && axis(a != null ? a.getZ() : null) == axis(b != null ? b.getZ() : null);
+        }
+
+        private static boolean sameRotation(@Nullable Rotation a, @Nullable Rotation b) {
+            return axis(a != null ? a.getYaw() : null) == axis(b != null ? b.getYaw() : null)
+                    && axis(a != null ? a.getPitch() : null) == axis(b != null ? b.getPitch() : null)
+                    && axis(a != null ? a.getRoll() : null) == axis(b != null ? b.getRoll() : null);
+        }
+
+        private static double axis(@Nullable Double value) {
+            return value != null ? value : 0.0;
         }
 
         @Nullable
         public Vec3 getOffset() {
             return offset;
+        }
+
+        /** The raw authored {@code Animated} knob; null = a still prop. */
+        @Nullable
+        public Boolean getAnimated() {
+            return animated;
+        }
+
+        /** {@link #animated}, reader-defaulted to {@code false} (a still prop). */
+        public boolean effectiveAnimated() {
+            return animated != null && animated;
         }
 
         @Nullable

@@ -37,12 +37,16 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
 | `Limits.MaxUnattendedGatherCycles` | unlimited | A server-wide ceiling on how many accrued [unattended](unattended-work.md) cycles ONE gather pays out. The effective ceiling is the SMALLER of it and each action's own `Work.Unattended.MaxCycles`, so it can only tighten what an action authors, never raise it; absent means each action's own knob alone applies. |
 | `Moments` | one entry: `Refused` | The engine-wide default cue layer, keyed by moment id exactly like an action's own `Moments` map (see [Flairs](flairs.md) for the vocabulary). An entry here sits UNDER every action's entry for the same id, per leaf: the action's authored leaves win, the leaves it omits fall through to this one, so a moment no action dressed still plays. The jar ships exactly one entry, `Refused`, playing `SFX_Generic_Crafting_Failed` - the same sound the vanilla benches play when they cannot proceed. |
 | `Refusals.RepeatWindowMs` | `1500` | How long, in milliseconds, the same player pressing the same station again for the SAME reason is answered by the refusal cue's sound alone: no second notice stacks on the first, no second particle burst or camera shake, and no event for a listening mod. `0` answers every press in full. See [Refusals](#refusals) below. |
+| `Protected` | none | The server-wide protect-list: `Items` (item ids, matched without regard to case) and `Tags` (item tag family to refused values) no station may take as placed input, whatever its own matcher says. A press that offers one is turned away with its own reason, `Refused:Protected`, before any socket is offered the piece. A station's own holes are its `Custody.Input.Except`; this is the owner's word over every station at once. |
 
-The top-level knobs (`Enabled`, `SummaryHud`, `Limits`, `Moments`, `Refusals`) are independent and
-composable - disabling the summary HUD does not disable the engine, and vice versa. Every leaf is nullable, so a
-partial owner override changes only what it mentions. `Limits` is deliberately unauthored in the jar
-default: every leaf means unlimited when absent, and the right ceiling depends on a server's own
-player count and hardware - a busy server sets its own numbers rather than inheriting a guess.
+The top-level knobs (`Enabled`, `SummaryHud`, `Limits`, `Moments`, `Refusals`, `Protected`) are
+independent and composable - disabling the summary HUD does not disable the engine, and vice versa.
+Every leaf is nullable within the one file, but the server reads ONE settings file: a pack's own
+`Settings.json` replaces the jar's whole rather than merging with it, so a pack (or an owner) that
+wants the jar's `Refused` cue beside its own protect-list authors both in its file. `Limits` is
+deliberately unauthored in the jar default: every leaf means unlimited when absent, and the right
+ceiling depends on a server's own player count and hardware - a busy server sets its own numbers
+rather than inheriting a guess.
 
 <a id="refusals"></a>
 ## Refusals

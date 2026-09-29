@@ -46,6 +46,7 @@ import com.ziggfreed.common.loot.stamp.RollPoolConfig;
 import com.ziggfreed.common.loot.stamp.StampSpec;
 import com.ziggfreed.common.loot.stamp.StatRollEntry;
 import com.ziggfreed.common.match.ItemMatch;
+import com.ziggfreed.common.cast.ModelParticleService;
 import com.ziggfreed.common.validation.Finding;
 import com.ziggfreed.common.validation.Severity;
 import com.ziggfreed.common.validation.ValidationReport;
@@ -726,14 +727,117 @@ public final class StationValidator {
                             label + " Particles SystemId '" + burst.getSystemId()
                                     + "' is not a known ParticleSystem id - check for a typo", id));
                 }
+                if (burst.getColor() != null && !burst.getColor().isBlank()
+                        && ModelParticleService.tint(burst.getColor()) == null) {
+                    out.add(Finding.warning(DOMAIN, "PRESENTATION_PARTICLE_BAD_COLOR",
+                            label + " Particles entry '" + burst.getSystemId() + "' authors Color '" + burst.getColor()
+                                    + "', which is not a #rrggbb hex - the tint is ignored and the system plays its"
+                                    + " own colours", id));
+                }
+                if (p.effectiveTargetKind() != Presentation.Target.Kind.BLOCK && burst.getDurationSeconds() != null) {
+                    out.add(Finding.info(DOMAIN, "PRESENTATION_ENTITY_TARGET_CAP_IGNORED",
+                            label + " Particles entry '" + burst.getSystemId() + "' authors DurationSeconds at an"
+                                    + " entity Target - an attached system has no playback cap, so an endless"
+                                    + " system should stay at the block (the cap applies only when the cue falls"
+                                    + " back to the entity's position)", id));
+                }
             }
         }
+        checkTarget(p.getTarget(), label, id, out);
         Presentation.Interaction interaction = p.getInteraction();
         if (interaction != null && interaction.hasId() && !interactionKnownLive(interaction.getId())) {
             out.add(Finding.warning(DOMAIN, "PRESENTATION_UNKNOWN_INTERACTION",
                     label + " Interaction.Id '" + interaction.getId() + "' references an unknown RootInteraction", id));
         }
         checkEffectRef(p.getEffect(), label + ".Effect", id, out);
+    }
+
+    /**
+     * The presentation {@code Target} leaf's own shape: an unknown kind word reads as Block
+     * ({@code PRESENTATION_TARGET_UNKNOWN_KIND}), and a {@code Node} means nothing at the block
+     * ({@code PRESENTATION_TARGET_NODE_AT_BLOCK}). Whether the action can honour a Display or a
+     * Puppet target is the action-level walk's business ({@link #checkTargetsAgainstAction}).
+     */
+    private static void checkTarget(@Nullable Presentation.Target target, @Nonnull String label,
+                                    @Nonnull String id, @Nonnull List<Finding> out) {
+        if (target == null) {
+            return;
+        }
+        String kind = target.getKind();
+        if (kind != null && !kind.isBlank() && !knownTargetKind(kind)) {
+            out.add(Finding.warning(DOMAIN, "PRESENTATION_TARGET_UNKNOWN_KIND",
+                    label + " Target '" + kind + "' is not Block, Display or Puppet - it reads as Block", id));
+        }
+        if (target.hasNode() && target.effectiveKind() == Presentation.Target.Kind.BLOCK) {
+            out.add(Finding.info(DOMAIN, "PRESENTATION_TARGET_NODE_AT_BLOCK",
+                    label + " Target names Node '" + target.getNode() + "' at the block - a node attaches particles"
+                            + " to an entity's model and means nothing at the block", id));
+        }
+    }
+
+    /** PURE: is {@code word} one of the three Target kinds, whatever its case? */
+    static boolean knownTargetKind(@Nonnull String word) {
+        String w = word.trim().toUpperCase(Locale.ROOT);
+        for (Presentation.Target.Kind kind : Presentation.Target.Kind.values()) {
+            if (kind.name().equals(w)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether an action can honour the entity targets one of its presentations names: a Display
+     * target needs a socket that shows a prop ({@code PRESENTATION_DISPLAY_TARGET_NO_DISPLAY}, a
+     * warning, since the cue would only ever play at the block), and a Puppet target on an action
+     * with no active puppet plays on the worker's own body ({@code PRESENTATION_PUPPET_TARGET_NO_PUPPET},
+     * INFO, since that is the documented fallback). The effect's own target gets the same Puppet
+     * note ({@code EFFECT_PUPPET_TARGET_NO_PUPPET}) and a word that is neither Player nor Puppet is
+     * a warning ({@code EFFECT_TARGET_UNKNOWN}).
+     */
+    private static void checkTargetsAgainstAction(@Nullable Presentation p, boolean showsDisplay, boolean puppetActive,
+                                                  @Nonnull String label, @Nonnull String id,
+                                                  @Nonnull List<Finding> out) {
+        if (p == null) {
+            return;
+        }
+        Presentation.Target.Kind kind = p.effectiveTargetKind();
+        if (kind == Presentation.Target.Kind.DISPLAY && !showsDisplay) {
+            out.add(Finding.warning(DOMAIN, "PRESENTATION_DISPLAY_TARGET_NO_DISPLAY",
+                    label + " targets the placed piece's Display, but no socket of this action authors a Display"
+                            + " group - the cue plays at the block instead", id));
+        }
+        if (kind == Presentation.Target.Kind.PUPPET && !puppetActive) {
+            out.add(Finding.info(DOMAIN, "PRESENTATION_PUPPET_TARGET_NO_PUPPET",
+                    label + " targets the Puppet, but this action's Puppet group is not active - the cue plays on"
+                            + " the worker's own body", id));
+        }
+        EffectRef effect = p.getEffect();
+        if (effect != null && effect.hasId() && effect.getTarget() != null && !effect.getTarget().isBlank()) {
+            boolean player = EffectRef.TARGET_PLAYER.equalsIgnoreCase(effect.getTarget());
+            if (!player && !effect.targetsPuppet()) {
+                out.add(Finding.warning(DOMAIN, "EFFECT_TARGET_UNKNOWN",
+                        label + ".Effect Target '" + effect.getTarget() + "' is not Player or Puppet - it reads as"
+                                + " Player", id));
+            } else if (effect.targetsPuppet() && !puppetActive) {
+                out.add(Finding.info(DOMAIN, "EFFECT_PUPPET_TARGET_NO_PUPPET",
+                        label + ".Effect targets the Puppet, but this action's Puppet group is not active - the"
+                                + " effect goes on the worker's own body", id));
+            }
+        }
+    }
+
+    /** Whether any Item socket of {@code custody} shows a prop (authors a {@code Display} group). */
+    static boolean showsDisplay(@Nullable Custody custody) {
+        if (custody == null) {
+            return false;
+        }
+        for (Custody.ResolvedSocket socket : custody.effectiveSockets()) {
+            if (socket.itemRoute() && socket.display() != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The shared {@link EffectRef} existence check (decision 51d), standard warn severity. */
@@ -1040,6 +1144,13 @@ public final class StationValidator {
             }
             if (ext.getCustody() != null) {
                 checkCustody(ext.getCustody(), null, true, label + ".Custody", extId, out);
+                // An overlay's own Except holes get the same shape checks the action's do: the
+                // overlay's entries land beside the base's, so an inert one here is as silent a
+                // slip as one on the action.
+                if (ext.getCustody().getInput() != null) {
+                    checkExcept(ext.getCustody().getInput(), label + ".Custody.Input", extId, out);
+                }
+                checkSocketExcepts(ext.getCustody(), label, extId, out);
             }
             if (ext.getContributionScale() != null) {
                 checkContributionScale(ext.getContributionScale(), extId, label + ".ContributionScale",
@@ -1821,6 +1932,13 @@ public final class StationValidator {
             out.add(Finding.warning(DOMAIN, "CUSTODY_DISPLAY_NON_POSITIVE_SCALE",
                     label + " Custody.Display.Scale is non-positive (" + display.getScale() + ") - falls back to "
                             + "the 1.0 default", id));
+        }
+        // The placed-piece preview names the row the recipe would run; with no Recipe there is
+        // nothing to preview, so the knob is inert.
+        if (!overlay && custody.effectivePreview() && effectiveRecipe == null) {
+            out.add(Finding.warning(DOMAIN, "CUSTODY_PREVIEW_WITHOUT_RECIPE",
+                    label + " authors Custody.Preview true with no Recipe - there is no row to preview, so the"
+                            + " knob does nothing", id));
         }
         // P11 knob (ruling 74): SingleFamily locks the claim to whichever family placed first,
         // refusing a different one "until the claim empties" - but a claim that can only ever hold
@@ -2678,20 +2796,27 @@ public final class StationValidator {
      */
     private static void checkExcept(@Nonnull ActionInput matcher, @Nonnull String label, @Nonnull String id,
             @Nonnull List<Finding> out) {
-        ActionInput except = matcher.getExcept();
-        if (except == null) {
+        ActionInput[] excepts = matcher.getExcepts();
+        if (excepts == null) {
             return;
         }
-        if (except.isCatchAll()) {
-            out.add(Finding.warning(DOMAIN, "EXCEPT_CATCH_ALL",
-                    label + ".Except authors no route at all, so it excludes nothing and does nothing - the"
-                            + " matcher accepts exactly what it would without it; author the ItemId, ResourceTypeId,"
-                            + " Tags or Function the hole should refuse", id));
-        }
-        String function = except.getFunction();
-        if (function != null && !function.isBlank() && !isKnownFunction(function)) {
-            out.add(Finding.warning(DOMAIN, "UNKNOWN_ACTION_FUNCTION",
-                    label + ".Except.Function '" + function + "' is not one of Weapon/Armor/Tool", id));
+        for (int i = 0; i < excepts.length; i++) {
+            ActionInput except = excepts[i];
+            String entry = excepts.length == 1 ? label + ".Except" : label + ".Except[" + i + "]";
+            if (except == null) {
+                continue;
+            }
+            if (except.isCatchAll()) {
+                out.add(Finding.warning(DOMAIN, "EXCEPT_CATCH_ALL",
+                        entry + " authors no route at all, so it excludes nothing and does nothing - the"
+                                + " matcher accepts exactly what it would without it; author the ItemId, ResourceTypeId,"
+                                + " Tags or Function the hole should refuse", id));
+            }
+            String function = except.getFunction();
+            if (function != null && !function.isBlank() && !isKnownFunction(function)) {
+                out.add(Finding.warning(DOMAIN, "UNKNOWN_ACTION_FUNCTION",
+                        entry + ".Function '" + function + "' is not one of Weapon/Armor/Tool", id));
+            }
         }
     }
 
@@ -3801,11 +3926,46 @@ public final class StationValidator {
     @Nonnull
     public static List<Finding> validateSettings(@Nullable RpgStationsSettingsAsset settings) {
         List<Finding> out = new ArrayList<>();
-        if (settings == null || settings.getMoments() == null || settings.getMoments().isEmpty()) {
+        if (settings == null) {
             return out;
         }
-        checkMomentsMap(settings.getMoments(), "Settings Moments", RpgStationsSettingsAsset.ID, out);
+        if (settings.getMoments() != null && !settings.getMoments().isEmpty()) {
+            checkMomentsMap(settings.getMoments(), "Settings Moments", RpgStationsSettingsAsset.ID, out);
+        }
+        checkProtected(settings.getProtected(), out);
         return out;
+    }
+
+    /**
+     * The owner protect-list ({@code Settings.Protected}): an item id no loaded item answers to is
+     * almost always a typo, and a typo protects nothing ({@code PROTECTED_UNKNOWN_ITEM}, INFO,
+     * since an id a later pack adds is legitimate); a group naming neither an id nor a tag does
+     * nothing ({@code PROTECTED_EMPTY}, INFO).
+     */
+    private static void checkProtected(@Nullable RpgStationsSettingsAsset.Protected protectedList,
+                                       @Nonnull List<Finding> out) {
+        if (protectedList == null) {
+            return;
+        }
+        if (protectedList.isEmpty()) {
+            out.add(Finding.info(DOMAIN, "PROTECTED_EMPTY",
+                    "Settings Protected names no Items and no Tags, so it protects nothing", RpgStationsSettingsAsset.ID));
+            return;
+        }
+        String[] items = protectedList.getItems();
+        if (items == null) {
+            return;
+        }
+        for (String itemId : items) {
+            if (itemId == null || itemId.isBlank()) {
+                continue;
+            }
+            if (!itemKnownLive(itemId)) {
+                out.add(Finding.info(DOMAIN, "PROTECTED_UNKNOWN_ITEM",
+                        "Settings Protected.Items entry '" + itemId + "' is not a known item id - check for a typo",
+                        RpgStationsSettingsAsset.ID));
+            }
+        }
     }
 
     /**
@@ -4093,6 +4253,14 @@ public final class StationValidator {
             // The same open-vocabulary walk a flair's Moments map gets - typo detection plus the
             // per-Presentation native-reference advisories, on every moment id at once.
             checkMomentsMap(moments, actionLabel + " Moments", id, out);
+            // Whether the action can honour the entity targets its moments name (a Display target
+            // needs a prop, a Puppet target an active puppet).
+            boolean momentPuppetActive = worker != null && worker.getPuppet() != null
+                    && worker.getPuppet().effectiveEnabled();
+            for (Map.Entry<String, Presentation> moment : moments.entrySet()) {
+                checkTargetsAgainstAction(moment.getValue(), showsDisplay(def.getCustody()), momentPuppetActive,
+                        actionLabel + " Moments['" + moment.getKey() + "']", id, out);
+            }
             // Timing, not references: a cue held for the whole window it plays inside lands in the
             // next one. Completion is deliberately exempt - there is no next cycle for it to overlap.
             checkCycleMomentDelay(def.getWork(), moment(moments, StationFlairs.MOMENT_CYCLE), noCycleOutput,
@@ -4114,7 +4282,7 @@ public final class StationValidator {
             Puppet puppet = worker != null ? worker.getPuppet() : null;
             boolean puppetActive = puppet != null && puppet.effectiveEnabled();
             checkSteps(steps, actionLabel, id, dropListKnown, factorKnown, lootableKnown, rollPoolKnown,
-                    puppetActive, knownAnchorIds, out);
+                    puppetActive, knownAnchorIds, def.getCustody(), out);
             // The beat-level knobs read the action's own groups: a Convert beat needs a Recipe to
             // run, a RollBonus beat a Bonus to roll. A Ref'd entry may inherit either from its base,
             // so hasRef counts as "may have one" and never false-flags.
@@ -4375,7 +4543,8 @@ public final class StationValidator {
             @Nonnull String actionLabel, @Nonnull String id, @Nonnull Predicate<String> dropListKnown,
             @Nonnull Predicate<String> factorKnown, @Nonnull Predicate<String> lootableKnown,
             @Nonnull Predicate<String> rollPoolKnown, boolean puppetActive, @Nonnull Set<String> knownAnchorIds,
-            @Nonnull List<Finding> out) {
+            @Nullable Custody custody, @Nonnull List<Finding> out) {
+        boolean showsDisplay = showsDisplay(custody);
         Set<String> seenIds = new HashSet<>();
         Set<String> knownIds = new HashSet<>();
         for (StationStep s : steps) {
@@ -4422,7 +4591,27 @@ public final class StationValidator {
             // (station/CLAUDE.md's per-step Presentation rule) - gets the SAME native-composition
             // advisory coverage every other Presentation site does.
             checkNativeRefs(step.getPresentation(), stepLabel + ".Presentation", id, out);
+            checkTargetsAgainstAction(step.getPresentation(), showsDisplay, puppetActive,
+                    stepLabel + ".Presentation", id, out);
             checkStepPresentationDelay(step, stepLabel, id, out);
+            // A step's own State needs the custody's States group (the exit reads the resting look
+            // off it) and only means anything on a work beat.
+            if (step.hasState()) {
+                if (custody == null || custody.getStates() == null) {
+                    out.add(Finding.warning(DOMAIN, "STEP_STATE_WITHOUT_STATES",
+                            stepLabel + " authors State '" + step.getState() + "' but this action's Custody authors"
+                                    + " no States group - the state is never applied", id));
+                } else if (!step.effectiveIsWork()) {
+                    out.add(Finding.info(DOMAIN, "STEP_STATE_NOT_WORK",
+                            stepLabel + " authors State '" + step.getState() + "' on a step that is not work (IsWork)"
+                                    + " - a block state is worn by a work beat only", id));
+                }
+            }
+            if (step.getDisplay() != null && !showsDisplay) {
+                out.add(Finding.warning(DOMAIN, "STEP_DISPLAY_WITHOUT_DISPLAY",
+                        stepLabel + " authors a Display overlay but no socket of this action shows a prop - there is"
+                                + " nothing to re-dress", id));
+            }
 
             StationStep.Repeat repeat = step.getRepeat();
             if (repeat != null) {

@@ -29,7 +29,7 @@ whole-group overridable per action, exactly like every other action group.
 }
 ```
 
-`Offset`/`Rotation` place the puppet relative to the station's block-top anchor - the same convention
+`Offset`/`Rotation` place the puppet relative to the station's block-centre anchor - the same convention
 `Custody.Display` follows: `X`/`Z` are in the placed block's own horizontal frame (`+Z` its front),
 `Y` is vertical and never rotated, and the block's own facing yaw folds additively into
 `Rotation.Yaw`, so `Yaw: 0` means "faces the same way the block does". `Rotation.Pitch` and

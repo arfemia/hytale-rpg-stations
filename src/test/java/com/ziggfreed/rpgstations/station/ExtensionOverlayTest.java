@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
 import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
@@ -53,7 +54,7 @@ public class ExtensionOverlayTest {
             + " \"Custody\": {"
             + "   \"MaxQuantity\": 7,"
             + "   \"SingleFamily\": true,"
-            + "   \"Input\": { \"ResourceTypeId\": \"Fixture_Family\" },"
+            + "   \"Input\": { \"ResourceTypeId\": \"Fixture_Family\", \"Except\": { \"ItemId\": \"Fixture_Base_Trophy\" } },"
             + "   \"States\": { \"Empty\": \"FixtureEmpty\", \"Loaded\": \"FixtureLoaded\","
             + "                 \"Working\": \"FixtureWorking\" },"
             + "   \"Display\": { \"Offset\": { \"X\": 0.25, \"Y\": 0.75, \"Z\": 1.25 }, \"Scale\": 2.0,"
@@ -182,6 +183,28 @@ public class ExtensionOverlayTest {
         assertEquals(5.5, d(merged.getDisplay().getOffset().getY()));
         assertEquals(0.25, d(merged.getDisplay().getOffset().getX()), "an unauthored Offset axis survives");
         assertEquals(2.0, d(merged.getDisplay().getScale()), "an unauthored Display leaf survives");
+    }
+
+    @Test
+    void custodyOverlay_exceptHolesAdd_theyNeverReplaceTheBases() throws Exception {
+        Custody base = baseCustody();
+        ExtensionAsset guard = ext("fixture_guard", "{ \"Target\": { \"Action\": \"Mill\" },"
+                + " \"Custody\": { \"Input\": { \"Except\": { \"ItemId\": \"Fixture_Pack_Trophy\" } } } }");
+
+        Custody merged = ExtensionCatalog.overlayCustody(base, guard.getCustody());
+
+        assertEquals("Fixture_Family", merged.getInput().getResourceTypeId(),
+                "the base's routes survive an Except-only overlay");
+        ActionInput[] holes = merged.getInput().getExcepts();
+        assertEquals(2, holes.length, "the overlay's hole lands BESIDE the base's, never in its place");
+        assertEquals("Fixture_Base_Trophy", holes[0].getItemId(), "the base's hole comes first");
+        assertEquals("Fixture_Pack_Trophy", holes[1].getItemId(), "then the overlay's");
+        assertTrue(StationCustody.exceptRefuses(merged.getInput(), "Fixture_Base_Trophy", null, null, null));
+        assertTrue(StationCustody.exceptRefuses(merged.getInput(), "Fixture_Pack_Trophy", null, null, null));
+        assertFalse(StationCustody.exceptRefuses(merged.getInput(), "Fixture_Log", null, null, null));
+
+        ActionInput[] baseOnly = ExtensionCatalog.concatExcepts(base.getInput().getExcepts(), null);
+        assertSame(base.getInput().getExcepts(), baseOnly, "no overlay entries: the base's own array stands");
     }
 
     // ==================== Custody.Sockets: per-id merge (overlay is not extension) ====================

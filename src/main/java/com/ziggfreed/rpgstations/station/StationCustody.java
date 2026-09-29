@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -16,7 +17,10 @@ import javax.annotation.Nullable;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Ingredient;
+import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
+import com.ziggfreed.common.entity.ItemReadings;
 import com.ziggfreed.common.match.ItemMatch;
 
 /**
@@ -382,12 +386,77 @@ final class StationCustody {
                 && !routesMatch(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
             return false;
         }
-        // The Except hole: a material the routes (or the catch-all) accept is refused when the
+        // The Except holes: a material the routes (or the catch-all) accept is refused when any
         // nested exclusion's ROUTES match it too. An absent Except excludes nothing, and so does a
-        // route-less one: it matches no route, so it carves no hole (the validator warns
-        // EXCEPT_CATCH_ALL, since such an Except does nothing).
-        ActionInput except = matcher.getExcept();
-        return except == null || !routesMatch(except, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+        // route-less entry: it matches no route, so it carves no hole (the validator warns
+        // EXCEPT_CATCH_ALL, since such an entry does nothing).
+        return !exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+    }
+
+    /**
+     * The hole alone: does any of {@code matcher}'s {@code Except} entries match the material? What
+     * turns a placement's generic "no place for that" into the Protected refusal, and what a
+     * derived acceptance (a {@code Custody.Input} or a socket {@code Match} that authors ONLY an
+     * {@code Except}) carves out of the rows and routes the station would otherwise accept. A null
+     * matcher, or one with no entry, refuses nothing.
+     */
+    static boolean exceptRefuses(@Nullable ActionInput matcher, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        ActionInput[] excepts = matcher != null ? matcher.getExcepts() : null;
+        if (excepts == null) {
+            return false;
+        }
+        for (ActionInput except : excepts) {
+            if (except != null && routesMatch(except, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * PURE: is the material on the owner's protect-list ({@code Settings.Protected})? Its id
+     * listed (matched without regard to case), or a listed tag value under a listed tag family
+     * the material carries. A null or empty list protects nothing.
+     */
+    static boolean isProtected(@Nullable RpgStationsSettingsAsset.Protected protectedList,
+            @Nullable String heldItemId, @Nullable Map<String, String[]> heldTags) {
+        if (protectedList == null || protectedList.isEmpty()) {
+            return false;
+        }
+        String[] items = protectedList.getItems();
+        if (items != null) {
+            for (String item : items) {
+                if (ItemMatch.itemId(item, heldItemId)) {
+                    return true;
+                }
+            }
+        }
+        return ItemMatch.tags(protectedList.getTags(), heldTags);
+    }
+
+    /**
+     * PURE: does a stack carry per-instance data a COUNT pile cannot keep? A count pile stores ids
+     * and counts only, so a stack that tracks durability (worn or not) or carries metadata would
+     * come back as a bare fresh stack: a free repair, or a lost enhancement. Such a stack is
+     * refused by every socket whose capacity is above one; a single-item socket keeps the real
+     * stack and takes it. A stack the reader cannot inspect ({@code null} keys) is refused too.
+     */
+    static boolean carriesInstanceData(@Nullable ItemStack stack) {
+        if (stack == null) {
+            return false;
+        }
+        try {
+            if (stack.getMaxDurability() > 0 && !stack.isUnbreakable()) {
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // A stack whose durability cannot be read is treated as bare on that axis; the
+            // metadata read below still decides.
+        }
+        Set<String> keys = ItemReadings.metadataKeys(stack);
+        return keys == null || !keys.isEmpty();
     }
 
     /**
@@ -407,8 +476,7 @@ final class StationCustody {
         if (!routesMatch(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
             return false;
         }
-        ActionInput except = matcher.getExcept();
-        return except == null || !routesMatch(except, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+        return !exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
     }
 
     /** One matcher's four routes alone (match = ANY), the {@code Except} hole not yet applied. */
@@ -556,6 +624,13 @@ final class StationCustody {
 
     /** Why a press placed nothing, most specific first - drives the keyed refusal toast. */
     enum PlacementDenial {
+        /**
+         * The material is protected: on the owner's protect-list, or in the hole an Except carves
+         * out of what a socket accepts. The most specific reason, and the one that survives a
+         * socket-less custody's generic mapping, so a player is told the station will not take
+         * the piece rather than that they hold nothing it works with.
+         */
+        PROTECTED,
         /** A socket accepted the material but its pile belongs to someone else (or Share.Place denied a fresh pile). */
         NOT_SHARED,
         /** A socket accepted the material but has no room left (its own cap, or the block total). */
