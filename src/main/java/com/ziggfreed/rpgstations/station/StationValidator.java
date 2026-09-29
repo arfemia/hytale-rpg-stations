@@ -68,6 +68,7 @@ import com.ziggfreed.rpgstations.asset.FlairAsset;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.Pace;
 import com.ziggfreed.rpgstations.asset.Presentation;
+import com.ziggfreed.rpgstations.asset.ProtectListAsset;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
@@ -241,6 +242,8 @@ public final class StationValidator {
                     dropListKnown, factorKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), stationKnown));
             out.addAll(validateSettings(SettingsCatalog.getInstance().current()));
+            out.addAll(validateProtectLists(ProtectListCatalog.getInstance().all().values(), stations,
+                    StationValidator::itemKnownLive));
             // Review minor (validator-standalone-action-unwired): the flagship standalone prepfish
             // ActionAsset (Ref'd from CuttingBoard) and every ExtensionAsset are validated HERE, in
             // the FULL post-load pass, now that ActionCatalog/ExtensionCatalog exist. Deliberately NOT
@@ -289,6 +292,7 @@ public final class StationValidator {
                     ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), ALWAYS_KNOWN));
             out.addAll(validateSettings(SettingsCatalog.getInstance().current()));
+            out.addAll(validateProtectLists(ProtectListCatalog.getInstance().all().values(), null, ALWAYS_KNOWN));
             out.addAll(validatePatterns(PatternCatalog.getInstance().all().values(),
                     ALWAYS_KNOWN, ALWAYS_KNOWN));
             return out;
@@ -734,12 +738,8 @@ public final class StationValidator {
                                     + "', which is not a #rrggbb hex - the tint is ignored and the system plays its"
                                     + " own colours", id));
                 }
-                if (p.effectiveTargetKind() != Presentation.Target.Kind.BLOCK && burst.getDurationSeconds() != null) {
-                    out.add(Finding.info(DOMAIN, "PRESENTATION_ENTITY_TARGET_CAP_IGNORED",
-                            label + " Particles entry '" + burst.getSystemId() + "' authors DurationSeconds at an"
-                                    + " entity Target - an attached system has no playback cap, so an endless"
-                                    + " system should stay at the block (the cap applies only when the cue falls"
-                                    + " back to the entity's position)", id));
+                if (p.effectiveTargetKind() != Presentation.Target.Kind.BLOCK) {
+                    checkEntityTargetBurst(burst, ParticleLifetimes.lifeSpanOf(burst.getSystemId()), label, id, out);
                 }
             }
         }
@@ -750,6 +750,32 @@ public final class StationValidator {
                     label + " Interaction.Id '" + interaction.getId() + "' references an unknown RootInteraction", id));
         }
         checkEffectRef(p.getEffect(), label + ".Effect", id, out);
+    }
+
+    /**
+     * One particle burst at an entity {@code Target} (the display prop or the double), given its
+     * system's own {@code LifeSpan} ({@code null} when unknown). An attached system has no playback
+     * cap, so the engine lets a burst ride the entity only when its system provably ends on its own
+     * ({@link ParticleLifetimes#provablyEnds}); any other burst plays at the entity's position
+     * under its {@code DurationSeconds} cap, which is a WARNING here
+     * ({@code PRESENTATION_ENTITY_TARGET_UNBOUNDED}): the author asked for the entity and gets a
+     * spot. A burst that does ride and authors {@code DurationSeconds} is told the cap does
+     * nothing there ({@code PRESENTATION_ENTITY_TARGET_CAP_IGNORED}, INFO).
+     */
+    static void checkEntityTargetBurst(@Nonnull Presentation.ModelParticle burst, @Nullable Float lifeSpanSeconds,
+            @Nonnull String label, @Nonnull String id, @Nonnull List<Finding> out) {
+        if (!ParticleLifetimes.provablyEnds(lifeSpanSeconds)) {
+            out.add(Finding.warning(DOMAIN, "PRESENTATION_ENTITY_TARGET_UNBOUNDED",
+                    label + " Particles entry '" + burst.getSystemId() + "' targets an entity, but its system has"
+                            + " no positive LifeSpan of its own, so nothing proves it ends: it plays at the"
+                            + " entity's position under DurationSeconds' cap instead of riding it. Give the"
+                            + " system (a derived copy) a LifeSpan to let it ride", id));
+        } else if (burst.getDurationSeconds() != null) {
+            out.add(Finding.info(DOMAIN, "PRESENTATION_ENTITY_TARGET_CAP_IGNORED",
+                    label + " Particles entry '" + burst.getSystemId() + "' authors DurationSeconds, but it rides"
+                            + " the entity, where its own LifeSpan (" + lifeSpanSeconds + "s) or the entity's"
+                            + " removal ends it and the cap does nothing", id));
+        }
     }
 
     /**
@@ -790,10 +816,11 @@ public final class StationValidator {
      * Whether an action can honour the entity targets one of its presentations names: a Display
      * target needs a socket that shows a prop ({@code PRESENTATION_DISPLAY_TARGET_NO_DISPLAY}, a
      * warning, since the cue would only ever play at the block), and a Puppet target on an action
-     * with no active puppet plays on the worker's own body ({@code PRESENTATION_PUPPET_TARGET_NO_PUPPET},
-     * INFO, since that is the documented fallback). The effect's own target gets the same Puppet
-     * note ({@code EFFECT_PUPPET_TARGET_NO_PUPPET}) and a word that is neither Player nor Puppet is
-     * a warning ({@code EFFECT_TARGET_UNKNOWN}).
+     * with no active puppet plays at the block ({@code PRESENTATION_PUPPET_TARGET_NO_PUPPET}, INFO,
+     * since that is the documented fallback: a moment's sounds and particles never land on the
+     * worker's own body). The effect's own target gets the same Puppet note
+     * ({@code EFFECT_PUPPET_TARGET_NO_PUPPET}: it goes on the worker then) and a word that is
+     * neither Player nor Puppet is a warning ({@code EFFECT_TARGET_UNKNOWN}).
      */
     private static void checkTargetsAgainstAction(@Nullable Presentation p, boolean showsDisplay, boolean puppetActive,
                                                   @Nonnull String label, @Nonnull String id,
@@ -809,8 +836,8 @@ public final class StationValidator {
         }
         if (kind == Presentation.Target.Kind.PUPPET && !puppetActive) {
             out.add(Finding.info(DOMAIN, "PRESENTATION_PUPPET_TARGET_NO_PUPPET",
-                    label + " targets the Puppet, but this action's Puppet group is not active - the cue plays on"
-                            + " the worker's own body", id));
+                    label + " targets the Puppet, but this action's Puppet group is not active - the cue's sounds"
+                            + " and particles play at the block", id));
         }
         EffectRef effect = p.getEffect();
         if (effect != null && effect.hasId() && effect.getTarget() != null && !effect.getTarget().isBlank()) {
@@ -838,6 +865,20 @@ public final class StationValidator {
             }
         }
         return false;
+    }
+
+    /**
+     * An effect's {@code Target} is read on a {@link Presentation}'s {@code Effect} only; authored
+     * anywhere else (a {@code Puppet.Hide.Effect}, an {@code rpgstations:effect} reward) it means
+     * nothing and the effect goes where that site always sends it ({@code EFFECT_TARGET_IGNORED}).
+     */
+    private static void checkEffectTargetIgnored(@Nullable String authoredTarget, @Nonnull String label,
+            @Nonnull String wearer, @Nonnull String id, @Nonnull List<Finding> out) {
+        if (authoredTarget != null && !authoredTarget.isBlank()) {
+            out.add(Finding.warning(DOMAIN, "EFFECT_TARGET_IGNORED",
+                    label + " authors Target '" + authoredTarget + "', which only a Presentation's Effect reads - "
+                            + "this effect always goes on " + wearer, id));
+        }
     }
 
     /** The shared {@link EffectRef} existence check (decision 51d), standard warn severity. */
@@ -2039,6 +2080,10 @@ public final class StationValidator {
                         label + " Puppet.Hide.Route '" + rawRoute
                                 + "' is not one of Scale/Effect/None - falls back to Scale at runtime", id));
             }
+            if (hide.getEffect() != null) {
+                checkEffectTargetIgnored(hide.getEffect().getTarget(), label + " Puppet.Hide.Effect",
+                        "the real player it hides", id, out);
+            }
             if (Puppet.HIDE_ROUTE_EFFECT.equalsIgnoreCase(effectiveRoute)
                     && (hide.getEffect() == null || !hide.getEffect().hasId())) {
                 out.add(Finding.warning(DOMAIN, "PUPPET_HIDE_EFFECT_MISSING_ID",
@@ -2615,6 +2660,7 @@ public final class StationValidator {
             String kind = spec.kind();
             if (StationRewardKinds.KIND_EFFECT.equalsIgnoreCase(kind)) {
                 checkEffectRef(EffectRef.of(spec.param("id")), label + " effect reward", id, out);
+                checkEffectTargetIgnored(spec.param("target"), label + " effect reward", "the worker", id, out);
             } else if (StationRewardKinds.KIND_OUTPUT_ITEMS.equalsIgnoreCase(kind)) {
                 checkOutputItemsReward(spec, label, id, trigger, cycleTrigger, noCycleOutput, out);
             } else if (StationRewardKinds.KIND_CONTRIBUTION.equalsIgnoreCase(kind)) {
@@ -3932,40 +3978,142 @@ public final class StationValidator {
         if (settings.getMoments() != null && !settings.getMoments().isEmpty()) {
             checkMomentsMap(settings.getMoments(), "Settings Moments", RpgStationsSettingsAsset.ID, out);
         }
-        checkProtected(settings.getProtected(), out);
         return out;
     }
 
     /**
-     * The owner protect-list ({@code Settings.Protected}): an item id no loaded item answers to is
-     * almost always a typo, and a typo protects nothing ({@code PROTECTED_UNKNOWN_ITEM}, INFO,
-     * since an id a later pack adds is legitimate); a group naming neither an id nor a tag does
-     * nothing ({@code PROTECTED_EMPTY}, INFO).
+     * The server-wide protect-list files ({@link ProtectListAsset}), singleton-free like every other
+     * collection validator here. A file that protects nothing ({@code PROTECT_LIST_EMPTY}: no
+     * {@code Protects} entry authors a route, and a route-less entry is never read as everything)
+     * and a route-less entry beside real ones ({@code PROTECT_LIST_CATCH_ALL}) are warnings, each
+     * entry's {@code Except} gets the shared {@code EXCEPT_CATCH_ALL} check, and an unknown
+     * {@code Function} word the shared {@code UNKNOWN_ACTION_FUNCTION}. An {@code ItemId} no
+     * loaded item answers to is INFO ({@code PROTECT_LIST_UNKNOWN_ITEM}; a later pack may add it).
+     * With {@code stations} handed in (the full pass), a scope id that names nothing warns:
+     * {@code PROTECT_LIST_UNKNOWN_STATION}, and {@code PROTECT_LIST_UNKNOWN_ACTION} for an action
+     * id no station in the file's scope resolves; the structural pass hands in null and skips
+     * those cross-layer reads.
      */
-    private static void checkProtected(@Nullable RpgStationsSettingsAsset.Protected protectedList,
-                                       @Nonnull List<Finding> out) {
-        if (protectedList == null) {
-            return;
-        }
-        if (protectedList.isEmpty()) {
-            out.add(Finding.info(DOMAIN, "PROTECTED_EMPTY",
-                    "Settings Protected names no Items and no Tags, so it protects nothing", RpgStationsSettingsAsset.ID));
-            return;
-        }
-        String[] items = protectedList.getItems();
-        if (items == null) {
-            return;
-        }
-        for (String itemId : items) {
-            if (itemId == null || itemId.isBlank()) {
+    @Nonnull
+    public static List<Finding> validateProtectLists(@Nonnull Collection<ProtectListAsset> lists,
+            @Nullable Collection<StationAsset> stations, @Nonnull Predicate<String> itemKnown) {
+        List<Finding> out = new ArrayList<>();
+        for (ProtectListAsset list : lists) {
+            if (list == null) {
                 continue;
             }
-            if (!itemKnownLive(itemId)) {
-                out.add(Finding.info(DOMAIN, "PROTECTED_UNKNOWN_ITEM",
-                        "Settings Protected.Items entry '" + itemId + "' is not a known item id - check for a typo",
-                        RpgStationsSettingsAsset.ID));
+            String id = list.getId() == null || list.getId().isBlank() ? "(unnamed)" : list.getId();
+            String label = "ProtectList '" + id + "'";
+            checkProtectEntries(list.getProtects(), label, id, itemKnown, out);
+            if (stations != null) {
+                checkProtectScope(list, stations, label, id, out);
             }
         }
+        return out;
+    }
+
+    /** The {@code Protects} entries of one protect-list file (see {@link #validateProtectLists}). */
+    private static void checkProtectEntries(@Nullable ActionInput[] entries, @Nonnull String label,
+            @Nonnull String id, @Nonnull Predicate<String> itemKnown, @Nonnull List<Finding> out) {
+        boolean protectsSomething = false;
+        if (entries != null) {
+            for (ActionInput entry : entries) {
+                if (entry != null && !entry.isCatchAll()) {
+                    protectsSomething = true;
+                    break;
+                }
+            }
+        }
+        if (!protectsSomething) {
+            out.add(Finding.warning(DOMAIN, "PROTECT_LIST_EMPTY",
+                    label + " protects nothing: author at least one Protects entry naming an ItemId,"
+                            + " ResourceTypeId, Tags or Function (an entry with no route protects nothing)", id));
+            return;
+        }
+        for (int i = 0; i < entries.length; i++) {
+            ActionInput entry = entries[i];
+            if (entry == null) {
+                continue;
+            }
+            String entryLabel = entries.length == 1 ? label + " Protects" : label + " Protects[" + i + "]";
+            if (entry.isCatchAll()) {
+                out.add(Finding.warning(DOMAIN, "PROTECT_LIST_CATCH_ALL",
+                        entryLabel + " authors no route, so it protects nothing - author the ItemId,"
+                                + " ResourceTypeId, Tags or Function it should protect", id));
+                continue;
+            }
+            String function = entry.getFunction();
+            if (function != null && !function.isBlank() && !isKnownFunction(function)) {
+                out.add(Finding.warning(DOMAIN, "UNKNOWN_ACTION_FUNCTION",
+                        entryLabel + ".Function '" + function + "' is not one of Weapon/Armor/Tool", id));
+            }
+            String itemId = entry.getItemId();
+            if (itemId != null && !itemId.isBlank() && !itemKnown.test(itemId)) {
+                out.add(Finding.info(DOMAIN, "PROTECT_LIST_UNKNOWN_ITEM",
+                        entryLabel + ".ItemId '" + itemId + "' is not a known item id - check for a typo", id));
+            }
+            checkExcept(entry, entryLabel, id, out);
+        }
+    }
+
+    /**
+     * One protect-list file's {@code Stations} and {@code Actions} scope against the folded
+     * stations: an unknown station id, and an action id that no station in the file's scope (every
+     * station when {@code Stations} is not authored) resolves, both matched without regard to case.
+     */
+    private static void checkProtectScope(@Nonnull ProtectListAsset list, @Nonnull Collection<StationAsset> stations,
+            @Nonnull String label, @Nonnull String id, @Nonnull List<Finding> out) {
+        Map<String, StationAsset> byId = new LinkedHashMap<>();
+        for (StationAsset station : stations) {
+            if (station != null && station.getId() != null) {
+                byId.put(station.getId().toLowerCase(Locale.ROOT), station);
+            }
+        }
+        List<StationAsset> inScope = new ArrayList<>();
+        String[] scopedStations = list.getStations();
+        if (scopedStations != null && scopedStations.length > 0) {
+            for (String stationId : scopedStations) {
+                if (stationId == null || stationId.isBlank()) {
+                    continue;
+                }
+                StationAsset station = byId.get(stationId.toLowerCase(Locale.ROOT));
+                if (station == null) {
+                    out.add(Finding.warning(DOMAIN, "PROTECT_LIST_UNKNOWN_STATION",
+                            label + " Stations names unknown station '" + stationId
+                                    + "' - the file never applies there", id));
+                } else {
+                    inScope.add(station);
+                }
+            }
+        } else {
+            inScope.addAll(byId.values());
+        }
+        String[] scopedActions = list.getActions();
+        if (scopedActions == null) {
+            return;
+        }
+        for (String actionId : scopedActions) {
+            if (actionId == null || actionId.isBlank()) {
+                continue;
+            }
+            if (!anyStationHasAction(inScope, actionId)) {
+                out.add(Finding.warning(DOMAIN, "PROTECT_LIST_UNKNOWN_ACTION",
+                        label + " Actions names '" + actionId + "', which no station in its scope has - the"
+                                + " file never applies to it", id));
+            }
+        }
+    }
+
+    /** Whether any of {@code stations} resolves an action answering to {@code actionId}, without regard to case. */
+    private static boolean anyStationHasAction(@Nonnull Collection<StationAsset> stations, @Nonnull String actionId) {
+        for (StationAsset station : stations) {
+            for (String known : ActionResolver.actionIds(station)) {
+                if (known.equalsIgnoreCase(actionId)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

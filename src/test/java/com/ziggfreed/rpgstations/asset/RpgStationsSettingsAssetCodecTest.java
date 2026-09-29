@@ -107,18 +107,6 @@ public class RpgStationsSettingsAssetCodecTest {
     // ==================== Limits (the owner ceilings) ====================
 
     @Test
-    void protected_decodesItemsAndTags_andIsAbsentByDefault() throws Exception {
-        RpgStationsSettingsAsset a = decodeAsset("{ \"Protected\": { \"Items\": [\"Fixture_Grimoire\"],"
-                + " \"Tags\": { \"Type\": [\"Trophy\"] } } }");
-        assertNotNull(a.getProtected());
-        assertFalse(a.getProtected().isEmpty());
-        assertEquals("Fixture_Grimoire", a.getProtected().getItems()[0]);
-        assertEquals("Trophy", a.getProtected().getTags().get("Type")[0]);
-        assertNull(decodeAsset("{ }").getProtected(), "absent protects nothing");
-        assertTrue(decodeAsset("{ \"Protected\": { } }").getProtected().isEmpty());
-    }
-
-    @Test
     void limits_decodeEveryLeaf() throws Exception {
         RpgStationsSettingsAsset a = decodeAsset("{ \"Limits\": { \"MaxSessionsPerWorld\": 7, "
                 + "\"MaxPuppetsPerWorld\": 3, \"MaxStashesPerSection\": 11 } }");

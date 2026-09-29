@@ -38,6 +38,7 @@ import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
+import com.ziggfreed.rpgstations.asset.ProtectListAsset;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
@@ -139,6 +140,7 @@ public final class SchemaDocWriter {
         register("FlairAsset", FlairAsset.CODEC);
         register("ExtensionAsset", ExtensionAsset.CODEC);
         register("SettingsAsset", RpgStationsSettingsAsset.CODEC);
+        register("ProtectListAsset", ProtectListAsset.CODEC);
     }
 
     private SchemaDocWriter() {

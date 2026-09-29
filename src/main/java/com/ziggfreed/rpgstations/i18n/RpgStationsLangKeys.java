@@ -83,7 +83,7 @@ public final class RpgStationsLangKeys {
             "rpgstations.ui.station.server_busy",
             "rpgstations.ui.station.storage_full",
             "rpgstations.ui.station.no_materials",
-            // The owner protect-list and a station's own Except hole both answer a placement with this
+            // The server-wide protect-list and a station's own Except hole both answer a placement with this
             // one refusal, whatever the socket shape.
             "rpgstations.ui.station.protected",
             // The placed-piece preview a Custody.Preview station toasts on placement: what the piece

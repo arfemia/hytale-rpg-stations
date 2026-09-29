@@ -526,6 +526,14 @@ final class StationSession {
     @Nullable String queueSocketId;
 
     /**
+     * The look this session last dressed each socket's display prop in through a step's per-beat
+     * {@code Display} overlay, keyed by lowercased socket id. It outlives the prop on purpose: a
+     * cue aimed at a piece a {@code Convert} beat just consumed lands where the piece last stood,
+     * lifted or not, rather than at the socket's un-lifted spot. Session-scoped, never persisted.
+     */
+    final Map<String, Custody.Display> shownDisplays = new LinkedHashMap<>();
+
+    /**
      * Committed enhancement stamps this session (design section 9.5, phase 2 round-7 D-6): appended
      * by {@code StationStepHandlers.StampHandler} after each Stamp step writes its mutated item back
      * to custody, drained by {@code StationService#enhanceLedgerRows} into the end-of-session

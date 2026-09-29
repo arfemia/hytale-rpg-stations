@@ -13,7 +13,7 @@ only the four things that genuinely belong to the STATION - `Identity`, `Block`,
 work cadence, custody, worker presentation, moments) lives INSIDE an [`ActionDef`](ActionDef.java)
 entry; an action reads its own groups, or the [`ActionAsset`](ActionAsset.java) its `Ref` names,
 and nothing else. File/folder layout:
-`Server/RpgStations/{Stations,Actions,Patterns,Flairs,Extensions,Settings}/` (loot tables and roll pools are the shared library's, at `Server/ZiggfreedCommon/{Lootables,RollPools}/`). The
+`Server/RpgStations/{Stations,Actions,Patterns,Flairs,Extensions,Settings,ProtectLists}/` (loot tables and roll pools are the shared library's, at `Server/ZiggfreedCommon/{Lootables,RollPools}/`). The
 multi-station seam (`ActionDef.Anchors`, `StationStep.Walk`/`At`, `Produce.To:"Custody"`) fully
 EXECUTES, with no decode-only decoys anywhere in the schema. See `../station/CLAUDE.md`'s
 resolution section for the engine half.
@@ -147,7 +147,10 @@ resolution section for the engine half.
   double the engine applies the effect with NO expiry (the double carries no `EntityStatMap`, so
   the engine's effect timer never runs there) and keeps an authored `DurationMs` on its own cue
   clock (`station.StationService#applyMomentEffect` / `queueEffectRemoval`), tracking every
-  effect on the session so the teardown strips whatever is still on.
+  effect on the session so the teardown strips whatever is still on. `Target` is read on a
+  `Presentation.Effect` only: authored on a `Puppet.Hide.Effect` or an `rpgstations:effect`
+  reward it means nothing and `EFFECT_TARGET_IGNORED` warns; an extension overlay carries it
+  through (`station.ExtensionCatalog#overlayEffectRef`).
   Reused at every altitude an effect payload lands: `Presentation.Effect` (a single per-moment
   effect group), a `rpgstations:effect` reward's own `Id`/`DurationMs` params, and `Puppet.Hide.Effect` (the
   `Hide.Route: "Effect"` arm's configuration). Two effect-shaped leaves deliberately STAY bare ids:
@@ -425,7 +428,8 @@ resolution section for the engine half.
   `Input` (reusing [`ActionInput`](ActionInput.java)'s ItemId/ResourceTypeId/Tags/Function routes)
   is the explicit placement-acceptance matcher; authored ROUTES replace the derivation, while an
   `Input` that authors only `Except` keeps it and carves the holes out of it (a station refuses a
-  short list of ids without restating what it takes; `station.StationService#socketAcceptsInput`).
+  short list of ids without restating what it takes; `station.StationService#socketAcceptsInput`
+  over its pure core `socketAccepts`).
   Absent derives acceptance from the resolved action's own `Recipe.Conversions` inputs and its
   fallback routes instead (ANY of a multi-input conversion's materials is accepted - a
   multi-material station is loaded one material at a time). **`HeldOnly`** (Boolean, default false)
@@ -616,18 +620,24 @@ resolution section for the engine half.
   hand-authored file on the same bytes. `DelayMs` there holds THAT sound and ADDS to the group's own
   (the moment delay offsets the moment, the entry delay offsets that sound inside it); the engine
   splits an offset entry off into its own sound-only queued cue, so both land on the ONE scheduler.
-  Still deliberately NO `Volume`/`Pitch`: the positional one-shot call takes neither argument
-  (only the entity-following packet carries the two modifiers), so a leaf would work at an entity
-  target and do nothing at the block, the default - vary them by referencing a different
-  `SoundEvent` asset, where a one-line `Parent` copy carries its own `Volume` or `Pitch`),
-  **`Target`** (WHERE the sounds and particles play, a bare word or `{Kind, Node}` through the
-  same `StringOrObjectCodec` a `Sounds` entry uses: `Block` (the default, the block centre),
-  `Display` (the placed piece's prop, the socket a ritual queue is working, else its resting
-  position when the prop is gone) or `Puppet` (the worker's double, else the worker's own body);
-  at an entity target the sounds follow the entity and the particles ride it, or the named `Node`
-  of its model, delivered only to the players whose tracker shows it, and a freshly spawned entity
-  nobody has been shown yet falls back to its position, so no cue is lost. The shake, the
-  interaction and the effect are not moved by it), **`Particles`** (an
+  No `Volume`/`Pitch` leaf: the engine's positional sound call and its entity-following packet
+  both DO take a volume and a pitch modifier, but a cue's loudness and tone live on its
+  `SoundEvent` asset, and a quieter or pitched cue is a one-line derived sound asset
+  (`{"Parent": "<vanilla id>", "Pitch": .., "Volume": ..}`) referenced by id, one place to tune a
+  sound for every station that plays it), **`Target`** (WHERE the sounds and particles play, a
+  bare word or `{Kind, Node}` through the same `StringOrObjectCodec` a `Sounds` entry uses:
+  `Block` (the default, the block centre), `Display` (the placed piece's prop, the socket a ritual
+  queue is working, else where the prop last stood when it is gone) or `Puppet` (the worker's
+  double, else the BLOCK: a cue's sounds and particles never land on the worker's own body); at an
+  entity target the sounds follow the entity, delivered only to the players whose tracker shows
+  it, and a particle system RIDES it (or the named `Node` of its model) only when it provably ends
+  on its own, its native asset's positive `LifeSpan` (`station.ParticleLifetimes`): an attached
+  system has no playback cap, so it lives until that lifetime ends or the entity is removed (a
+  prop when its piece is consumed or taken back, a double when the session ends), and
+  `DurationSeconds` cannot shorten it; any other system plays at the entity's position under its
+  cap (`PRESENTATION_ENTITY_TARGET_UNBOUNDED` warns). A freshly spawned entity nobody has been
+  shown yet falls back to its position, so no cue is lost. The shake, the interaction and the
+  effect are not moved by it), **`Particles`** (an
   ARRAY of `ModelParticle`-shaped bursts matching native `InteractionEffects.Particles` - each
   entry is `{SystemId, Scale?, DurationSeconds?, RotationOffset{Yaw,Pitch,Roll}?,
   PositionOffset{X,Y,Z}?, Color?}`, every knob nullable with reader-defaults that reproduce the old
@@ -638,9 +648,10 @@ resolution section for the engine half.
   not decoration - an unbounded-spawner system fired uncapped never stops. **`Color`** is a
   `#rrggbb` tint through the engine's own colour argument, riding the ONE engine overload that
   carries both a colour and the playback cap (ziggfreed-common's full-arity
-  `ModelParticleService.spawnAt`), so a tinted burst keeps the leak guard; at an entity target it
-  rides the attached leaf, which has no cap at all, which `PRESENTATION_ENTITY_TARGET_CAP_IGNORED`
-  notes), `Shake` (nested `{EffectId, Intensity}`), plus TWO
+  `ModelParticleService.spawnAt`), so a tinted burst keeps the leak guard wherever it plays at a
+  position; a burst riding an entity carries the tint on the attached leaf, where its own
+  `LifeSpan` ends it and a `DurationSeconds` does nothing (`PRESENTATION_ENTITY_TARGET_CAP_IGNORED`
+  notes it)), `Shake` (nested `{EffectId, Intensity}`), plus TWO
   native-composition groups: `Interaction` (`{Id}`, an inner class - fires a native RootInteraction
   chain by id) and `Effect` (an [`EffectRef`](EffectRef.java) - applies a native EntityEffect by
   id). Both id-ref-only. Plus **`DelayMs`** (nullable `Long`), the one leaf that is not itself a
@@ -884,20 +895,34 @@ resolution section for the engine half.
     leaves it re-tunes and inherits every other one from the base.
   - See `../station/CLAUDE.md`'s ExtensionCatalog bullet for the engine-side fold + the
     cross-pack-aware validator's `EXTENSION_APPLIED` boot summary.
+- **[`ProtectListAsset`](ProtectListAsset.java)** - the server-wide PROTECT-LIST, one file per
+  list: `Server/RpgStations/ProtectLists/<Name>.json` (Pattern A, id = lowercased filename),
+  `{Protects, Stations?[], Actions?[]}`. `Protects` is the shared input matcher, one
+  [`ActionInput`](ActionInput.java) or an array (the dual-shape `ObjectOrArrayCodec`, each entry
+  with its own `Except` hole); an entry protects what its routes match minus its holes, and an
+  entry authoring no route protects NOTHING (never everything). `Stations` and `Actions` scope the
+  file independently: absent or empty = every consuming station (or action), both authored = both
+  must match, ids matched without regard to case (`appliesTo`). **Every loaded file ADDS to one
+  list** (`station.ProtectListCatalog#protects` asks every file in scope,
+  `station.StationCustody#isProtected` the pure core), whether it comes from the jar, a pack or the
+  owner's own pack, so no layer's list replaces another's; a later layer's file with the same name
+  replaces the earlier one inside the store, which is how an entry is taken back. Checked first at
+  placement (`StationService#routeStack`) and answered `Refused:Protected` (`ui.station.protected`),
+  the one denial that keeps its own key on a socket-less custody; like every placement denial it
+  refuses only at a station that was empty before the press (`StationService#unplacedPressRefusal`),
+  so a loaded station judges the held item as a tool. The jar ships no file (the list is the
+  server owner's policy; a station refuses its own pieces through its own `Custody.Input.Except`).
+  Validator (`StationValidator.validateProtectLists`): `PROTECT_LIST_EMPTY`,
+  `PROTECT_LIST_CATCH_ALL`, `PROTECT_LIST_UNKNOWN_STATION` / `PROTECT_LIST_UNKNOWN_ACTION` (full
+  pass only), `PROTECT_LIST_UNKNOWN_ITEM` (INFO), plus the shared `EXCEPT_CATCH_ALL` per entry.
 - **[`RpgStationsSettingsAsset`](RpgStationsSettingsAsset.java)** - `Server/RpgStations/Settings/
   Settings.json`, a single id (`settings`), jar default + pack-overridable: `{Enabled,
   SummaryHud:{Enabled, Position, OffsetX, OffsetY, TtlMs, MaxRows, Color}, Limits:{MaxSessionsPerWorld,
   MaxPuppetsPerWorld, MaxStashesPerSection, UnattendedIntervalMs,
-  MaxUnattendedGatherCycles}, Moments:{<momentId>: Presentation}, Refusals:{RepeatWindowMs},
-  Protected:{Items[], Tags}}`. **`Protected`** is the server-wide PROTECT-LIST: item ids
-  (matched without regard to case) and item tags (the shared `TagMatch` map) no station may take
-  as placed input, whatever its own matcher says; checked first at placement
-  (`station.StationCustody#isProtected`, from `StationService#routeStack`) and answered
-  `Refused:Protected` (`ui.station.protected`), the one denial that keeps its own key on a
-  socket-less custody. `SettingsCatalog.fold` keeps ONE surviving settings instance, so a pack's
-  `Settings.json` replaces the jar's whole and an owner who wants both lists authors both;
-  `validateSettings` notes an id no loaded item answers to (`PROTECTED_UNKNOWN_ITEM`, INFO) and a
-  group naming nothing (`PROTECTED_EMPTY`, INFO).
+  MaxUnattendedGatherCycles}, Moments:{<momentId>: Presentation}, Refusals:{RepeatWindowMs}}`.
+  `SettingsCatalog.fold` keeps ONE surviving settings instance, so a pack's `Settings.json`
+  replaces the jar's whole. The server-wide protect-list is NOT a settings leaf: it is its own
+  store, [`ProtectListAsset`](ProtectListAsset.java), where every file counts (below).
   **`Moments`** is the ENGINE-WIDE default cue layer (an `InheritMapCodec` over `Presentation`,
   merged per moment id under `Parent`): it sits UNDER every action's own entry for the same id, per
   leaf via `Presentation.overlaid`, and the jar ships exactly one entry, `Refused` playing
@@ -941,8 +966,8 @@ resolution section for the engine half.
 Three cross-cutting layers ride the SAME `FieldBuilder` chain as the field declaration itself, so
 they land per-leaf and are never a parallel table that can drift from the codec:
 
-- **`.documentation("...")` on EVERY leaf.** Every `KeyedCodec` leaf reachable from the eight
-  `CODEC` statics the coverage walk roots on (this mod's six own Pattern A types plus the shared
+- **`.documentation("...")` on EVERY leaf.** Every `KeyedCodec` leaf reachable from the nine
+  `CODEC` statics the coverage walk roots on (this mod's seven own Pattern A types plus the shared
   `LootableAsset`/`RollPoolAsset` this schema embeds) carries a description of what the leaf does
   plus its default/unit;
   `AssetDocumentationCoverageTest` walks `BuilderCodec#getEntries()` (unwrapping array/map codecs
@@ -1023,7 +1048,7 @@ and re-folds for free, no owner-override precedence layer beyond `defaults < pac
 The `api` artifact carries a WRITTEN additive growth policy (its own router's "Additive growth
 policy" section, at the repo's `api/src/main/java/com/ziggfreed/rpgstations/api/CLAUDE.md`:
 default-bodied interface methods, new event classes, additive getters, never a signature change).
-This is its ASSET-SIDE twin, and it exists for the same reason: these six codecs are a published
+This is its ASSET-SIDE twin, and it exists for the same reason: these seven codecs are a published
 contract too. A pack author's JSON and a server owner's override files are written against them,
 live in repos this one cannot see, and outlive any release here. **`SCHEMA.md` is GENERATED from
 the codecs** ([`../docs/SchemaDocWriter`](../docs/SchemaDocWriter.java), `gradlew

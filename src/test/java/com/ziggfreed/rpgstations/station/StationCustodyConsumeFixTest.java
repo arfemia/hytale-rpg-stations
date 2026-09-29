@@ -287,7 +287,7 @@ public class StationCustodyConsumeFixTest {
     }
 
     @Test
-    void aCatchAllMatcher_acceptsEverything_butItsExceptHole_theOneRuleAtEverySite() {
+    void theSharedMatcher_readsACatchAllAsEverything_butItsExceptHole() {
         Map<String, String[]> weapon = Map.of("Type", new String[] {"Weapon"});
         assertTrue(StationCustody.accepts(null, "Fixture_Anything", null, Map.of(), null), "no matcher accepts all");
         ActionInput catchAll = ActionInput.of(null, null, null, null);
@@ -299,7 +299,8 @@ public class StationCustodyConsumeFixTest {
         assertTrue(StationCustody.accepts(catchAllWithHole, "Fixture_Sword", null, weapon, "Weapon"),
                 "a catch-all with a hole takes everything...");
         assertFalse(StationCustody.accepts(catchAllWithHole, "Fixture_Grimoire", null, weapon, "Weapon"),
-                "...except the hole, at every site alike");
+                "...except the hole, under the shared matcher (the placement site narrows an Except-only"
+                        + " Input further, to what the station derives)");
         assertFalse(StationCustody.accepts(catchAllWithHole, "fixture_grimoire", null, null, null),
                 "the hole matches ids case-insensitively, like every route");
         ActionInput hollow = ActionInput.of(null, null, null, null, ActionInput.of(null, null, null, null));

@@ -118,13 +118,17 @@ weapon" is a wide door ([Custody & Placed Display](custody-and-placed-display.md
   and carves the holes out of that, so a table that takes every weapon but its own trophy authors
   one hole, never a list of every weapon. A pack's extension overlay ADDS its holes beside the
   jar's.
-- `Settings.Protected` is the server owner's list: item ids and item tags no station may take.
+- The protect-list (`Server/RpgStations/ProtectLists/`) is the server owner's word: every file
+  in it counts, each optionally scoped to certain stations or actions, and no station in scope may
+  take what it protects.
 - A count pile (`MaxQuantity` above one) refuses a stack that tracks wear or carries metadata,
   because it could only hand it back as a bare fresh stack. A single-item socket keeps the real
   stack and takes it.
 
-A hole or the owner's list answers `Refused:Protected`, its own reason with its own line, so the
-player learns the station would have taken the piece but for the rule.
+A hole or the protect-list answers `Refused:Protected`, its own reason with its own line, so the
+player learns the station would have taken the piece but for the rule. At a station already
+holding material the held item is judged as a tool instead, so a protected trophy tool still works
+there.
 
 ## Telling the player before they commit
 
@@ -143,7 +147,7 @@ one valuable piece at a time.
 4. `Fallback` when pieces beyond the recipe set should be accepted, scoped by its `Input`.
 5. `Custody.Input.Except` for the holes, `HeldOnly` and `Preview` for a one-piece station.
 6. `/rpgstations validate`: `FALLBACK_WITHOUT_CUSTODY`, `CUSTODY_PREVIEW_WITHOUT_RECIPE` and the
-   `PROTECTED_*` findings name the usual slips.
+   `PROTECT_LIST_*` findings name the usual slips.
 
 ---
 

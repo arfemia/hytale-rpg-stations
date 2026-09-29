@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Reads this package's main-tree source for the tests that pin an ORDER on the source itself,
@@ -58,6 +60,25 @@ final class SourcePins {
             }
             from = start + signatureStart.length();
         }
+    }
+
+    /**
+     * The body of every {@code for} loop in {@code text} whose header iterates {@code iterated}, in
+     * source order, each cut from its opening brace to the matching closing one. Every occurrence
+     * of {@code iterated} must sit in a {@code for} header, so a pin never reads a loop that is not
+     * there.
+     */
+    static List<String> loopBodies(String text, String iterated) {
+        List<String> bodies = new ArrayList<>();
+        for (int at = text.indexOf(iterated); at >= 0; at = text.indexOf(iterated, at + iterated.length())) {
+            int lineStart = text.lastIndexOf('\n', at) + 1;
+            assertTrue(text.substring(lineStart, at).contains("for ("),
+                    iterated + " is read outside a for header: " + text.substring(lineStart, at));
+            int open = text.indexOf('{', at);
+            assertTrue(open > at, "no loop body after " + iterated);
+            bodies.add(text.substring(open, closingBrace(text, open) + 1));
+        }
+        return bodies;
     }
 
     /** How many times {@code call} appears in {@code text}. */

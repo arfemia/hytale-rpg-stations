@@ -141,16 +141,32 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   one) refuses a stack carrying per-instance data, a tool that tracks wear or a stack with
   metadata (`StationCustody.carriesInstanceData`), since a pile keeps ids and counts only and
   would hand it back as a bare fresh stack: a free repair, or a lost enhancement; a single-item
-  socket keeps the real stack and takes it. The owner PROTECT-LIST, `Settings.Protected {Items[],
-  Tags}`, names item ids and item tags no station may take as placed input, whatever its own
-  matcher says (`StationCustody.isProtected`, checked before any socket is offered the material).
-  A protected piece, on that list or in a station's own `Except` hole, is refused outright with
-  its own reason: `PlacementDenial.PROTECTED` (first in the enum, so it outranks every other
-  denial), the `ui.station.protected` key in `rpgstations.lang` (en-US; the other locales follow)
-  and `RpgStationsLangKeys`, and the moment `Refused:Protected` through `StationRefusals`; it is
-  the one placement denial that keeps its own key on a socket-less custody, where every other
-  denial folds to `no_materials`. Validator: `PROTECTED_UNKNOWN_ITEM` (INFO), `PROTECTED_EMPTY`
-  (INFO).
+  socket keeps the real stack and takes it. A protected piece, on the server-wide protect-list
+  (below) or in a station's own `Except` hole, is refused with its own reason:
+  `PlacementDenial.PROTECTED` (first in the enum, so it outranks every other denial), the
+  `ui.station.protected` key in `rpgstations.lang` (en-US; the other locales follow) and
+  `RpgStationsLangKeys`, and the moment `Refused:Protected` through `StationRefusals`; it is the
+  one placement denial that keeps its own key on a socket-less custody, where every other denial
+  folds to `no_materials`. Like every other placement denial it refuses only at a station that was
+  EMPTY before the press (and cannot idle); at a loaded station the press falls through to the
+  engage gates, where the held item is judged as a TOOL, never as input, so an owner who protects
+  a trophy tool still works a loaded station with it (`StationService.unplacedPressRefusal`).
+- **The server-wide protect-list, a store of its own where every layer counts.** Adds
+  `Server/RpgStations/ProtectLists/<Name>.json` (`ProtectListAsset`, a Pattern A store folded into
+  `ProtectListCatalog`): each file carries `Protects`, what it protects, as the shared input matcher
+  (one `ActionInput` or an array, each with its own `Except` hole; an entry authoring no route
+  protects nothing, never everything), and may be scoped with `Stations` and `Actions` (absent or
+  empty = every consuming station, or every action; both authored = both must match; ids matched
+  without regard to case). Every loaded file ADDS to one server-wide list, whether it comes from the
+  jar, a pack or the owner's own pack, so no layer's list replaces another's; a later layer's file
+  with the same name replaces the earlier one inside the store, which is how an entry is taken
+  back. The check runs before any socket is offered the piece (`StationCustody.isProtected` over the
+  files in scope at the station and action). The jar ships no file: the list is the server owner's
+  policy, and a station that must refuse one of its own pieces says so in its own
+  `Custody.Input.Except`, in the station's file. Validator: `PROTECT_LIST_EMPTY`,
+  `PROTECT_LIST_CATCH_ALL`, `PROTECT_LIST_UNKNOWN_STATION`, `PROTECT_LIST_UNKNOWN_ACTION`,
+  `PROTECT_LIST_UNKNOWN_ITEM` (INFO), plus the shared `EXCEPT_CATCH_ALL` and
+  `UNKNOWN_ACTION_FUNCTION` on each entry.
 - **Expected versus found loot rows.** A roll authored `Expected: true` (Ziggfreed Common's new
   `Roll` leaf) pays the moment's EXPECTED payout, a wage or a return, and its items read as
   ORDINARY produced output: the plain item row on the HUD and the produced ledger row on the
@@ -163,34 +179,45 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
 - **The presentation `Target`.** A `Presentation` names where its sounds and particles play:
   `"Block"` (the default, the block centre, where every moment has always played), `"Display"`
   (the placed piece's prop, the socket a ritual queue is working, else the first socket showing
-  one; that socket's resting display position when the prop is gone, which is where a `Convert`
-  beat's cues land after the beat consumed the piece and dropped its prop) or `"Puppet"` (the
-  worker's double, or the worker's own body when no double stands), a bare word or `{Kind, Node}`
-  to attach the particles to one named node of the double's model. The target is resolved when
-  the cue PLAYS (`StationService.resolveAim`), so a delayed cue lands where its target is when it
-  comes due. At an entity target the sounds follow the entity (Ziggfreed Common's `Sound3D.playOn`)
-  and the particles ride it (`ModelParticleService.spawnOn`), delivered only to the players whose
-  tracker shows the entity, never the engine's world-wide broadcast; a freshly spawned prop or
-  double has been shown to nobody until the tracker's next tick, so a cue in the same beat falls
-  back to its position and no cue is lost. A burst at an entity target has no playback cap, so an
-  endless system stays at the block. The shake stays on the worker's camera and the interaction
-  on the worker. A queued pass's beat cues therefore play at the current socket's prop once a
-  `Target: "Display"` is authored; unauthored, they play at the block as before. The sessionless
-  route (refusals, structures, the gather) has no session to aim through and plays at the block.
-  Validator: `PRESENTATION_TARGET_UNKNOWN_KIND`, `PRESENTATION_TARGET_NODE_AT_BLOCK` (INFO),
+  one; where that prop last stood when it is gone, which is where a `Convert` beat's cues land
+  after the beat consumed the piece and dropped its prop) or `"Puppet"` (the worker's double; the
+  BLOCK when no double stands, so a moment's sounds and particles never land on the worker's own
+  body), a bare word or `{Kind, Node}` to attach the particles to one named node of the double's
+  model. The target is resolved when the cue PLAYS (`StationService.resolveAim` over the pure
+  `aimSource`), so a delayed cue lands where its target is when it comes due. At an entity target
+  the sounds follow the entity (Ziggfreed Common's `Sound3D.playOn`), delivered only to the players
+  whose tracker shows it, never the engine's world-wide broadcast. A particle system RIDES the
+  entity (`ModelParticleService.spawnOn`) only when it provably ends on its own, its native asset
+  giving it a positive `LifeSpan` (`ParticleLifetimes`): an attached system carries no playback
+  cap, so it lives until that lifetime ends or the entity is removed (a prop when its piece is
+  consumed or taken back, a double when the session ends), and `DurationSeconds` cannot shorten it.
+  Any other system plays at the entity's position under its `DurationSeconds` cap, so nothing
+  endless ever rides a prop or a double. A freshly spawned prop or double has been shown to nobody
+  until the tracker's next tick, so a cue in the same beat falls back to its position and no cue is
+  lost. The shake stays on the worker's camera and the interaction on the worker. A queued pass's
+  beat cues therefore play at the current socket's prop once a `Target: "Display"` is authored;
+  unauthored, they play at the block as before. The sessionless route (refusals, structures, the
+  gather) has no session to aim through and plays at the block. Validator:
+  `PRESENTATION_TARGET_UNKNOWN_KIND`, `PRESENTATION_TARGET_NODE_AT_BLOCK` (INFO),
   `PRESENTATION_DISPLAY_TARGET_NO_DISPLAY`, `PRESENTATION_PUPPET_TARGET_NO_PUPPET` (INFO),
-  `PRESENTATION_ENTITY_TARGET_CAP_IGNORED` (INFO).
+  `PRESENTATION_ENTITY_TARGET_UNBOUNDED` (a burst at an entity target whose system has no positive
+  `LifeSpan` the server can read, so it plays at the entity's position instead of riding it) and
+  `PRESENTATION_ENTITY_TARGET_CAP_IGNORED` (INFO: a riding burst authors a `DurationSeconds` that
+  does nothing there).
 - **An effect on the double.** `EffectRef.Target` is `"Player"` (the default, the worker's own
   body, what a `LocalSoundEventId` sting or a screen effect needs) or `"Puppet"` (the worker's
   double, for an aura or a ModelVFX the onlookers see on the performer; the worker's own body when
   no double stands). The double carries no `EntityStatMap`, so the engine's effect timer never runs
   on it: an effect there is put on with NO expiry (Ziggfreed Common's
   `NativeEffectUtil.applyInfinite`, the double's effect controller added before its spawn by
-  `PlayerPuppetService`) and an authored
-  `DurationMs` is kept by this engine's own cue clock (`StationService.queueEffectRemoval`, a
-  removal parked on the one delayed-cue queue and drained into `NativeEffectUtil.remove`); every
-  effect is tracked on the session either way, so the teardown strips whatever is still on.
-  Validator: `EFFECT_TARGET_UNKNOWN`, `EFFECT_PUPPET_TARGET_NO_PUPPET` (INFO).
+  `PlayerPuppetService`) and an authored `DurationMs` is kept by this engine's own cue clock
+  (`StationService.queueEffectRemoval`, a removal parked on the one delayed-cue queue and drained
+  into `NativeEffectUtil.remove`); every effect is tracked on the session either way, so the
+  teardown strips whatever is still on. An extension overlay carries the `Target` through
+  (`ExtensionCatalog.overlayEffectRef`). The `Target` is read on a presentation's `Effect` only.
+  Validator: `EFFECT_TARGET_UNKNOWN`, `EFFECT_PUPPET_TARGET_NO_PUPPET` (INFO), and
+  `EFFECT_TARGET_IGNORED` for a `Target` authored where it means nothing (a `Puppet.Hide.Effect`,
+  an `rpgstations:effect` reward).
 - **A `Color` on a presentation burst.** `Presentation.Particles[].Color` is a `#rrggbb` tint
   applied through the engine's own colour argument, so a tintable vanilla system takes a moment's
   palette without a copied spawner file. Every block-positioned burst now spawns through Ziggfreed
@@ -211,15 +238,18 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   `Scale`, `Rotation` and `Animated`, each authored leaf replacing the socket's own), respawning
   the prop at iteration entry when the look changed (`StationService.applyStepDisplay`; the
   display handle records the group it was spawned with, so the same overlay twice never
-  respawns), so a beat can lift the piece, set it turning or enlarge it. Validator:
-  `STEP_DISPLAY_WITHOUT_DISPLAY`.
+  respawns), so a beat can lift the piece, set it turning or enlarge it. The session remembers the
+  look it last dressed each socket's prop in (`StationSession.shownDisplays`), past the prop's
+  despawn, so a `Display`-targeted cue after the `Convert` beat lands where the lifted piece last
+  stood. Validator: `STEP_DISPLAY_WITHOUT_DISPLAY`.
 - **The placed-piece preview.** `Custody.Preview` (default false) toasts, on placement, what the
   piece will give back: the row the recipe would run for it right now (authored, derived, or a
   fallback route's), listed as count and name (`ui.station.preview.returns`), or that it gives
   nothing back on its own when only the essence-only route takes it
-  (`ui.station.preview.nothing_back`); a piece no row runs for right now says nothing. The
-  selection is the one a cycle or a Convert beat makes, addressed to the socket the piece landed
-  in. Validator: `CUSTODY_PREVIEW_WITHOUT_RECIPE`.
+  (`ui.station.preview.nothing_back`); a piece no row runs for right now says nothing. The lines
+  are worded for any recipe station. The selection is the one a cycle or a Convert beat makes,
+  addressed to the socket the piece landed in, whether it came from the hand or the backpack.
+  Validator: `CUSTODY_PREVIEW_WITHOUT_RECIPE`.
 - **Custody correctness, three fixes.** A custody consume that takes the last of a single-item
   socket's piece now takes the pile's metadata-bearing `Unique` stack with it
   (`StationCustodyClaim.takeUniqueIfDrained`), so the placed piece is actually destroyed and its
@@ -281,20 +311,25 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   rolls plus every matching extension's) at that beat, once per iteration, and a program with such
   a beat skips its completion-time pass so the Bonus never rolls twice. Unset, nothing moves.
   Validator: `BONUS_AT_BEAT_NO_BONUS`, `BONUS_AT_BEAT_REPEATED` (INFO).
+- **Extension overlays keep every leaf.** An extension's `Custody.States` overlay now keeps the
+  base's `Ready` and `Overdone` names (before, authoring any `States` group dropped them), and its
+  `EffectRef` overlay keeps the `Target`.
 - **Docs.** `SCHEMA.md` regenerated for every leaf above. New guides:
   `docs/derive-from-any-bench.md` (the Sawmill and the Disenchanting Table as the two worked
-  examples) and `docs/disenchanting.md`
-  (the staged ritual, end to end). `docs/loot-and-factors.md` names the item factors and corrects
-  its Grants table (`Effects` and `Contributions` are the `rpgstations:effect` and
-  `rpgstations:contribution` reward kinds, never keys of `Grants`); `docs/integrations.md` carries
-  the tenth event, the third kind and the api version scheme; the custody, presentation and
-  settings guides carry the leaves above. Three claims the docs made against the code are
+  examples) and `docs/disenchanting.md` (the staged ritual, end to end). `docs/loot-and-factors.md`
+  names the item factors and corrects its Grants table (`Effects` and `Contributions` are the
+  `rpgstations:effect` and `rpgstations:contribution` reward kinds, never keys of `Grants`);
+  `docs/integrations.md` carries the tenth event, the third kind and the api version scheme; the
+  custody, presentation and settings guides carry the leaves above, and the custody guide describes
+  the protect-list store and its layering rule. Three claims the docs made against the code are
   corrected everywhere they appeared (the routers, the javadoc, the codec documentation and so
   `SCHEMA.md`): a custody state flip is not hint-only (it swaps the block to the state's own
-  variant, so the state's texture, animation, light, ambient loop and particles come with it),
-  the display and puppet anchor is the block CENTRE, not the block top, and the engine does have a
-  colour call for particles (the sound call still takes no volume or pitch, and the entity-following
-  packet's two modifiers would work at one target and not the other, so neither is a leaf).
+  variant, so the state's texture, animation, light, ambient loop and particles come with it), the
+  display and puppet anchor is the block CENTRE, not the block top, and the engine does have a
+  colour call for particles. Its positional sound call and its entity-following packet both take a
+  volume and a pitch modifier too; a cue's loudness and tone still live on its `SoundEvent` asset,
+  and a quieter or pitched cue is a one-line derived sound asset (`{"Parent": "<vanilla id>",
+  "Pitch": .., "Volume": ..}`), so no per-cue leaf is added.
 - **Technical.** The api artifact is versioned WITH the mod (`api_version=1.1.0`; 1.0.0 carried
   contract 9, 1.1.0 carries 10), and `RpgStationsApi.apiVersion()` moves to **10** for ONE batch:
   the `StationInputConsumedEvent` event class and the `FactorContext.item()` accessor with its
@@ -307,9 +342,14 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   hook half beside its refund halves. The consumption paths run only against a live store, so
   `InputConsumedHookOrderTest` and the fallback selection pin read the order off the source, one
   method body at a time (`SourcePins`, a test-only reader that cuts a body at its matching brace).
-  `StationService.placementDenyKey` and `workingStateName` are package-visible pure cores, and
-  `Presentation.of` gained the `Target`-carrying overload every rebuild site uses
-  (`StationPacing.scaleInTime`, the offset-sound split, `Presentation.overlaid`).
+  `StationService.placementDenyKey`, `unplacedPressRefusal`, `socketAccepts` (placement acceptance
+  over the live reads it is handed), `aimSource`, `effectGoesOnDouble`, `workingMove` and
+  `workingStateName`, `StationCustody.carriesInstanceData` over the raw readings, and
+  `ParticleLifetimes` are package-visible pure cores, each pinned by a test, and `SourcePins` gained
+  `loopBodies` for the grant routing pin. `Presentation.of` gained the `Target`-carrying overload
+  every rebuild site uses (`StationPacing.scaleInTime`, the offset-sound split,
+  `Presentation.overlaid`). The test task declares `docs/` as an input, so a docs-only change
+  re-runs `MmoAgnosticismTest`.
 
 ## 1.0.0 - 2026-09-12 (first public release)
 

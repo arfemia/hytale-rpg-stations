@@ -78,7 +78,9 @@ public class ShippedAssetDecodeTest {
             Map.entry("Patterns", (body, key) -> StructurePatternAsset.CODEC.decodeAndInheritJsonAsset(
                     RawJsonReader.fromJsonString(body), null, info(StructurePatternAsset.class, key))),
             Map.entry("Settings", (body, key) -> RpgStationsSettingsAsset.CODEC.decodeAndInheritJsonAsset(
-                    RawJsonReader.fromJsonString(body), null, info(RpgStationsSettingsAsset.class, key))));
+                    RawJsonReader.fromJsonString(body), null, info(RpgStationsSettingsAsset.class, key))),
+            Map.entry("ProtectLists", (body, key) -> ProtectListAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(ProtectListAsset.class, key))));
 
     /** This jar's own shipped assets: its own stores, and what it ships into the shared library's stores. */
     private static final List<Path> JAR_ROOTS = List.of(

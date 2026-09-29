@@ -14,8 +14,6 @@ import com.hypixel.hytale.assetstore.map.DefaultAssetMap;
 import com.hypixel.hytale.assetstore.map.JsonAssetWithMap;
 import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
-import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
-import com.ziggfreed.common.codec.TagMatch;
 import com.ziggfreed.common.asset.EditorSchema;
 import com.ziggfreed.common.codec.InheritMapCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
@@ -62,7 +60,6 @@ public final class RpgStationsSettingsAsset
     @Nullable private Limits limits;
     @Nullable private Map<String, Presentation> moments;
     @Nullable private Refusals refusals;
-    @Nullable private Protected protectedItems;
 
     public static final AssetBuilderCodec<String, RpgStationsSettingsAsset> CODEC = AssetBuilderCodec.builder(
                     RpgStationsSettingsAsset.class,
@@ -98,10 +95,6 @@ public final class RpgStationsSettingsAsset
                     (a, v) -> a.refusals = v, a -> a.refusals, (a, parent) -> a.refusals = parent.refusals)
             .documentation("How a turned-away press is answered when the same player repeats it: the repeat window inside which the same reason at the same block is answered by its sound alone.")
             .metadata(new UIEditorSectionStart("Refusals")).add()
-            .appendInherited(new KeyedCodec<>("Protected", Protected.CODEC, false),
-                    (a, v) -> a.protectedItems = v, a -> a.protectedItems, (a, parent) -> a.protectedItems = parent.protectedItems)
-            .documentation("The server-wide protect-list: item ids and item tags no station may ever take as placed input, whatever its own matcher says. A press that offers one is turned away with its own reason (Refused:Protected). Absent protects nothing; a pack's own Settings.json is the one settings file the server reads, so an owner who wants both lists authors both.")
-            .metadata(new UIEditorSectionStart("Protected")).add()
             .build();
 
     public RpgStationsSettingsAsset() {
@@ -189,60 +182,6 @@ public final class RpgStationsSettingsAsset
     /** {@link Refusals#effectiveRepeatWindowMs()} over {@link #getRefusals()}, the reader default when the group is absent. */
     public long effectiveRefusalRepeatWindowMs() {
         return refusals != null ? refusals.effectiveRepeatWindowMs() : Refusals.DEFAULT_REPEAT_WINDOW_MS;
-    }
-
-    /** The server-wide protect-list, or {@code null} when the owner authored none (nothing is protected). */
-    @Nullable
-    public Protected getProtected() {
-        return protectedItems;
-    }
-
-    /**
-     * The server-wide PROTECT-LIST: item ids and item tags no station may take as placed input,
-     * whatever its own matcher accepts. Two independent lists, either or both authorable; an
-     * item is protected when its id is listed (matched without regard to case) or when it carries
-     * a listed tag value under a listed tag family. The check runs at placement, before any
-     * socket is offered the material, and the refusal answers with its own reason
-     * ({@code Refused:Protected}), so an owner can keep a server's trophies out of every
-     * consuming station with one file. A per-station hole is the station's own
-     * {@code Custody.Input.Except}; this list is the owner's word over every station at once.
-     */
-    public static final class Protected {
-
-        @Nullable protected String[] items;
-        @Nullable protected Map<String, String[]> tags;
-
-        public static final BuilderCodec<Protected> CODEC = BuilderCodec.builder(Protected.class, Protected::new)
-                .appendInherited(new KeyedCodec<>("Items", new ArrayCodec<>(Codec.STRING, String[]::new), false),
-                        (o, v) -> o.items = v, o -> o.items, (o, p) -> o.items = p.items)
-                .documentation("Item ids no station may take as placed input, matched without regard to case. Absent or empty protects no id.").add()
-                .appendInherited(new KeyedCodec<>("Tags", TagMatch.CODEC, false),
-                        (o, v) -> o.tags = v, o -> o.tags, (o, p) -> o.tags = p.tags)
-                .documentation("Item tags no station may take as placed input (tag family -> refused values), matched the way every other tag matcher in this schema matches. Absent protects no tag.").add()
-                .build();
-
-        @Nonnull
-        public static Protected of(@Nullable String[] items, @Nullable Map<String, String[]> tags) {
-            Protected p = new Protected();
-            p.items = items;
-            p.tags = tags;
-            return p;
-        }
-
-        @Nullable
-        public String[] getItems() {
-            return items;
-        }
-
-        @Nullable
-        public Map<String, String[]> getTags() {
-            return tags;
-        }
-
-        /** True when neither list names anything. */
-        public boolean isEmpty() {
-            return (items == null || items.length == 0) && (tags == null || tags.isEmpty());
-        }
     }
 
     /**

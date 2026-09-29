@@ -121,6 +121,11 @@ public class AssetCodecInitTest {
         assertDoesNotThrow(() -> assertNotNull(RpgStationsSettingsAsset.SummaryHud.CODEC));
     }
 
+    @Test
+    void protectListAssetCodec_initializesWithoutThrowing() {
+        assertDoesNotThrow(() -> assertNotNull(ProtectListAsset.CODEC));
+    }
+
     /**
      * Design section 9.1's multi-action schema (leg B). {@code stationAssetCodec_
      * initializesWithoutThrowing} already exercises this whole tree TRANSITIVELY

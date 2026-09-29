@@ -149,9 +149,10 @@ each originating pile, so a shared worker's interruption never walks off with th
 
 Three rules sit in front of every placement, whatever the station's own matcher says.
 
-- **The owner's protect-list.** `Settings.Protected` names item ids and item tags no station on the
-  server may take as placed input (see [Settings](settings.md)). A press that offers one is turned
-  away with its own reason, `Refused:Protected`, before any socket is offered the piece.
+- **The server-wide protect-list.** The files under `Server/RpgStations/ProtectLists/` name what
+  no consuming station may take as placed input (see [The protect-list](#the-protect-list) below).
+  A press that offers a protected piece is turned away with its own reason, `Refused:Protected`,
+  before any socket is offered the piece.
 - **A station's own holes.** `Custody.Input.Except` (or a socket's `Match.Except`) names what THIS
   station refuses. An `Input` that authors only `Except` keeps everything the station derives from
   its recipe and its fallback routes and carves the holes out of that, so a station that takes
@@ -163,6 +164,47 @@ Three rules sit in front of every placement, whatever the station's own matcher 
   stack that tracks wear or carries metadata (a worn tool, an enhanced piece): a pile could only
   hand it back as a bare fresh stack, which would repair it for free or lose what was on it. A
   single-item socket (`MaxQuantity: 1`) keeps the real stack and takes it.
+
+A `Refused:Protected` answer, like every other placement refusal, comes only from a station that
+was empty before the press. At a station that already holds material, the held item is judged as
+a TOOL by the usual gates, never as input, so protecting a trophy tool never stops its owner
+working a loaded station with it.
+
+<a id="the-protect-list"></a>
+### The protect-list
+
+Each file under `Server/RpgStations/ProtectLists/` is one list: what it protects, and optionally
+where.
+
+```json
+{
+  "Protects": [
+    { "ItemId": "Weapon_Sword_Heirloom" },
+    { "Tags": { "Type": ["Trophy"] }, "Except": { "ItemId": "Trophy_Common_Plaque" } }
+  ],
+  "Stations": ["Disenchanting_Table"]
+}
+```
+
+| Field | What it does |
+|---|---|
+| `Protects` | What the file protects: one input matcher or an array of them, the same `ItemId` / `ResourceTypeId` / `Tags` / `Function` routes (match = ANY route) and `Except` holes a `Custody.Input` uses. An entry protects what its routes match, minus its own holes; an entry authoring no route protects nothing (it is never read as "everything"). |
+| `Stations` | The station ids the file applies to. Absent or empty: every consuming station. |
+| `Actions` | The action ids the file applies to, at any station in scope. Absent or empty: every action. |
+
+Both scope lists are matched without regard to case, and when both are authored both must match:
+`"Stations": ["Disenchanting_Table"], "Actions": ["Disenchant"]` protects only at that station's
+`Disenchant` action.
+
+**Every file counts.** The files ADD UP into one server-wide list, whichever layer each comes from:
+this jar, a content pack, or the server owner's own pack. A pack's list never silently replaces the
+jar's or another pack's, so each can protect its own pieces without restating anyone else's. To
+take an entry back, override its file BY ID: a later layer that ships the same file name replaces
+the earlier file whole, so the owner copies it, drops the entries to lift, and keeps the rest. The
+jar ships no protect-list of its own; it is the server owner's word, and a station that must
+refuse one of its own pieces says so in its own `Custody.Input.Except`. `/rpgstations validate`
+warns about a file that protects nothing, an entry with no route, and a `Stations` or `Actions` id
+that names nothing in scope.
 
 ## The placed-piece preview
 

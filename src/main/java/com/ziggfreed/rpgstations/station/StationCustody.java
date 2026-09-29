@@ -17,7 +17,7 @@ import javax.annotation.Nullable;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Ingredient;
-import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
+import com.ziggfreed.rpgstations.asset.ProtectListAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.ziggfreed.common.entity.ItemReadings;
@@ -416,47 +416,64 @@ final class StationCustody {
     }
 
     /**
-     * PURE: is the material on the owner's protect-list ({@code Settings.Protected})? Its id
-     * listed (matched without regard to case), or a listed tag value under a listed tag family
-     * the material carries. A null or empty list protects nothing.
+     * PURE: is the material on the server-wide protect-list at this station and action? Every
+     * file in {@code lists} that applies here ({@link ProtectListAsset#appliesTo}: its
+     * {@code Stations} and {@code Actions} scope) is asked, and ANY of them protecting the material
+     * refuses it, so the files add up rather than replace each other. A file protects what one of
+     * its {@code Protects} entries' routes match, minus that entry's {@code Except} holes
+     * ({@link #matchesInput}); an entry authoring no route protects nothing. An empty list
+     * protects nothing.
      */
-    static boolean isProtected(@Nullable RpgStationsSettingsAsset.Protected protectedList,
-            @Nullable String heldItemId, @Nullable Map<String, String[]> heldTags) {
-        if (protectedList == null || protectedList.isEmpty()) {
-            return false;
-        }
-        String[] items = protectedList.getItems();
-        if (items != null) {
-            for (String item : items) {
-                if (ItemMatch.itemId(item, heldItemId)) {
+    static boolean isProtected(@Nonnull Iterable<ProtectListAsset> lists, @Nullable String stationId,
+            @Nullable String actionId, @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds,
+            @Nullable Map<String, String[]> heldTags, @Nullable String heldFunction) {
+        for (ProtectListAsset list : lists) {
+            if (list == null || list.getProtects() == null || !list.appliesTo(stationId, actionId)) {
+                continue;
+            }
+            for (ActionInput entry : list.getProtects()) {
+                if (entry != null && matchesInput(entry, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
                     return true;
                 }
             }
         }
-        return ItemMatch.tags(protectedList.getTags(), heldTags);
+        return false;
     }
 
     /**
-     * PURE: does a stack carry per-instance data a COUNT pile cannot keep? A count pile stores ids
-     * and counts only, so a stack that tracks durability (worn or not) or carries metadata would
-     * come back as a bare fresh stack: a free repair, or a lost enhancement. Such a stack is
-     * refused by every socket whose capacity is above one; a single-item socket keeps the real
-     * stack and takes it. A stack the reader cannot inspect ({@code null} keys) is refused too.
+     * Does a stack carry per-instance data a COUNT pile cannot keep? Reads the stack and asks
+     * {@link #carriesInstanceData(double, boolean, Set)}. A stack whose durability cannot be read
+     * is treated as bare on that axis, and the metadata read still decides.
      */
     static boolean carriesInstanceData(@Nullable ItemStack stack) {
         if (stack == null) {
             return false;
         }
+        double maxDurability = 0.0;
+        boolean unbreakable = true;
         try {
-            if (stack.getMaxDurability() > 0 && !stack.isUnbreakable()) {
-                return true;
-            }
+            maxDurability = stack.getMaxDurability();
+            unbreakable = stack.isUnbreakable();
         } catch (Throwable ignored) {
-            // A stack whose durability cannot be read is treated as bare on that axis; the
-            // metadata read below still decides.
+            // Unreadable durability: bare on that axis, the metadata keys below still decide.
         }
-        Set<String> keys = ItemReadings.metadataKeys(stack);
-        return keys == null || !keys.isEmpty();
+        return carriesInstanceData(maxDurability, unbreakable, ItemReadings.metadataKeys(stack));
+    }
+
+    /**
+     * PURE, over the raw readings: does a stack carry per-instance data a COUNT pile cannot keep? A
+     * count pile stores ids and counts only, so a stack that tracks durability (a positive maximum
+     * on a breakable item, worn or not) or carries metadata would come back as a bare fresh stack:
+     * a free repair, or a lost enhancement. Such a stack is refused by every socket whose capacity
+     * is above one; a single-item socket keeps the real stack and takes it. Metadata keys the
+     * reader could not inspect ({@code null}) count as carried, so an unreadable stack is refused.
+     */
+    static boolean carriesInstanceData(double maxDurability, boolean unbreakable,
+            @Nullable Set<String> metadataKeys) {
+        if (maxDurability > 0 && !unbreakable) {
+            return true;
+        }
+        return metadataKeys == null || !metadataKeys.isEmpty();
     }
 
     /**
@@ -625,7 +642,7 @@ final class StationCustody {
     /** Why a press placed nothing, most specific first - drives the keyed refusal toast. */
     enum PlacementDenial {
         /**
-         * The material is protected: on the owner's protect-list, or in the hole an Except carves
+         * The material is protected: on the server-wide protect-list, or in the hole an Except carves
          * out of what a socket accepts. The most specific reason, and the one that survives a
          * socket-less custody's generic mapping, so a player is told the station will not take
          * the piece rather than that they hold nothing it works with.

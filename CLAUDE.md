@@ -269,9 +269,10 @@ cd 'D:\dev\business\hyMMO\additional-mods\rpg-stations'; .\build.ps1
 Produces `build/libs/RpgStations-<version>.jar` (**version is `1.1.0`, HELD and unreleased**: the
 disenchanting wave's engine core (any-bench derivation with full outputs, the fallback routes,
 the `Convert` phase, the custody fixes, the item in the factors, the ritual queue and paced beats)
-and its engine surface (placement safety and the owner protect-list, the input-consumed event and
-the `STATION_INPUT` kind, expected-versus-found loot rows, the presentation `Target`, the per-step
-block state and display overlay, the placed-piece preview, api 1.1.0 at contract 10), see
+and its engine surface (placement safety and the server-wide protect-list store, the
+input-consumed event and the `STATION_INPUT` kind, expected-versus-found loot rows, the
+presentation `Target`, the per-step block state and display overlay, the placed-piece preview, api
+1.1.0 at contract 10), see
 `CHANGELOG.md`'s `1.1.0 - unreleased` section; the last public release was `1.0.0`, the
 maintainer-set Sawmill-only scope described in the "1.0.0 release scope" section below) and
 copies the runtime jar into the Hytale `Mods/` folder. `.\gradlew.bat
@@ -300,8 +301,8 @@ api/                                                   the extension-surface (NO
   src/main/java/com/ziggfreed/rpgstations/api/         see api/CLAUDE.md
 src/main/resources/
   manifest.json                                        Group Ziggfreed, IncludesAssetPack:true, ServerVersion >=0.6.0-pre.13 <0.7.0 (Update 6)
-  Server/RpgStations/{Stations,Actions,Patterns,Flairs,Extensions,Settings}/
-                                                        the six Pattern A asset stores this mod registers
+  Server/RpgStations/{Stations,Actions,Patterns,Flairs,Extensions,Settings,ProtectLists}/
+                                                        the seven Pattern A asset stores this mod registers
   Server/ZiggfreedCommon/Lootables/                      the Sawmill's loot tables (the SHARED library's store)
   Server/ZiggfreedCommon/ObjectiveKinds/RpgStations/     the three objective kinds this engine fires (WORK_STATION /
                                                         STATION_OUTPUT / STATION_INPUT), in the SHARED library's store; see progression/

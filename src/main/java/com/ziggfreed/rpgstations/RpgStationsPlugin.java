@@ -34,6 +34,7 @@ import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.AssetEditorDataSets;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.FlairAsset;
+import com.ziggfreed.rpgstations.asset.ProtectListAsset;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
@@ -44,6 +45,7 @@ import com.ziggfreed.rpgstations.progression.StationProgressProducers;
 import com.ziggfreed.rpgstations.station.ActionCatalog;
 import com.ziggfreed.rpgstations.station.ExtensionCatalog;
 import com.ziggfreed.rpgstations.station.FlairCatalog;
+import com.ziggfreed.rpgstations.station.ProtectListCatalog;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.station.StationBlockPlaceSystem;
 import com.ziggfreed.rpgstations.station.PatternCatalog;
@@ -129,6 +131,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerFlairAssetStore();
         registerFlairUnlockDefault();
         registerSettingsAssetStore();
+        registerProtectListAssetStore();
         registerAssetEditorDataSets();
         registerStationInteraction();
         registerStationRetrieveInteraction();
@@ -531,6 +534,37 @@ public class RpgStationsPlugin extends JavaPlugin {
         SettingsCatalog.getInstance().fold(layer, false);
         Log.info("Settings asset layer: folded " + layer.size() + " settings entry(ies), Enabled="
                 + SettingsCatalog.getInstance().current().isEnabled());
+    }
+
+    /**
+     * Registers the {@link ProtectListAsset} Pattern-A store at {@code Server/RpgStations/ProtectLists}
+     * and folds every loaded file into {@link ProtectListCatalog}, the server-wide protect-list every
+     * placement consults. The files ADD UP: each one loaded from this jar, a pack or the owner's own
+     * pack counts, and a later layer's file with the same name replaces the earlier one inside the
+     * store, which is how an entry is taken back.
+     */
+    private void registerProtectListAssetStore() {
+        AssetStoreRegistrar.registerStore(
+                ProtectListAsset.class,
+                new DefaultAssetMap<String, ProtectListAsset>(),
+                "RpgStations/ProtectLists",
+                ProtectListAsset::getId,
+                ProtectListAsset.CODEC,
+                null);
+        getEventRegistry().register(LoadedAssetsEvent.class, ProtectListAsset.class,
+                RpgStationsPlugin::onProtectListAssetsLoaded);
+    }
+
+    private static void onProtectListAssetsLoaded(
+            LoadedAssetsEvent<String, ProtectListAsset, DefaultAssetMap<String, ProtectListAsset>> event) {
+        DefaultAssetMap<String, ProtectListAsset> assetMap = event.getAssetMap();
+        Map<String, ProtectListAsset> layer = new LinkedHashMap<>();
+        for (Map.Entry<String, ProtectListAsset> entry : assetMap.getAssetMap().entrySet()) {
+            layer.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
+        }
+        ProtectListCatalog.getInstance().fold(layer, false);
+        Log.info("ProtectList asset layer: folded " + layer.size() + " protect-list file(s) into ProtectListCatalog: "
+                + layer.keySet());
     }
 
     /** Registers {@code "rpg_station_use"}, the object-form interaction every station block references. */

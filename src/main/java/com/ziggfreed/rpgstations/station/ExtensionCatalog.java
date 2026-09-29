@@ -447,9 +447,9 @@ public final class ExtensionCatalog {
                 overlayEffectRef(base.getEffect(), overlay.getEffect()));
     }
 
-    /** Per-leaf overlay of the shared {@code EffectRef} group ({@code Id}/{@code DurationMs}). */
+    /** Per-leaf overlay of the shared {@code EffectRef} group ({@code Id}/{@code DurationMs}/{@code Target}). */
     @Nullable
-    private static EffectRef overlayEffectRef(@Nullable EffectRef base, @Nullable EffectRef overlay) {
+    static EffectRef overlayEffectRef(@Nullable EffectRef base, @Nullable EffectRef overlay) {
         if (overlay == null) {
             return base;
         }
@@ -458,7 +458,8 @@ public final class ExtensionCatalog {
         }
         return EffectRef.of(
                 firstNonNull(overlay.getId(), base.getId()),
-                firstNonNull(overlay.getDurationMs(), base.getDurationMs()));
+                firstNonNull(overlay.getDurationMs(), base.getDurationMs()),
+                firstNonNull(overlay.getTarget(), base.getTarget()));
     }
 
     @Nullable
@@ -752,12 +753,12 @@ public final class ExtensionCatalog {
 
     /**
      * Per-leaf {@code Custody.States} overlay. Every state name is an independent nullable knob, so
-     * each overlays on its own. NOTE for whoever adds the FOURTH state name: add it here in the same
-     * change, or an overlay silently drops it (a leaf missing from this factory call reads as
+     * each of the five overlays on its own. NOTE for whoever adds a state name: add it here in the
+     * same change, or an overlay silently drops it (a leaf missing from this factory call reads as
      * "neither side authored one" and the merged group loses it).
      */
     @Nullable
-    private static Custody.States overlayStates(@Nullable Custody.States base, @Nullable Custody.States overlay) {
+    static Custody.States overlayStates(@Nullable Custody.States base, @Nullable Custody.States overlay) {
         if (overlay == null) {
             return base;
         }
@@ -767,7 +768,9 @@ public final class ExtensionCatalog {
         return Custody.States.of(
                 firstNonNull(overlay.getEmpty(), base.getEmpty()),
                 firstNonNull(overlay.getLoaded(), base.getLoaded()),
-                firstNonNull(overlay.getWorking(), base.getWorking()));
+                firstNonNull(overlay.getWorking(), base.getWorking()),
+                firstNonNull(overlay.getReady(), base.getReady()),
+                firstNonNull(overlay.getOverdone(), base.getOverdone()));
     }
 
     /** The ONE per-leaf {@code Display} overlay, shared with a step's per-beat overlay: {@link Custody.Display#overlaid}. */

@@ -77,11 +77,11 @@ One beat, in full:
   "Id": "Draw", "Paced": true, "IsWork": true, "State": "Drawing",
   "Duration": { "Ms": 12000 },
   "Puppet": { "Clip": "RPG_Emote_Disenchant_Channel" },
-  "Display": { "Offset": { "Y": 1.4 }, "Rotation": { "Y": 45 }, "Animated": true },
+  "Display": { "Offset": { "Y": 1.4 }, "Rotation": { "Yaw": 45 }, "Animated": true },
   "Presentation": {
     "Target": "Display",
     "Sounds": ["SFX_MemoryRestored"],
-    "Particles": [ { "SystemId": "RPG_Disenchant_Draw", "DurationSeconds": 6 } ]
+    "Particles": [ { "SystemId": "RPG_Disenchant_Draw" } ]
   }
 }
 ```
@@ -98,6 +98,8 @@ One beat, in full:
   without a flicker; a beat naming a different one re-flips in place.
 - `Display` overlays the placed piece's prop for this beat only, the leaves it authors replacing the
   socket's own: here the piece lifts and turns. The socket's own look comes back after.
+- `RPG_Disenchant_Draw` authors its own `LifeSpan`, so it rides the lifted piece and ends on its
+  own; it needs no `DurationSeconds`, which only caps a burst played at a position.
 
 ### Pace
 
@@ -136,24 +138,29 @@ and candle bobbing) under a hum that ducks the music; `Drawing` adds violet mote
 `State` leaf is the whole mechanism: name the state, and the block does the rest.
 
 **The accents are one-shots.** A step's `Presentation` fires one-shot sounds (always positional) and
-bounded particle bursts. `DurationSeconds` caps a burst that would otherwise never end; a system
-that ends on its own needs no cap. `Color` tints a vanilla system to the beat's palette through the
-engine's own colour argument, so the green-gold sparks are vanilla's `Block_Gem_Sparks` with one
-leaf, not a copied system.
+bounded particle bursts. `DurationSeconds` caps a burst played at a position that would otherwise
+never end; a system that ends on its own needs no cap. `Color` tints a vanilla system to the beat's
+palette through the engine's own colour argument, so the green-gold sparks are vanilla's
+`Block_Gem_Sparks` with one leaf, not a copied system.
 
 **Where a cue plays** is `Presentation.Target`:
 
 - `Block` (the default): the station block's centre.
-- `Display`: the placed piece's prop, the socket the queue is working. Particles attach to the prop
-  entity and sounds follow it, delivered only to the players who can see it. A `Convert` beat
-  drops the prop before its own entry cues, so a `Display` target on that beat resolves to the
-  socket's resting position: the shatter plays where the piece was.
-- `Puppet`: the worker's double. `{ "Kind": "Puppet", "Node": "<a node of its model>" }` attaches
-  the particles to a named node of the double's model (the raised book, a hand).
+- `Display`: the placed piece's prop, the socket the queue is working. Sounds follow the prop,
+  delivered only to the players who can see it, and particles ride it. A `Convert` beat drops the
+  prop before its own entry cues, so a `Display` target on that beat resolves to where the piece
+  last stood, lifted or not: the shatter plays where the piece was.
+- `Puppet`: the worker's double, or the block when no double stands.
+  `{ "Kind": "Puppet", "Node": "<a node of its model>" }` attaches the riding particles to a named
+  node of the double's model (the raised book, a hand).
 
-An entity target has no playback cap on its attached particles, so an endless system there needs
-a bounded copy; a fresh entity nobody's tracker has shown yet falls back to a positional play at
-its place.
+A particle system rides an entity only when it ends on its own: its own `LifeSpan` is positive. An
+attached system has no playback cap, so it lives until that lifetime ends or the entity is removed
+(the prop when the piece is consumed, the double when the session ends). A system with no
+`LifeSpan` plays at the entity's position under `DurationSeconds` instead, and
+`/rpgstations validate` warns about it; which is why each of the ritual's derived systems authors a
+`LifeSpan`. A fresh entity nobody's tracker has shown yet falls back to a positional play at its
+place.
 
 **A sting reaches the worker in 2D** through `Presentation.Effect` with `"Target": "Player"`: a
 tiny native `EntityEffect` whose only job is a `LocalSoundEventId`, applied to the real (hidden)

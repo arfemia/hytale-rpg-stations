@@ -40,11 +40,12 @@ import com.ziggfreed.common.codec.Rotation;
  * weapon placement, leg E).
  *
  * <p>{@link #states} is nullable: authoring it opts the BLOCK's {@code State.Definitions} into
- * the empty/loaded hint flip (a pack-authored {@code BlockType} state pair, see
- * {@code station.StationService#flipCustodyState}) and, when its own nullable {@code Working} leaf
- * is authored, into the actively-working flip on top ({@code station.StationService
- * #enterWorkingState}); omitting it means custody still works mechanically (placement/drain/
- * auto-return) with no visual/hint flip.
+ * the empty/loaded flip (a pack-authored {@code BlockType} state pair, see
+ * {@code station.StationService#flipCustodyState}; a flip swaps the block to the state's own
+ * variant, its texture, animation, light, ambient loop and particles with it) and, when its own
+ * nullable {@code Working} leaf is authored, into the actively-working flip on top
+ * ({@code station.StationService#enterWorkingState}); omitting it means custody still works
+ * mechanically (placement/drain/auto-return) with no visual/hint flip.
  *
  * <p>{@link #display} is nullable (design section 9's Visuals leg, phase 2 leg G): authoring it
  * opts the placed input into a PLACED-AS-ENTITY visual (a static, network-replicated,

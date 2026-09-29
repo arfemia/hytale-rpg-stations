@@ -87,6 +87,7 @@ class AssetDocumentationCoverageTest {
         walk("FlairAsset", FlairAsset.CODEC, undocumented, narrated, visited);
         walk("ExtensionAsset", ExtensionAsset.CODEC, undocumented, narrated, visited);
         walk("RpgStationsSettingsAsset", RpgStationsSettingsAsset.CODEC, undocumented, narrated, visited);
+        walk("ProtectListAsset", ProtectListAsset.CODEC, undocumented, narrated, visited);
     }
 
     private static void walk(String path, BuilderCodec<?> codec, List<String> undocumented,

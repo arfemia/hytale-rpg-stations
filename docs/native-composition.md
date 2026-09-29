@@ -129,30 +129,34 @@ mechanic that already has a natural-sounding native match.
 
 A `Sounds` entry is normally just the id string. Authoring it as `{"EventId": "...", "DelayMs": 140}`
 instead holds that ONE sound behind the rest of the moment - useful for staggering a thud and a chime
-inside a single cue. Volume and pitch are deliberately not authorable: the engine's positional
-one-shot call takes neither (only its entity-following packet carries the two modifiers), so a leaf
-here would work at an entity target and do nothing at the block, the default. Vary them by
-referencing a different `SoundEvent` asset, which is where they live; a one-line `Parent` copy with
-its own `Volume` or `Pitch` is the whole file.
+inside a single cue. A cue's loudness and tone live on its `SoundEvent` asset, not on the entry:
+the engine's positional sound call and its entity-following packet both take a volume and a pitch
+modifier, but a quieter or pitched cue is simply a derived sound asset of its own, one line long,
+`{"Parent": "<vanilla id>", "Pitch": -3, "Volume": -2}`, referenced here by id like any other. One
+place to tune a sound then serves every station and moment that plays it.
 
 A `Particles` entry can carry a `Color`, a `#rrggbb` tint the engine applies to the whole system
 through its own colour argument, so a tintable vanilla system (a spark, a mote) takes a moment's
 palette without a copied spawner file. Absent, the system plays its authored colours.
 
 A `Presentation` can name WHERE it plays with `Target`: `"Block"` (the default, the station block's
-centre), `"Display"` (the placed piece's prop, the socket a ritual queue is working; its resting
-position once the prop is gone, as after a `Convert` beat consumed the piece) or `"Puppet"` (the
-worker's double, or the worker's own body when no double stands). At an entity target the sounds
-follow the entity and the particles ride it, delivered only to the players who can see it; the
-object form `{"Kind": "Puppet", "Node": "Hand_R"}` attaches the particles to one named node of the
-double's model. Two things to know: a burst at an entity target has no playback cap (the engine's
-attached-particle leaf carries none), so a system that never ends on its own stays at the block; and
-a prop or double spawned this very tick has been shown to nobody yet, so a cue in the same beat plays
-at its position instead, never lost. The shake, the interaction and the effect are not moved by
-`Target`: the effect picks its own wearer with `Effect.Target`, `"Player"` (the default, what a
-`LocalSoundEventId` sting or a screen effect needs) or `"Puppet"` (an aura or a ModelVFX the
-onlookers see on the performer). An effect on the double never expires by itself, so its
-`DurationMs` is kept by the station's own clock and every effect the station put on comes off at
+centre), `"Display"` (the placed piece's prop, the socket a ritual queue is working; where it last
+stood once the prop is gone, as after a `Convert` beat consumed the piece) or `"Puppet"` (the
+worker's double; the block when no double stands, since a cue never lands on the worker's own body).
+At an entity target the sounds follow the entity, delivered only to the players who can see it, and
+the object form `{"Kind": "Puppet", "Node": "Hand_R"}` attaches the riding particles to one named
+node of the double's model. Two things to know. A particle system rides an entity only when it ends
+on its own, which the engine reads off the system's own `LifeSpan`: an attached system has no
+playback cap, so it lives until that lifetime ends or the entity is removed (a prop when its piece
+is consumed or taken back, a double when the session ends), and `DurationSeconds` cannot shorten it.
+A system with no positive `LifeSpan` plays at the entity's position under its `DurationSeconds` cap
+instead, and `/rpgstations validate` warns about it; give a derived copy of the system a `LifeSpan`
+to let it ride. And a prop or double spawned this very tick has been shown to nobody yet, so a cue
+in the same beat plays at its position instead, never lost. The shake, the interaction and the
+effect are not moved by `Target`: the effect picks its own wearer with `Effect.Target`, `"Player"`
+(the default, what a `LocalSoundEventId` sting or a screen effect needs) or `"Puppet"` (an aura or a
+ModelVFX the onlookers see on the performer). An effect on the double never expires by itself, so
+its `DurationMs` is kept by the station's own clock and every effect the station put on comes off at
 the session's end.
 
 A `Presentation` also carries `DelayMs`, which is not a cue but a timing knob over the whole group:

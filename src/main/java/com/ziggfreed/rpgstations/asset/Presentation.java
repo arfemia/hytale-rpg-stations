@@ -47,7 +47,7 @@ public final class Presentation {
     public static final BuilderCodec<Presentation> CODEC = BuilderCodec.builder(Presentation.class, Presentation::new)
             .appendInherited(new KeyedCodec<>("Target", Target.CODEC, false),
                     (o, v) -> o.target = v, o -> o.target, (o, p) -> o.target = p.target)
-            .documentation("Where this moment's sounds and particles play: 'Block' (the default, the station block's centre), 'Display' (the placed piece's prop, the socket a ritual queue is working; its resting position when the prop is gone, as after a Convert beat consumed it) or 'Puppet' (the worker's double, or the worker's own body when no double stands). A bare word, or {Kind, Node} to attach the particles to one named node of the double's model. A sound or a particle system at an entity target follows it and reaches only the players who see it; a burst there cannot be capped by DurationSeconds, so an endless system stays at the block. The shake, the interaction and the effect are not moved by this leaf.").add()
+            .documentation("Where this moment's sounds and particles play: 'Block' (the default, the station block's centre), 'Display' (the placed piece's prop, the socket a ritual queue is working; where it last stood when the prop is gone, as after a Convert beat consumed it) or 'Puppet' (the worker's double; the block when no double stands, since a cue never lands on the worker's own body). A bare word, or {Kind, Node} to attach the particles to one named node of the double's model. At an entity target a sound follows the entity and reaches only the players who see it. A particle system RIDES the entity only when its own asset gives it a positive LifeSpan, and then lives until that LifeSpan ends or the entity is removed (a prop when its piece is consumed or taken back, a double when the session ends), which DurationSeconds cannot shorten; any other system plays at the entity's position under its DurationSeconds cap. The shake, the interaction and the effect are not moved by this leaf.").add()
             .appendInherited(new KeyedCodec<>("Sounds",
                             new ArrayCodec<>(SoundCue.CODEC, SoundCue[]::new), false),
                     (o, v) -> o.sounds = v, o -> o.sounds, (o, p) -> o.sounds = p.sounds)
@@ -263,17 +263,22 @@ public final class Presentation {
      * always played. {@link Kind#DISPLAY} is the placed piece's prop: under a ritual queue the
      * socket the current pass is working, else the first socket that shows one; when the prop is
      * gone (a {@code Convert} beat consumed the piece in the same tick its cues fire) the cue
-     * plays at that socket's resting display position instead. {@link Kind#PUPPET} is the
-     * worker's double, or the worker's own body when no double stands (the puppet group off, or
-     * the world's puppet ceiling reached, where the worker performs in their own body anyway).
+     * plays where the prop last stood instead. {@link Kind#PUPPET} is the worker's double, or the
+     * BLOCK when no double stands (the puppet group off, or the world's puppet ceiling reached):
+     * a moment's sounds and particles never land on the worker's own body.
      *
-     * <p>At an entity target the sounds follow the entity and the particles ride it, delivered
-     * only to the players whose tracker shows that entity; {@link #node} names one node of the
-     * double's model to attach the particles to (a hand, the held item), and means nothing at the
-     * block. A freshly spawned prop or double has been shown to nobody yet, so a cue that lands
-     * in the same tick plays at its position instead; nothing is lost. The shake, the interaction
-     * and the effect never move: the shake is the worker's camera, the interaction fires on the
-     * worker, and the effect chooses its own target ({@link EffectRef#getTarget()}).
+     * <p>At an entity target the sounds follow the entity, delivered only to the players whose
+     * tracker shows it. A particle system RIDES the entity only when it provably ends on its own
+     * (its native asset's positive {@code LifeSpan}): an attached system carries no playback cap,
+     * so it lives until that lifetime ends or the entity is removed (a prop when its piece is
+     * consumed or taken back, a double when the session ends), and {@code DurationSeconds} cannot
+     * shorten it. Any other system plays at the entity's position under its cap, so nothing
+     * endless ever rides a prop or a double. {@link #node} names one node of the double's model to
+     * attach the riding particles to (a hand, the held item), and means nothing at the block. A
+     * freshly spawned prop or double has been shown to nobody yet, so a cue that lands in the same
+     * tick plays at its position instead; nothing is lost. The shake, the interaction and the
+     * effect never move: the shake is the worker's camera, the interaction fires on the worker, and
+     * the effect chooses its own target ({@link EffectRef#getTarget()}).
      */
     public static final class Target {
 
@@ -283,7 +288,7 @@ public final class Presentation {
             BLOCK,
             /** The placed piece's display prop, or its resting position when the prop is gone. */
             DISPLAY,
-            /** The worker's double, or the worker's own body when none stands. */
+            /** The worker's double, or the block when none stands. */
             PUPPET;
 
             /** Parse a case-insensitive word, falling back to {@link #BLOCK} for null/unknown input. */
@@ -309,13 +314,13 @@ public final class Presentation {
                         (o, v) -> o.kind = v, o -> o.kind, (o, p) -> o.kind = p.kind)
                 .metadata(EditorSchema.oneOfDocumented(
                         "Block", "The station block's centre, the default",
-                        "Display", "The placed piece's prop (the socket a queue is working), or its resting position when the prop is gone",
-                        "Puppet", "The worker's double, or the worker's own body when no double stands"))
+                        "Display", "The placed piece's prop (the socket a queue is working), or where it last stood when the prop is gone",
+                        "Puppet", "The worker's double, or the block when no double stands"))
                 .metadata(EditorSchema.defaultValue("Block"))
                 .documentation("Where the moment plays: Block (the default), Display or Puppet. An unknown word reads as Block.").add()
                 .appendInherited(new KeyedCodec<>("Node", Codec.STRING, false),
                         (o, v) -> o.node = v, o -> o.node, (o, p) -> o.node = p.node)
-                .documentation("A named node of the target entity's model the particles attach to (a hand, the held item); meaningful at an entity target only. Absent attaches them to the entity itself.").add()
+                .documentation("A named node of the target entity's model the riding particles attach to (a hand, the held item); meaningful at an entity target only. Absent attaches them to the entity itself.").add()
                 .build();
 
         /** The dual bare-word / {@code {Kind, Node}} codec (see {@link StringOrObjectCodec}). */
@@ -392,12 +397,12 @@ public final class Presentation {
      * held 100ms whose second sound authors 140ms plays that sound 240ms after the engine reached
      * the moment. Both are scheduled on the ONE playback queue, at a resolution of one server tick.
      *
-     * <p><b>No {@code Volume} or {@code Pitch} leaf, deliberately.</b> The engine's one-shot
-     * positional sound call takes neither a gain nor a pitch argument (only its entity-following
-     * packet carries the two modifiers), so a leaf here would work at an entity target and do
-     * nothing at the block, the default. Vary the loudness or tone by referencing a different
-     * {@code SoundEvent} asset, which is where those values are authored and where a one-line
-     * {@code Parent} copy with its own {@code Volume} or {@code Pitch} lives.
+     * <p><b>No {@code Volume} or {@code Pitch} leaf here: a cue's loudness and tone live on its
+     * {@code SoundEvent} asset.</b> The engine's positional sound call and its entity-following
+     * packet both take a volume and a pitch modifier, but a quieter or pitched cue is one line of
+     * its own, a derived sound asset, {@code {"Parent": "<vanilla id>", "Pitch": .., "Volume": ..}},
+     * referenced here by id like any other, which keeps one place to tune a sound for every
+     * station and moment that plays it.
      */
     public static final class SoundCue {
 
@@ -505,8 +510,9 @@ public final class Presentation {
      * <p><b>{@link #color} tints the system</b> through the engine's own colour argument, the one
      * leaf that lets a tintable vanilla system (a spark, a mote) take the moment's palette without
      * a copied spawner. It rides the ONE engine overload that carries both a colour and the
-     * playback cap, so a tinted burst keeps {@link #durationSeconds}' leak guard at the block; at
-     * an entity target the colour rides the attached particle leaf, which has no cap at all.
+     * playback cap, so a tinted burst keeps {@link #durationSeconds}' leak guard wherever it plays
+     * at a position; a burst riding an entity carries the colour on the attached particle leaf,
+     * where the system's own {@code LifeSpan} ends it instead of the cap.
      */
     public static final class ModelParticle {
 
@@ -537,7 +543,7 @@ public final class Presentation {
                         .appendInherited(new KeyedCodec<>("DurationSeconds", Codec.DOUBLE, false),
                                 (o, v) -> o.durationSeconds = v, o -> o.durationSeconds,
                                 (o, p) -> o.durationSeconds = p.durationSeconds)
-                        .documentation("Client-playback cap in seconds; defaults to 4. Author 0 or less for UNCAPPED, which an unbounded-spawner system will never stop.").add()
+                        .documentation("Client-playback cap in seconds; defaults to 4. Author 0 or less for UNCAPPED, which an unbounded-spawner system will never stop. It caps every burst played at a position; a burst riding an entity target ends with its own LifeSpan or the entity instead.").add()
                         .appendInherited(new KeyedCodec<>("RotationOffset", Rotation.CODEC, false),
                                 (o, v) -> o.rotationOffset = v, o -> o.rotationOffset,
                                 (o, p) -> o.rotationOffset = p.rotationOffset)

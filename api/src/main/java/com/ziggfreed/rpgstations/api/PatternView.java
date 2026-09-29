@@ -15,7 +15,7 @@ import javax.annotation.Nullable;
  * query time, and a consumer may retain whatever it likes.
  *
  * <p>An interface rather than a record on purpose: it is a view likely to grow, and a new
- * default-bodied accessor is the one post-freeze addition shape the growth policy allows (see
+ * default-bodied accessor is the one additive shape the growth policy allows (see
  * {@code api/CLAUDE.md}).
  */
 public interface PatternView {

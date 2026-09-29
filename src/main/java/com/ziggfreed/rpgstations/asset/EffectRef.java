@@ -52,7 +52,7 @@ public final class EffectRef {
                     TARGET_PLAYER, "The worker's own body, the default: what a 2D sound sting or a screen effect needs",
                     TARGET_PUPPET, "The worker's double: what a visible aura or a ModelVFX on the performer needs"))
             .metadata(EditorSchema.defaultValue(TARGET_PLAYER))
-            .documentation("Who wears the effect: Player (the default, the worker's own body, which is what a LocalSoundEventId sting or a screen effect needs) or Puppet (the worker's double, for an aura or a ModelVFX the onlookers should see on the performer; the worker's own body when no double stands). An effect on the double never expires by itself, so a DurationMs there is kept by the engine's own clock, and every effect it put on comes off at the session's end.").add()
+            .documentation("Who wears the effect: Player (the default, the worker's own body, which is what a LocalSoundEventId sting or a screen effect needs) or Puppet (the worker's double, for an aura or a ModelVFX the onlookers should see on the performer; the worker's own body when no double stands). An effect on the double never expires by itself, so a DurationMs there is kept by the engine's own clock, and every effect it put on comes off at the session's end. Read on a Presentation's Effect only: authored on a Puppet.Hide.Effect it means nothing, and the validator says so.").add()
             .build();
 
     public EffectRef() {

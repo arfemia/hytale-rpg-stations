@@ -163,9 +163,9 @@ its own `Moments` via `patternMoments`, which also switches the flair overlay of
   casing (`reasonOf`: `no_materials` is `No_Materials`, `retrieve.busy` is `Retrieve_Busy`, a
   `_named` variant collapses to its base), and the moment id is `Refused:<Reason>`
   (`StationFlairs.refusedMomentId`); `Refused` is the blanket, `Refused:` a recognized prefix.
-  `Refused:Protected` (`ui.station.protected`) is the placement of a piece on the owner's
-  protect-list or in a station's own `Except` hole, the one placement denial that keeps its own
-  key whatever the socket shape.
+  `Refused:Protected` (`ui.station.protected`) is the placement of a piece on the server-wide
+  protect-list (`ProtectListCatalog`) or in a station's own `Except` hole, the one placement denial
+  that keeps its own key whatever the socket shape.
 - **Resolution, nearest wins per leaf** (`resolveCue`, pure): the action's `Refused:<Reason>`, the
   action's `Refused`, the settings' `Refused:<Reason>`, the settings' `Refused`
   (`SettingsCatalog.defaultMoments`, the `Settings.Moments` map). Every layer folds through
@@ -467,10 +467,14 @@ recursively and take the OVERLAY's leaf where it is authored, the BASE's where i
 therefore never clobbers `States`/`MaxQuantity`/`Input` - that is the whole reason the capability
 exists, so a pack can re-skin a station's placed-input visual without silently disabling its
 placement mechanics; a `ContributionScale` overlay authoring only `Floors` keeps the base action's
-own `Factors`. Overlays apply in `APPLY_ORDER`, so the later (higher-priority) extension wins a
-same-leaf contest and the fold stays deterministic; a null overlay group returns the base object
-unchanged. Covered by `ExtensionOverlayTest` (`src/test/java/com/ziggfreed/rpgstations/station/`,
-fixture JSON authored by the test and decoded through the real shipped codecs). The keyed `Anchors`
+own `Factors`. Every leaf of a nested group rides the same rule, so a `States` overlay keeps all
+five names (`overlayStates`, `Ready` and `Overdone` included) and an `EffectRef` overlay keeps its
+`Target` (`overlayEffectRef`); a leaf added to one of these groups is added to its overlay factory
+in the same change, or the overlay drops it. Overlays apply in `APPLY_ORDER`, so the later
+(higher-priority) extension wins a same-leaf contest and the fold stays deterministic; a null
+overlay group returns the base object unchanged. Covered by `ExtensionOverlayTest`
+(`src/test/java/com/ziggfreed/rpgstations/station/`, fixture JSON authored by the test and decoded
+through the real shipped codecs). The keyed `Anchors`
 map layers in the same place but by the keyed rule, not the leaf rule (`applyToActionAnchors` over
 the pure `mergeAnchors`: base keys first, then each extension's NEW keys in `APPLY_ORDER`, the base
 winning a collision case-insensitively). It is safe at this level precisely because nothing branches
@@ -608,16 +612,22 @@ one `Ingredient`). **Held/placed acceptance against an `ActionInput` is ONE rule
 what a route matches, the `Except` holes carved out either way, one entry or several; a
 route-less entry matches nothing and carves no hole): action selection, a socket's `Match` and an
 explicit `Custody.Input` at placement, a Block socket's match and a fallback's `Input` all ask it.
-PLACEMENT layers three station rules over it in `StationService.socketAcceptsInput` /
-`routeStack`: a route-less matcher's holes are carved out of what the station DERIVES (its
-conversion inputs and fallback routes), never out of everything, so an `Input` that authors only
-`Except` narrows the derived acceptance; a material a hole refused, or one on the owner's
-protect-list (`Settings.Protected`, `StationCustody.isProtected`, checked before any socket is
-offered it), is `PlacementDenial.PROTECTED` (first in the enum, so it outranks every other reason
-and keeps its own `ui.station.protected` key on a socket-less custody, `placementDenyKey`; a
-protected piece is refused outright, loaded station or not); and a COUNT pile (capacity above
-one) refuses a stack carrying per-instance data (`StationCustody.carriesInstanceData`: wear
-tracked, or metadata), since it would come back as a bare fresh stack. `Custody.HeldOnly` skips
+PLACEMENT layers three station rules over it in `StationService.socketAcceptsInput` (its pure
+core `socketAccepts`, handed the live reads) / `routeStack`: a route-less matcher's holes are
+carved out of what the station DERIVES (its conversion inputs and fallback routes), never out of
+everything, so an `Input` that authors only `Except` narrows the derived acceptance; a material a
+hole refused, or one the server-wide protect-list protects at this station and action
+(`ProtectListCatalog.protects`, every `ProtectListAsset` file in scope, the pure core
+`StationCustody.isProtected`, checked before any socket is offered it), is
+`PlacementDenial.PROTECTED` (first in the enum, so it outranks every other reason and keeps its
+own `ui.station.protected` key on a socket-less custody, `placementDenyKey`); and a COUNT pile
+(capacity above one) refuses a stack carrying per-instance data
+(`StationCustody.carriesInstanceData` over the raw readings: wear tracked, or metadata), since it
+would come back as a bare fresh stack.
+A press that placed nothing refuses only at a station that was EMPTY before it and cannot idle
+(`unplacedPressRefusal`), Protected included: at a loaded station the press falls through to the
+engage gates, which judge the held item as a TOOL, so protecting a trophy tool never locks its
+owner out of the work. `Custody.HeldOnly` skips
 the inventory scan (`findFirstCustodyMatchInInventory`) altogether. `matchesInput` is NOT an
 acceptance site: it is the ROUTES-only seam behind `accepts` (a catch-all answers false there),
 kept so `ActionInput` and `Ingredient` stay two leaves over ONE route matcher, pinned by
@@ -885,22 +895,33 @@ and the playback cap together, the one engine overload that carries both a colou
 AND the leak guard (this bug was found in-game; do not reintroduce it).
 
 **The presentation `Target` is resolved at PLAY time** (`playMoment` -> `resolveAim`, an
-`Aim(entity, position, node)`), never at emit time, so a delayed cue lands where its target IS
-when it comes due: `Block` (or none) is the block centre `emitMoment` was handed; `Display` is
-the worked socket's prop (`displaySocketIdFor`: the ritual queue's `StationSession.queueSocketId`,
-else the first Item socket authoring a `Display`) while it stands, else that socket's resting
-display position (`displayRestingPosition` over `StationCustodyDisplay.resolvePosition`), which is
-where a `Convert` beat's cues land after the beat consumed the piece and `onUniqueConsumed`
-dropped its prop in the same tick; `Puppet` is the double while one stands, else the worker's
-own body (`s.ref`), which performs the work then. At an entity aim the sounds go through zc
-`Sound3D.playOn` (the entity-following packet, delivered to the players whose tracker shows the
-entity, never the engine's world-wide broadcast) and the particles through
-`ModelParticleService.spawnOn` (`SpawnModelParticles` on the entity's `NetworkId`, riding the
-entity or the `Node` of its model; no cap exists on that route), and BOTH fall back to the aim's
-position when nobody received them: a freshly spawned prop or double has been shown to nobody
-until the tracker's next tick, so a cue in the same beat plays at its place, never lost. The
-shake stays on the worker's camera and the interaction on the worker; the effect chooses its own
-target (`applyMomentEffect`): `EffectRef.Target "Puppet"` puts it on the double with NO expiry
+`Aim(entity, position, node)` over the pure decision `aimSource`), never at emit time, so a
+delayed cue lands where its target IS when it comes due: `Block` (or none) is the block centre
+`emitMoment` was handed; `Display` is the worked socket's prop (`displaySocketIdFor`: the ritual
+queue's `StationSession.queueSocketId`, else the first Item socket authoring a `Display`) while
+it stands, else where it last stood (`displayRestingPosition`: the look the session last dressed
+that socket's prop in, `StationSession.shownDisplays`, kept past the despawn, else the socket's
+own `Display`, through `StationCustodyDisplay.resolvePosition`), which is where a `Convert`
+beat's cues land after the beat consumed the piece and `onUniqueConsumed` dropped its prop in the
+same tick; `Puppet` is the double while one stands, else the BLOCK: a moment's sounds and
+particles never land on the worker's own body, which a burst could otherwise ride until they log
+out. At an entity aim the sounds go through zc `Sound3D.playOn` (the entity-following packet,
+delivered to the players whose tracker shows the entity, never the engine's world-wide broadcast)
+and a burst RIDES the entity through `ModelParticleService.spawnOn` (`SpawnModelParticles` on the
+entity's `NetworkId`, riding the entity or the `Node` of its model) ONLY when its system provably
+ends on its own (`ParticleLifetimes`: the native `ParticleSystem` asset's own positive `LifeSpan`,
+read live; zero or less is the engine's unlimited, and an unreadable system is unproven), since
+that route carries no cap: an attached system lives until its own lifetime ends or the entity is
+removed (a prop when its piece is consumed or taken back, a double when the session ends), and
+`DurationSeconds` cannot shorten it. Every other burst plays at the entity's position through the
+capped positional spawn, so nothing endless ever rides; the validator warns
+`PRESENTATION_ENTITY_TARGET_UNBOUNDED` on such a burst (and notes
+`PRESENTATION_ENTITY_TARGET_CAP_IGNORED` on a riding burst that authors a cap). Sounds and riding
+bursts fall back to the aim's position when nobody received them: a freshly spawned prop or
+double has been shown to nobody until the tracker's next tick, so a cue in the same beat plays at
+its place, never lost. The shake stays on the worker's camera and the interaction on the worker;
+the effect chooses its own target (`applyMomentEffect`, the pure `effectGoesOnDouble`):
+`EffectRef.Target "Puppet"` puts it on the double with NO expiry
 (zc `NativeEffectUtil.applyInfinite`, since the double carries no `EntityStatMap` and the
 engine's effect timer never runs on it) and an authored `DurationMs` is kept by this engine's own
 cue clock (`queueEffectRemoval`: a `PendingMoment` carrying the ref and effect id instead of a
@@ -1362,9 +1383,10 @@ two package-private seams on `StationService`:
   it under a DIFFERENT name, a step's own `State`, re-flips the block in place without the resting
   look between) and exits any previously-working block first, so at most one block per player is
   ever left working (`workingByPlayer`, a transient `UUID -> WorkingFlip` map carrying the state
-  NAME it wears, never persisted). The name a work beat wears is the pure `workingStateName`: the
-  step's `State` when it authors one and the custody authors `States` (the exit needs that group
-  for the resting look), else the custody's `Working` name, else no flip.
+  NAME it wears, never persisted). The decision is the pure `workingMove` (`KEEP` / `REFLIP` /
+  `ENTER` / `EXIT`, pinned by a test), and the name a work beat wears is the pure
+  `workingStateName`: the step's `State` when it authors one and the custody authors `States` (the
+  exit needs that group for the resting look), else the custody's `Working` name, else no flip.
 - **`exitWorkingState(session)`** returns the block to its RESTING look
   (`StationDoneness.restingStateName`): `Loaded` (a claim still stands there), `Ready` (an open
   doneness window's batch waits), `Overdone` (a collapsed pile), or `Empty`. Idempotent, so every
@@ -1764,7 +1786,14 @@ per-floor one, and a cue paired with grants rides only once those grants produce
 ## Engine settings + Validation (unchanged mechanism; new checks)
 
 [`SettingsCatalog`](SettingsCatalog.java) holds the folded `asset.RpgStationsSettingsAsset`
-singleton. [`StationValidator`](StationValidator.java) keeps its two-pass structure and warn-only
+singleton. [`ProtectListCatalog`](ProtectListCatalog.java) holds every folded
+`asset.ProtectListAsset` file, keyed by lowercased id, and answers `protects(stationId, actionId,
+...)` by asking every file in scope (the files add up; a same-name file in a later layer replaces
+the earlier one inside the store). [`ParticleLifetimes`](ParticleLifetimes.java) answers whether a
+particle system provably ends on its own (its native asset's positive `LifeSpan`), the rule that
+decides whether a burst may ride an entity target; it is a generic read and a lift candidate for
+ziggfreed-common's particle seam.
+[`StationValidator`](StationValidator.java) keeps its two-pass structure and warn-only
 posture: `validateStructural()`/`runStructuralAndLog()` runs at EVERY asset-load fold (every
 check except cross-layer reference-existence ones); `validate()`/`runAndLog()` (the FULL set)
 runs ONCE post-load from the first `PlayerReadyEvent` and on demand from `/rpgstations validate`.

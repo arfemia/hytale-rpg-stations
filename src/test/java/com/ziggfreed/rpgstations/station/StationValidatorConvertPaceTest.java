@@ -117,8 +117,9 @@ public class StationValidatorConvertPaceTest {
     @Test
     void presentationTargets_needWhatTheyPointAt() throws Exception {
         // A Display target on an action whose sockets show no prop plays at the block; a Puppet
-        // target with no active puppet plays on the worker's own body; a Node at the block means
-        // nothing; an unknown kind reads as Block; a bad Color is ignored.
+        // target with no active puppet plays at the block too; a burst whose system is not proven
+        // to end never rides an entity; a Node at the block means nothing; an unknown kind reads
+        // as Block; a bad Color is ignored.
         ActionDef a = ActionDef.of("Unmake")
                 .withRecipe(recipe())
                 .withCustody(twoSingleSockets())
@@ -135,7 +136,8 @@ public class StationValidatorConvertPaceTest {
         Set<String> codes = validate(station("fixture_targets", a));
         assertTrue(codes.contains("PRESENTATION_DISPLAY_TARGET_NO_DISPLAY"), codes.toString());
         assertTrue(codes.contains("PRESENTATION_PARTICLE_BAD_COLOR"), codes.toString());
-        assertTrue(codes.contains("PRESENTATION_ENTITY_TARGET_CAP_IGNORED"), codes.toString());
+        assertTrue(codes.contains("PRESENTATION_ENTITY_TARGET_UNBOUNDED"),
+                "a system with no LifeSpan the server can read never rides the entity: " + codes);
         assertTrue(codes.contains("PRESENTATION_PUPPET_TARGET_NO_PUPPET"), codes.toString());
         assertTrue(codes.contains("EFFECT_PUPPET_TARGET_NO_PUPPET"), codes.toString());
         assertTrue(codes.contains("PRESENTATION_TARGET_NODE_AT_BLOCK"), codes.toString());

@@ -16,8 +16,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -636,6 +638,7 @@ public final class StationService {
                         store.getComponent(ref, InventoryComponent.Hotbar.getComponentType());
                 ItemStack heldForPlacement = hotbarComp != null ? hotbarComp.getActiveItem() : null;
                 int moved = 0;
+                Custody.ResolvedSocket placedSocket = null;
                 StationCustody.PlacementRoute heldRoute = routeStack(custodySockets, claim, playerUuid,
                         custody, asset, action, heldForPlacement);
                 placeDenial = heldRoute.denial();
@@ -655,6 +658,7 @@ public final class StationService {
                     moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
                             action.getActionId(), hotbarComp.getInventory(), hotbarComp.getActiveSlot(),
                             heldForPlacement, custody, heldRoute.socket(), blockX, blockY, blockZ);
+                    placedSocket = heldRoute.socket();
                 }
                 if (moved <= 0 && hotbarComp != null && !custody.effectiveHeldOnly()) {
                     // R3 fix (directive 5's held-else-inventory ruling): the held slot didn't
@@ -673,6 +677,7 @@ public final class StationService {
                         moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
                                 action.getActionId(), found.container(), found.slot(), found.stack(), custody,
                                 found.socket(), blockX, blockY, blockZ);
+                        placedSocket = found.socket();
                     }
                 }
                 if (moved > 0) {
@@ -685,39 +690,30 @@ public final class StationService {
                     toast(playerRef, RpgMsg.tr(loadedBefore
                             ? "ui.station.custody.topped_up" : "ui.station.custody.placed"));
                     // The placed-piece preview (Custody.Preview): what the piece just placed will
-                    // give back, named now, before any work starts.
+                    // give back, named now, before any work starts, addressed to the socket it
+                    // actually went into (held or backpack route alike).
                     if (custody.effectivePreview()) {
                         previewPlacedReturn(playerRef, player, asset, action, world, blockX, blockY, blockZ,
-                                heldRoute.placed() ? heldRoute.socket() : null);
+                                placedSocket);
                     }
                     return;
                 }
-                if (placeDenial == StationCustody.PlacementDenial.PROTECTED) {
-                    // A protected piece is refused OUTRIGHT, loaded station or not: the owner's
-                    // protect-list and a station's own Except hole answer with their own reason,
-                    // and never fall through to a tool gate or an idle engage.
-                    press.refuse(placementDenyKey(authoredSockets, placeDenial));
+                // An EMPTY station where nothing held or carried is accepted denies with the
+                // honest reason NOW instead of falling through to the tool gate, whose "wrong
+                // tool" toast would mislead (a held Food_Fish_Raw at the cutting board reads as a
+                // dagger problem when the real issue is an unacceptable material). A LOADED
+                // station falls through, and so does an idle-capable classic station
+                // (empty-handed practice is a legitimate engage).
+                // A Protected denial follows the same rule: at a loaded station the held piece
+                // is judged as a TOOL by the engage gates below, never as input, so protecting a
+                // trophy tool never locks its owner out of working with it.
+                boolean stepsAuthored = action.getSteps() != null && action.getSteps().length > 0;
+                StationAsset.Work workForIdle = action.getWork();
+                boolean idleCapable = !stepsAuthored && workForIdle != null && workForIdle.getIdle() != null;
+                String unplacedRefusal = unplacedPressRefusal(loadedBefore, idleCapable, authoredSockets, placeDenial);
+                if (unplacedRefusal != null) {
+                    press.refuse(unplacedRefusal);
                     return;
-                }
-                if (!loadedBefore) {
-                    // Decision 66 (round-3 smoke): the station is EMPTY and neither the held
-                    // stack nor the rest of the inventory carries anything this custody
-                    // accepts - deny with the honest reason NOW instead of falling through to
-                    // the tool gate, whose "wrong tool" toast misled the smoke (a held
-                    // Food_Fish_Raw at the cutting board read as a dagger problem when the
-                    // real issue was an unacceptable material). A LOADED station still falls
-                    // through (a denial further down really is about the tool), and an
-                    // idle-capable classic station falls through too - empty-handed practice
-                    // is a legitimate engage there. With authored sockets the routing's own
-                    // most-specific reason (share refusal > full socket > wrong input) replaces
-                    // the generic no-materials line.
-                    boolean stepsAuthored = action.getSteps() != null && action.getSteps().length > 0;
-                    StationAsset.Work workForIdle = action.getWork();
-                    boolean idleCapable = !stepsAuthored && workForIdle != null && workForIdle.getIdle() != null;
-                    if (!idleCapable) {
-                        press.refuse(placementDenyKey(authoredSockets, placeDenial));
-                        return;
-                    }
                 }
             }
             // ENGAGE-side socket gates (authored sockets only; the degenerate custody's ownership
@@ -3158,9 +3154,12 @@ public final class StationService {
      * ({@link #resolveAim}), never at emit time: a delayed cue targeting the placed piece plays
      * where the piece IS when it comes due, and a piece consumed in between (a {@code Convert}
      * beat despawns its prop the same tick its cues fire) is answered by the socket's resting
-     * position. At an entity target the sounds follow the entity and the particles ride it,
-     * delivered to the players whose tracker shows it; an entity the tracker has shown nobody yet
-     * (spawned this tick) answers no viewers, and the cue plays at its position instead.
+     * position. At an entity target the sounds follow the entity, delivered to the players whose
+     * tracker shows it, and a burst RIDES the entity only when its system provably ends on its own
+     * ({@link ParticleLifetimes}: an attached system has no playback cap, so it lives until its own
+     * lifetime ends or its entity is removed); every other burst plays at the entity's position
+     * under its {@code DurationSeconds} cap. An entity the tracker has shown nobody yet (spawned
+     * this tick) answers no viewers, and the cue plays at its position instead.
      */
     private static void playMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
                                    @Nonnull Presentation p, @Nonnull Vector3d targetPos) {
@@ -3179,8 +3178,18 @@ public final class StationService {
                 }
             }
         }
-        if (aim.entity() == null || !spawnAttachedParticles(store, aim, p.getParticles())) {
+        if (aim.entity() == null) {
             spawnMomentParticles(store, s, p.getParticles(), aim.position());
+        } else {
+            // A system that ends on its own rides the entity; one that might never end plays at the
+            // entity's position, where DurationSeconds caps it, so nothing endless ever rides.
+            List<Presentation.ModelParticle> riding =
+                    ParticleLifetimes.bursts(true, p.getParticles(), ParticleLifetimes::systemProvablyEnds);
+            if (!spawnAttachedParticles(store, aim, riding)) {
+                spawnMomentParticles(store, s, burstArray(riding), aim.position());
+            }
+            spawnMomentParticles(store, s, burstArray(ParticleLifetimes.bursts(false, p.getParticles(),
+                    ParticleLifetimes::systemProvablyEnds)), aim.position());
         }
         Presentation.Shake shake = p.getShake();
         if (shake != null && shake.getEffectId() != null && !shake.getEffectId().isBlank()) {
@@ -3210,21 +3219,27 @@ public final class StationService {
         }
     }
 
+    /** A burst list as the array the positional spawn takes; null when empty, which spawns nothing. */
+    @Nullable
+    private static Presentation.ModelParticle[] burstArray(@Nonnull List<Presentation.ModelParticle> bursts) {
+        return bursts.isEmpty() ? null : bursts.toArray(new Presentation.ModelParticle[0]);
+    }
+
     /**
      * A moment's {@code Effect}, on the target it names: the worker's own body (the default), or
      * the worker's double under {@code Target: "Puppet"} when one stands (the worker's own body
-     * again when none does: the worker IS the performer then). On the double the effect goes on
-     * with NO expiry, because the double carries no stat map and the engine's effect timer never
-     * runs on it, and an authored {@code DurationMs} is kept by this engine's own cue clock
-     * ({@link #queueEffectRemoval}); every effect either way is tracked on the session, so the
-     * session's teardown strips whatever is still on.
+     * again when none does: the worker IS the performer then, {@link #effectGoesOnDouble}). On the
+     * double the effect goes on with NO expiry, because the double carries no stat map and the
+     * engine's effect timer never runs on it, and an authored {@code DurationMs} is kept by this
+     * engine's own cue clock ({@link #queueEffectRemoval}); every effect either way is tracked on
+     * the session, so the session's teardown strips whatever is still on.
      */
     private static void applyMomentEffect(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
                                           @Nonnull EffectRef effect) {
         Long durMs = effect.getDurationMs();
-        Ref<EntityStore> puppet = effect.targetsPuppet() && s.puppetActive && s.puppetRef != null
-                && s.puppetRef.isValid() ? s.puppetRef : null;
-        if (puppet != null) {
+        boolean doubleStands = s.puppetActive && s.puppetRef != null && s.puppetRef.isValid();
+        if (effectGoesOnDouble(effect, doubleStands)) {
+            Ref<EntityStore> puppet = s.puppetRef;
             if (NativeEffectUtil.applyInfinite(store, puppet, effect.getId())) {
                 s.appliedEffects.track(puppet, effect.getId());
                 if (durMs != null && durMs > 0) {
@@ -3241,11 +3256,20 @@ public final class StationService {
         }
     }
 
+    /**
+     * PURE: does a moment's effect go on the worker's double? Only when it names the Puppet and a
+     * double stands; otherwise the worker wears it, which is where a Player-targeted sting belongs
+     * and where the work is performed when no double stands.
+     */
+    static boolean effectGoesOnDouble(@Nonnull EffectRef effect, boolean doubleStands) {
+        return effect.targetsPuppet() && doubleStands;
+    }
+
     // ==================== The presentation Target: block, display prop or double ====================
 
     /**
-     * Where one moment plays: the entity its sounds follow and its particles ride (null at the
-     * block, or when no such entity stands), and the position every fallback plays at. The
+     * Where one moment plays: the entity its sounds follow and its bounded particles ride (null at
+     * the block, or when no such entity stands), and the position every fallback plays at. The
      * {@code node} is the named model node an entity-attached burst rides, or null for the entity
      * itself.
      */
@@ -3253,14 +3277,50 @@ public final class StationService {
     }
 
     /**
-     * Resolves a presentation's {@code Target} for THIS session right now. {@code Block} (or no
-     * target) is {@code blockPos}, where every moment has always played. {@code Display} is the
-     * worked socket's prop ({@link #displaySocketIdFor}: the ritual queue's current socket, else
-     * the first socket showing one) while it stands, else that socket's resting display position
-     * ({@link #displayRestingPosition}), which is where a {@code Convert} beat's cues land after
-     * the beat consumed the piece and dropped its prop. {@code Puppet} is the worker's double
-     * while one stands, else the worker's own body, which is what performs the work then. An
-     * entity target whose position cannot be read falls back to the block.
+     * Where a moment's sounds and particles play, as {@link #aimSource} decides it over what stands
+     * right now. Never the worker's own body: a moment aimed at the performer with no double
+     * standing plays at the block.
+     */
+    enum AimSource {
+        /** The station block's centre. */
+        BLOCK,
+        /** The worked socket's live display prop. */
+        DISPLAY_PROP,
+        /** The worked socket's resting display position: its prop is gone (a Convert beat consumed the piece). */
+        DISPLAY_RESTING,
+        /** The worker's double. */
+        DOUBLE
+    }
+
+    /**
+     * PURE, the target decision: {@code Block} is the block; {@code Display} is the worked socket's
+     * prop while it stands ({@code propStands}: a live handle whose position reads), else that
+     * socket's resting display position, else the block when the action's sockets show no prop
+     * ({@code socketShowsProp}); {@code Puppet} is the double while one stands, else the BLOCK. A
+     * moment's sounds and particles never land on the real player, whose hidden body a burst
+     * could otherwise ride until they log out; the effect has its own rule
+     * ({@link #effectGoesOnDouble}).
+     */
+    @Nonnull
+    static AimSource aimSource(@Nonnull Presentation.Target.Kind kind, boolean socketShowsProp, boolean propStands,
+            boolean doubleStands) {
+        return switch (kind) {
+            case DISPLAY -> !socketShowsProp ? AimSource.BLOCK
+                    : propStands ? AimSource.DISPLAY_PROP : AimSource.DISPLAY_RESTING;
+            case PUPPET -> doubleStands ? AimSource.DOUBLE : AimSource.BLOCK;
+            case BLOCK -> AimSource.BLOCK;
+        };
+    }
+
+    /**
+     * Resolves a presentation's {@code Target} for THIS session right now, through the pure
+     * {@link #aimSource}: {@code Block} (or no target) is {@code blockPos}, where every moment has
+     * always played; {@code Display} is the worked socket's prop ({@link #displaySocketIdFor}: the
+     * ritual queue's current socket, else the first socket showing one) while it stands, else that
+     * socket's resting display position ({@link #displayRestingPosition}), which is where a
+     * {@code Convert} beat's cues land after the beat consumed the piece and dropped its prop;
+     * {@code Puppet} is the worker's double while one stands, else the block. An entity whose
+     * position cannot be read counts as not standing.
      */
     @Nonnull
     private static Aim resolveAim(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
@@ -3268,30 +3328,19 @@ public final class StationService {
         Presentation.Target.Kind kind = target != null ? target.effectiveKind() : Presentation.Target.Kind.BLOCK;
         String node = target != null && target.hasNode() ? target.getNode() : null;
         try {
-            switch (kind) {
-                case DISPLAY -> {
-                    String socketId = displaySocketIdFor(s);
-                    if (socketId == null) {
-                        return new Aim(null, blockPos, null);
-                    }
-                    DisplayHandle handle = getInstance().displayByBlock.get(
-                            StationCustodyRetrieval.displayKey(s.blockKey, socketId));
-                    Vector3d at = handle != null ? entityPosition(store, handle.ref()) : null;
-                    if (handle != null && at != null) {
-                        return new Aim(handle.ref(), at, node);
-                    }
-                    return new Aim(null, displayRestingPosition(store, s, socketId, blockPos), null);
-                }
-                case PUPPET -> {
-                    Ref<EntityStore> performer = s.puppetActive && s.puppetRef != null && s.puppetRef.isValid()
-                            ? s.puppetRef : s.ref;
-                    Vector3d at = entityPosition(store, performer);
-                    return at != null ? new Aim(performer, at, node) : new Aim(null, blockPos, null);
-                }
-                default -> {
-                    return new Aim(null, blockPos, null);
-                }
-            }
+            String socketId = kind == Presentation.Target.Kind.DISPLAY ? displaySocketIdFor(s) : null;
+            DisplayHandle prop = socketId != null ? getInstance().displayByBlock.get(
+                    StationCustodyRetrieval.displayKey(s.blockKey, socketId)) : null;
+            Vector3d propAt = prop != null ? entityPosition(store, prop.ref()) : null;
+            Ref<EntityStore> performer = kind == Presentation.Target.Kind.PUPPET && s.puppetActive
+                    && s.puppetRef != null && s.puppetRef.isValid() ? s.puppetRef : null;
+            Vector3d performerAt = performer != null ? entityPosition(store, performer) : null;
+            return switch (aimSource(kind, socketId != null, propAt != null, performerAt != null)) {
+                case DISPLAY_PROP -> new Aim(prop.ref(), propAt, node);
+                case DISPLAY_RESTING -> new Aim(null, displayRestingPosition(store, s, socketId, blockPos), null);
+                case DOUBLE -> new Aim(performer, performerAt, node);
+                case BLOCK -> new Aim(null, blockPos, null);
+            };
         } catch (Throwable t) {
             Log.fine("STATION could not resolve a moment target (" + kind + "): " + t.getMessage());
             return new Aim(null, blockPos, null);
@@ -3336,15 +3385,19 @@ public final class StationService {
     }
 
     /**
-     * Where {@code socketId}'s prop RESTS: the socket's authored {@code Display} offset off the
-     * block centre, facing-relative through the same pure core the spawn uses
-     * ({@link StationCustodyDisplay#resolvePosition}), so a cue aimed at a piece that is already
-     * gone lands exactly where the piece stood. {@code blockPos} when the socket shows no prop.
+     * Where {@code socketId}'s prop last STOOD: the look this session last dressed it in through a
+     * step's per-beat {@code Display} overlay ({@link StationSession#shownDisplays}, kept past the
+     * prop's despawn), else the socket's own authored {@code Display}, placed off the block centre
+     * facing-relative through the same pure core the spawn uses
+     * ({@link StationCustodyDisplay#resolvePosition}). So a cue aimed at a piece that is already
+     * gone lands exactly where the piece stood, lifted or not. {@code blockPos} when the socket
+     * shows no prop.
      */
     @Nonnull
     private static Vector3d displayRestingPosition(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
                                                    @Nonnull String socketId, @Nonnull Vector3d blockPos) {
-        Custody.Display display = socketDisplayFor(s, socketId);
+        Custody.Display shown = s.shownDisplays.get(socketId.toLowerCase(Locale.ROOT));
+        Custody.Display display = shown != null ? shown : socketDisplayFor(s, socketId);
         if (display == null) {
             return blockPos;
         }
@@ -3370,19 +3423,22 @@ public final class StationService {
     /**
      * The entity-attached particle route: every burst rides {@code aim.entity()} (or its named
      * node), delivered to the players whose tracker shows that entity through the shared
-     * primitive. Answers false when nothing was delivered (no bursts, a fresh entity nobody has
-     * been shown yet, nobody near, an entity with no network id), so the caller plays the same
-     * bursts at the aim's position instead and no cue is lost. The authored {@code PositionOffset}
-     * rides as the entity-local offset and {@code RotationOffset} as the entity-local rotation,
-     * both as the engine's own attached-particle leaf takes them; {@code DurationSeconds} cannot
-     * apply on this route (the attached leaf has no cap), which the validator notes.
+     * primitive. The caller hands in only bursts whose system ends on its own
+     * ({@link ParticleLifetimes}), since an attached system has no playback cap: it lives until its
+     * own lifetime ends or its entity is removed (a prop when its piece is consumed or taken back,
+     * a double when the session ends), and {@code DurationSeconds} cannot shorten it. Answers false
+     * when nothing was delivered (no bursts, a fresh entity nobody has been shown yet, nobody near,
+     * an entity with no network id), so the caller plays the same bursts at the aim's position
+     * instead and no cue is lost. The authored {@code PositionOffset} rides as the entity-local
+     * offset and {@code RotationOffset} as the entity-local rotation, both as the engine's own
+     * attached-particle leaf takes them.
      */
     private static boolean spawnAttachedParticles(@Nonnull Store<EntityStore> store, @Nonnull Aim aim,
-                                                  @Nullable Presentation.ModelParticle[] particles) {
-        if (particles == null || particles.length == 0 || aim.entity() == null) {
+                                                  @Nonnull List<Presentation.ModelParticle> particles) {
+        if (particles.isEmpty() || aim.entity() == null) {
             return false;
         }
-        List<ModelParticleService.AttachedParticle> attached = new ArrayList<>(particles.length);
+        List<ModelParticleService.AttachedParticle> attached = new ArrayList<>(particles.size());
         for (Presentation.ModelParticle burst : particles) {
             if (burst == null || !burst.hasSystemId()) {
                 continue;
@@ -5357,8 +5413,12 @@ public final class StationService {
                 return;
             }
             despawnDisplay(s.blockKey, socketId, commandBuffer);
-            spawnDisplayIfAbsent(s.blockKey, socketId, effective, claim, oldestPlacedItemId(claim, socketId),
-                    commandBuffer, s.blockX, s.blockY, s.blockZ);
+            if (spawnDisplayIfAbsent(s.blockKey, socketId, effective, claim, oldestPlacedItemId(claim, socketId),
+                    commandBuffer, s.blockX, s.blockY, s.blockZ)) {
+                // Remembered past the prop's despawn, so a cue aimed at the piece after a Convert
+                // beat consumed it lands where it last stood (displayRestingPosition).
+                s.shownDisplays.put(socketId.toLowerCase(Locale.ROOT), effective);
+            }
         } catch (Throwable t) {
             Log.fine("STATION step display overlay failed at '" + s.stationId + "': " + t.getMessage());
         }
@@ -6350,9 +6410,10 @@ public final class StationService {
         String[] heldResourceTypeIds = liveResourceTypeIdsOf(heldItemId);
         Map<String, String[]> heldTags = liveRawTagsOf(heldItemId);
         String heldFunction = liveFunctionOf(heldItemId);
-        // The owner's protect-list is the first word on any placement: a listed id or tag is
-        // refused before any socket is offered it, with its own reason.
-        if (StationCustody.isProtected(SettingsCatalog.getInstance().current().getProtected(), heldItemId, heldTags)) {
+        // The server-wide protect-list is the first word on any placement: a piece any file in
+        // scope here protects is refused before any socket is offered it, with its own reason.
+        if (ProtectListCatalog.getInstance().protects(asset.getId(), action.getActionId(), heldItemId,
+                heldResourceTypeIds, heldTags, heldFunction)) {
             return new StationCustody.PlacementRoute(null, 0, StationCustody.PlacementDenial.PROTECTED);
         }
         StationCustody.PlacementRoute route = StationCustody.routePlacement(sockets, claim, playerUuid, heldItemId,
@@ -6399,7 +6460,31 @@ public final class StationService {
             @Nonnull ActionResolver.ResolvedAction action, @Nullable ItemStack held, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
             @Nullable String heldFunction) {
-        if (socket.maxQuantity() > 1 && StationCustody.carriesInstanceData(held)) {
+        StationAsset.Recipe recipe = action.getRecipe();
+        return socketAccepts(socket, () -> StationCustody.carriesInstanceData(held),
+                () -> allConversionsFor(asset, action),
+                () -> recipe != null && fallbackAccepts(recipe.getFallback(), held, heldItemId,
+                        heldResourceTypeIds, heldTags, heldFunction),
+                heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+    }
+
+    /**
+     * PURE, the decision {@link #socketAcceptsInput} makes once the live reads are wired in: the
+     * held stack's per-instance data ({@code carriesInstanceData}), the action's rows
+     * ({@code derivedRows}) and whether a fallback route would take the piece
+     * ({@code fallbackTakes}), each asked only when the decision reaches it. A socket whose matcher
+     * authors ROUTES takes what {@link StationCustody#accepts} says; a route-less matcher's holes
+     * are carved out of the DERIVED acceptance (the rows, then the fallback routes), so an Input
+     * that authors only {@code Except} narrows what the station derives; a bare catch-all takes
+     * everything; and a count pile refuses a stack carrying per-instance data first.
+     */
+    static boolean socketAccepts(@Nonnull Custody.ResolvedSocket socket,
+            @Nonnull BooleanSupplier carriesInstanceData,
+            @Nonnull Supplier<StationAsset.Conversion[]> derivedRows,
+            @Nonnull BooleanSupplier fallbackTakes, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        if (socket.maxQuantity() > 1 && carriesInstanceData.getAsBoolean()) {
             return false;
         }
         var matcher = socket.match();
@@ -6413,16 +6498,30 @@ public final class StationService {
             // A bare catch-all Input accepts everything, as it always has.
             return true;
         }
-        StationAsset.Conversion[] conversions = allConversionsFor(asset, action);
-        if (conversions.length > 0
+        StationAsset.Conversion[] conversions = derivedRows.get();
+        if (conversions != null && conversions.length > 0
                 && StationCustody.matchesAnyConversionInput(conversions, heldItemId, heldResourceTypeIds, heldTags)) {
             return true;
         }
         // A piece no row covers still places when a fallback route would take it - the routes are
         // built per piece at the beat, so acceptance asks the same question they will.
-        StationAsset.Recipe recipe = action.getRecipe();
-        return recipe != null && fallbackAccepts(recipe.getFallback(), held, heldItemId, heldResourceTypeIds,
-                heldTags, heldFunction);
+        return fallbackTakes.getAsBoolean();
+    }
+
+    /**
+     * PURE: what a press that placed nothing answers with, or null to fall through to the engage
+     * gates. Only an EMPTY station refuses, and only when it cannot idle: a station already loaded
+     * judges the held item as a tool from here on (its own work consumes what is placed, never
+     * what is held), so a Protected denial there never locks a trophy tool's owner out of the
+     * work, and an idle-capable station lets an empty-handed press practise.
+     */
+    @Nullable
+    static String unplacedPressRefusal(boolean loadedBefore, boolean idleCapable, boolean authoredSockets,
+            @Nullable StationCustody.PlacementDenial denial) {
+        if (loadedBefore || idleCapable) {
+            return null;
+        }
+        return placementDenyKey(authoredSockets, denial);
     }
 
     /**
@@ -7262,11 +7361,13 @@ public final class StationService {
     }
 
     /**
-     * Flips the block at {@code (x,y,z)} to {@code custody}'s Empty/Loaded state (design 9.4's
-     * hint-only state pair; a nullable {@link Custody#getStates()} means "no visual/hint flip,
-     * custody still works mechanically" - a no-op here). Guarded exactly like the kweebec shrine
-     * precedent: a block that is gone, or that never authored the named state, no-ops (retried
-     * naturally on the next interaction).
+     * Flips the block at {@code (x,y,z)} to {@code custody}'s Empty/Loaded state. A flip swaps the
+     * block to that state's own variant, so everything the state authors comes on with it and the
+     * previous state's stops: its texture, its model animation, its light, its looping ambient sound
+     * and its particles, as well as its interaction hint. A null {@link Custody#getStates()} means
+     * no flip at all, custody still working mechanically (a no-op here). Guarded exactly like the
+     * kweebec shrine precedent: a block that is gone, or that never authored the named state,
+     * no-ops (retried naturally on the next interaction).
      */
     private static void flipCustodyState(@Nonnull World world, int x, int y, int z, @Nonnull Custody custody,
             boolean toLoaded) {
@@ -7346,10 +7447,12 @@ public final class StationService {
         Custody.States states = custody != null ? custody.getStates() : null;
         String stateName = workingStateName(states, stepState);
         WorkingFlip live = workingByPlayer.get(s.playerUuid);
-        if (live != null && live.blockKey().equals(blockKey)) {
-            if (stateName == null || live.stateName().equalsIgnoreCase(stateName)) {
-                return;
-            }
+        WorkingMove move = workingMove(live != null ? live.blockKey() : null, live != null ? live.stateName() : null,
+                blockKey, stateName);
+        if (move == WorkingMove.KEEP) {
+            return;
+        }
+        if (move == WorkingMove.REFLIP) {
             // The same block, a different name: re-flip in place (no exit, so the resting look
             // never shows between two beats of one ritual).
             World world = sessionWorld(s);
@@ -7360,7 +7463,7 @@ public final class StationService {
             return;
         }
         exitWorkingState(s);
-        if (stateName == null) {
+        if (move == WorkingMove.EXIT) {
             return;
         }
         int[] coords = anchorCoords(s, anchorId, blockKey);
@@ -7375,6 +7478,36 @@ public final class StationService {
             workingByPlayer.put(s.playerUuid, new WorkingFlip(blockKey, anchorId, coords[0], coords[1], coords[2],
                     stateName));
         }
+    }
+
+    /** What entering a work beat does to the block this player's session has working, as {@link #workingMove} decides it. */
+    enum WorkingMove {
+        /** Nothing: the same block already wears this state, or the beat names none while it is working. */
+        KEEP,
+        /** The same block, a different state name: flip it in place, never through the resting look. */
+        REFLIP,
+        /** Another block (or none) was working and the beat names a state: take the old one out, flip the new one. */
+        ENTER,
+        /** Another block (or none) was working and the beat names no state: only take the old one out. */
+        EXIT
+    }
+
+    /**
+     * PURE, {@link #enterWorkingState}'s decision: {@code liveBlockKey} / {@code liveStateName} are
+     * the block this player's session left working and the state it wears (both null when none),
+     * {@code blockKey} the block the beat works at and {@code stateName} the state it wears
+     * ({@link #workingStateName}, null for none). The same block under the same name (without
+     * regard to case) is kept, so the implicit convert program holds a steady look; the same block
+     * under a DIFFERENT name re-flips in place, which is how a ritual's beat moves the block from
+     * {@code Working} to {@code Drawing}.
+     */
+    @Nonnull
+    static WorkingMove workingMove(@Nullable String liveBlockKey, @Nullable String liveStateName,
+            @Nonnull String blockKey, @Nullable String stateName) {
+        if (liveBlockKey != null && liveBlockKey.equals(blockKey)) {
+            return stateName == null || stateName.equalsIgnoreCase(liveStateName) ? WorkingMove.KEEP : WorkingMove.REFLIP;
+        }
+        return stateName == null ? WorkingMove.EXIT : WorkingMove.ENTER;
     }
 
     /**

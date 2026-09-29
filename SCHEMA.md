@@ -29,6 +29,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 - [FlairAsset](#type-flairasset)
 - [ExtensionAsset](#type-extensionasset)
 - [SettingsAsset](#type-settingsasset)
+- [ProtectListAsset](#type-protectlistasset)
 
 <a id="type-stationasset"></a>
 ## StationAsset
@@ -1227,7 +1228,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Id` | `string` | `null` | The native EntityEffect asset id to apply (id-ref-only; never inlines the effect body). |
 | `DurationMs` | `long` | `null` | Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL. On the Puppet target the engine keeps this clock itself, since the double carries no stat map for the engine's effect timer: the effect is put on with no expiry and taken off when the time is up, or at the session's end, whichever comes first. |
-| `Target` | `string` | `null` | Who wears the effect: Player (the default, the worker's own body, which is what a LocalSoundEventId sting or a screen effect needs) or Puppet (the worker's double, for an aura or a ModelVFX the onlookers should see on the performer; the worker's own body when no double stands). An effect on the double never expires by itself, so a DurationMs there is kept by the engine's own clock, and every effect it put on comes off at the session's end. |
+| `Target` | `string` | `null` | Who wears the effect: Player (the default, the worker's own body, which is what a LocalSoundEventId sting or a screen effect needs) or Puppet (the worker's double, for an aura or a ModelVFX the onlookers should see on the performer; the worker's own body when no double stands). An effect on the double never expires by itself, so a DurationMs there is kept by the engine's own clock, and every effect it put on comes off at the session's end. Read on a Presentation's Effect only: authored on a Puppet.Hide.Effect it means nothing, and the validator says so. |
 
 <a id="field-puppet-look-model"></a>
 #### Puppet.Look.Model
@@ -1259,7 +1260,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Target` | `string`, or [Target](#field-presentation-target) | `null` | Where this moment's sounds and particles play: 'Block' (the default, the station block's centre), 'Display' (the placed piece's prop, the socket a ritual queue is working; its resting position when the prop is gone, as after a Convert beat consumed it) or 'Puppet' (the worker's double, or the worker's own body when no double stands). A bare word, or {Kind, Node} to attach the particles to one named node of the double's model. A sound or a particle system at an entity target follows it and reaches only the players who see it; a burst there cannot be capped by DurationSeconds, so an endless system stays at the block. The shake, the interaction and the effect are not moved by this leaf. |
+| `Target` | `string`, or [Target](#field-presentation-target) | `null` | Where this moment's sounds and particles play: 'Block' (the default, the station block's centre), 'Display' (the placed piece's prop, the socket a ritual queue is working; where it last stood when the prop is gone, as after a Convert beat consumed it) or 'Puppet' (the worker's double; the block when no double stands, since a cue never lands on the worker's own body). A bare word, or {Kind, Node} to attach the particles to one named node of the double's model. At an entity target a sound follows the entity and reaches only the players who see it. A particle system RIDES the entity only when its own asset gives it a positive LifeSpan, and then lives until that LifeSpan ends or the entity is removed (a prop when its piece is consumed or taken back, a double when the session ends), which DurationSeconds cannot shorten; any other system plays at the entity's position under its DurationSeconds cap. The shake, the interaction and the effect are not moved by this leaf. |
 | `Sounds` | array of `string`, or [SoundCue](#field-presentation-sounds-item) | `null` | The one-shot sounds played at the moment's target position, in authored order (a thud plus a chime is two entries). Each entry is either a bare SoundEvent id or {EventId, DelayMs} to hold that one sound behind the rest of the moment. Never author a LOOPING event here - nothing can stop it once fired. |
 | `Particles` | array of [ModelParticle](#field-presentation-particles-item) | `null` | The particle bursts played at this moment, in authored order (native InteractionEffects.Particles is an array too). Each entry is one ModelParticle-shaped burst; layering two is the author's call. |
 | `Shake` | [Shake](#field-presentation-shake) | `null` | A one-shot camera shake: a CameraEffect asset id plus a contextual intensity. |
@@ -1273,7 +1274,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Kind` | `string` | `null` | Where the moment plays: Block (the default), Display or Puppet. An unknown word reads as Block. |
-| `Node` | `string` | `null` | A named node of the target entity's model the particles attach to (a hand, the held item); meaningful at an entity target only. Absent attaches them to the entity itself. |
+| `Node` | `string` | `null` | A named node of the target entity's model the riding particles attach to (a hand, the held item); meaningful at an entity target only. Absent attaches them to the entity itself. |
 
 <a id="field-presentation-sounds-item"></a>
 ### Presentation.Sounds[]
@@ -1291,7 +1292,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `SystemId` | `string` | `null` | The native particle-system asset id to spawn (required; a blank entry is skipped). |
 | `Scale` | `double` | `null` | Uniform burst scale; defaults to 1.0 when absent or non-positive. |
 | `Color` | `string` | `null` | A tint for the whole system as a #rrggbb hex, applied through the engine's own colour argument, so a tintable vanilla system takes this moment's palette without a copied spawner. Absent plays the system's authored colours; a value that is not a six-digit hex is ignored with one line in the log. |
-| `DurationSeconds` | `double` | `null` | Client-playback cap in seconds; defaults to 4. Author 0 or less for UNCAPPED, which an unbounded-spawner system will never stop. |
+| `DurationSeconds` | `double` | `null` | Client-playback cap in seconds; defaults to 4. Author 0 or less for UNCAPPED, which an unbounded-spawner system will never stop. It caps every burst played at a position; a burst riding an entity target ends with its own LifeSpan or the entity instead. |
 | `RotationOffset` | [Rotation](#field-presentation-particles-item-rotationoffset) | `null` | Burst emission rotation in degrees (Yaw/Pitch/Roll); each unauthored axis is 0. Not composed with the block facing. |
 | `PositionOffset` | [Vec3](#field-presentation-particles-item-positionoffset) | `null` | Facing-relative shift off the moment's target position: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical. |
 
@@ -1317,7 +1318,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Id` | `string` | `null` | The native EntityEffect asset id to apply (id-ref-only; never inlines the effect body). |
 | `DurationMs` | `long` | `null` | Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL. On the Puppet target the engine keeps this clock itself, since the double carries no stat map for the engine's effect timer: the effect is put on with no expiry and taken off when the time is up, or at the session's end, whichever comes first. |
-| `Target` | `string` | `null` | Who wears the effect: Player (the default, the worker's own body, which is what a LocalSoundEventId sting or a screen effect needs) or Puppet (the worker's double, for an aura or a ModelVFX the onlookers should see on the performer; the worker's own body when no double stands). An effect on the double never expires by itself, so a DurationMs there is kept by the engine's own clock, and every effect it put on comes off at the session's end. |
+| `Target` | `string` | `null` | Who wears the effect: Player (the default, the worker's own body, which is what a LocalSoundEventId sting or a screen effect needs) or Puppet (the worker's double, for an aura or a ModelVFX the onlookers should see on the performer; the worker's own body when no double stands). An effect on the double never expires by itself, so a DurationMs there is kept by the engine's own clock, and every effect it put on comes off at the session's end. Read on a Presentation's Effect only: authored on a Puppet.Hide.Effect it means nothing, and the validator says so. |
 
 <a id="field-presentation-particles-item-rotationoffset"></a>
 #### Presentation.Particles[].RotationOffset
@@ -1650,7 +1651,6 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Limits` | [Limits](#field-settingsasset-limits) | `null` | Ceilings a server owner can set on what this engine is allowed to have live at once (sessions and puppets per world, placed-input stashes per chunk section), plus the unattended pass's per-world visit interval and a ceiling on how many accrued unattended cycles one gather pays. Absent, or any ceiling leaf left null, means unlimited; the interval defaults to 1000ms. |
 | `Moments` | map of [Presentation](#type-presentation) | `null` | Engine-wide default cues, keyed by moment id exactly like an action's own Moments (Cycle/Swing/Impact/Completion/Ready/Overdone, Refused and Refused:<Reason>, or a Step:/Cue: id); ids are written Is_Like_This and matched case-insensitively. An entry here sits UNDER every action's entry for the same id, per leaf: the action's authored leaves win and the leaves it omits fall through to this one, so a moment no action dressed still plays. The Refused entries are what a turned-away press answers with, and they resolve nearest-first per leaf: the action's Refused:<Reason>, the action's Refused, this map's Refused:<Reason>, then this map's Refused. An authored empty Sounds array means silence and is different from leaving the key out, which falls through. A refusal cue plays at once: a DelayMs on it, or on one of its Sounds, is read as zero. Under native Parent the map merges PER MOMENT ID. |
 | `Refusals` | [Refusals](#field-settingsasset-refusals) | `null` | How a turned-away press is answered when the same player repeats it: the repeat window inside which the same reason at the same block is answered by its sound alone. |
-| `Protected` | [Protected](#field-settingsasset-protected) | `null` | The server-wide protect-list: item ids and item tags no station may ever take as placed input, whatever its own matcher says. A press that offers one is turned away with its own reason (Refused:Protected). Absent protects nothing; a pack's own Settings.json is the one settings file the server reads, so an owner who wants both lists authors both. |
 
 <a id="field-settingsasset-summaryhud"></a>
 ### SettingsAsset.SummaryHud
@@ -1684,11 +1684,25 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `RepeatWindowMs` | `long` | `null` | Milliseconds inside which the same player pressing the same station again for the SAME reason is answered by the refusal cue's sound alone: no second notice stacks on the first, no second particle burst or camera shake, and no event for a listening mod. A different reason, or the same reason at another block, always gets the full answer. Null (the default) means 1500; 0 answers every press in full. |
 
-<a id="field-settingsasset-protected"></a>
-### SettingsAsset.Protected
+<a id="type-protectlistasset"></a>
+## ProtectListAsset
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Items` | array of `string` | `null` | Item ids no station may take as placed input, matched without regard to case. Absent or empty protects no id. |
-| `Tags` | map of array of `string` | `null` | Item tags no station may take as placed input (tag family -> refused values), matched the way every other tag matcher in this schema matches. Absent protects no tag. |
+| `Tags` | map of array of `string` | `null` | Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.<br><br>For example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.<br><br>Tags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**. |
+| `Name` | `string` | `null` | Ignored - the protect-list id comes from the asset filename, not this key. Kept as a schema field for editor display only. |
+| `Protects` | array of [ActionInput](#field-protectlistasset-protects-item) | `null` | What this file protects: one input matcher or an array of them (ItemId \| ResourceTypeId \| Tags \| Function, match = ANY route, minus the entry's own Except holes). A protected piece is refused by every consuming station this file applies to, with its own reason (Refused:Protected). An entry authoring no route protects nothing. |
+| `Stations` | array of `string` | `null` | Station ids this file applies to, matched without regard to case; absent or empty = every consuming station. Authored beside Actions, both must match. |
+| `Actions` | array of `string` | `null` | Action ids this file applies to, at any station in scope, matched without regard to case; absent or empty = every action. Authored beside Stations, both must match. |
+
+<a id="field-protectlistasset-protects-item"></a>
+### ProtectListAsset.Protects[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ItemId` | `string` | `null` | Match an exact held item id (one of several optional routes; match = ANY route satisfied). |
+| `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
+| `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
+| `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
