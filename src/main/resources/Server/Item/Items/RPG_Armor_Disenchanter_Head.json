@@ -1,0 +1,44 @@
+{
+  "$Comment": "The hood of the disenchanter's kit, a four-piece cloth set paid only by the four chance rolls in Lootables/Disenchant_Kit.json, so it is collected ritual by ritual at the table rather than bought or crafted. A standalone copy of the vanilla silk hood (Armor_Cloth_Silk_Head): the same icon, model, texture, Health and Mana lines and cloth resistances, at Uncommon quality. No Parent and no Recipe, so neither the silk piece's crafting recipe nor its salvage recipe is inherited and the piece stays reward-only; everything the silk piece takes from its own iron parent is spelled out here for the same reason (Categories, the Block animation set, DurabilityLossOnHit and the Interactions block whose Primary and Secondary each run an EquipItem step, which is what makes it wearable at all). Its own stat is Disenchanting Proficiency, applied by the engine while worn; the set it belongs to (ZiggfreedCommon/GearSets/RPG_Disenchanters_Kit.json, members by id) adds more at two, four and four-plus-grimoire. Family Disenchanter is the tag the tables refuse as input, so a found piece is never unmade by accident. All amounts are opening balance.",
+  "TranslationProperties": {
+    "Name": "items.RPG_Armor_Disenchanter_Head.name",
+    "Description": "items.RPG_Armor_Disenchanter_Head.description"
+  },
+  "Categories": ["Items.Armors"],
+  "Quality": "Uncommon",
+  "ItemLevel": 35,
+  "PlayerAnimationsId": "Block",
+  "ItemSoundSetId": "ISS_Armor_Cloth",
+  "Icon": "Icons/ItemsGenerated/Armor_Cloth_Silk_Head.png",
+  "IconProperties": {
+    "Rotation": [22.5, 45, 22.5],
+    "Scale": 0.5,
+    "Translation": [-0.6, -7.2]
+  },
+  "Model": "Items/Armors/Silk/Head.blockymodel",
+  "Texture": "Items/Armors/Silk/Head_Texture.png",
+  "Interactions": {
+    "Primary": { "Interactions": [ { "Type": "EquipItem" } ] },
+    "Secondary": { "Interactions": [ { "Type": "EquipItem" } ] }
+  },
+  "Armor": {
+    "ArmorSlot": "Head",
+    "BaseDamageResistance": 0,
+    "CosmeticsToHide": ["EarAccessory", "Ear", "Haircut", "HeadAccessory"],
+    "StatModifiers": {
+      "Health": [ { "Amount": 9, "CalculationType": "Additive" } ],
+      "Mana": [ { "Amount": 12, "CalculationType": "Additive" } ],
+      "RPG_Disenchanting_Proficiency": [ { "Amount": 8, "CalculationType": "Additive" } ]
+    },
+    "DamageResistance": {
+      "Physical": [ { "Amount": 0.05, "CalculationType": "Percent" } ],
+      "Projectile": [ { "Amount": 0.05, "CalculationType": "Percent" } ]
+    }
+  },
+  "MaxDurability": 120,
+  "DurabilityLossOnHit": 0.5,
+  "Tags": {
+    "Type": ["Armor"],
+    "Family": ["Disenchanter"]
+  }
+}

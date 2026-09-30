@@ -29,6 +29,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 - [FlairAsset](#type-flairasset)
 - [ExtensionAsset](#type-extensionasset)
 - [SettingsAsset](#type-settingsasset)
+- [ProtectListAsset](#type-protectlistasset)
 
 <a id="type-stationasset"></a>
 ## StationAsset
@@ -84,6 +85,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Steps` | array of [StationStep](#type-stationstep) | `null` | The authored step PROGRAM; absent = the implicit classic-convert-loop program built from Recipe. |
 | `Bonus` | [LootRef](#type-lootref) | `null` | What ELSE a cycle hands over: referenced Lootables plus inline Rolls. Yield decides how much of the thing you made, Bonus decides what else you got. |
 | `ContributionScale` | [ContributionScale](#field-actionasset-contributionscale) | `null` | A factor ladder multiplying every Work.PerCycleContributions amount before it is forwarded; the engine pre-scales, so a listener grants the amount verbatim. |
+| `Pace` | [Pace](#field-actionasset-pace) | `null` | The pace of this action's Steps program: a factor Ladder (the ContributionScale shape) whose scale multiplies the Duration of every step marked Paced, bounded by Clamp; an extension's own Pace ladder multiplies in. Null = every beat runs at its authored length. |
 | `Worker` | [Worker](#field-actionasset-worker) | `null` | How the person looks doing this: Hold, Camera, Animation, Puppet. |
 | `Moments` | map of [Presentation](#type-presentation) | `null` | What it sounds and looks like, keyed by moment id (Cycle/Swing/Impact/Completion/Ready/Overdone, Refused or Refused:<Reason> for a press this action turns away, a Cue:<Your_Name> a loot roll names, or Step:<ActionId>:<StepId>); ids are written Is_Like_This and matched case-insensitively. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why Rare_Find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). A Refused entry sits over the settings' engine-wide Refused default per leaf: author only the leaves to change, and an empty Sounds array to silence this action's refusals. |
 
@@ -96,6 +98,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-actionasset-tool"></a>
 ### ActionAsset.Tool
@@ -113,8 +116,9 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Conversions` | array of [Conversion](#field-actionasset-recipe-conversions-item) | `null` | Hand-authored input-to-output conversions, evaluated FIRST (before any FromCrafting-derived ones). |
-| `FromCrafting` | [FromCrafting](#field-actionasset-recipe-fromcrafting) | `null` | Derive additional Conversions from the engine's own native crafting/processing recipes; null = no derivation. |
-| `Yield` | [Yield](#field-actionasset-recipe-yield) | `null` | Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived); null = each conversion's own authored quantity, unchanged. |
+| `FromCrafting` | [FromCrafting](#field-actionasset-recipe-fromcrafting) | `null` | Derive additional Conversions from the engine's own native recipes, standalone recipe files and item-authored ones alike, each row carrying that recipe's full outputs at native quantities; null = no derivation. |
+| `Fallback` | [Fallback](#field-actionasset-recipe-fallback) | `null` | What a placed piece that NO authored or derived row covers falls back to: a share of its own crafting recipe, then consumption with no conversion output (the action's Bonus rolls are its payout). Custody-routed only. Null = an uncovered piece is refused. |
+| `Yield` | [Yield](#field-actionasset-recipe-yield) | `null` | Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived): Base replaces the primary (first) output's quantity only, Scale/Min/Max apply to every output. Null = each conversion's own authored quantities, unchanged. |
 | `Doneness` | [Doneness](#field-actionasset-recipe-doneness) | `null` | The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window. |
 
 <a id="field-actionasset-work"></a>
@@ -128,6 +132,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `PerCycleContributions` | array of [Contribution](#field-actionasset-work-percyclecontributions-item) | `null` | Amounts posted on every completed cycle, forwarded verbatim on the cycle-completed event; the engine never interprets a channel itself. On an IDLE cycle each Amount is pre-scaled by Work.Idle.Fraction. Contrast Roll.Grants.Contributions, which is one-shot and never scaled. |
 | `Idle` | [Idle](#field-actionasset-work-idle) | `null` | Opt-in no-material idle practice mode: authoring this group at all turns it on; absent = off (a NO_INPUTS start is denied). |
 | `Looping` | `boolean` | `null` | Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape). |
+| `Queue` | `boolean` | `null` | Run the authored Steps program once per FILLED custody socket, in authored socket order, each run working that one socket's piece (it is the piece the factors read and the piece the Convert phase consumes) until every socket is empty. Default false. Meant for a Looping false ritual over several single-item sockets; a one-socket station is unaffected. |
 | `Unattended` | [Unattended](#field-actionasset-work-unattended) | `null` | Opt-in unattended processing over placed custody: authoring this group at all turns it on (absent = attended-only). While nobody works the station, its recipe conversions keep settling against the placed piles on world game time - the transform happens immediately, and the loot rolls and contribution posts it would have earned accrue on the output pile and pay out to whoever gathers it. |
 
 <a id="field-actionasset-anchors-item"></a>
@@ -145,6 +150,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
 | `Floors` | array of [Floor](#field-actionasset-contributionscale-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
+<a id="field-actionasset-pace"></a>
+### ActionAsset.Pace
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Ladder` | [ContributionScale](#field-actionasset-pace-ladder) | `null` | The factor ladder (Factors summed, the highest reached Floor's Scale wins; none reached = 1.0) whose scale multiplies the Duration of every step marked Paced. The same shape as ContributionScale. |
+| `Clamp` | [Clamp](#field-actionasset-pace-clamp) | `null` | Bounds on the FINAL pace scale after every ladder (this action's and each matching extension's) has multiplied in: Min is the fastest a paced beat may run, Max the slowest. Author both sides; the action's clamp is the one place the pace range lives (PACE_UNCLAMPED warns on a missing side). |
 
 <a id="field-actionasset-worker"></a>
 ### ActionAsset.Worker
@@ -195,6 +208,15 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Benches` | array of `string` | `null` | Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match). |
 | `Types` | array of `string` | `null` | The recipe kinds to derive: 'Crafting' and/or 'Processing'; absent = both. |
 | `NativeTime` | [NativeTime](#field-actionasset-recipe-fromcrafting-nativetime) | `null` | Linear transform (Scale*TimeSeconds + OffsetMs) over each derived recipe's native time; defaults stay slower than vanilla. |
+
+<a id="field-actionasset-recipe-fallback"></a>
+#### ActionAsset.Recipe.Fallback
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Input` | [ActionInput](#field-actionasset-recipe-fallback-input) | `null` | The gear filter both fallback routes are scoped to (ItemId \| ResourceTypeId \| Tags \| Function, match = ANY, minus its Except hole). Absent = any placed piece the metadata guard accepts. |
+| `CraftingShare` | [CraftingShare](#field-actionasset-recipe-fallback-craftingshare) | `null` | Give back a share of the piece's OWN crafting recipe inputs (tier 2, tried before EssenceOnly). Absent = this route is off. |
+| `EssenceOnly` | [EssenceOnly](#field-actionasset-recipe-fallback-essenceonly) | `null` | Consume the piece with NO conversion output (tier 3, the last resort); the action's Bonus rolls are its whole payout. Authoring the group turns it on. Absent = this route is off. |
 
 <a id="field-actionasset-recipe-yield"></a>
 #### ActionAsset.Recipe.Yield
@@ -249,6 +271,22 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
 | `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
 
+<a id="field-actionasset-pace-ladder"></a>
+#### ActionAsset.Pace.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-actionasset-pace-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
+<a id="field-actionasset-pace-clamp"></a>
+#### ActionAsset.Pace.Clamp
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | Inclusive floor: a result below this is raised to it. Omit for no floor. |
+| `Max` | `double` | `null` | Inclusive ceiling: a result above this is lowered to it. Omit for no ceiling. |
+
 <a id="field-actionasset-worker-hold"></a>
 #### ActionAsset.Worker.Hold
 
@@ -292,6 +330,39 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Scale` | `double` | `null` | Multiplier (m) on the recipe's native time; reader-defaults to 1.0 (stretch, never speed up below vanilla). |
 | `OffsetMs` | `long` | `null` | Additive floor (b) in milliseconds added after scaling; reader-defaults to 2000 so a station is never instant like vanilla. |
+
+<a id="field-actionasset-recipe-fallback-input"></a>
+##### ActionAsset.Recipe.Fallback.Input
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ItemId` | `string` | `null` | Match an exact held item id (one of several optional routes; match = ANY route satisfied). |
+| `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
+| `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
+| `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+
+<a id="field-actionasset-recipe-fallback-craftingshare"></a>
+##### ActionAsset.Recipe.Fallback.CraftingShare
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Share` | `double` | `null` | The fraction of each exact-item line of the piece's own crafting recipe given back, in (0, 1]: each line becomes floor(Quantity x Share / OutputQuantity), OutputQuantity being how many pieces the recipe makes per craft (a batch recipe pays per piece); a line that rounds to nothing is dropped, and a recipe with no line left does not take this route. |
+
+<a id="field-actionasset-recipe-fallback-essenceonly"></a>
+##### ActionAsset.Recipe.Fallback.EssenceOnly
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Enabled` | `boolean` | `null` | Whether the essence-only route applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's group with the route switched off. |
+
+<a id="field-actionasset-pace-ladder-floors-item"></a>
+##### ActionAsset.Pace.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
 
 <a id="field-actionasset-worker-hold-mount"></a>
 ##### ActionAsset.Worker.Hold.Mount
@@ -344,6 +415,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Steps` | array of [StationStep](#type-stationstep) | `null` | The authored step PROGRAM; absent = the implicit classic-convert-loop program built from Recipe. |
 | `Bonus` | [LootRef](#type-lootref) | `null` | What ELSE a cycle hands over: referenced Lootables plus inline Rolls. Yield decides how much of the thing you made, Bonus decides what else you got. |
 | `ContributionScale` | [ContributionScale](#field-actiondef-contributionscale) | `null` | A factor ladder multiplying every Work.PerCycleContributions amount before it is forwarded; the engine pre-scales, so a listener grants the amount verbatim. |
+| `Pace` | [Pace](#field-actiondef-pace) | `null` | The pace of this action's Steps program: a factor Ladder (the ContributionScale shape) whose scale multiplies the Duration of every step marked Paced, bounded by Clamp; an extension's own Pace ladder multiplies in. Null = every beat runs at its authored length. |
 | `Worker` | [Worker](#field-actiondef-worker) | `null` | How the person looks doing this: Hold, Camera, Animation, Puppet. |
 | `Moments` | map of [Presentation](#type-presentation) | `null` | What it sounds and looks like, keyed by moment id (Cycle/Swing/Impact/Completion/Ready/Overdone, Refused or Refused:<Reason> for a press this action turns away, a Cue:<Your_Name> a loot roll names, or Step:<ActionId>:<StepId>); ids are written Is_Like_This and matched case-insensitively. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why Rare_Find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). A Refused entry sits over the settings' engine-wide Refused default per leaf: author only the leaves to change, and an empty Sounds array to silence this action's refusals. |
 
@@ -356,6 +428,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-actiondef-tool"></a>
 ### ActionDef.Tool
@@ -373,8 +446,9 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Conversions` | array of [Conversion](#field-actiondef-recipe-conversions-item) | `null` | Hand-authored input-to-output conversions, evaluated FIRST (before any FromCrafting-derived ones). |
-| `FromCrafting` | [FromCrafting](#field-actiondef-recipe-fromcrafting) | `null` | Derive additional Conversions from the engine's own native crafting/processing recipes; null = no derivation. |
-| `Yield` | [Yield](#field-actiondef-recipe-yield) | `null` | Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived); null = each conversion's own authored quantity, unchanged. |
+| `FromCrafting` | [FromCrafting](#field-actiondef-recipe-fromcrafting) | `null` | Derive additional Conversions from the engine's own native recipes, standalone recipe files and item-authored ones alike, each row carrying that recipe's full outputs at native quantities; null = no derivation. |
+| `Fallback` | [Fallback](#field-actiondef-recipe-fallback) | `null` | What a placed piece that NO authored or derived row covers falls back to: a share of its own crafting recipe, then consumption with no conversion output (the action's Bonus rolls are its payout). Custody-routed only. Null = an uncovered piece is refused. |
+| `Yield` | [Yield](#field-actiondef-recipe-yield) | `null` | Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived): Base replaces the primary (first) output's quantity only, Scale/Min/Max apply to every output. Null = each conversion's own authored quantities, unchanged. |
 | `Doneness` | [Doneness](#field-actiondef-recipe-doneness) | `null` | The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window. |
 
 <a id="field-actiondef-work"></a>
@@ -388,6 +462,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `PerCycleContributions` | array of [Contribution](#field-actiondef-work-percyclecontributions-item) | `null` | Amounts posted on every completed cycle, forwarded verbatim on the cycle-completed event; the engine never interprets a channel itself. On an IDLE cycle each Amount is pre-scaled by Work.Idle.Fraction. Contrast Roll.Grants.Contributions, which is one-shot and never scaled. |
 | `Idle` | [Idle](#field-actiondef-work-idle) | `null` | Opt-in no-material idle practice mode: authoring this group at all turns it on; absent = off (a NO_INPUTS start is denied). |
 | `Looping` | `boolean` | `null` | Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape). |
+| `Queue` | `boolean` | `null` | Run the authored Steps program once per FILLED custody socket, in authored socket order, each run working that one socket's piece (it is the piece the factors read and the piece the Convert phase consumes) until every socket is empty. Default false. Meant for a Looping false ritual over several single-item sockets; a one-socket station is unaffected. |
 | `Unattended` | [Unattended](#field-actiondef-work-unattended) | `null` | Opt-in unattended processing over placed custody: authoring this group at all turns it on (absent = attended-only). While nobody works the station, its recipe conversions keep settling against the placed piles on world game time - the transform happens immediately, and the loot rolls and contribution posts it would have earned accrue on the output pile and pay out to whoever gathers it. |
 
 <a id="field-actiondef-anchors-item"></a>
@@ -405,6 +480,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
 | `Floors` | array of [Floor](#field-actiondef-contributionscale-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
+<a id="field-actiondef-pace"></a>
+### ActionDef.Pace
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Ladder` | [ContributionScale](#field-actiondef-pace-ladder) | `null` | The factor ladder (Factors summed, the highest reached Floor's Scale wins; none reached = 1.0) whose scale multiplies the Duration of every step marked Paced. The same shape as ContributionScale. |
+| `Clamp` | [Clamp](#field-actiondef-pace-clamp) | `null` | Bounds on the FINAL pace scale after every ladder (this action's and each matching extension's) has multiplied in: Min is the fastest a paced beat may run, Max the slowest. Author both sides; the action's clamp is the one place the pace range lives (PACE_UNCLAMPED warns on a missing side). |
 
 <a id="field-actiondef-worker"></a>
 ### ActionDef.Worker
@@ -455,6 +538,15 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Benches` | array of `string` | `null` | Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match). |
 | `Types` | array of `string` | `null` | The recipe kinds to derive: 'Crafting' and/or 'Processing'; absent = both. |
 | `NativeTime` | [NativeTime](#field-actiondef-recipe-fromcrafting-nativetime) | `null` | Linear transform (Scale*TimeSeconds + OffsetMs) over each derived recipe's native time; defaults stay slower than vanilla. |
+
+<a id="field-actiondef-recipe-fallback"></a>
+#### ActionDef.Recipe.Fallback
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Input` | [ActionInput](#field-actiondef-recipe-fallback-input) | `null` | The gear filter both fallback routes are scoped to (ItemId \| ResourceTypeId \| Tags \| Function, match = ANY, minus its Except hole). Absent = any placed piece the metadata guard accepts. |
+| `CraftingShare` | [CraftingShare](#field-actiondef-recipe-fallback-craftingshare) | `null` | Give back a share of the piece's OWN crafting recipe inputs (tier 2, tried before EssenceOnly). Absent = this route is off. |
+| `EssenceOnly` | [EssenceOnly](#field-actiondef-recipe-fallback-essenceonly) | `null` | Consume the piece with NO conversion output (tier 3, the last resort); the action's Bonus rolls are its whole payout. Authoring the group turns it on. Absent = this route is off. |
 
 <a id="field-actiondef-recipe-yield"></a>
 #### ActionDef.Recipe.Yield
@@ -509,6 +601,22 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
 | `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
 
+<a id="field-actiondef-pace-ladder"></a>
+#### ActionDef.Pace.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-actiondef-pace-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
+<a id="field-actiondef-pace-clamp"></a>
+#### ActionDef.Pace.Clamp
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | Inclusive floor: a result below this is raised to it. Omit for no floor. |
+| `Max` | `double` | `null` | Inclusive ceiling: a result above this is lowered to it. Omit for no ceiling. |
+
 <a id="field-actiondef-worker-hold"></a>
 #### ActionDef.Worker.Hold
 
@@ -552,6 +660,39 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Scale` | `double` | `null` | Multiplier (m) on the recipe's native time; reader-defaults to 1.0 (stretch, never speed up below vanilla). |
 | `OffsetMs` | `long` | `null` | Additive floor (b) in milliseconds added after scaling; reader-defaults to 2000 so a station is never instant like vanilla. |
+
+<a id="field-actiondef-recipe-fallback-input"></a>
+##### ActionDef.Recipe.Fallback.Input
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ItemId` | `string` | `null` | Match an exact held item id (one of several optional routes; match = ANY route satisfied). |
+| `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
+| `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
+| `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+
+<a id="field-actiondef-recipe-fallback-craftingshare"></a>
+##### ActionDef.Recipe.Fallback.CraftingShare
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Share` | `double` | `null` | The fraction of each exact-item line of the piece's own crafting recipe given back, in (0, 1]: each line becomes floor(Quantity x Share / OutputQuantity), OutputQuantity being how many pieces the recipe makes per craft (a batch recipe pays per piece); a line that rounds to nothing is dropped, and a recipe with no line left does not take this route. |
+
+<a id="field-actiondef-recipe-fallback-essenceonly"></a>
+##### ActionDef.Recipe.Fallback.EssenceOnly
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Enabled` | `boolean` | `null` | Whether the essence-only route applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's group with the route switched off. |
+
+<a id="field-actiondef-pace-ladder-floors-item"></a>
+##### ActionDef.Pace.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
 
 <a id="field-actiondef-worker-hold-mount"></a>
 ##### ActionDef.Worker.Hold.Mount
@@ -602,10 +743,15 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Walk` | [Walk](#field-stationstep-walk) | `null` | Move the puppet to an anchor (To) at SpeedMps; requires Puppet enabled (WALK_REQUIRES_PUPPET warns otherwise). |
 | `Consume` | [Consume](#field-stationstep-consume) | `null` | Consume every Items entry From Inventory (default) or Custody; all-or-nothing across the whole list. |
 | `Produce` | [Produce](#field-stationstep-produce) | `null` | Produce every Items entry To Inventory (default) or Custody (the At-anchor's claim). |
+| `Convert` | [Convert](#field-stationstep-convert) | `null` | Run the action's Recipe at this beat: the matched conversion's inputs are consumed (from custody when the action authors Custody, else the inventory) and its outputs produced to the inventory, exactly as the classic convert loop does per cycle. Authoring the group turns it on. |
 | `Roll` | [LootRef](#type-lootref) | `null` | Evaluate a loot pass through the shared LootRef (Lootables + inline Rolls) vocabulary. |
 | `Commands` | array of `string` | `null` | Run commands through the shared CommandRewardExecutor with the usual placeholder substitutions. |
 | `Stamp` | [Stamp](#field-stationstep-stamp) | `null` | The enhance-commit phase (reagents + durability + stat rolls) - see Stamp. |
-| `IsWork` | `boolean` | `null` | Does this step count as WORK at its At-anchor block (driving that block's Custody.States.Working look)? Default: true for a Consume+Produce convert step, false otherwise. Author true on a pure beat that IS the work (a cook hold), false to suppress. |
+| `IsWork` | `boolean` | `null` | Does this step count as WORK at its At-anchor block (driving that block's Custody.States.Working look)? Default: true for a Convert step or a Consume+Produce pair, false otherwise. Author true on a pure beat that IS the work (a cook hold), false to suppress. |
+| `Paced` | `boolean` | `null` | Does the action's Pace scale this step? True multiplies this step's Duration.Ms, and the DelayMs and every burst's DurationSeconds of its own presentation, by the resolved pace. Default false: the beat keeps its authored length whatever the pace. |
+| `RollBonus` | `boolean` | `null` | Roll the action's Bonus (its own Lootables and Rolls plus every matching extension's) at this beat, once per iteration, instead of once when the program completes. Default false. A program with no step authoring this rolls the Bonus at completion as before. |
+| `State` | `string` | `null` | The block State.Definitions name this beat holds its At-anchor block in while it runs, instead of the Custody.States.Working name: a deeper look for a later beat of one ritual. It applies only on a step that counts as work (IsWork) at a block whose Custody authors States, must exist in the block's own definitions (an unknown name is a silent no-op), and gives way to the resting look on the next non-work step and every session stop, exactly as Working does. Absent, a work step wears Working. |
+| `Display` | [Display](#field-stationstep-display) | `null` | A per-beat overlay on the placed piece's Display (the socket a ritual queue is working, else the first socket that shows a prop): the leaves it authors replace the socket's own for this beat, so a beat can lift the piece (Offset), turn it (Animated) or enlarge it (Scale). The prop is respawned with the overlay at iteration entry and stays that way until another beat overlays it or the piece leaves; a freshly respawned prop is seen by nobody until the next tick, so a cue targeting it in the same beat plays at its position. Absent leaves the prop as it stands. |
 
 <a id="field-stationstep-onconditionfail"></a>
 ### StationStep.OnConditionFail
@@ -666,6 +812,13 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `To` | `string` | `null` | The destination for EVERY item in this phase: 'Inventory' (default) or 'Custody' (the At-anchor's claim). |
 | `Socket` | `string` | `null` | The custody socket every entry of this phase lands in, unless an entry names its own Socket. Absent = the first Item socket. Only meaningful with To: 'Custody'. |
 
+<a id="field-stationstep-convert"></a>
+### StationStep.Convert
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Enabled` | `boolean` | `null` | Whether this beat runs the recipe. Reader-defaults to TRUE when the group is authored; author false to inherit a Parent's step with its conversion switched off. |
+
 <a id="field-stationstep-stamp"></a>
 ### StationStep.Stamp
 
@@ -675,6 +828,16 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Durability` | [Durability](#field-stationstep-stamp-durability) | `null` | RpgStations-native durability upgrade (AddMax). Real with no other mod installed. |
 | `Stats` | [StampSpec](#type-stampspec) | `null` | The composable stat-roll + budget model: which entries are candidates (a shared roll pool, inline entries, or both), how many are picked, and the ceilings the result is held under. The points are written onto the item by whichever stamper this server registered. |
 | `Economics` | [Economics](#field-stationstep-stamp-economics) | `null` | Reagent-cost scaling per prior stamp count; never affects the point budget. |
+
+<a id="field-stationstep-display"></a>
+### StationStep.Display
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Offset` | [Vec3](#field-stationstep-display-offset) | `null` | Facing-relative shift off the block-centre anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical. |
+| `Scale` | `double` | `null` | Uniform prop scale, a fraction of a real block for a block-shaped item; defaults to 1.0 (full block size) when absent or non-positive. |
+| `Rotation` | [Rotation](#field-stationstep-display-rotation) | `null` | Facing-relative rotation in degrees; the placed block's own facing is added into Yaw at spawn. |
+| `Animated` | `boolean` | `null` | When true the prop turns and bobs the way a dropped item does (the client's own motion); default false, a still prop. Set at spawn: a beat that switches it on mid-ritual (a step's Display overlay) respawns the prop. |
 
 <a id="field-stationstep-puppet-prop"></a>
 #### StationStep.Puppet.Prop
@@ -698,6 +861,24 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `RepeatCostMultiplier` | `double` | `null` | Scales reagent cost per prior stamp count: ceil(base * (1 + mult * stampCount)). |
+
+<a id="field-stationstep-display-offset"></a>
+#### StationStep.Display.Offset
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `X` | `double` | `null` | The X component; unauthored means 0 (each axis is independently optional). |
+| `Y` | `double` | `null` | The Y component; unauthored means 0 (each axis is independently optional). |
+| `Z` | `double` | `null` | The Z component; unauthored means 0 (each axis is independently optional). |
+
+<a id="field-stationstep-display-rotation"></a>
+#### StationStep.Display.Rotation
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Yaw` | `double` | `null` | Yaw in degrees (turns about the vertical axis). Default 0. |
+| `Pitch` | `double` | `null` | Pitch in degrees (tips forward/back - the 'lay it flat' axis). Default 0. |
+| `Roll` | `double` | `null` | Roll in degrees (tips sideways about the subject's own long axis). Default 0. |
 
 <a id="type-ingredient"></a>
 ## Ingredient
@@ -755,6 +936,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Ladder` | [Ladder](#field-roll-ladder) | `null` | Tiers over a summed factor value; the highest reached floor pays out ON TOP of the top-level Grants. |
 | `Grants` | [LootGrants](#type-lootgrants) | `null` | What this roll hands over whenever its gates passed, whether or not a ladder floor was also reached. |
 | `Cue` | `string` | `null` | An opaque celebration id the granting site plays (a sound, a toast). With no Grants beside it, it always plays on the hit; with Grants beside it, only once they actually produced something. |
+| `Expected` | `boolean` | `null` | True when what this roll hands over is the moment's EXPECTED payout, a wage or a return the player is owed, rather than a find: a granting site that tells the two apart shows an expected item as ordinary output and a find as a windfall. It changes nothing about what the roll pays or when; a Chance or a Ladder still applies. Default false, so every roll reads as a find unless it says otherwise. |
 
 <a id="field-roll-ladder"></a>
 ### Roll.Ladder
@@ -817,9 +999,11 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `MaxQuantity` | `integer` | `null` | The total item count this block's claim holds; reader-defaults to 100. |
 | `SingleFamily` | `boolean` | `null` | When true the claim locks to the FIRST placed item's resource family: a later placement of a different family is refused until the claim empties. Default false (any accepted material mixes freely). |
-| `Input` | [ActionInput](#field-custody-input) | `null` | The explicit placement-acceptance matcher; absent derives acceptance from the resolved action's Recipe.Conversions inputs. |
+| `HeldOnly` | `boolean` | `null` | When true a press places only what the player HOLDS: an empty hand, or a held item the station refuses, places nothing, and the hotbar and backpack are never searched for a match. Author it on a station that takes one valuable piece at a time, so a press can never pull gear out of the bag unasked. Default false, the classic held-else-inventory placement. |
+| `Preview` | `boolean` | `null` | When true, placing a piece tells the player what it will give back before any work starts: the outputs of the row the recipe matches for it (an authored or derived row, or a fallback route's), or that it gives nothing back on its own when only the essence-only route takes it. Default false, no preview. A station with no Recipe has nothing to preview. |
+| `Input` | [ActionInput](#field-custody-input) | `null` | The explicit placement-acceptance matcher. Authored routes REPLACE the derivation from the resolved action's Recipe (its conversion inputs and its fallback routes); an Input that authors only Except keeps that derivation and carves the holes out of it, so a station can refuse a short list of ids without restating what it takes. Absent derives acceptance from the recipe alone. |
 | `States` | [States](#field-custody-states) | `null` | The block State.Definitions names custody flips between; null = no visual/hint flip. |
-| `Display` | [Display](#field-custody-display) | `null` | Opts the placed input into a placed-as-entity prop visual at the block-top anchor; null = no visual. |
+| `Display` | [Display](#field-custody-display) | `null` | Opts the placed input into a placed-as-entity prop visual at the block-centre anchor; null = no visual. |
 | `Share` | [Share](#field-custody-share) | `null` | Who besides an owner may place, work from, or take back placed materials here; every leaf defaults false (owner-only). A socket may override any leaf for its own pile. |
 | `Sockets` | map of [Socket](#field-custody-sockets-item) | `null` | Named placement slots by socket id (author ids lower-case; matching is case-insensitive), each holding its own independently owned pile. Merged per socket id under Parent inheritance, per leaf within a socket. Omit for the classic single-pile custody: the custody-level leaves above then act as the one implicit socket. |
 
@@ -832,6 +1016,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-custody-states"></a>
 ### Custody.States
@@ -849,9 +1034,10 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Offset` | [Vec3](#field-custody-display-offset) | `null` | Facing-relative shift off the block-top anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical. |
+| `Offset` | [Vec3](#field-custody-display-offset) | `null` | Facing-relative shift off the block-centre anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical. |
 | `Scale` | `double` | `null` | Uniform prop scale, a fraction of a real block for a block-shaped item; defaults to 1.0 (full block size) when absent or non-positive. |
 | `Rotation` | [Rotation](#field-custody-display-rotation) | `null` | Facing-relative rotation in degrees; the placed block's own facing is added into Yaw at spawn. |
+| `Animated` | `boolean` | `null` | When true the prop turns and bobs the way a dropped item does (the client's own motion); default false, a still prop. Set at spawn: a beat that switches it on mid-ritual (a step's Display overlay) respawns the prop. |
 
 <a id="field-custody-share"></a>
 ### Custody.Share
@@ -915,9 +1101,10 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Offset` | [Vec3](#field-custody-sockets-item-display-offset) | `null` | Facing-relative shift off the block-top anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical. |
+| `Offset` | [Vec3](#field-custody-sockets-item-display-offset) | `null` | Facing-relative shift off the block-centre anchor: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical. |
 | `Scale` | `double` | `null` | Uniform prop scale, a fraction of a real block for a block-shaped item; defaults to 1.0 (full block size) when absent or non-positive. |
 | `Rotation` | [Rotation](#field-custody-sockets-item-display-rotation) | `null` | Facing-relative rotation in degrees; the placed block's own facing is added into Yaw at spawn. |
+| `Animated` | `boolean` | `null` | When true the prop turns and bobs the way a dropped item does (the client's own motion); default false, a still prop. Set at spawn: a beat that switches it on mid-ritual (a step's Display overlay) respawns the prop. |
 
 <a id="field-custody-sockets-item-share"></a>
 #### Custody.Sockets[].Share
@@ -937,6 +1124,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-custody-sockets-item-block-at"></a>
 ##### Custody.Sockets[].Block.At
@@ -956,6 +1144,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-custody-sockets-item-display-offset"></a>
 ##### Custody.Sockets[].Display.Offset
@@ -983,7 +1172,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Enabled` | `boolean` | `null` | Activates the whole puppet route (spawn + hide together). Reader-defaults to true when the group is authored at all; false = the classic in-body worker. |
 | `Hide` | [Hide](#field-puppet-hide) | `null` | How the real player's own body is hidden while the puppet performs. |
 | `Look` | [Look](#field-puppet-look) | `null` | The puppet's appearance: whose model it wears and where that model comes from. |
-| `Offset` | [Vec3](#field-puppet-offset) | `null` | The puppet's stance shift off the station's block-top anchor, facing-relative: X/Z are in the block's own horizontal frame (+Z = its front), Y is vertical. |
+| `Offset` | [Vec3](#field-puppet-offset) | `null` | The puppet's stance shift off the station's block-centre anchor, facing-relative: X/Z are in the block's own horizontal frame (+Z = its front), Y is vertical. |
 | `Rotation` | [Rotation](#field-puppet-rotation) | `null` | The puppet's own orientation in degrees (Yaw/Pitch/Roll), each leaf defaulting to 0. Yaw is facing-relative (the placed block's facing folds in additively, so 0 faces the same way the block does); Pitch and Roll are the puppet's own tilt and are NOT composed with the block. Roll needs Look.Source "PlayerClone" or "Model": an NPC keeps its pose from a leash that carries heading and pitch only, so a banked pose is dropped under Look.Source "NpcRole" (the validator warns). |
 | `Prop` | [Prop](#field-puppet-prop) | `null` | The item the puppet holds while performing. |
 
@@ -1038,7 +1227,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Id` | `string` | `null` | The native EntityEffect asset id to apply (id-ref-only; never inlines the effect body). |
-| `DurationMs` | `long` | `null` | Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL. |
+| `DurationMs` | `long` | `null` | Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL. On the Puppet target the engine keeps this clock itself, since the double carries no stat map for the engine's effect timer: the effect is put on with no expiry and taken off when the time is up, or at the session's end, whichever comes first. |
+| `Target` | `string` | `null` | Who wears the effect: Player (the default, the worker's own body, which is what a LocalSoundEventId sting or a screen effect needs) or Puppet (the worker's double, for an aura or a ModelVFX the onlookers should see on the performer; the worker's own body when no double stands). An effect on the double never expires by itself, so a DurationMs there is kept by the engine's own clock, and every effect it put on comes off at the session's end. Read on a Presentation's Effect only: authored on a Puppet.Hide.Effect it means nothing, and the validator says so. |
 
 <a id="field-puppet-look-model"></a>
 #### Puppet.Look.Model
@@ -1070,12 +1260,21 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
+| `Target` | `string`, or [Target](#field-presentation-target) | `null` | Where this moment's sounds and particles play: 'Block' (the default, the station block's centre), 'Display' (the placed piece's prop, the socket a ritual queue is working; where it last stood when the prop is gone, as after a Convert beat consumed it) or 'Puppet' (the worker's double; the block when no double stands, since a cue never lands on the worker's own body). A bare word, or {Kind, Node} to attach the particles to one named node of the double's model. At an entity target a sound follows the entity and reaches only the players who see it. A particle system RIDES the entity only when its own asset gives it a positive LifeSpan, and then lives until that LifeSpan ends or the entity is removed (a prop when its piece is consumed or taken back, a double when the session ends), which DurationSeconds cannot shorten; any other system plays at the entity's position under its DurationSeconds cap. The shake, the interaction and the effect are not moved by this leaf. |
 | `Sounds` | array of `string`, or [SoundCue](#field-presentation-sounds-item) | `null` | The one-shot sounds played at the moment's target position, in authored order (a thud plus a chime is two entries). Each entry is either a bare SoundEvent id or {EventId, DelayMs} to hold that one sound behind the rest of the moment. Never author a LOOPING event here - nothing can stop it once fired. |
 | `Particles` | array of [ModelParticle](#field-presentation-particles-item) | `null` | The particle bursts played at this moment, in authored order (native InteractionEffects.Particles is an array too). Each entry is one ModelParticle-shaped burst; layering two is the author's call. |
 | `Shake` | [Shake](#field-presentation-shake) | `null` | A one-shot camera shake: a CameraEffect asset id plus a contextual intensity. |
 | `Interaction` | [Interaction](#field-presentation-interaction) | `null` | A native RootInteraction chain fired at this moment (id-ref-only); null = none. |
 | `Effect` | [EffectRef](#field-presentation-effect) | `null` | A native EntityEffect applied at this moment (id-ref-only, with an optional DurationMs); null = none. |
 | `DelayMs` | `long` | `null` | Milliseconds to hold every cue in this group before it plays; null/non-positive (the default) plays it at once. Use it to land a sound on the beat it belongs to rather than the instant the engine reached it. Playback resolution is one server tick (about 33ms at the default 30 ticks per second), so the cue fires on the first tick at or after the delay, never earlier. |
+
+<a id="field-presentation-target"></a>
+### Presentation.Target
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Kind` | `string` | `null` | Where the moment plays: Block (the default), Display or Puppet. An unknown word reads as Block. |
+| `Node` | `string` | `null` | A named node of the target entity's model the riding particles attach to (a hand, the held item); meaningful at an entity target only. Absent attaches them to the entity itself. |
 
 <a id="field-presentation-sounds-item"></a>
 ### Presentation.Sounds[]
@@ -1092,7 +1291,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `SystemId` | `string` | `null` | The native particle-system asset id to spawn (required; a blank entry is skipped). |
 | `Scale` | `double` | `null` | Uniform burst scale; defaults to 1.0 when absent or non-positive. |
-| `DurationSeconds` | `double` | `null` | Client-playback cap in seconds; defaults to 4. Author 0 or less for UNCAPPED, which an unbounded-spawner system will never stop. |
+| `Color` | `string` | `null` | A tint for the whole system as a #rrggbb hex, applied through the engine's own colour argument, so a tintable vanilla system takes this moment's palette without a copied spawner. Absent plays the system's authored colours; a value that is not a six-digit hex is ignored with one line in the log. |
+| `DurationSeconds` | `double` | `null` | Client-playback cap in seconds; defaults to 4. Author 0 or less for UNCAPPED, which an unbounded-spawner system will never stop. It caps every burst played at a position; a burst riding an entity target ends with its own LifeSpan or the entity instead. |
 | `RotationOffset` | [Rotation](#field-presentation-particles-item-rotationoffset) | `null` | Burst emission rotation in degrees (Yaw/Pitch/Roll); each unauthored axis is 0. Not composed with the block facing. |
 | `PositionOffset` | [Vec3](#field-presentation-particles-item-positionoffset) | `null` | Facing-relative shift off the moment's target position: X/Z are in the placed block's own horizontal frame (+Z = its front), Y is vertical. |
 
@@ -1117,7 +1317,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Id` | `string` | `null` | The native EntityEffect asset id to apply (id-ref-only; never inlines the effect body). |
-| `DurationMs` | `long` | `null` | Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL. |
+| `DurationMs` | `long` | `null` | Optional duration override in milliseconds; null defers to the referenced effect asset's own TTL. On the Puppet target the engine keeps this clock itself, since the double carries no stat map for the engine's effect timer: the effect is put on with no expiry and taken off when the time is up, or at the session's end, whichever comes first. |
+| `Target` | `string` | `null` | Who wears the effect: Player (the default, the worker's own body, which is what a LocalSoundEventId sting or a screen effect needs) or Puppet (the worker's double, for an aura or a ModelVFX the onlookers should see on the performer; the worker's own body when no double stands). An effect on the double never expires by itself, so a DurationMs there is kept by the engine's own clock, and every effect it put on comes off at the session's end. Read on a Presentation's Effect only: authored on a Puppet.Hide.Effect it means nothing, and the validator says so. |
 
 <a id="field-presentation-particles-item-rotationoffset"></a>
 #### Presentation.Particles[].RotationOffset
@@ -1299,6 +1500,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="type-flairasset"></a>
 ## FlairAsset
@@ -1322,6 +1524,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `PerCycleContributions` | array of [Contribution](#field-extensionasset-percyclecontributions-item) | `null` | Appended Work.PerCycleContributions entries (Action target). |
 | `Bonus` | [LootRef](#type-lootref) | `null` | Appended Bonus references and inline Rolls (Action target). |
 | `ContributionScale` | [ContributionScale](#field-extensionasset-contributionscale) | `null` | ContributionScale overlay (Action target), merged PER LEAF: an overlay authoring only Floors keeps the base action's own Factors. |
+| `Pace` | [Pace](#field-extensionasset-pace) | `null` | This extension's OWN complete Pace ladder (Action target), {Ladder} only and never an overlay: it resolves from its own Factors and Floors, and its scale MULTIPLIES the action's and every other extension's; the action's own Clamp bounds the product, so there is no Clamp to author here. |
 | `Actions` | array of [ActionDef](#type-actiondef) | `null` | NEW actions appended to a station's ordered Actions list (Station target); the base wins an Id collision, and an appended action is selected only after every base action. |
 | `Conversions` | array of [Conversion](#field-extensionasset-conversions-item) | `null` | Appended Recipe.Conversions (Action target). |
 | `Steps` | array of [StepInsertion](#field-extensionasset-steps-item) | `null` | Ordered step insertions into an action's OWN authored step program (Action target); an action that authors no Steps runs the recipe-driven convert loop and has no program to insert into. |
@@ -1357,6 +1560,13 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
 | `Floors` | array of [Floor](#field-extensionasset-contributionscale-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
+<a id="field-extensionasset-pace"></a>
+### ExtensionAsset.Pace
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Ladder` | [ContributionScale](#field-extensionasset-pace-ladder) | `null` | The factor ladder (Factors summed, the highest reached Floor's Scale wins; none reached = 1.0) whose scale multiplies the Duration of every step marked Paced. The same shape as ContributionScale. |
 
 <a id="field-extensionasset-conversions-item"></a>
 ### ExtensionAsset.Conversions[]
@@ -1395,6 +1605,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
 | `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
 
+<a id="field-extensionasset-pace-ladder"></a>
+#### ExtensionAsset.Pace.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-extensionasset-pace-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
 <a id="field-extensionasset-conversions-item-doneness"></a>
 #### ExtensionAsset.Conversions[].Doneness
 
@@ -1412,6 +1630,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Before` | `string` | `null` | Insert BEFORE the step with this Id (exactly one of After \| Before \| AtStart \| AtEnd). |
 | `AtStart` | `boolean` | `null` | Insert at the START of the program (exactly one of After \| Before \| AtStart \| AtEnd). |
 | `AtEnd` | `boolean` | `null` | Insert at the END of the program (exactly one of After \| Before \| AtStart \| AtEnd; the degrade default). |
+
+<a id="field-extensionasset-pace-ladder-floors-item"></a>
+##### ExtensionAsset.Pace.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
 
 <a id="type-settingsasset"></a>
 ## SettingsAsset
@@ -1457,4 +1683,26 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `RepeatWindowMs` | `long` | `null` | Milliseconds inside which the same player pressing the same station again for the SAME reason is answered by the refusal cue's sound alone: no second notice stacks on the first, no second particle burst or camera shake, and no event for a listening mod. A different reason, or the same reason at another block, always gets the full answer. Null (the default) means 1500; 0 answers every press in full. |
+
+<a id="type-protectlistasset"></a>
+## ProtectListAsset
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Tags` | map of array of `string` | `null` | Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.<br><br>For example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.<br><br>Tags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**. |
+| `Name` | `string` | `null` | Ignored - the protect-list id comes from the asset filename, not this key. Kept as a schema field for editor display only. |
+| `Protects` | array of [ActionInput](#field-protectlistasset-protects-item) | `null` | What this file protects: one input matcher or an array of them (ItemId \| ResourceTypeId \| Tags \| Function, match = ANY route, minus the entry's own Except holes). A protected piece is refused by every consuming station this file applies to, with its own reason (Refused:Protected). An entry authoring no route protects nothing. |
+| `Stations` | array of `string` | `null` | Station ids this file applies to, matched without regard to case; absent or empty = every consuming station. Authored beside Actions, both must match. |
+| `Actions` | array of `string` | `null` | Action ids this file applies to, at any station in scope, matched without regard to case; absent or empty = every action. Authored beside Stations, both must match. |
+
+<a id="field-protectlistasset-protects-item"></a>
+### ProtectListAsset.Protects[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ItemId` | `string` | `null` | Match an exact held item id (one of several optional routes; match = ANY route satisfied). |
+| `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
+| `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
+| `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 

@@ -1,0 +1,28 @@
+{
+  "$Comment": "The Unmake beat's shatter, one bounded system so all of it lands where the piece was: the vanilla magic hit (Magic_Hit's seven spawners, listed by id with the one-block offset every entry of that system carries left out, so the flash sits ON the piece), the glass-and-stars break of a shattered potion (Item_Break_GlassMagic's bits, stars, shards and rays; its puddle and drops are liquid and are left out of a shatter in mid-air) and the crystal break (Block_Break_Crystal's parts and sparks). Vanilla's own spawners are referenced, not copied, so their gold-and-white palette is the vanilla one. LifeSpan 2.5 seconds ends the system on its own.",
+  "Spawners": [
+    { "SpawnerId": "MagicHit_Glow" },
+    { "SpawnerId": "MagicHit_Schockwave" },
+    { "SpawnerId": "Magic_Hit_Smoke" },
+    { "SpawnerId": "MagicHit_DustWhite" },
+    { "SpawnerId": "MAgic_Hit_DustGold" },
+    { "SpawnerId": "MagicHit_Flash" },
+    { "SpawnerId": "MagicHit_Flair" },
+    { "SpawnerId": "Item_Break_GlassPotion_Bits" },
+    { "SpawnerId": "Item_Break_GlassPotion_Stars" },
+    { "SpawnerId": "Item_Break_GlassPotion_Shards" },
+    { "SpawnerId": "Item_Break_GlassPotion_Shards_Erosion" },
+    {
+      "SpawnerId": "Item_BreakPotion_MagicRays",
+      "RotationOffset": { "Roll": 90.0 }
+    },
+    { "SpawnerId": "Block_Break_Crystal_Parts" },
+    {
+      "SpawnerId": "Block_Break_Crystal_Sparks",
+      "FixedRotation": true
+    }
+  ],
+  "BoundingRadius": 4,
+  "IsImportant": false,
+  "LifeSpan": 2.5
+}

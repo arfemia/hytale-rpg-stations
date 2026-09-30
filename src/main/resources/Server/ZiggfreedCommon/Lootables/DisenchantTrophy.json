@@ -1,0 +1,18 @@
+{
+  "$Comment": "The Disenchanter's Grimoire chase: the one roll that hands over the Disenchanting Table's trophy, referenced from the Disenchant action's Bonus.Lootables and rolled once per ritual at its Payout beat. It is the only roll in this file so it is cheap to re-tune: a Lootable folds by id and a later layer replaces the whole file, so a pack wanting different odds ships its own DisenchantTrophy.json and inherits nothing else, and only one version of the id is ever live. The chance is flat on purpose, one visible Chance.Base with no factors, so the odds read at a glance and hold for every worker: 0.5 percent is one grimoire per two hundred rituals on average, a couple of hours of steady work untrained, a real chase. The one Condition keeps it to gear of item level 20 and up, so a heap of crude daggers never farms it. The win grants through Grants.Items, straight to the worker (hotbar first, then the backpack, dropped at the table when the bag is full), and because it is an item grant the grimoire is reported as station output like any other stack the table pays. The Cue plays only when the book actually landed.",
+  "Rolls": [
+    {
+      "Trigger": "Cycle",
+      "Conditions": [
+        { "Factor": "hytale:item_level", "Min": 20 }
+      ],
+      "Chance": {
+        "Base": 0.5
+      },
+      "Grants": {
+        "Items": [ { "Item": "RPG_Weapon_Spellbook_Grimoire_Disenchanter", "Count": 1 } ]
+      },
+      "Cue": "Cue:Trophy"
+    }
+  ]
+}

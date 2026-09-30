@@ -1,0 +1,11 @@
+{
+  "$Comment": "The Greater Disenchanting Table's Use chain: one file per station carrying the object-form station parameter (matched without regard to case), referenced by the block's Interactions.Use. Retrieval of a placed piece is the shared RPG_Station_Retrieve, never a per-station file.",
+  "Cooldown": {
+    "Id": "BlockInteraction",
+    "Cooldown": 0.278,
+    "ClickBypass": true
+  },
+  "Interactions": [
+    { "Type": "rpg_station_use", "Station": "Disenchanting_Table_Greater" }
+  ]
+}

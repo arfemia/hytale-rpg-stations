@@ -42,8 +42,9 @@ the `rpgstations:output_items` reward is fractional: `1.5` hands over one item e
 - `Trigger` - `Cycle` (default, once per completed work cycle) or `Completion` (once, at session
   stop). `Cycle` means THE action's cycle-completed moment whatever program shape it runs: an
   action driving the classic convert loop and one running an authored `Steps` program both fire it
-  once per completed pass. (the `rpgstations:output_items` reward is the one payload an authored program cannot
-  honour, since such a program has no single cycle output to add copies of - see the table below.)
+  once per completed pass. (The `rpgstations:output_items` reward is the one payload an authored
+  program honours only through a `Convert` beat, which is what gives such a program a cycle output
+  to add copies of; a program with no `Convert` beat drops it - see the table below.)
 - `Conditions` - a hard gate; every entry must pass a bounded factor check before the roll is even
   considered.
 - `Chance` - a probabilistic gate over the WHOLE roll (Ladder included):
@@ -55,6 +56,12 @@ the `rpgstations:output_items` reward is fractional: `1.5` hands over one item e
   several.
 - `Grants` - the reward vocabulary, below. Top-level `Grants` AND the reached floor's own `Grants` both
   apply when a Ladder is present.
+- `Expected` - `true` marks what this roll hands over as the moment's EXPECTED payout, a wage or a
+  return the worker is owed, rather than a find. It changes nothing about what the roll pays or
+  when (a `Chance` or a `Ladder` still applies); it changes how the station SHOWS it: an expected
+  item lands on the plain item row and the produced ledger row, exactly like the cycle's own
+  output, while everything else a roll pays stays the gold find row. Default `false`, so every
+  table authored before the knob existed reads as it always did; the Sawmill's tables author none.
 - `Cue` - a MOMENT ID the station plays at the block. The loot table names the moment; the action's own `Moments` map decides what it sounds like, and a flair overlays that. Well-known ids, a per-step `Step:<ActionId>:<StepId>`, and the open author-defined `Cue:<Your_Name>` namespace all resolve. Played on the rare-find moment
   when the roll HITS. A Ladder floor carries the same leaf for its own tier, so a tiered find
   celebrates per tier and a plain chance roll celebrates on the win with no Ladder involved.
@@ -120,8 +127,11 @@ defaults to `0` and is therefore always reached, making it the ladder's baseline
 | `Items` | Exact stacks (`{"Item": "...", "Count": N}`, or a `Count`..`CountMax` range), handed straight to the worker: hotbar first, then the backpack, then the ground at the station block when the bag is full. What lands is reported as station output (`StationOutputProducedEvent`), so an item granted this way is countable by any listener and by the `STATION_OUTPUT` objective kind; the shipped `SawmillTrophy` pays its hatchet this way for exactly that reason. |
 | `DropLists` | Native `ItemDropList` asset ids, each rolled independently in authored order through the engine's own drop-list roller; every stack a table pays is reported as station output the same way. See [Native Composition](native-composition.md), and the composition note below. |
 | `Commands` | Console commands, with `{player}`/`{uuid}`/`{station}`/`{action}`/`{cycles}` placeholders substituted. Runs outside the engine's sight: whatever a command gives is never reported as station output and never counts toward an objective, so a payout that must be countable is authored as `Items`. |
-| `Effects` | Native EntityEffects applied to the player, id-ref-only. See [Native Composition](native-composition.md). |
-| `Contributions` | One-shot amounts posted verbatim when this roll grants - `Cycle` trigger only, and deliberately UNSCALED (never inherits the idle fraction or the action's `ContributionScale`). See [Extension Channels](extension-channels.md). |
+| the `rpgstations:effect` reward | A native EntityEffect applied to the player, id-ref-only (`Params: {Id, DurationMs?}`). See [Native Composition](native-composition.md). |
+| the `rpgstations:contribution` reward | A one-shot amount posted verbatim when this roll grants (`Params: {Channel, Param?, Amount}`) - `Cycle` trigger only, and deliberately UNSCALED (never inherits the idle fraction or the action's `ContributionScale`). See [Extension Channels](extension-channels.md). |
+
+`Grants` itself carries four keys: `Items`, `DropLists`, `Commands` and `Rewards`. The three
+station-only payouts above are registered reward KINDS inside `Rewards`, never keys of their own.
 
 ## Composing drop tables
 
@@ -220,6 +230,15 @@ fully rewarding with nothing else installed: `rpgstations:session_seconds`, `rpg
 (cycles completed so far this session), `hytale:tool_power`, `hytale:tool_quality`,
 `hytale:tool_item_level`, and `hytale:tool_durability_percent` - the tool-curve set the shipped Sawmill
 lootable and its `ContributionScale` both roll against.
+
+The PIECE a session works is in the factors too, separately from whatever the worker holds: the
+placed piece a ritual is taking apart, the material a cycle is about to drain. Ziggfreed Common's
+item family reads it: `hytale:item_quality` (the quality the stack carries), `hytale:item_level`,
+`hytale:item_durability_percent` (an item that never wears reads 100), `hytale:item_stat` (`Param`
+a stat id: what the item's own armor, weapon and utility bonuses add to it) and
+`ziggfreedcommon:item_stamp_points` (`Param` an optional stat id: the enhancement points stamped on
+it). Each answers nothing where the moment has no piece, so a condition on one stays shut; a worn
+piece pays less and an enhanced one more through exactly these reads.
 
 ---
 

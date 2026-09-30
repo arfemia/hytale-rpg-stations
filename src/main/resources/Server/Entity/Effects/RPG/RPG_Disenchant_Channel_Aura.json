@@ -1,0 +1,12 @@
+{
+  "$Comment": "The channel aura the Disenchanting Table's Draw beat puts on the worker's double (Actions/Disenchant.json, the Draw step's Presentation.Effect with Target Puppet): a green-gold glow over the model, a mossy underglow and slow Life-essence motes rising off the figure while it channels. On the double the station keeps the clock and strips the effect at the session's end; on a worker with no double it lands on the player instead, where this Duration bounds it.",
+  "Duration": 30,
+  "OverlapBehavior": "Overwrite",
+  "ApplicationEffects": {
+    "ModelVFXId": "RPG_Disenchant_Channel_Glow",
+    "EntityBottomTint": "#6fbf3a",
+    "Particles": [
+      { "SystemId": "Seeds_Eternal", "Scale": 0.6 }
+    ]
+  }
+}

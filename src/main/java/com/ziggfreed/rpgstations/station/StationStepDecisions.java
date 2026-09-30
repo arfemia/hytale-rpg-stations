@@ -181,6 +181,40 @@ final class StationStepDecisions {
     }
 
     /**
+     * Does any step of {@code steps} author {@code RollBonus} (the beat-level Bonus knob)? When one
+     * does, the dispatch skips its completion-time Bonus pass: the action's Bonus rolls at those
+     * beats instead, so a program never rolls it twice. Null-safe.
+     */
+    static boolean programRollsBonusAtBeat(@Nullable List<StationStep> steps) {
+        if (steps == null) {
+            return false;
+        }
+        for (StationStep step : steps) {
+            if (step != null && step.effectiveRollBonus()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Does any step of {@code steps} author a {@code Convert} phase? A program with one has a cycle
+     * output the moment that beat runs, so an {@code OutputItems} grant on it lands (the
+     * validator's cycle-output rule reads this).
+     */
+    static boolean programConverts(@Nullable StationStep[] steps) {
+        if (steps == null) {
+            return false;
+        }
+        for (StationStep step : steps) {
+            if (step != null && step.getConvert() != null && step.getConvert().effectiveEnabled()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Whether ANY step in an authored program authors a non-blank per-step {@code Puppet.Clip} -
      * the gate {@code StationService} resolves ONCE at engage to SUPPRESS the generic engage/swing
      * puppet clip (round-8): a stepped program whose steps author clips drives the puppet ENTIRELY

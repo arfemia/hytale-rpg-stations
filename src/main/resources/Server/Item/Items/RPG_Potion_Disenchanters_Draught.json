@@ -1,0 +1,49 @@
+{
+  "$Comment": "The Disenchanter's Draught, the standalone way to work the tables faster: an Alchemy bench potion on the vanilla purple potion art whose drink applies Entity/Effects/RPG/RPG_Disenchanters_Draught, five minutes of raised Disenchanting Proficiency (the stat the ritual's pace reads). Parent Potion_Template supplies the drink animation, the consume interaction and the potion block, exactly as vanilla's own potions do; the leaves below are what this potion changes. InteractionVars.Effect MUST be overridden by every child of the template, since the template's own Effect applies health potions. The recipe brews it from an empty bottle, Life essence and a little Void essence, the same two essences the table itself draws out, in the Alchemy bench's misc potions tab.",
+  "Parent": "Potion_Template",
+  "TranslationProperties": {
+    "Name": "items.RPG_Potion_Disenchanters_Draught.name",
+    "Description": "items.RPG_Potion_Disenchanters_Draught.description"
+  },
+  "Icon": "Icons/ItemsGenerated/Potion_Regen_Mana.png",
+  "Quality": "Uncommon",
+  "ItemLevel": 30,
+  "Recipe": {
+    "TimeSeconds": 2,
+    "KnowledgeRequired": false,
+    "Input": [
+      { "ItemId": "Potion_Empty", "Quantity": 1 },
+      { "ItemId": "Ingredient_Life_Essence", "Quantity": 8 },
+      { "ItemId": "Ingredient_Void_Essence", "Quantity": 2 }
+    ],
+    "BenchRequirement": [
+      {
+        "Id": "Alchemybench",
+        "Type": "Crafting",
+        "Categories": ["Alchemy_Potions_Misc"]
+      }
+    ]
+  },
+  "InteractionVars": {
+    "Effect": {
+      "Interactions": [
+        { "Type": "ApplyEffect", "EffectId": "RPG_Disenchanters_Draught" }
+      ]
+    }
+  },
+  "BlockType": {
+    "CustomModel": "Items/Consumables/Potions/Potion.blockymodel",
+    "CustomModelTexture": [
+      { "Texture": "Items/Consumables/Potions/Potion_Textures/Purple.png", "Weight": 1 }
+    ],
+    "ParticleColor": "#b07cff",
+    "Light": { "Color": "#535" },
+    "TextureComputedColor": "#8C6BB8"
+  },
+  "IconProperties": {
+    "Scale": 0.9,
+    "Rotation": [22.5, 45, 22.5],
+    "Translation": [0, -9]
+  },
+  "MaxStack": 10
+}

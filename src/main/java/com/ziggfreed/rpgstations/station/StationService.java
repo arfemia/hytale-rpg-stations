@@ -16,13 +16,17 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.DoubleSupplier;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.joml.Vector3d;
+import org.joml.Vector3f;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.component.ArchetypeChunk;
@@ -31,6 +35,8 @@ import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.protocol.AnimationSlot;
+import com.hypixel.hytale.protocol.Direction;
+import com.hypixel.hytale.protocol.EntityPart;
 import com.hypixel.hytale.protocol.InteractionType;
 import com.hypixel.hytale.protocol.ItemResourceType;
 import com.hypixel.hytale.server.core.Message;
@@ -38,7 +44,6 @@ import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.asset.type.entityeffect.config.OverlapBehavior;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemArmor;
-import com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemTool;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemToolSpec;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemWeapon;
@@ -61,13 +66,14 @@ import com.hypixel.hytale.server.core.modules.interaction.interaction.config.Int
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.RootInteraction;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
-import com.hypixel.hytale.server.core.universe.world.ParticleUtil;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.chunk.section.ChunkSection;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.core.util.NotificationUtil;
 import com.ziggfreed.common.camera.CameraShakeService;
+import com.ziggfreed.common.cast.ModelParticleService;
+import com.ziggfreed.common.cast.ParticleLifetimes;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.cast.WorldKeyedQueues;
 import com.ziggfreed.common.cast.step.CastKernel;
@@ -83,6 +89,7 @@ import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.common.feedback.PickupMimic;
 import com.ziggfreed.common.i18n.Msg;
 import com.ziggfreed.common.i18n.NativeNames;
+import com.ziggfreed.common.recipe.RecipeIndex;
 import com.ziggfreed.common.interaction.NativeChainFire;
 import com.ziggfreed.common.inventory.InventoryGrant;
 import com.ziggfreed.common.loot.FactorLookup;
@@ -108,6 +115,7 @@ import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.SummaryEnricherRegistryImpl;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Contribution;
+import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.Ingredient;
@@ -302,8 +310,24 @@ public final class StationService {
      * {@link #stop}.
      */
     private record PendingMoment(@Nonnull StationSession session, @Nonnull String momentId,
-                                 @Nonnull Presentation presentation, @Nonnull Vector3d targetPos,
-                                 long dueAtMs) {
+                                 @Nullable Presentation presentation, @Nonnull Vector3d targetPos,
+                                 long dueAtMs, @Nullable Ref<EntityStore> effectRef, @Nullable String effectId) {
+
+        /** A parked cue: the resolved presentation, played at its due time. */
+        PendingMoment(@Nonnull StationSession session, @Nonnull String momentId,
+                @Nonnull Presentation presentation, @Nonnull Vector3d targetPos, long dueAtMs) {
+            this(session, momentId, presentation, targetPos, dueAtMs, null, null);
+        }
+
+        /**
+         * A parked REMOVAL: an effect the engine put on the worker's double with no expiry (the
+         * double carries no stat map, so the engine's own effect timer never runs on it) comes off
+         * at its due time. Rides the one cue queue so an effect's authored DurationMs and a cue's
+         * DelayMs are kept by the same clock.
+         */
+        boolean isEffectRemoval() {
+            return effectId != null;
+        }
     }
 
     /**
@@ -340,8 +364,14 @@ public final class StationService {
      */
     private final ConcurrentHashMap<String, DisplayHandle> displayByBlock = new ConcurrentHashMap<>();
 
-    /** One live display prop: the entity ref plus the per-world network id press-F retrieval matches on. */
-    private record DisplayHandle(@Nonnull Ref<EntityStore> ref, @Nullable Integer networkId) {
+    /**
+     * One live display prop: the entity ref, the per-world network id press-F retrieval matches
+     * on, and the {@code Display} group it was spawned with (the socket's own, or a step's
+     * per-beat overlay over it), so a beat that asks for the look it already wears never
+     * respawns it.
+     */
+    private record DisplayHandle(@Nonnull Ref<EntityStore> ref, @Nullable Integer networkId,
+                                 @Nullable Custody.Display shown) {
     }
 
     /**
@@ -358,9 +388,12 @@ public final class StationService {
     /**
      * One live Working flip: the block currently wearing its actively-working look, plus the anchor
      * id it was entered under (so the exit re-resolves the SAME {@code Custody} group that chose the
-     * Working name) and its already-parsed coordinates (so the exit never re-parses a blockKey).
+     * resting name), its already-parsed coordinates (so the exit never re-parses a blockKey), and
+     * the state NAME it wears (the custody's Working name, or a step's own {@code State}), so a
+     * later beat naming a different state re-flips the same block instead of being swallowed.
      */
-    private record WorkingFlip(@Nonnull String blockKey, @Nullable String anchorId, int x, int y, int z) {
+    private record WorkingFlip(@Nonnull String blockKey, @Nullable String anchorId, int x, int y, int z,
+                               @Nonnull String stateName) {
     }
 
     /**
@@ -536,7 +569,7 @@ public final class StationService {
         String selectedActionId = (preClaim != null && !preClaim.isEmpty()
                 && mayCommitToClaim(asset, preClaim, playerUuid))
                 ? preClaim.actionId
-                : selectActionForHeld(asset, player, playerRef, socketsFilled);
+                : selectActionForHeld(asset, player, playerRef, socketsFilled, preClaim);
         if (selectedActionId == null) {
             // Neither the claim nor the held item matched - before denying, recover the action
             // from the block's OWN persisted interaction-state name, so a Loaded block whose
@@ -557,8 +590,9 @@ public final class StationService {
         // gated by the station's alone, and vice versa. Selection above already preferred a
         // matching action whose own gate passes; this re-check is what actually DENIES (the
         // claim-commit path bypasses selection, and the station-level gate is only checked here).
-        if (!checkRequires(asset.getRequires(), playerRef, asset, action, socketsFilled)
-                || !checkRequires(action.getRequires(), playerRef, asset, action, socketsFilled)) {
+        ItemStack gatePiece = gatePiece(preClaim, action);
+        if (!checkRequires(asset.getRequires(), playerRef, asset, action, socketsFilled, gatePiece)
+                || !checkRequires(action.getRequires(), playerRef, asset, action, socketsFilled, gatePiece)) {
             press.refuse("ui.station.locked");
             return;
         }
@@ -605,7 +639,9 @@ public final class StationService {
                 InventoryComponent.Hotbar hotbarComp =
                         store.getComponent(ref, InventoryComponent.Hotbar.getComponentType());
                 ItemStack heldForPlacement = hotbarComp != null ? hotbarComp.getActiveItem() : null;
-                int moved = 0;
+                int heldMoved = 0;
+                int foundMoved = 0;
+                Custody.ResolvedSocket foundSocket = null;
                 StationCustody.PlacementRoute heldRoute = routeStack(custodySockets, claim, playerUuid,
                         custody, asset, action, heldForPlacement);
                 placeDenial = heldRoute.denial();
@@ -622,15 +658,16 @@ public final class StationService {
                         press.refuse("ui.station.storage_full");
                         return;
                     }
-                    moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
+                    heldMoved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
                             action.getActionId(), hotbarComp.getInventory(), hotbarComp.getActiveSlot(),
                             heldForPlacement, custody, heldRoute.socket(), blockX, blockY, blockZ);
                 }
-                if (moved <= 0 && hotbarComp != null) {
+                if (heldMoved <= 0 && hotbarComp != null && !custody.effectiveHeldOnly()) {
                     // R3 fix (directive 5's held-else-inventory ruling): the held slot didn't
                     // match (or nothing is held) - scan the rest of the inventory before denying,
                     // so matching material sitting unheld in the backpack is no longer invisible
-                    // to placement.
+                    // to placement. A HeldOnly custody never scans: what the player holds is the
+                    // whole offer, so a press can never pull gear out of the bag unasked.
                     InventoryMatch found = findFirstCustodyMatchInInventory(store, ref, custody, custodySockets,
                             asset, action, hotbarComp.getActiveSlot(), claim, playerUuid);
                     if (found != null) {
@@ -639,12 +676,14 @@ public final class StationService {
                             press.refuse("ui.station.storage_full");
                             return;
                         }
-                        moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
-                                action.getActionId(), found.container(), found.slot(), found.stack(), custody,
-                                found.socket(), blockX, blockY, blockZ);
+                        foundMoved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid,
+                                asset.getId(), action.getActionId(), found.container(), found.slot(), found.stack(),
+                                custody, found.socket(), blockX, blockY, blockZ);
+                        foundSocket = found.socket();
                     }
                 }
-                if (moved > 0) {
+                PlacedPiece placed = placedPiece(heldMoved, heldRoute.socket(), foundMoved, foundSocket);
+                if (placed.placed()) {
                     if (!loadedBefore) {
                         flipCustodyState(world, blockX, blockY, blockZ, custody, true);
                     }
@@ -653,27 +692,31 @@ public final class StationService {
                     registerUnattendedIfEnabled(blockKey, action);
                     toast(playerRef, RpgMsg.tr(loadedBefore
                             ? "ui.station.custody.topped_up" : "ui.station.custody.placed"));
+                    // The placed-piece preview (Custody.Preview): what the piece just placed will
+                    // give back, named now, before any work starts, addressed to the socket it
+                    // actually went into (held or backpack route alike, as placedPiece settles it).
+                    if (custody.effectivePreview()) {
+                        previewPlacedReturn(playerRef, player, asset, action, world, blockX, blockY, blockZ,
+                                placed.socket());
+                    }
                     return;
                 }
-                if (!loadedBefore) {
-                    // Decision 66 (round-3 smoke): the station is EMPTY and neither the held
-                    // stack nor the rest of the inventory carries anything this custody
-                    // accepts - deny with the honest reason NOW instead of falling through to
-                    // the tool gate, whose "wrong tool" toast misled the smoke (a held
-                    // Food_Fish_Raw at the cutting board read as a dagger problem when the
-                    // real issue was an unacceptable material). A LOADED station still falls
-                    // through (a denial further down really is about the tool), and an
-                    // idle-capable classic station falls through too - empty-handed practice
-                    // is a legitimate engage there. With authored sockets the routing's own
-                    // most-specific reason (share refusal > full socket > wrong input) replaces
-                    // the generic no-materials line.
-                    boolean stepsAuthored = action.getSteps() != null && action.getSteps().length > 0;
-                    StationAsset.Work workForIdle = action.getWork();
-                    boolean idleCapable = !stepsAuthored && workForIdle != null && workForIdle.getIdle() != null;
-                    if (!idleCapable) {
-                        press.refuse(placementDenyKey(authoredSockets, placeDenial));
-                        return;
-                    }
+                // An EMPTY station where nothing held or carried is accepted denies with the
+                // honest reason NOW instead of falling through to the tool gate, whose "wrong
+                // tool" toast would mislead (a held Food_Fish_Raw at the cutting board reads as a
+                // dagger problem when the real issue is an unacceptable material). A LOADED
+                // station falls through, and so does an idle-capable classic station
+                // (empty-handed practice is a legitimate engage).
+                // A Protected denial follows the same rule: at a loaded station the held piece
+                // is judged as a TOOL by the engage gates below, never as input, so protecting a
+                // trophy tool never locks its owner out of working with it.
+                boolean stepsAuthored = action.getSteps() != null && action.getSteps().length > 0;
+                StationAsset.Work workForIdle = action.getWork();
+                boolean idleCapable = !stepsAuthored && workForIdle != null && workForIdle.getIdle() != null;
+                String unplacedRefusal = unplacedPressRefusal(loadedBefore, idleCapable, authoredSockets, placeDenial);
+                if (unplacedRefusal != null) {
+                    press.refuse(unplacedRefusal);
+                    return;
                 }
             }
             // ENGAGE-side socket gates (authored sockets only; the degenerate custody's ownership
@@ -1343,35 +1386,26 @@ public final class StationService {
                                  @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
                                  @Nonnull ConversionCheck check) {
         int attemptCycleIndex = s.cyclesDone + 1;
-        // Sawmill migration (design 9.4): an action authoring Custody ALWAYS draws its implicit
-        // Consume from the claim, never the live inventory - the backpack drain the pre-leg-C
-        // engine ran per cycle is retired for any station custody governs.
-        String consumeFrom = action.getCustody() != null
-                ? StationStep.Consume.FROM_CUSTODY : StationStep.Consume.FROM_INVENTORY;
-        // Decision 73: the chosen conversion's FULL Ingredient arrays drive the implicit program, so
-        // a multi-input recipe stays ONE atomic Consume/Produce step pair.
-        StationStep.Consume consumeStep = StationStep.Consume.of(check.inputs, consumeFrom);
-        // Recipe.Yield: the per-cycle output-quantity transform (StationYield), DETERMINISTIC end to
-        // end. ONE FactorSnapshot still serves the whole cycle (the Bonus rolls below and any Stamp
-        // phase read it), so two ladders reading the same factor can never disagree.
-        StationAsset.Yield yield = check.recipe != null ? check.recipe.getYield() : null;
+        // The piece this cycle is about, captured BEFORE the snapshot so the item factors read it:
+        // the addressed pile's unique stack or its oldest matching material for a custody action,
+        // the exact-item input for the inventory route.
+        Custody custody = action.getCustody();
+        s.factorItem = custody != null
+                ? pieceInCustody(custodyClaimAt(sessionWorld(s), s.blockX, s.blockY, s.blockZ),
+                        custody.effectiveSockets(), null, check.inputs)
+                : pieceFromInventoryInput(check.inputs);
+        // ONE FactorSnapshot serves the whole cycle (the Convert phase's yield read, the Bonus rolls
+        // and any Stamp phase), so two ladders reading the same factor can never disagree.
         FactorLookup snapshot = FactorRegistryImpl.getInstance().snapshotFor(
                 buildFactorContext(s, store, player, action, attemptCycleIndex));
-        Ingredient[] yieldedOutputs = StationYield.applyToOutputs(yield, check.outputs);
-        recordYieldBreakdown(s, check.outputs, yieldedOutputs);
-        // A Bonus roll's Grants.OutputItems adds EXTRA items of this cycle's own primary output; the
-        // roll phase reports the fractional tally and applyGrantResult resolves it to whole items of
-        // this id, once for the whole cycle.
-        Ingredient primaryOutput = yieldedOutputs.length > 0 ? yieldedOutputs[0] : null;
-        s.cycleOutputItemId = primaryOutput != null ? primaryOutput.getItemId() : null;
-        StationStep.Produce produceStep = StationStep.Produce.of(yieldedOutputs,
-                StationStep.Produce.TO_INVENTORY);
-        // The action's effective Bonus rides the implicit program's own Roll phase, which is why this
-        // route runs no separate completion-time pass.
-        List<StationStep> steps = ImplicitProgram.build(consumeStep, produceStep,
-                effectiveBonus(asset, action), action.getPresentation());
+        // The chosen conversion rides the dispatch as the Convert phase's PRESELECTED row, so the
+        // implicit program converts through the very code path an authored Convert beat runs -
+        // yield, the yield breakdown, the cycle output, the consume, the produce and the input hook
+        // all live in that one phase. The action's effective Bonus rides the program's own Roll
+        // phase, which is why this route runs no separate completion-time pass.
+        List<StationStep> steps = ImplicitProgram.build(effectiveBonus(asset, action), action.getPresentation());
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps,
-                attemptCycleIndex, 0, false, snapshot, false);
+                attemptCycleIndex, 0, false, snapshot, false, check);
     }
 
     /**
@@ -1385,9 +1419,20 @@ public final class StationService {
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player) {
         List<StationStep> steps = effectiveProgramSteps(asset, action);
         int attemptCycleIndex = s.cyclesDone + 1;
-        // An authored program has no single "cycle output", so an OutputItems grant has nothing to
-        // add to and is dropped (LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT flags the authoring).
+        // An authored program has no single "cycle output" until a Convert beat runs one; an
+        // OutputItems grant before that has nothing to add to and is dropped
+        // (LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT flags a program with no Convert at all).
         s.cycleOutputItemId = null;
+        // The piece this pass works, captured BEFORE the snapshot: under Work.Queue the NEXT filled
+        // socket in authored order takes this pass (its id addresses the Convert phase's drain and
+        // its piece is what the item factors read); otherwise the first Item socket's piece.
+        Custody custody = action.getCustody();
+        StationCustodyClaim claim = custody != null ? custodyClaimAt(sessionWorld(s), s.blockX, s.blockY, s.blockZ) : null;
+        List<Custody.ResolvedSocket> sockets = custody != null ? custody.effectiveSockets() : List.of();
+        boolean queue = action.getWork() != null && action.getWork().effectiveQueue();
+        s.queueSocketId = queue && claim != null
+                ? StationCustody.nextFilledSocket(sockets, id -> claim.totalQuantity(id) > 0) : null;
+        s.factorItem = pieceInCustody(claim, sockets, s.queueSocketId, null);
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, attemptCycleIndex, 0, false);
     }
 
@@ -1509,9 +1554,11 @@ public final class StationService {
             int attemptCycleIndex, int startIndex, boolean resuming) {
         // The AUTHORED-program entry (a fresh pass and a resume alike): such a program carries no
         // implicit Roll phase for the action's own Bonus, so its Cycle-trigger pass runs at
-        // completion instead - see rollCycleBonus.
+        // completion instead - see rollCycleBonus - unless one of its beats authors RollBonus and
+        // rolls it there (StationStepDecisions#programRollsBonusAtBeat).
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps,
-                attemptCycleIndex, startIndex, resuming, null, true);
+                attemptCycleIndex, startIndex, resuming, null,
+                !StationStepDecisions.programRollsBonusAtBeat(steps), null);
     }
 
     /**
@@ -1533,7 +1580,8 @@ public final class StationService {
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player, @Nonnull List<StationStep> steps,
             int attemptCycleIndex, int startIndex, boolean resuming,
-            @Nullable FactorLookup presetSnapshot, boolean bonusAtCompletion) {
+            @Nullable FactorLookup presetSnapshot, boolean bonusAtCompletion,
+            @Nullable ConversionCheck preselected) {
         if (!resuming) {
             // A FRESH cycle attempt explicitly zeroes the suspend deadline AND the per-step
             // iteration counter before the walk starts, so a fresh program's very first Duration
@@ -1545,8 +1593,8 @@ public final class StationService {
         FactorLookup snapshot = presetSnapshot != null ? presetSnapshot
                 : FactorRegistryImpl.getInstance().snapshotFor(
                         buildFactorContext(s, store, player, action, attemptCycleIndex));
-        StationStepContext ctx = new StationStepContext(s, store, commandBuffer, player, action, snapshot,
-                steps, attemptCycleIndex);
+        StationStepContext ctx = new StationStepContext(s, store, commandBuffer, player, asset, action, snapshot,
+                steps, attemptCycleIndex, effectivePace(asset, action), preselected);
 
         CastKernel.Walk<StationStepResult> walk = StationStepKernel.runResumable(ctx, startIndex);
         if (walk instanceof CastKernel.Walk.Suspended<StationStepResult> suspended) {
@@ -1568,10 +1616,12 @@ public final class StationService {
         }
 
         s.cyclesDone++;
-        // Iteration refund ledger (design 2.5/M1): a COMPLETED program cycle committed every output
-        // (to inventory or custody), so nothing is owed - clear the ledger so a stop between cycles
-        // refunds nothing. A mid-cycle stop still refunds whatever was recorded before the commit.
-        s.iterationConsumed.clear();
+        // Iteration refund ledger: a COMPLETED program cycle committed every output (to inventory
+        // or custody), so nothing is owed - the pass COMMITS: every refund half clears, so a stop
+        // between cycles refunds nothing, and any consume no produce committed yet (a Consume beat
+        // with nothing produced after it) reaches the input-consumed hook now, once. A mid-cycle
+        // stop still refunds whatever was recorded before the commit, and reports none of it.
+        commitIteration(s, store);
         if (s.durabilityPerCycle > 0) {
             drainHeldToolDurability(store, s.ref, player, s.durabilityPerCycle);
         }
@@ -1591,11 +1641,187 @@ public final class StationService {
         onCycleCompleted(s, store, commandBuffer, action, false, s.cyclesDone, scale);
 
         StationAsset.Work work = action.getWork();
+        // The ritual queue (Work.Queue): while another filled socket waits, the next pass takes it
+        // on the next frame (one full ritual after another), whatever Looping says; once every
+        // socket is empty the ordinary end-of-pass rule below decides.
+        if (work != null && work.effectiveQueue() && queueHasNext(s, action)) {
+            s.nextCycleAtMs = System.currentTimeMillis();
+            return true;
+        }
         if (work != null && !work.effectiveLooping()) {
             stop(s, StopReason.RITUAL_COMPLETE, store, commandBuffer);
             return false;
         }
         return true;
+    }
+
+    /** Does another filled Item socket wait for the ritual queue after this pass? */
+    private boolean queueHasNext(@Nonnull StationSession s, @Nonnull ActionResolver.ResolvedAction action) {
+        Custody custody = action.getCustody();
+        if (custody == null) {
+            return false;
+        }
+        StationCustodyClaim claim = custodyClaimAt(sessionWorld(s), s.blockX, s.blockY, s.blockZ);
+        return claim != null && StationCustody.nextFilledSocket(custody.effectiveSockets(),
+                id -> claim.totalQuantity(id) > 0) != null;
+    }
+
+    /**
+     * The action's {@code Cycle}-trigger Bonus pass fired from a step marked {@code RollBonus}
+     * (the beat-level knob): the SAME effective Bonus, the same snapshot and the same grant handoff
+     * the completion-time pass uses, just earlier.
+     */
+    static void rollBonusAtBeat(@Nonnull StationStepContext ctx) {
+        rollCycleBonus(ctx.session, ctx.store, ctx.commandBuffer, ctx.asset, ctx.action, ctx.player,
+                ctx.snapshot, ctx.cycleIndex);
+    }
+
+    // ==================== The ONE input-consumed hook and the commits that reach it ====================
+    //
+    // Every path on which a station consumes input reaches onInputConsumed exactly once, AFTER that
+    // consumption commits, and a consumption that is refunded never reaches it:
+    //   - a session consume (a Consume phase, or a Convert phase's own drain) records its batch into
+    //     the iteration ledger's hook half (recordIterationConsumedInputs) beside the refund halves;
+    //     the commit (commitIteration: a committed produce, a committed conversion, a completed
+    //     program pass) reports it, and a refund at stop drops it;
+    //   - a Stamp phase's reagents commit with the enhanced stack (reportCommittedConsumption);
+    //   - an unattended settle commits its transform to the stash and reports it with no worker
+    //     (settleUnattendedAt).
+
+    /**
+     * THE ONE input-consumed hook, session-free so every path can reach it: called exactly once
+     * per committed consumption, after the commit, with the REAL stacks that were consumed (the
+     * metadata-bearing piece when a single-item socket gave it up, else bare stacks of the drained
+     * ids), each with the custody socket it came out of ({@link ConsumedInput#socketId()}, null for
+     * the inventory route), plus the worker (null on an unattended settle), the world and block,
+     * and the station and action ids ({@link InputConsumption}). It fires the api's
+     * {@code StationInputConsumedEvent} ({@link StationEvents#fireInputConsumed}); the
+     * {@code STATION_INPUT} objective kind rides that event through
+     * {@code progression.StationProgressProducers}, which credits the worker and nobody on an
+     * unattended settle. Never throws.
+     *
+     * <p>One drop remains, by design: an attended consumption whose session has lost its worker
+     * handle, entity ref or uuid, or whose world can no longer be resolved off the worker's entity,
+     * is not reported at all (teardown racing the phase; see {@link #attendedConsumption}), rather
+     * than reported with a partial worker that would read as an unattended settle.
+     */
+    static void onInputConsumed(@Nonnull Store<EntityStore> store, @Nonnull InputConsumption consumption) {
+        if (consumption.consumed().isEmpty()) {
+            return;
+        }
+        Log.fine("STATION input consumed at '" + consumption.stationId() + "' (" + consumption.consumed().size()
+                + " stack(s), " + (consumption.hasWorker() ? "attended" : "unattended") + ")");
+        StationEvents.fireInputConsumed(store, consumption.playerRef(), consumption.worker(), consumption.workerId(),
+                consumption.worldUuid(), consumption.blockX(), consumption.blockY(), consumption.blockZ(),
+                consumption.stationId(), consumption.actionId(), consumption.consumed());
+    }
+
+    /**
+     * The session's consumption record for a batch taken at {@code anchorId} (null or {@code Self}
+     * for the station's own block): the worker, the world, the block that pile stood at and the
+     * session's station and action. The world is the STATION's own, read off the worker's entity
+     * ({@link #sessionWorld}): the consumption happened at this station, whatever handle the
+     * worker carries (a {@code PlayerRef} names no world only before its first join, never
+     * between worlds, so it was never the right authority here). An attended record always names
+     * its WHOLE worker (handle, entity ref and uuid, what {@link InputConsumption#hasWorker}
+     * reads), so it never reads as unattended. Null when nothing was consumed, or the session has
+     * lost part of its worker or its entity is gone (teardown racing the phase), in which case
+     * nothing is reported.
+     */
+    @Nullable
+    static InputConsumption attendedConsumption(@Nonnull StationSession s, @Nullable String anchorId,
+            @Nonnull List<ConsumedInput> consumed) {
+        try {
+            if (consumed.isEmpty() || s.playerRef == null || s.ref == null || s.playerUuid == null
+                    || s.stationId == null || s.actionId == null) {
+                return null;
+            }
+            World world = sessionWorld(s);
+            UUID worldUuid = world != null ? worldUuidOf(world) : null;
+            if (worldUuid == null) {
+                Log.fine("STATION input consumption at '" + s.stationId + "' names no world, not reported");
+                return null;
+            }
+            String blockKey = anchorBlockKeyFor(s, anchorId);
+            int[] coords = blockKey != null ? anchorCoords(s, anchorId, blockKey) : null;
+            int x = coords != null ? coords[0] : s.blockX;
+            int y = coords != null ? coords[1] : s.blockY;
+            int z = coords != null ? coords[2] : s.blockZ;
+            return new InputConsumption(s.playerRef, s.ref, s.playerUuid, worldUuid, x, y, z,
+                    s.stationId, s.actionId, List.copyOf(consumed));
+        } catch (Throwable t) {
+            Log.fine("STATION input consumption unreadable for '" + s.stationId + "': " + t.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Records a session consume's batch into the HOOK half of the iteration ledger
+     * ({@link StationSession#iterationConsumedInputs}), beside the refund halves the same body
+     * already wrote: the consumption is not final yet, so it waits for {@link #commitIteration}
+     * (reported once) or a refund at stop (dropped unreported).
+     */
+    static void recordIterationConsumedInputs(@Nonnull StationSession s, @Nullable String anchorId,
+            @Nonnull List<ConsumedInput> consumed) {
+        InputConsumption consumption = attendedConsumption(s, anchorId, consumed);
+        if (consumption != null) {
+            s.iterationConsumedInputs.add(consumption);
+        }
+    }
+
+    /**
+     * A consumption that is final the moment it lands, outside the iteration ledger: a
+     * {@code Stamp} phase's reagents, which commit with the enhanced stack and are never refunded
+     * by a later stop (the phase restores them itself on its own failure, before this is reached).
+     * Reported straight to the hook.
+     */
+    static void reportCommittedConsumption(@Nonnull StationSession s, @Nonnull Store<EntityStore> store,
+            @Nullable String anchorId, @Nonnull List<ConsumedInput> consumed) {
+        InputConsumption consumption = attendedConsumption(s, anchorId, consumed);
+        if (consumption != null) {
+            onInputConsumed(store, consumption);
+        }
+    }
+
+    /**
+     * THE iteration COMMIT, the one call every commit point makes (a committed {@code Produce}, a
+     * committed {@code Convert}, a completed program pass): the iteration's consumption is final,
+     * so the ledger commits ({@link #commitIterationLedger}: every refund half clears, the hook
+     * half is taken) and THEN each taken consumption reaches the hook, once. That order is the
+     * contract: a stop after this point refunds nothing, and a stop before it refunds everything
+     * and reports nothing.
+     */
+    static void commitIteration(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
+        for (InputConsumption consumption : commitIterationLedger(s)) {
+            onInputConsumed(store, consumption);
+        }
+    }
+
+    /**
+     * PURE, the ledger half of {@link #commitIteration}: the refund halves clear
+     * ({@link #clearIterationLedgerOnCommittedProduce}) and the hook half is TAKEN, answered for
+     * the caller to report and cleared, so no later commit reports the same consumption again.
+     */
+    @Nonnull
+    static List<InputConsumption> commitIterationLedger(@Nonnull StationSession s) {
+        List<InputConsumption> committed = s.iterationConsumedInputs.isEmpty()
+                ? List.of() : List.copyOf(s.iterationConsumedInputs);
+        s.iterationConsumedInputs.clear();
+        clearIterationLedgerOnCommittedProduce(s);
+        return committed;
+    }
+
+    /**
+     * A single-item socket gave up its piece to a custody consume: the prop that rendered
+     * THAT stack goes with it in the same tick, so nothing stands on the surface for a piece that
+     * no longer exists. A count pile keeps its prop while its record stands (the classic look).
+     */
+    void onUniqueConsumed(@Nonnull StationSession s, @Nullable String anchorId, @Nonnull String socketId,
+            @Nullable CommandBuffer<EntityStore> commandBuffer) {
+        String blockKey = anchorBlockKeyFor(s, anchorId);
+        if (blockKey != null) {
+            despawnDisplay(blockKey, socketId, commandBuffer);
+        }
     }
 
     /**
@@ -1961,7 +2187,14 @@ public final class StationService {
             return;
         }
         int bonusLanded = grantBonusOutputItems(s, store, commandBuffer, player, result.getOutputItems());
-        for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
+        // Per-roll origin: an item a roll authored Expected paid is the moment's expected payout
+        // (a wage, a return) and reads as ORDINARY produced output, on the plain item row and the
+        // produced ledger row; everything else a pass paid is a find, the gold row. Every table
+        // authored before the knob existed has no Expected roll, so its rows are what they were.
+        for (Map.Entry<String, Integer> e : result.getExpectedItems().entrySet()) {
+            s.producedItems.merge(e.getKey(), e.getValue(), Integer::sum);
+        }
+        for (Map.Entry<String, Integer> e : result.getFoundItems().entrySet()) {
             s.luckItems.merge(e.getKey(), e.getValue(), Integer::sum);
         }
         // A rpgstations:contribution reward buffers its one-shot post for THIS cycle's completed
@@ -1981,7 +2214,10 @@ public final class StationService {
             emitMoment(store, s, cue, null, blockPos);
         }
         if (s.playerRef != null) {
-            for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
+            for (String itemId : result.getExpectedItems().keySet()) {
+                notifyItemGain(s, itemId);
+            }
+            for (Map.Entry<String, Integer> e : result.getFoundItems().entrySet()) {
                 notifyLuckyFind(s, e.getKey(), e.getValue());
             }
         }
@@ -2179,7 +2415,72 @@ public final class StationService {
                 .toolItemLevel(resolveHeldToolItemLevel(player))
                 .contributions(contributionParams(s.stationId, actionTargetIdFor(s, action.getActionId()),
                         action.getWork()))
+                .item(s.factorItem)
                 .build();
+    }
+
+    /**
+     * The action's composed PACE: its own {@code Pace} (ladder and clamp) plus every matching
+     * extension's own ladder, gathered once per dispatch and resolved once per step entry by the
+     * composite handler ({@link StationPacing}). {@link StationPacing.Composed#NONE} for an action
+     * nothing paces, so the classic loop pays nothing for the knob.
+     */
+    @Nonnull
+    static StationPacing.Composed effectivePace(@Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action) {
+        String target = ActionResolver.actionTargetId(asset, action.getActionId());
+        List<ContributionScale> ladders = target != null
+                ? ExtensionCatalog.getInstance().paceLaddersFor(asset.getId(), target) : List.of();
+        if (action.getPace() == null && ladders.isEmpty()) {
+            return StationPacing.Composed.NONE;
+        }
+        return new StationPacing.Composed(action.getPace(), ladders);
+    }
+
+    /**
+     * The piece the work is ABOUT, for the factor context's item leaf: the metadata-bearing unique
+     * stack in the addressed socket when one stands there, else a bare one-count stack of the
+     * oldest item in that pile the conversion's first input accepts (a count pile's "piece" is its
+     * material), else null. {@code socketOverride} is the ritual queue's current socket.
+     */
+    @Nullable
+    static ItemStack pieceInCustody(@Nullable StationCustodyClaim claim, @Nonnull List<Custody.ResolvedSocket> sockets,
+            @Nullable String socketOverride, @Nullable Ingredient[] inputs) {
+        if (claim == null) {
+            return null;
+        }
+        Ingredient first = inputs != null && inputs.length > 0 ? inputs[0] : null;
+        String socketId = StationCustody.socketIdFor(first != null ? first.getSocket() : null, socketOverride, sockets);
+        ItemStack unique = claim.uniqueStack(socketId);
+        if (unique != null) {
+            return unique;
+        }
+        String itemId = StationCustody.firstMatchingInPile(claim.items(socketId),
+                first != null ? liveIngredientMatcher(first) : id -> true);
+        return itemId != null ? bareStack(itemId) : null;
+    }
+
+    /**
+     * The inventory route's "piece": a bare stack of the conversion's first input when it names an
+     * exact item, else null (a family or tag input names no one item until the drain picks it).
+     */
+    @Nullable
+    static ItemStack pieceFromInventoryInput(@Nullable Ingredient[] inputs) {
+        Ingredient first = inputs != null && inputs.length > 0 ? inputs[0] : null;
+        return first != null && first.hasItemRoute() ? bareStack(first.getItemId()) : null;
+    }
+
+    /** A one-count stack of {@code itemId}, or null when the engine cannot build one (never a throw on the work thread). */
+    @Nullable
+    private static ItemStack bareStack(@Nullable String itemId) {
+        if (itemId == null || itemId.isBlank()) {
+            return null;
+        }
+        try {
+            return new ItemStack(itemId, 1);
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     /**
@@ -2204,54 +2505,33 @@ public final class StationService {
      * quality asset authors ({@code hytale:tool_quality}); 0 when nothing is held or the item
      * names no quality.
      *
-     * <p>Two indirections, both deliberate. {@code Item#getQualityIndex()} returns an ASSET-MAP
-     * INDEX, not the ordering value, so the index is resolved back through
-     * {@code ItemQuality.getAssetMap()} to read the authored {@code QualityValue} - the number that
-     * actually orders qualities (0 = lowest) and the only one a pack-added tier participates in. The
-     * engine's own {@code DEFAULT_ITEM_QUALITY} authors {@code -1}, which is floored to 0 here so an
-     * unqualified item can never drag a weighted formula below an authored {@code Junk} tier.
+     * <p>Read through the ONE shared item reader ({@link StationToolReadings} over the library's
+     * {@code ItemReadings}): the held ITEM's current quality value, the number that actually orders
+     * qualities (0 = lowest) and the only one a pack-added tier participates in, floored at 0 so
+     * the engine's own {@code -1} default quality can never drag a weighted formula below an
+     * authored {@code Junk} tier. Never the index the held STACK carries: that is
+     * {@code hytale:item_quality}'s reading of the placed piece, a different question.
      *
-     * <p>Fully try-guarded: this runs per cycle on the world thread, and a quality lookup is never
+     * <p>Fully guarded: this runs per cycle on the world thread, and a quality lookup is never
      * worth failing a work cycle over.
      */
     private static double resolveHeldToolQuality(@Nonnull Player player) {
-        try {
-            ItemStack held = PlayerAccess.activeHotbarItem(player);
-            Item item = held != null ? held.getItem() : null;
-            if (item == null) {
-                return 0.0;
-            }
-            ItemQuality quality = ItemQuality.getAssetMap().getAsset(item.getQualityIndex());
-            return quality == null ? 0.0 : Math.max(0.0, quality.getQualityValue());
-        } catch (Throwable t) {
-            Log.fine("STATION could not resolve the held tool's quality: " + t.getMessage());
-            return 0.0;
-        }
+        return StationToolReadings.quality(PlayerAccess.activeHotbarItem(player));
     }
 
     /**
      * The active hotbar item's native {@code ItemLevel} ({@code hytale:tool_item_level}); 0 when
      * nothing is held. The fine-grained third tool axis - see {@code FactorContext#toolItemLevel()}
-     * for why it is a tiebreaker rather than a primary one. Try-guarded like its two siblings.
+     * for why it is a tiebreaker rather than a primary one. Read through the shared item reader
+     * like its two siblings.
      */
     private static double resolveHeldToolItemLevel(@Nonnull Player player) {
-        try {
-            ItemStack held = PlayerAccess.activeHotbarItem(player);
-            Item item = held != null ? held.getItem() : null;
-            return item == null ? 0.0 : Math.max(0.0, item.getItemLevel());
-        } catch (Throwable t) {
-            Log.fine("STATION could not resolve the held tool's item level: " + t.getMessage());
-            return 0.0;
-        }
+        return StationToolReadings.itemLevel(PlayerAccess.activeHotbarItem(player));
     }
 
     /** The active hotbar item's durability percent [0,100]; 100 when no item held or it tracks no durability. */
     private static double resolveHeldToolDurabilityPercent(@Nonnull Player player) {
-        ItemStack held = PlayerAccess.activeHotbarItem(player);
-        if (held == null || held.isEmpty() || held.getMaxDurability() <= 0) {
-            return 100.0;
-        }
-        return Math.max(0.0, Math.min(100.0, (held.getDurability() / held.getMaxDurability()) * 100.0));
+        return StationToolReadings.durabilityPercent(PlayerAccess.activeHotbarItem(player));
     }
 
     /**
@@ -2642,7 +2922,7 @@ public final class StationService {
      * any authored casing.
      */
     @Nullable
-    private static Presentation actionMoment(@Nonnull StationSession s, @Nonnull String momentId) {
+    static Presentation actionMoment(@Nonnull StationSession s, @Nonnull String momentId) {
         return s.moments == null ? null : s.moments.get(momentId);
     }
 
@@ -2663,7 +2943,7 @@ public final class StationService {
                 kept.add(cue);
             }
         }
-        return Presentation.of(kept.isEmpty() ? null : kept.toArray(new Presentation.SoundCue[0]),
+        return Presentation.of(p.getTarget(), kept.isEmpty() ? null : kept.toArray(new Presentation.SoundCue[0]),
                 p.getParticles(), p.getShake(), p.getInteraction(), p.getEffect(), p.getDelayMs());
     }
 
@@ -2686,7 +2966,7 @@ public final class StationService {
             if (cue == null || cue.effectiveDelayMs() <= 0) {
                 continue;
             }
-            out.add(Presentation.of(new Presentation.SoundCue[] {Presentation.SoundCue.of(cue.getEventId())},
+            out.add(Presentation.of(p.getTarget(), new Presentation.SoundCue[] {Presentation.SoundCue.of(cue.getEventId())},
                     null, null, null, null, groupDelayMs + cue.effectiveDelayMs()));
         }
         return out;
@@ -2736,6 +3016,35 @@ public final class StationService {
                 scheduleCueAt(System.currentTimeMillis(), delayMs)));
     }
 
+    /**
+     * Parks the removal of {@code effectId} from {@code target} (the worker's double) until
+     * {@code delayMs} elapses, on the same queue every delayed cue rides. Returns false when it
+     * could not be queued (the world unresolvable, or the queue full), in which case the effect
+     * stays on until the session's own teardown strips it: a lost expiry, never a stranded effect,
+     * since every effect the engine puts on the double is tracked on the session.
+     */
+    private boolean queueEffectRemoval(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
+                                       @Nonnull Ref<EntityStore> target, @Nonnull String effectId, long delayMs) {
+        World world;
+        try {
+            world = WorldEvictors.worldOf(store);
+        } catch (Throwable t) {
+            Log.fine("STATION could not resolve the world for a timed puppet effect: " + t.getMessage());
+            return false;
+        }
+        ConcurrentLinkedQueue<PendingMoment> queue = pendingMomentsByWorld.queueFor(world);
+        AtomicInteger count = pendingMomentCounts.computeIfAbsent(world, k -> new AtomicInteger());
+        if (pendingMomentsAtCapacity(count.getAndIncrement())) {
+            count.decrementAndGet();
+            Log.fine("STATION delayed-moment queue is full for this world; '" + effectId
+                    + "' stays on the double until the session ends");
+            return false;
+        }
+        return queue.offer(new PendingMoment(s, "Effect:" + effectId, null,
+                new Vector3d(s.blockX + 0.5, s.blockY + 0.5, s.blockZ + 0.5),
+                scheduleCueAt(System.currentTimeMillis(), delayMs), target, effectId));
+    }
+
     /** Pure capacity gate for one world's delayed-cue queue. */
     static boolean pendingMomentsAtCapacity(int currentSize) {
         return currentSize >= MAX_PENDING_MOMENTS_PER_WORLD;
@@ -2777,7 +3086,14 @@ public final class StationService {
                 continue;
             }
             try {
-                playMoment(store, s, pending.presentation(), pending.targetPos());
+                if (pending.isEffectRemoval()) {
+                    // The double's effect clock: the effect was put on with no expiry, so this
+                    // is the only thing that ever takes it off before the session ends. A double
+                    // already gone (the ref invalid) has nothing to take it off.
+                    NativeEffectUtil.remove(store, pending.effectRef(), pending.effectId());
+                } else if (pending.presentation() != null) {
+                    playMoment(store, s, pending.presentation(), pending.targetPos());
+                }
             } catch (Throwable t) {
                 Log.fine("STATION delayed moment '" + pending.momentId() + "' failed: " + t.getMessage());
             }
@@ -2836,20 +3152,43 @@ public final class StationService {
      * Plays one already-resolved presentation: {@code Sounds} (in authored order),
      * {@code Particles}, {@code Shake}, and the two native-composition payloads. Reached either
      * inline from {@link #emitMoment} or, for a delayed cue, from {@link #drainPendingMoments}.
+     *
+     * <p><b>The presentation's {@code Target} is resolved HERE, at play time</b>
+     * ({@link #resolveAim}), never at emit time: a delayed cue targeting the placed piece plays
+     * where the piece IS when it comes due, and a piece consumed in between (a {@code Convert}
+     * beat despawns its prop the same tick its cues fire) is answered by the socket's resting
+     * position. At an entity target the sounds follow the entity, delivered to the players whose
+     * tracker shows it, and a burst RIDES the entity only when its system provably ends on its own
+     * (ziggfreed-common's {@link ParticleLifetimes}: an attached system has no playback cap, so it
+     * lives until its own lifetime ends or its entity is removed); every other burst plays at the
+     * entity's position under its {@code DurationSeconds} cap. {@link MomentBursts#plan} makes that
+     * split, and rides nothing at the block or at a resting spot, so no burst ever rides the worker's
+     * own body. An entity the tracker has shown nobody yet (spawned this tick) answers no viewers,
+     * and the cue plays at its position instead.
      */
     private static void playMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
                                    @Nonnull Presentation p, @Nonnull Vector3d targetPos) {
+        Aim aim = resolveAim(store, s, p.getTarget(), targetPos);
         // Every Sounds entry reaching here plays NOW: an entry with its own offset was split off
         // into its own queued cue back in emitMoment, so this loop never re-reads a per-sound delay.
         Presentation.SoundCue[] sounds = p.getSounds();
         if (sounds != null) {
             for (Presentation.SoundCue cue : sounds) {
-                if (cue != null && cue.hasEventId()) {
-                    Sound3D.play(cue.getEventId(), targetPos, store, "STATION");
+                if (cue == null || !cue.hasEventId()) {
+                    continue;
+                }
+                if (aim.entity() == null
+                        || Sound3D.playOn(cue.getEventId(), aim.entity(), 1f, 1f, store, "STATION", false) == 0) {
+                    Sound3D.play(cue.getEventId(), aim.position(), store, "STATION");
                 }
             }
         }
-        spawnMomentParticles(store, s, p.getParticles(), targetPos);
+        // A system that ends on its own rides the entity; one that might never end plays at the
+        // entity's position, where DurationSeconds caps it, so nothing endless ever rides.
+        MomentBursts bursts = MomentBursts.plan(aim.source(), p.getParticles(),
+                ParticleLifetimes::systemProvablyEnds);
+        boolean attached = spawnAttachedParticles(store, aim, bursts.riding());
+        spawnMomentParticles(store, s, burstArray(bursts.atPosition(attached)), aim.position());
         Presentation.Shake shake = p.getShake();
         if (shake != null && shake.getEffectId() != null && !shake.getEffectId().isBlank()) {
             float intensity = shake.getIntensity() != null ? shake.getIntensity().floatValue() : 1.0f;
@@ -2873,15 +3212,285 @@ public final class StationService {
             }
             EffectRef effect = p.getEffect();
             if (effect != null && effect.hasId()) {
-                Long durMs = effect.getDurationMs();
-                boolean applied = durMs != null && durMs > 0
-                        ? NativeEffectUtil.applyFor(store, s.ref, effect.getId(), durMs / 1000f, OverlapBehavior.OVERWRITE)
-                        : NativeEffectUtil.apply(store, s.ref, effect.getId());
-                if (applied) {
-                    s.appliedEffects.track(s.ref, effect.getId());
-                }
+                applyMomentEffect(store, s, effect);
             }
         }
+    }
+
+    /** A burst list as the array the positional spawn takes; null when empty, which spawns nothing. */
+    @Nullable
+    private static Presentation.ModelParticle[] burstArray(@Nonnull List<Presentation.ModelParticle> bursts) {
+        return bursts.isEmpty() ? null : bursts.toArray(new Presentation.ModelParticle[0]);
+    }
+
+    /**
+     * A moment's {@code Effect}, on the target it names: the worker's own body (the default), or
+     * the worker's double under {@code Target: "Puppet"} when one stands (the worker's own body
+     * again when none does: the worker IS the performer then, {@link #effectGoesOnDouble}). On the
+     * double the effect goes on with NO expiry, because the double carries no stat map and the
+     * engine's effect timer never runs on it, and an authored {@code DurationMs} is kept by this
+     * engine's own cue clock ({@link #queueEffectRemoval}); every effect either way is tracked on
+     * the session, so the session's teardown strips whatever is still on.
+     */
+    private static void applyMomentEffect(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
+                                          @Nonnull EffectRef effect) {
+        Long durMs = effect.getDurationMs();
+        boolean doubleStands = s.puppetActive && s.puppetRef != null && s.puppetRef.isValid();
+        if (effectGoesOnDouble(effect, doubleStands)) {
+            Ref<EntityStore> puppet = s.puppetRef;
+            if (NativeEffectUtil.applyInfinite(store, puppet, effect.getId())) {
+                s.appliedEffects.track(puppet, effect.getId());
+                if (durMs != null && durMs > 0) {
+                    getInstance().queueEffectRemoval(store, s, puppet, effect.getId(), durMs);
+                }
+            }
+            return;
+        }
+        boolean applied = durMs != null && durMs > 0
+                ? NativeEffectUtil.applyFor(store, s.ref, effect.getId(), durMs / 1000f, OverlapBehavior.OVERWRITE)
+                : NativeEffectUtil.apply(store, s.ref, effect.getId());
+        if (applied) {
+            s.appliedEffects.track(s.ref, effect.getId());
+        }
+    }
+
+    /**
+     * PURE: does a moment's effect go on the worker's double? Only when it names the Puppet and a
+     * double stands; otherwise the worker wears it, which is where a Player-targeted sting belongs
+     * and where the work is performed when no double stands.
+     */
+    static boolean effectGoesOnDouble(@Nonnull EffectRef effect, boolean doubleStands) {
+        return effect.targetsPuppet() && doubleStands;
+    }
+
+    // ==================== The presentation Target: block, display prop or double ====================
+
+    /**
+     * Where one moment plays: the entity its sounds follow and its bounded particles ride (null at
+     * the block, or when no such entity stands), and the position every fallback plays at. The
+     * {@code node} is the named model node an entity-attached burst rides, or null for the entity
+     * itself.
+     */
+    private record Aim(@Nonnull AimSource source, @Nullable Ref<EntityStore> entity, @Nonnull Vector3d position,
+            @Nullable String node) {
+    }
+
+    /**
+     * Where a moment's sounds and particles play, as {@link #aimSource} decides it over what stands
+     * right now. Never the worker's own body: a moment aimed at the performer with no double
+     * standing plays at the block.
+     */
+    enum AimSource {
+        /** The station block's centre. */
+        BLOCK,
+        /** The worked socket's live display prop. */
+        DISPLAY_PROP,
+        /** The worked socket's resting display position: its prop is gone (a Convert beat consumed the piece). */
+        DISPLAY_RESTING,
+        /** The worker's double. */
+        DOUBLE
+    }
+
+    /**
+     * PURE, the target decision: {@code Block} is the block; {@code Display} is the worked socket's
+     * prop while it stands ({@code propStands}: a live handle whose position reads), else that
+     * socket's resting display position, else the block when the action's sockets show no prop
+     * ({@code socketShowsProp}); {@code Puppet} is the double while one stands, else the BLOCK. A
+     * moment's sounds and particles never land on the real player, whose hidden body a burst
+     * could otherwise ride until they log out; the effect has its own rule
+     * ({@link #effectGoesOnDouble}).
+     */
+    @Nonnull
+    static AimSource aimSource(@Nonnull Presentation.Target.Kind kind, boolean socketShowsProp, boolean propStands,
+            boolean doubleStands) {
+        return switch (kind) {
+            case DISPLAY -> !socketShowsProp ? AimSource.BLOCK
+                    : propStands ? AimSource.DISPLAY_PROP : AimSource.DISPLAY_RESTING;
+            case PUPPET -> doubleStands ? AimSource.DOUBLE : AimSource.BLOCK;
+            case BLOCK -> AimSource.BLOCK;
+        };
+    }
+
+    /**
+     * Resolves a presentation's {@code Target} for THIS session right now, through the pure
+     * {@link #aimSource}: {@code Block} (or no target) is {@code blockPos}, where every moment has
+     * always played; {@code Display} is the worked socket's prop ({@link #displaySocketIdFor}: the
+     * ritual queue's current socket, else the first socket showing one) while it stands, else that
+     * socket's resting display position ({@link #displayRestingPosition}), which is where a
+     * {@code Convert} beat's cues land after the beat consumed the piece and dropped its prop;
+     * {@code Puppet} is the worker's double while one stands, else the block. An entity whose
+     * position cannot be read counts as not standing.
+     */
+    @Nonnull
+    private static Aim resolveAim(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
+                                  @Nullable Presentation.Target target, @Nonnull Vector3d blockPos) {
+        Presentation.Target.Kind kind = target != null ? target.effectiveKind() : Presentation.Target.Kind.BLOCK;
+        String node = target != null && target.hasNode() ? target.getNode() : null;
+        try {
+            String socketId = kind == Presentation.Target.Kind.DISPLAY ? displaySocketIdFor(s) : null;
+            DisplayHandle prop = socketId != null ? getInstance().displayByBlock.get(
+                    StationCustodyRetrieval.displayKey(s.blockKey, socketId)) : null;
+            Vector3d propAt = prop != null ? entityPosition(store, prop.ref()) : null;
+            Ref<EntityStore> performer = kind == Presentation.Target.Kind.PUPPET && s.puppetActive
+                    && s.puppetRef != null && s.puppetRef.isValid() ? s.puppetRef : null;
+            Vector3d performerAt = performer != null ? entityPosition(store, performer) : null;
+            return switch (aimSource(kind, socketId != null, propAt != null, performerAt != null)) {
+                case DISPLAY_PROP -> new Aim(AimSource.DISPLAY_PROP, prop.ref(), propAt, node);
+                case DISPLAY_RESTING -> new Aim(AimSource.DISPLAY_RESTING, null,
+                        displayRestingPosition(store, s, socketId, blockPos), null);
+                case DOUBLE -> new Aim(AimSource.DOUBLE, performer, performerAt, node);
+                case BLOCK -> new Aim(AimSource.BLOCK, null, blockPos, null);
+            };
+        } catch (Throwable t) {
+            Log.fine("STATION could not resolve a moment target (" + kind + "): " + t.getMessage());
+            return new Aim(AimSource.BLOCK, null, blockPos, null);
+        }
+    }
+
+    /**
+     * The socket a {@code Display}-targeted moment addresses: the ritual queue's current socket
+     * ({@link StationSession#queueSocketId}), else the first Item socket of the running action that
+     * authors a {@code Display} group; null when the action shows no prop at all.
+     */
+    @Nullable
+    private static String displaySocketIdFor(@Nonnull StationSession s) {
+        if (s.queueSocketId != null) {
+            return s.queueSocketId;
+        }
+        Custody custody = runningActionCustody(s);
+        if (custody == null) {
+            return null;
+        }
+        for (Custody.ResolvedSocket socket : custody.effectiveSockets()) {
+            if (socket.itemRoute() && socket.display() != null) {
+                return socket.id();
+            }
+        }
+        return null;
+    }
+
+    /** The running action's {@code Display} group for {@code socketId}, or null when that socket shows no prop. */
+    @Nullable
+    private static Custody.Display socketDisplayFor(@Nonnull StationSession s, @Nonnull String socketId) {
+        Custody custody = runningActionCustody(s);
+        if (custody == null) {
+            return null;
+        }
+        for (Custody.ResolvedSocket socket : custody.effectiveSockets()) {
+            if (socket.id().equalsIgnoreCase(socketId)) {
+                return socket.display();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Where {@code socketId}'s prop last STOOD: the look this session last dressed it in through a
+     * step's per-beat {@code Display} overlay ({@link StationSession#shownDisplays}, kept past the
+     * prop's despawn), else the socket's own authored {@code Display}, placed off the block centre
+     * facing-relative through the same pure core the spawn uses
+     * ({@link StationCustodyDisplay#resolvePosition}). So a cue aimed at a piece that is already
+     * gone lands exactly where the piece stood, lifted or not. {@code blockPos} when the socket
+     * shows no prop.
+     */
+    @Nonnull
+    private static Vector3d displayRestingPosition(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
+                                                   @Nonnull String socketId, @Nonnull Vector3d blockPos) {
+        double[] at = restingPosition(s.shownDisplays, socketId, () -> socketDisplayFor(s, socketId),
+                s.blockX, s.blockY, s.blockZ, () -> momentBlockYaw(store, s));
+        return at != null ? new Vector3d(at[0], at[1], at[2]) : blockPos;
+    }
+
+    /**
+     * Remembers {@code look} as the display {@code socketId}'s prop was last dressed in, under the
+     * one key {@link #restingDisplay} reads it back by (the socket id lowercased, whatever spelling
+     * either side was handed).
+     */
+    static void rememberShownDisplay(@Nonnull Map<String, Custody.Display> shown, @Nonnull String socketId,
+                                     @Nonnull Custody.Display look) {
+        shown.put(socketId.toLowerCase(Locale.ROOT), look);
+    }
+
+    /**
+     * PURE: the look {@code socketId}'s prop last stood in: the per-beat overlay this session last
+     * dressed it in ({@link #rememberShownDisplay}), else the socket's own authored {@code Display}
+     * (asked only when nothing is remembered), else null when the socket shows no prop.
+     */
+    @Nullable
+    static Custody.Display restingDisplay(@Nonnull Map<String, Custody.Display> shown, @Nonnull String socketId,
+                                          @Nonnull Supplier<Custody.Display> socketOwn) {
+        Custody.Display remembered = shown.get(socketId.toLowerCase(Locale.ROOT));
+        return remembered != null ? remembered : socketOwn.get();
+    }
+
+    /**
+     * PURE: where {@code socketId}'s prop last stood, placed off the block centre facing-relative
+     * through the same pure core the prop's spawn uses ({@link StationCustodyDisplay#resolvePosition})
+     * under the look {@link #restingDisplay} settles; null when the socket shows no prop. The
+     * block's facing yaw is read only when there is a look to place.
+     */
+    @Nullable
+    static double[] restingPosition(@Nonnull Map<String, Custody.Display> shown, @Nonnull String socketId,
+                                    @Nonnull Supplier<Custody.Display> socketOwn, int blockX, int blockY, int blockZ,
+                                    @Nonnull DoubleSupplier blockYaw) {
+        Custody.Display display = restingDisplay(shown, socketId, socketOwn);
+        return display != null
+                ? StationCustodyDisplay.resolvePosition(display, blockX, blockY, blockZ, blockYaw.getAsDouble())
+                : null;
+    }
+
+    /** An entity's current position as a fresh vector, or null when it cannot be read (gone, no transform). */
+    @Nullable
+    private static Vector3d entityPosition(@Nonnull Store<EntityStore> store, @Nullable Ref<EntityStore> ref) {
+        if (ref == null || !ref.isValid()) {
+            return null;
+        }
+        try {
+            TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
+            return transform != null ? new Vector3d(transform.getPosition()) : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * The entity-attached particle route: every burst rides {@code aim.entity()} (or its named
+     * node), delivered to the players whose tracker shows that entity through the shared
+     * primitive. The caller hands in only bursts whose system ends on its own
+     * (ziggfreed-common's {@link ParticleLifetimes}), since an attached system has no playback cap:
+     * it lives until its own lifetime ends or its entity is removed (a prop when its piece is
+     * consumed or taken back, a double when the session ends), and {@code DurationSeconds} cannot
+     * shorten it. Answers false when nothing was delivered (no bursts, a fresh entity nobody has been
+     * shown yet, nobody near, an entity with no network id), so the caller plays the same bursts at
+     * the aim's position instead and no cue is lost. The authored {@code PositionOffset} rides as the entity-local
+     * offset and {@code RotationOffset} as the entity-local rotation, both as the engine's own
+     * attached-particle leaf takes them.
+     */
+    private static boolean spawnAttachedParticles(@Nonnull Store<EntityStore> store, @Nonnull Aim aim,
+                                                  @Nonnull List<Presentation.ModelParticle> particles) {
+        if (particles.isEmpty() || aim.entity() == null) {
+            return false;
+        }
+        List<ModelParticleService.AttachedParticle> attached = new ArrayList<>(particles.size());
+        for (Presentation.ModelParticle burst : particles) {
+            if (burst == null || !burst.hasSystemId()) {
+                continue;
+            }
+            Vec3 offset = burst.getPositionOffset();
+            Rotation rot = burst.getRotationOffset();
+            attached.add(ModelParticleService.AttachedParticle.of(burst.getSystemId())
+                    .withScale((float) burst.effectiveScale())
+                    .withColor(ModelParticleService.tint(burst.getColor()))
+                    .at(aim.node() != null ? EntityPart.Entity : EntityPart.Self, aim.node())
+                    .withOffsets(offset == null ? null : new Vector3f(
+                                    offset.getX() != null ? offset.getX().floatValue() : 0f,
+                                    offset.getY() != null ? offset.getY().floatValue() : 0f,
+                                    offset.getZ() != null ? offset.getZ().floatValue() : 0f),
+                            rot == null ? null : new Direction(
+                                    (float) rot.effectiveYawDegrees(), (float) rot.effectivePitchDegrees(),
+                                    (float) rot.effectiveRollDegrees())));
+        }
+        return !attached.isEmpty() && ModelParticleService.spawnOn(store, aim.entity(), attached) > 0;
     }
 
     /**
@@ -2893,13 +3502,12 @@ public final class StationService {
      * {@code Puppet.Offset}). An entry authoring only {@code SystemId} reproduces the pre-array
      * single-string behavior byte for byte (scale 1, a 4s cap, zero rotation, no offset).
      *
-     * <p>This reaches the engine's own full-arity {@code ParticleUtil} overload rather than
-     * {@code ziggfreed-common}'s {@code ModelParticleService.spawnAt}, whose signature hardcodes the
-     * rotation and scale arguments this schema now authors; the guard shape (one try/catch per
-     * burst, a failure never escapes a moment) mirrors that primitive's own. The convergence target
-     * is a common-side overload taking the full argument set - lift this call when one exists.
-     * The per-burst duration cap is load-bearing: at least one shipped particle asset
-     * ({@code Block_Gem_Sparks}) authors an unbounded spawner that never stops without it.
+     * <p>Every burst goes through {@code ziggfreed-common}'s full-arity
+     * {@code ModelParticleService.spawnAt} (rotation, scale, the {@code Color} tint and the
+     * playback cap together, the one engine overload that carries both a colour and a cap), so a
+     * tinted burst keeps its leak guard. The per-burst duration cap is load-bearing: at least one
+     * shipped particle asset ({@code Block_Gem_Sparks}) authors an unbounded spawner that never
+     * stops without it.
      */
     private static void spawnMomentParticles(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
             @Nullable Presentation.ModelParticle[] particles, @Nonnull Vector3d targetPos) {
@@ -2941,11 +3549,10 @@ public final class StationService {
             float yaw = rot != null && rot.getYaw() != null ? (float) Math.toRadians(rot.getYaw()) : 0f;
             float pitch = rot != null && rot.getPitch() != null ? (float) Math.toRadians(rot.getPitch()) : 0f;
             float roll = rot != null && rot.getRoll() != null ? (float) Math.toRadians(rot.getRoll()) : 0f;
-            try {
-                ParticleUtil.spawnParticleEffect(burst.getSystemId(), pos, yaw, pitch, roll,
-                        (float) burst.effectiveScale(), burst.effectiveDurationSeconds(), store);
-            } catch (Throwable t) {
-                Log.fine("STATION moment particle '" + burst.getSystemId() + "' failed: " + t.getMessage());
+            if (!ModelParticleService.spawnAt(store, burst.getSystemId(), pos, yaw, pitch, roll,
+                    (float) burst.effectiveScale(), ModelParticleService.tint(burst.getColor()),
+                    burst.effectiveDurationSeconds())) {
+                Log.fine("STATION moment particle '" + burst.getSystemId() + "' did not spawn");
             }
         }
     }
@@ -3559,11 +4166,17 @@ public final class StationService {
     /** {@code world}'s own uuid as the text a block key carries, or {@code null} when unreadable. */
     @Nullable
     private static String worldUuidTextOf(@Nonnull World world) {
+        UUID uuid = worldUuidOf(world);
+        return uuid != null ? uuid.toString() : null;
+    }
+
+    /** {@code world}'s uuid, or null when its config cannot be read. Never throws. */
+    @Nullable
+    private static UUID worldUuidOf(@Nonnull World world) {
         try {
-            UUID uuid = world.getWorldConfig().getUuid();
-            return uuid != null ? uuid.toString() : null;
+            return world.getWorldConfig().getUuid();
         } catch (Throwable t) {
-            Log.fine("STATION could not read a world uuid for eviction: " + t.getMessage());
+            Log.fine("STATION could not read a world uuid: " + t.getMessage());
             return null;
         }
     }
@@ -3628,17 +4241,20 @@ public final class StationService {
 
     // ==================== Convert transaction core ====================
 
-    private enum ConversionState { RUNNABLE, NO_INPUTS, NO_ROOM }
+    enum ConversionState { RUNNABLE, NO_INPUTS, NO_ROOM }
 
     /**
      * One resolved conversion attempt. {@link #inputs}/{@link #outputs} are the chosen conversion's
-     * FULL native-shaped arrays (decision 73), so a multi-input recipe drives the implicit program's
-     * one atomic Consume/Produce phase pair rather than needing a step split.
+     * FULL native-shaped arrays, so a multi-input recipe drives the {@code Convert} phase's one
+     * atomic consume/produce pair rather than needing a step split; {@link #conversion} is the
+     * row itself (its essence-only mark says whether an empty output is the route's own shape).
      */
-    private static final class ConversionCheck {
+    static final class ConversionCheck {
         final ConversionState state;
         @Nullable final Ingredient[] inputs;
         @Nullable final Ingredient[] outputs;
+        /** The chosen row (null for a non-runnable check). */
+        @Nullable final StationAsset.Conversion conversion;
         /**
          * The action's {@code Recipe}, carried through so the produce phase reads its {@code Yield};
          * null for a non-runnable check or a Steps program (which has no recipe at all).
@@ -3654,14 +4270,15 @@ public final class StationService {
 
         /** The non-runnable shape: no chosen conversion at all. */
         ConversionCheck(ConversionState state) {
-            this(state, null, null, 0L);
+            this(state, null, 0L);
         }
 
-        ConversionCheck(ConversionState state, @Nullable Ingredient[] inputs, @Nullable Ingredient[] outputs,
-                        long durationMs) {
+        /** The runnable shape: the chosen row's own input and output arrays ride the check. */
+        ConversionCheck(ConversionState state, @Nullable StationAsset.Conversion conversion, long durationMs) {
             this.state = state;
-            this.inputs = inputs;
-            this.outputs = outputs;
+            this.conversion = conversion;
+            this.inputs = conversion != null ? conversion.getInput() : null;
+            this.outputs = conversion != null ? conversion.getOutput() : null;
             this.durationMs = durationMs;
         }
 
@@ -3687,6 +4304,29 @@ public final class StationService {
     private ConversionCheck selectConversion(@Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
             @Nullable StationCustodyClaim claim, boolean fromCustody, @Nullable String chosenCategory) {
+        return selectConversion(asset, action, player, claim, fromCustody, chosenCategory, null);
+    }
+
+    /**
+     * As above, addressing {@code socketOverride} (the ritual queue's current socket) as the pile
+     * every input without a {@code Socket} of its own draws from; null keeps the classic
+     * first-Item-socket addressing.
+     *
+     * <p><b>The fallback routes ride here too.</b> When no authored or derived row runs from
+     * custody and the recipe authors {@code Fallback}, the piece in the addressed socket is
+     * offered ONE row, the first route that applies to it ({@link StationFallbackRoutes#routeFor}:
+     * the crafting share, else essence only), built for THAT piece and put through the same
+     * runnable check as any row. Offering one row is what keeps a full inventory honest: a share
+     * row with no room answers NO_ROOM, and the essence-only row, whose empty output always fits,
+     * never stands behind it to run instead. A row scan that found a covering row but no room
+     * never falls back either: a full inventory is a full inventory, and a fallback must never
+     * quietly destroy a piece a covering row would have paid for.
+     */
+    @Nonnull
+    ConversionCheck selectConversion(@Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
+            @Nullable StationCustodyClaim claim, boolean fromCustody, @Nullable String chosenCategory,
+            @Nullable String socketOverride) {
         StationAsset.Recipe recipe = action.getRecipe();
         if (recipe == null) {
             return new ConversionCheck(ConversionState.NO_INPUTS);
@@ -3695,16 +4335,87 @@ public final class StationService {
                 .resolvedConversions(asset, action.getActionId(), recipe);
         conversions = conversionsForCategory(conversions,
                 effectiveCategory(chosenCategory, recipe.getFromCrafting(), conversions));
-        // Set-recipe wave: the runnable scan walks candidates by effective Tier ascending, STABLE
-        // inside a tier - a file authoring no Tier anywhere scans in pure authored order exactly as
-        // before, and derived rows (stamped tier 1) yield to unauthored tier-0 hand-written rows.
+        // The runnable scan walks candidates by effective Tier ascending, STABLE inside a tier - a
+        // file authoring no Tier anywhere scans in pure authored order exactly as before, and
+        // derived rows (stamped tier 1) yield to unauthored tier-0 hand-written rows.
         conversions = tierOrdered(conversions);
         Custody custody = action.getCustody();
+        List<Custody.ResolvedSocket> sockets = custody != null ? custody.effectiveSockets() : List.of();
         ConversionCheck check = fromCustody
-                ? firstRunnableConversionFromCustody(claim, player, conversions,
-                        custody != null ? custody.effectiveSockets() : List.of())
+                ? firstRunnableConversionFromCustody(claim, player, conversions, sockets, socketOverride)
                 : firstRunnableConversion(player, conversions);
+        if (check.state == ConversionState.NO_INPUTS && fromCustody && recipe.getFallback() != null
+                && claim != null) {
+            // The scan is handed EXACTLY the rows the fallback offers, at most one
+            // (StationFallbackRoutes#offeredRows), so a share row with no room answers NO_ROOM.
+            StationAsset.Conversion[] offered = fallbackRowsFor(recipe.getFallback(), claim, sockets, socketOverride);
+            if (offered.length > 0) {
+                check = firstRunnableConversionFromCustody(claim, player, offered, sockets, socketOverride);
+            }
+        }
         return check.state == ConversionState.RUNNABLE ? check.withRecipe(recipe) : check;
+    }
+
+    /**
+     * The conversion an authored {@code Convert} beat runs: the SAME selection the classic loop
+     * makes before dispatch (custody-sourced when the action authors Custody, narrowed to the
+     * session's chosen output category, addressed to the ritual queue's current socket), made at
+     * the beat because an authored program chose nothing before it started.
+     */
+    @Nonnull
+    ConversionCheck selectConversionForStep(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        StationSession s = ctx.session;
+        Custody custody = ctx.action.getCustody();
+        StationCustodyClaim claim = custody != null
+                ? custodyClaimForAnchor(s, step.getAt()) : null;
+        return selectConversion(ctx.asset, ctx.action, ctx.player, claim, custody != null,
+                s.chosenOutputCategory, s.queueSocketId);
+    }
+
+    /**
+     * The fallback rows for the piece in the addressed socket ({@code socketOverride}, else the
+     * first Item socket), the live adapter over {@link StationFallbackRoutes#offeredRows}: at most
+     * ONE row, the first route that applies to the OLDEST item still counted in that pile that
+     * passes the gear filter, and none when the metadata guard refuses the pile's real unique stack
+     * (a count pile with no unique stack passes it, since it carries no metadata at all). Empty
+     * when nothing there falls back.
+     */
+    @Nonnull
+    private static StationAsset.Conversion[] fallbackRowsFor(@Nonnull StationAsset.Fallback fallback,
+            @Nonnull StationCustodyClaim claim, @Nonnull List<Custody.ResolvedSocket> sockets,
+            @Nullable String socketOverride) {
+        String socketId = StationCustody.socketIdFor(null, socketOverride, sockets);
+        ItemStack unique = claim.uniqueStack(socketId);
+        if (unique != null && !StationMetadataGuard.accepts(unique)) {
+            return new StationAsset.Conversion[0];
+        }
+        return StationFallbackRoutes.offeredRows(fallback, claim.items(socketId),
+                itemId -> StationFallbackRoutes.inFilter(fallback, itemId, liveResourceTypeIdsOf(itemId),
+                        liveRawTagsOf(itemId), liveFunctionOf(itemId)),
+                itemId -> RecipeIndex.live().catalog().craftingRecipeOf(itemId));
+    }
+
+    /**
+     * Does a placed material with no covering row fall back at all? What placement acceptance asks
+     * beside the conversion rows: the gear filter, the metadata guard over the real held stack, and
+     * at least one route applying to the piece (a crafting share its own recipe leaves a line for,
+     * or the essence-only route being on). Custody-routed only, since both routes read a placed
+     * stack.
+     */
+    static boolean fallbackAccepts(@Nullable StationAsset.Fallback fallback, @Nullable ItemStack held,
+            @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds,
+            @Nullable Map<String, String[]> heldTags, @Nullable String heldFunction) {
+        if (fallback == null || heldItemId == null || heldItemId.isBlank()) {
+            return false;
+        }
+        if (!StationFallbackRoutes.inFilter(fallback, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+            return false;
+        }
+        if (!StationMetadataGuard.accepts(held)) {
+            return false;
+        }
+        return StationFallbackRoutes.anyRouteApplies(fallback, heldItemId,
+                RecipeIndex.live().catalog().craftingRecipeOf(heldItemId));
     }
 
     /**
@@ -4287,8 +4998,7 @@ public final class StationService {
                     sawInputWithoutRoom = true;
                     continue;
                 }
-                return new ConversionCheck(ConversionState.RUNNABLE, c.getInput(), c.getOutput(),
-                        effectiveConversionDurationMs(c));
+                return new ConversionCheck(ConversionState.RUNNABLE, c, effectiveConversionDurationMs(c));
             }
         } catch (Throwable t) {
             Log.warn("STATION inventory check failed: " + t.getMessage());
@@ -4390,7 +5100,7 @@ public final class StationService {
     @Nonnull
     private ConversionCheck firstRunnableConversionFromCustody(@Nullable StationCustodyClaim claim,
             @Nonnull Player player, @Nullable StationAsset.Conversion[] conversions,
-            @Nonnull List<Custody.ResolvedSocket> sockets) {
+            @Nonnull List<Custody.ResolvedSocket> sockets, @Nullable String socketOverride) {
         if (conversions == null || conversions.length == 0 || claim == null) {
             return new ConversionCheck(ConversionState.NO_INPUTS);
         }
@@ -4402,7 +5112,7 @@ public final class StationService {
                 }
                 boolean hasEveryInput = true;
                 for (Ingredient in : c.getInput()) {
-                    String socketId = StationCustody.socketIdFor(in.getSocket(), null, sockets);
+                    String socketId = StationCustody.socketIdFor(in.getSocket(), socketOverride, sockets);
                     int have = StationCustody.availableInPile(claim.items(socketId),
                             StationCustody.ingredientEntryMatcher(in,
                                     StationService::liveResourceTypeIdsOf, StationService::liveRawTagsOf));
@@ -4426,8 +5136,7 @@ public final class StationService {
                     sawInputWithoutRoom = true;
                     continue;
                 }
-                return new ConversionCheck(ConversionState.RUNNABLE, c.getInput(), c.getOutput(),
-                        effectiveConversionDurationMs(c));
+                return new ConversionCheck(ConversionState.RUNNABLE, c, effectiveConversionDurationMs(c));
             }
         } catch (Throwable t) {
             Log.warn("STATION custody check failed: " + t.getMessage());
@@ -4702,10 +5411,50 @@ public final class StationService {
         if (spawned != null) {
             // Both halves land together: the ref AND the network id the prop was built with, so
             // press-F retrieval never has to read a live NetworkId component back off the entity.
-            displayByBlock.put(displayKey, new DisplayHandle(spawned.ref(), spawned.networkId()));
+            displayByBlock.put(displayKey, new DisplayHandle(spawned.ref(), spawned.networkId(), displayGroup));
             return true;
         }
         return false;
+    }
+
+    /**
+     * A step's per-beat {@code Display} overlay on the worked piece's prop: the socket a
+     * {@code Display}-targeted moment addresses ({@link #displaySocketIdFor}) has its prop
+     * RESPAWNED with the overlay laid over the socket's own group ({@link Custody.Display#overlaid}),
+     * so a beat can lift, turn or enlarge the piece; a prop already wearing that exact look is
+     * left standing. Nothing happens when the socket shows no prop, its pile is empty, or the
+     * session's world is gone. The respawned prop keeps the pile's real stack as its visual, so a
+     * placed piece looks like itself.
+     */
+    void applyStepDisplay(@Nonnull StationSession s, @Nonnull StationStep step,
+                          @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        try {
+            String socketId = displaySocketIdFor(s);
+            Custody.Display base = socketId != null ? socketDisplayFor(s, socketId) : null;
+            if (socketId == null || base == null) {
+                return;
+            }
+            Custody.Display effective = Custody.Display.overlaid(base, step.getDisplay());
+            String displayKey = StationCustodyRetrieval.displayKey(s.blockKey, socketId);
+            DisplayHandle live = displayByBlock.get(displayKey);
+            if (live != null && Custody.Display.sameLook(live.shown(), effective)) {
+                return;
+            }
+            World world = sessionWorld(s);
+            StationCustodyClaim claim = world != null ? custodyClaimAt(world, s.blockX, s.blockY, s.blockZ) : null;
+            if (claim == null || (claim.isEmpty(socketId) && claim.uniqueStack(socketId) == null)) {
+                return;
+            }
+            despawnDisplay(s.blockKey, socketId, commandBuffer);
+            if (spawnDisplayIfAbsent(s.blockKey, socketId, effective, claim, oldestPlacedItemId(claim, socketId),
+                    commandBuffer, s.blockX, s.blockY, s.blockZ)) {
+                // Remembered past the prop's despawn, so a cue aimed at the piece after a Convert
+                // beat consumed it lands where it last stood (displayRestingPosition).
+                rememberShownDisplay(s.shownDisplays, socketId, effective);
+            }
+        } catch (Throwable t) {
+            Log.fine("STATION step display overlay failed at '" + s.stationId + "': " + t.getMessage());
+        }
     }
 
     /**
@@ -5495,11 +6244,15 @@ public final class StationService {
      * drop-at-block on overflow, the same tick-safe {@code commandBuffer} contract). Both clear;
      * both are empty at every completed-cycle boundary (each committed produce AND each completed
      * program cycle clears the ledger), so an orderly stop between cycles refunds NOTHING -
-     * refund and custody-return stay mutually exclusive per iteration.
+     * refund and custody-return stay mutually exclusive per iteration. The ledger's HOOK half
+     * ({@link StationSession#iterationConsumedInputs}) is dropped unreported: a consumption handed
+     * back never reaches the input-consumed hook.
      */
     private void refundIterationLedger(@Nonnull StationSession s,
             @Nullable CommandBuffer<EntityStore> commandBuffer) {
-        if (s.iterationConsumed.isEmpty() && s.iterationConsumedCustody.isEmpty()) {
+        s.iterationConsumedInputs.clear();
+        if (s.iterationConsumed.isEmpty() && s.iterationConsumedCustody.isEmpty()
+                && s.iterationConsumedUnique.isEmpty()) {
             return;
         }
         Store<EntityStore> ownerStore = null;
@@ -5518,7 +6271,13 @@ public final class StationService {
             String blockKey = StationCustodyRetrieval.blockKeyOf(pileEntry.getKey());
             String socketId = StationCustodyRetrieval.socketIdOf(pileEntry.getKey());
             StationCustodyClaim claim = custodyClaimAt(world, blockKey);
-            for (Map.Entry<String, Integer> e : pileEntry.getValue().entrySet()) {
+            // The REAL piece a single-item socket gave up rides its own ledger half: it goes back
+            // onto its pile as the metadata-bearing unique stack beside the count, or, when the
+            // pile can no longer be resolved, into the player's hands AS ITSELF rather than as a
+            // bare fresh stack of its id.
+            ItemStack unique = s.iterationConsumedUnique.get(pileEntry.getKey());
+            Map<String, Integer> counts = StationCustodyLedger.countsBesideUnique(pileEntry.getValue(), unique);
+            for (Map.Entry<String, Integer> e : counts.entrySet()) {
                 if (e.getKey() == null || e.getValue() == null || e.getValue() <= 0) {
                     continue;
                 }
@@ -5529,11 +6288,20 @@ public final class StationService {
                     refund.add(new ItemStack(e.getKey(), e.getValue()));
                 }
             }
+            if (unique != null) {
+                if (claim != null) {
+                    claim.addTo(socketId, null, unique.getItemId(), unique.getQuantity());
+                    claim.setUniqueStack(socketId, unique);
+                } else {
+                    refund.add(unique);
+                }
+            }
             if (claim != null) {
                 claim.markDirty();
             }
         }
         s.iterationConsumedCustody.clear();
+        s.iterationConsumedUnique.clear();
         for (Map.Entry<String, Integer> e : s.iterationConsumed.entrySet()) {
             if (e.getKey() == null || e.getValue() == null || e.getValue() <= 0) {
                 continue;
@@ -5545,7 +6313,7 @@ public final class StationService {
     }
 
     /**
-     * Resolves the target anchor's block-top column point (scope-2 wave 3, design 2.3): the reserved
+     * Resolves the target anchor's block-centre column point (scope-2 wave 3, design 2.3): the reserved
      * {@code "Self"}/null anchor targets the primary block, any other id reads
      * {@link StationSession#anchorBlocks}. Returns the block-centred column point (the walk goal), or
      * {@code null} when the anchor is unresolved (the handler maps a null to a graceful
@@ -5607,17 +6375,31 @@ public final class StationService {
     /**
      * The M1 single rule (design 2.5, extended for review minor m1): ANY committed produce - a
      * {@code Produce.To:"Custody"} OR a {@code Produce.To:"Inventory"} - clears the ENTIRE current
-     * iteration's consumed ledger, BOTH halves (the inventory-sourced map and the per-pile custody
-     * map). The consumed inputs BECAME the produced output (handed back by {@code returnCustody}
-     * for a custody produce, already in the player's inventory for an inventory produce), so
-     * refund and the committed output stay mutually exclusive per iteration. Without the inventory
-     * case a {@code Consume + Produce(To:Inventory) + Duration} step stopped mid-{@code Duration}
-     * would refund the consumed inputs while the produced item is already in the inventory - a
-     * double-grant.
+     * iteration's REFUND ledger, every half (the inventory-sourced map, the per-pile custody map
+     * and the unique-stack map). The consumed inputs BECAME the produced output (handed back by
+     * {@code returnCustody} for a custody produce, already in the player's inventory for an
+     * inventory produce), so refund and the committed output stay mutually exclusive per
+     * iteration. Without the inventory case a {@code Consume + Produce(To:Inventory) + Duration}
+     * step stopped mid-{@code Duration} would refund the consumed inputs while the produced item is
+     * already in the inventory - a double-grant. A completed program pass and a committed
+     * conversion clear the same halves. Reached through {@link #commitIterationLedger}, which takes
+     * the hook half in the same commit; a production commit point calls {@link #commitIteration}.
      */
     static void clearIterationLedgerOnCommittedProduce(@Nonnull StationSession s) {
         s.iterationConsumed.clear();
         s.iterationConsumedCustody.clear();
+        s.iterationConsumedUnique.clear();
+    }
+
+    /**
+     * Records the REAL metadata-bearing stack a custody consume took out of a single-item socket
+     * into the unique half of the refund ledger, keyed by originating pile like the count half.
+     */
+    static void recordIterationConsumedUnique(@Nonnull StationSession s, @Nonnull String blockKey,
+            @Nonnull String socketId, @Nullable ItemStack unique) {
+        if (unique != null) {
+            s.iterationConsumedUnique.put(StationCustodyRetrieval.displayKey(blockKey, socketId), unique);
+        }
     }
 
     /**
@@ -5661,40 +6443,233 @@ public final class StationService {
         String[] heldResourceTypeIds = liveResourceTypeIdsOf(heldItemId);
         Map<String, String[]> heldTags = liveRawTagsOf(heldItemId);
         String heldFunction = liveFunctionOf(heldItemId);
-        return StationCustody.routePlacement(sockets, claim, playerUuid, heldItemId, held.getQuantity(),
-                heldResourceTypeIds, custody.effectiveMaxQuantity(),
-                socket -> socketAcceptsInput(socket, asset, action, heldItemId, heldResourceTypeIds,
+        // The server-wide protect-list is the first word on any placement: a piece any file in
+        // scope here protects is refused before any socket is offered it, with its own reason.
+        if (ProtectListCatalog.getInstance().protects(asset.getId(), action.getActionId(), heldItemId,
+                heldResourceTypeIds, heldTags, heldFunction)) {
+            return new StationCustody.PlacementRoute(null, 0, StationCustody.PlacementDenial.PROTECTED);
+        }
+        StationCustody.PlacementRoute route = StationCustody.routePlacement(sockets, claim, playerUuid, heldItemId,
+                held.getQuantity(), heldResourceTypeIds, custody.effectiveMaxQuantity(),
+                socket -> socketAcceptsInput(socket, asset, action, held, heldItemId, heldResourceTypeIds,
                         heldTags, heldFunction),
                 StationService::liveResourceTypeIdsOf);
+        // A material no socket took because a socket's Except hole refused it is PROTECTED, not
+        // merely the wrong input: the station would have taken it but for the hole, and the player
+        // is told so.
+        if (!route.placed() && route.denial() == StationCustody.PlacementDenial.WRONG_INPUT
+                && anySocketExceptRefuses(sockets, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+            return new StationCustody.PlacementRoute(null, 0, StationCustody.PlacementDenial.PROTECTED);
+        }
+        return route;
     }
 
-    /** One socket's acceptance matcher: its own {@code Match} when authored, else the derived-conversion route. */
+    /** Whether any Item socket's matcher carves a hole the material falls into ({@link StationCustody#exceptRefuses}). */
+    private static boolean anySocketExceptRefuses(@Nonnull List<Custody.ResolvedSocket> sockets,
+            @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds,
+            @Nullable Map<String, String[]> heldTags, @Nullable String heldFunction) {
+        for (Custody.ResolvedSocket socket : sockets) {
+            if (socket.itemRoute() && StationCustody.exceptRefuses(socket.match(), heldItemId, heldResourceTypeIds,
+                    heldTags, heldFunction)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * One socket's acceptance: its own {@code Match} when it authors ROUTES (an explicit
+     * {@code Custody.Input} arrives here as the degenerate socket's match), under the shared
+     * matcher's ONE rule ({@link StationCustody#accepts}: a route set takes what a route matches,
+     * minus the {@code Except} holes); else the DERIVED acceptance, the action's conversion inputs
+     * and its fallback routes, with a route-less matcher's {@code Except} holes carved out of it
+     * (an {@code Input} that authors only {@code Except} NARROWS what the station derives, never
+     * turns it into everything but the hole). A COUNT pile (capacity above one) additionally
+     * refuses a stack carrying per-instance data ({@link StationCustody#carriesInstanceData}: a
+     * tool that tracks wear, a stack with metadata), since a pile keeps ids and counts only and
+     * would hand it back as a bare fresh stack.
+     */
     private static boolean socketAcceptsInput(@Nonnull Custody.ResolvedSocket socket, @Nonnull StationAsset asset,
-            @Nonnull ActionResolver.ResolvedAction action, @Nullable String heldItemId,
+            @Nonnull ActionResolver.ResolvedAction action, @Nullable ItemStack held, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
             @Nullable String heldFunction) {
-        var matcher = socket.match();
-        if (matcher != null) {
-            return StationCustody.matchesInput(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
-        }
-        StationAsset.Conversion[] conversions = allConversionsFor(asset, action);
-        return conversions.length > 0
-                && StationCustody.matchesAnyConversionInput(conversions, heldItemId, heldResourceTypeIds,
-                        heldTags);
+        StationAsset.Recipe recipe = action.getRecipe();
+        return socketAccepts(socket, () -> StationCustody.carriesInstanceData(held),
+                () -> allConversionsFor(asset, action),
+                () -> recipe != null && fallbackAccepts(recipe.getFallback(), held, heldItemId,
+                        heldResourceTypeIds, heldTags, heldFunction),
+                heldItemId, heldResourceTypeIds, heldTags, heldFunction);
     }
 
-    /** The refusal key a placement that moved nothing toasts: socket-specific with authored sockets, the classic generic line without. */
+    /**
+     * PURE, the decision {@link #socketAcceptsInput} makes once the live reads are wired in: the
+     * held stack's per-instance data ({@code carriesInstanceData}), the action's rows
+     * ({@code derivedRows}) and whether a fallback route would take the piece
+     * ({@code fallbackTakes}), each asked only when the decision reaches it. A socket whose matcher
+     * authors ROUTES takes what {@link StationCustody#accepts} says; a route-less matcher's holes
+     * are carved out of the DERIVED acceptance (the rows, then the fallback routes), so an Input
+     * that authors only {@code Except} narrows what the station derives; a bare catch-all takes
+     * everything; and a count pile refuses a stack carrying per-instance data first.
+     */
+    static boolean socketAccepts(@Nonnull Custody.ResolvedSocket socket,
+            @Nonnull BooleanSupplier carriesInstanceData,
+            @Nonnull Supplier<StationAsset.Conversion[]> derivedRows,
+            @Nonnull BooleanSupplier fallbackTakes, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        if (socket.maxQuantity() > 1 && carriesInstanceData.getAsBoolean()) {
+            return false;
+        }
+        var matcher = socket.match();
+        if (matcher != null && !matcher.isCatchAll()) {
+            return StationCustody.accepts(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+        }
+        if (StationCustody.exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+            return false;
+        }
+        if (matcher != null && !matcher.hasExcept()) {
+            // A bare catch-all Input accepts everything, as it always has.
+            return true;
+        }
+        StationAsset.Conversion[] conversions = derivedRows.get();
+        if (conversions != null && conversions.length > 0
+                && StationCustody.matchesAnyConversionInput(conversions, heldItemId, heldResourceTypeIds, heldTags)) {
+            return true;
+        }
+        // A piece no row covers still places when a fallback route would take it - the routes are
+        // built per piece at the beat, so acceptance asks the same question they will.
+        return fallbackTakes.getAsBoolean();
+    }
+
+    /**
+     * What one press's placement did: how many pieces moved into custody, and the socket they
+     * went into (null when nothing moved). The placed-piece preview reads {@link #socket()}, so it
+     * names the return of the socket the piece actually entered.
+     */
+    record PlacedPiece(int moved, @Nullable Custody.ResolvedSocket socket) {
+
+        /** True when the press moved at least one piece into custody. */
+        boolean placed() {
+            return moved > 0;
+        }
+    }
+
+    /**
+     * PURE: which placement a press made once both routes have had their turn: the held route
+     * when it moved anything, else the backpack scan when that moved anything, else nothing. The
+     * socket always belongs to the route that moved, so a held route that was offered a socket
+     * but moved nothing never lends that socket to a piece the scan placed elsewhere.
+     */
     @Nonnull
-    private static String placementDenyKey(boolean authoredSockets,
+    static PlacedPiece placedPiece(int heldMoved, @Nullable Custody.ResolvedSocket heldSocket, int foundMoved,
+            @Nullable Custody.ResolvedSocket foundSocket) {
+        if (heldMoved > 0) {
+            return new PlacedPiece(heldMoved, heldSocket);
+        }
+        if (foundMoved > 0) {
+            return new PlacedPiece(foundMoved, foundSocket);
+        }
+        return new PlacedPiece(0, null);
+    }
+
+    /**
+     * PURE: what a press that placed nothing answers with, or null to fall through to the engage
+     * gates. Only an EMPTY station refuses, and only when it cannot idle: a station already loaded
+     * judges the held item as a tool from here on (its own work consumes what is placed, never
+     * what is held), so a Protected denial there never locks a trophy tool's owner out of the
+     * work, and an idle-capable station lets an empty-handed press practise.
+     */
+    @Nullable
+    static String unplacedPressRefusal(boolean loadedBefore, boolean idleCapable, boolean authoredSockets,
             @Nullable StationCustody.PlacementDenial denial) {
+        if (loadedBefore || idleCapable) {
+            return null;
+        }
+        return placementDenyKey(authoredSockets, denial);
+    }
+
+    /**
+     * The refusal key a placement that moved nothing toasts: socket-specific with authored
+     * sockets, the classic generic line without. A PROTECTED denial keeps its own key whatever the
+     * socket shape, so a one-socket table still tells the player the station will not take the
+     * piece rather than that they hold nothing it works with.
+     */
+    @Nonnull
+    static String placementDenyKey(boolean authoredSockets,
+            @Nullable StationCustody.PlacementDenial denial) {
+        if (denial == StationCustody.PlacementDenial.PROTECTED) {
+            return "ui.station.protected";
+        }
         if (!authoredSockets || denial == null) {
             return "ui.station.no_materials";
         }
         return switch (denial) {
+            case PROTECTED -> "ui.station.protected";
             case NOT_SHARED -> "ui.station.not_shared";
             case FULL -> "ui.station.socket_full";
             case WRONG_INPUT -> "ui.station.socket_wrong_input";
         };
+    }
+
+    /**
+     * The placed-piece preview ({@code Custody.Preview}): the row the station would run NOW for
+     * the piece just placed into {@code socket} (the same selection a cycle or a Convert beat
+     * makes: authored rows, derived rows, then the fallback routes, addressed to that socket),
+     * toasted as what it gives back. An essence-only row says the piece gives nothing back on its
+     * own; a piece no row runs for right now (no room in the bag, nothing matching) says nothing,
+     * since there is nothing true to promise. Never throws.
+     */
+    private void previewPlacedReturn(@Nonnull PlayerRef playerRef, @Nonnull Player player,
+            @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action, @Nonnull World world,
+            int blockX, int blockY, int blockZ, @Nullable Custody.ResolvedSocket socket) {
+        try {
+            StationCustodyClaim claim = custodyClaimAt(world, blockX, blockY, blockZ);
+            if (claim == null) {
+                return;
+            }
+            ConversionCheck check = selectConversion(asset, action, player, claim, true, null,
+                    socket != null ? socket.id() : null);
+            if (check.state != ConversionState.RUNNABLE || check.conversion == null) {
+                return;
+            }
+            Message line = previewLine(check.conversion);
+            if (line != null) {
+                toast(playerRef, line);
+            }
+        } catch (Throwable t) {
+            Log.fine("STATION placed-piece preview failed at '" + asset.getId() + "': " + t.getMessage());
+        }
+    }
+
+    /**
+     * The preview's line for one row: the essence-only shape names nothing back, any other row
+     * lists its outputs as count and name in authored order; null for a row with nothing to say.
+     */
+    @Nullable
+    static Message previewLine(@Nonnull StationAsset.Conversion conversion) {
+        if (conversion.isEssenceOnly()) {
+            return RpgMsg.tr("ui.station.preview.nothing_back");
+        }
+        Ingredient[] outputs = conversion.getOutput();
+        if (outputs == null || outputs.length == 0) {
+            return null;
+        }
+        List<Message> parts = new ArrayList<>();
+        for (Ingredient out : outputs) {
+            if (out == null || out.getItemId() == null || out.getItemId().isBlank()) {
+                continue;
+            }
+            if (!parts.isEmpty()) {
+                parts.add(Msg.raw(", "));
+            }
+            parts.add(Msg.num(out.effectiveQuantity()));
+            parts.add(Msg.raw(" "));
+            parts.add(itemNameMsg(out.getItemId()));
+        }
+        if (parts.isEmpty()) {
+            return null;
+        }
+        return RpgMsg.tr("ui.station.preview.returns", Msg.cat(parts.toArray(new Message[0])));
     }
 
     /**
@@ -6450,11 +7425,13 @@ public final class StationService {
     }
 
     /**
-     * Flips the block at {@code (x,y,z)} to {@code custody}'s Empty/Loaded state (design 9.4's
-     * hint-only state pair; a nullable {@link Custody#getStates()} means "no visual/hint flip,
-     * custody still works mechanically" - a no-op here). Guarded exactly like the kweebec shrine
-     * precedent: a block that is gone, or that never authored the named state, no-ops (retried
-     * naturally on the next interaction).
+     * Flips the block at {@code (x,y,z)} to {@code custody}'s Empty/Loaded state. A flip swaps the
+     * block to that state's own variant, so everything the state authors comes on with it and the
+     * previous state's stops: its texture, its model animation, its light, its looping ambient sound
+     * and its particles, as well as its interaction hint. A null {@link Custody#getStates()} means
+     * no flip at all, custody still working mechanically (a no-op here). Guarded exactly like the
+     * kweebec shrine precedent: a block that is gone, or that never authored the named state,
+     * no-ops (retried naturally on the next interaction).
      */
     private static void flipCustodyState(@Nonnull World world, int x, int y, int z, @Nonnull Custody custody,
             boolean toLoaded) {
@@ -6506,25 +7483,51 @@ public final class StationService {
      * primary station block (the cooking fire's own plain-F convert loop), any other id is the
      * claimed remote anchor (the cutting board's fish program lighting the fire it walked to).
      *
-     * <p>IDEMPOTENT per block: re-entering the SAME block never re-writes the state, so the implicit
-     * convert program (one working step re-dispatched every cycle) holds a steady look instead of
-     * flickering once per cycle. Entering a DIFFERENT block exits the previous one first, so at most
-     * one block per player is ever left working. A no-op when the resolved {@code Custody} authors
-     * no {@code Working} name - every pre-knob station is byte-identical.
+     * <p>IDEMPOTENT per block AND state name: re-entering the SAME block under the SAME name never
+     * re-writes the state, so the implicit convert program (one working step re-dispatched every
+     * cycle) holds a steady look instead of flickering once per cycle; re-entering it under a
+     * DIFFERENT name (a step's own {@code State}, a deeper look of one ritual) re-flips the block
+     * in place, never through the resting look in between. Entering a DIFFERENT block exits the
+     * previous one first, so at most one block per player is ever left working. A no-op when the
+     * resolved {@code Custody} authors no {@code States} at all - every pre-knob station is
+     * byte-identical.
      */
     void enterWorkingState(@Nonnull StationSession s, @Nullable String anchorId) {
+        enterWorkingState(s, anchorId, null);
+    }
+
+    /**
+     * As {@link #enterWorkingState(StationSession, String)}, under {@code stepState} when a step
+     * authors its own {@code State} (null wears the custody's {@code Working} name). A step state
+     * needs the custody's {@code States} group (the exit reads the resting look off it), and the
+     * name must exist in the block's own definitions, or the flip is a silent no-op.
+     */
+    void enterWorkingState(@Nonnull StationSession s, @Nullable String anchorId, @Nullable String stepState) {
         String blockKey = anchorBlockKeyFor(s, anchorId);
         if (blockKey == null) {
             return;
         }
+        Custody custody = anchorCustody(s, anchorId, c -> c.getStates() != null, false);
+        Custody.States states = custody != null ? custody.getStates() : null;
+        String stateName = workingStateName(states, stepState);
         WorkingFlip live = workingByPlayer.get(s.playerUuid);
-        if (live != null && live.blockKey().equals(blockKey)) {
+        WorkingMove move = workingMove(live != null ? live.blockKey() : null, live != null ? live.stateName() : null,
+                blockKey, stateName);
+        if (move == WorkingMove.KEEP) {
+            return;
+        }
+        if (move == WorkingMove.REFLIP) {
+            // The same block, a different name: re-flip in place (no exit, so the resting look
+            // never shows between two beats of one ritual).
+            World world = sessionWorld(s);
+            if (world != null && setBlockState(world, live.x(), live.y(), live.z(), stateName)) {
+                workingByPlayer.put(s.playerUuid, new WorkingFlip(blockKey, anchorId, live.x(), live.y(), live.z(),
+                        stateName));
+            }
             return;
         }
         exitWorkingState(s);
-        Custody custody = anchorCustody(s, anchorId, c -> c.getStates() != null, false);
-        Custody.States states = custody != null ? custody.getStates() : null;
-        if (states == null || states.getWorking() == null || states.getWorking().isBlank()) {
+        if (move == WorkingMove.EXIT) {
             return;
         }
         int[] coords = anchorCoords(s, anchorId, blockKey);
@@ -6535,9 +7538,56 @@ public final class StationService {
         if (world == null) {
             return;
         }
-        if (setBlockState(world, coords[0], coords[1], coords[2], states.getWorking())) {
-            workingByPlayer.put(s.playerUuid, new WorkingFlip(blockKey, anchorId, coords[0], coords[1], coords[2]));
+        if (setBlockState(world, coords[0], coords[1], coords[2], stateName)) {
+            workingByPlayer.put(s.playerUuid, new WorkingFlip(blockKey, anchorId, coords[0], coords[1], coords[2],
+                    stateName));
         }
+    }
+
+    /** What entering a work beat does to the block this player's session has working, as {@link #workingMove} decides it. */
+    enum WorkingMove {
+        /** Nothing: the same block already wears this state, or the beat names none while it is working. */
+        KEEP,
+        /** The same block, a different state name: flip it in place, never through the resting look. */
+        REFLIP,
+        /** Another block (or none) was working and the beat names a state: take the old one out, flip the new one. */
+        ENTER,
+        /** Another block (or none) was working and the beat names no state: only take the old one out. */
+        EXIT
+    }
+
+    /**
+     * PURE, {@link #enterWorkingState}'s decision: {@code liveBlockKey} / {@code liveStateName} are
+     * the block this player's session left working and the state it wears (both null when none),
+     * {@code blockKey} the block the beat works at and {@code stateName} the state it wears
+     * ({@link #workingStateName}, null for none). The same block under the same name (without
+     * regard to case) is kept, so the implicit convert program holds a steady look; the same block
+     * under a DIFFERENT name re-flips in place, which is how a ritual's beat moves the block from
+     * {@code Working} to {@code Drawing}.
+     */
+    @Nonnull
+    static WorkingMove workingMove(@Nullable String liveBlockKey, @Nullable String liveStateName,
+            @Nonnull String blockKey, @Nullable String stateName) {
+        if (liveBlockKey != null && liveBlockKey.equals(blockKey)) {
+            return stateName == null || stateName.equalsIgnoreCase(liveStateName) ? WorkingMove.KEEP : WorkingMove.REFLIP;
+        }
+        return stateName == null ? WorkingMove.EXIT : WorkingMove.ENTER;
+    }
+
+    /**
+     * PURE: the state a work beat wears. A step's own {@code State} when it authors one and the
+     * custody authors {@code States} (the exit needs that group for the resting look), else the
+     * custody's {@code Working} name, else null (no flip at all).
+     */
+    @Nullable
+    static String workingStateName(@Nullable Custody.States states, @Nullable String stepState) {
+        if (states == null) {
+            return null;
+        }
+        if (stepState != null && !stepState.isBlank()) {
+            return stepState;
+        }
+        return states.getWorking() != null && !states.getWorking().isBlank() ? states.getWorking() : null;
     }
 
     /**
@@ -7149,6 +8199,14 @@ public final class StationService {
                         setBlockState(world, claim.blockX, claim.blockY, claim.blockZ, states.getReady());
                     }
                 }
+                // A single-item socket that gave up its piece loses the prop that rendered it,
+                // exactly as an attended consume drops it; the respawn below re-renders whatever
+                // the settle left standing there.
+                for (StationUnattended.PileDrain drain : settle.drains()) {
+                    if (drain.unique() != null) {
+                        despawnDisplay(blockKey, drain.socketId(), commandBuffer);
+                    }
+                }
                 respawnDisplayIfMissing(claim, blockKey, commandBuffer);
                 healRestingState(world, claim, blockKey);
             }
@@ -7159,9 +8217,36 @@ public final class StationService {
             // chunk for a save EVERY pass for every input-starved station on the server.
             if (settle.transformed()) {
                 claim.markDirty();
+                // The transform is committed to the stash: what it consumed reaches the ONE
+                // input-consumed hook now, once, with no worker (nobody is engaged).
+                reportUnattendedConsumption(world, claim, settle);
             }
         } catch (Throwable t) {
             Log.warn("STATION unattended settle failed at " + blockKey + ": " + t.getMessage());
+        }
+    }
+
+    /**
+     * An unattended settle's consumption, reported to the ONE input-consumed hook after the
+     * transform committed: every socket pile it drained, as the real stacks (the piece's own
+     * stack when a single-item socket gave it up) with their sockets, against the claim's block
+     * and its committed station and action, with no worker. Never throws.
+     */
+    private static void reportUnattendedConsumption(@Nonnull World world, @Nonnull StationCustodyClaim claim,
+            @Nonnull StationUnattended.Settle settle) {
+        try {
+            UUID worldUuid = worldUuidOf(world);
+            if (worldUuid == null || settle.drains().isEmpty()) {
+                return;
+            }
+            List<ConsumedInput> consumed = new ArrayList<>();
+            for (StationUnattended.PileDrain drain : settle.drains()) {
+                consumed.addAll(ConsumedInput.fromPile(drain.socketId(), drain.drained(), drain.unique()));
+            }
+            onInputConsumed(world.getEntityStore().getStore(), InputConsumption.unattended(worldUuid,
+                    claim.blockX, claim.blockY, claim.blockZ, claim.stationId, claim.actionId, List.copyOf(consumed)));
+        } catch (Throwable t) {
+            Log.fine("STATION unattended input report skipped for '" + claim.stationId + "': " + t.getMessage());
         }
     }
 
@@ -7276,7 +8361,7 @@ public final class StationService {
             String actionTarget = ActionResolver.actionTargetId(asset, action.getActionId());
             FactorLookup snapshot = FactorRegistryImpl.getInstance().snapshotFor(
                     buildGatherFactorContext(store, playerRef, gathererId, claim.stationId, actionTarget,
-                            action, player, plan.grantCycles()));
+                            action, player, plan.grantCycles(), gatheredPiece(claim, socketIds)));
 
             Contribution[] merged = work != null ? work.getPerCycleContributions() : null;
             if (actionTarget != null) {
@@ -7342,7 +8427,12 @@ public final class StationService {
                 notifyItemGain(playerRef, outputItemId, resolved);
             }
         }
-        for (Map.Entry<String, Integer> e : result.getDropListItems().entrySet()) {
+        // The same origin split the attended twin makes: an Expected roll's items are ordinary
+        // output, a find's are the gold row.
+        for (Map.Entry<String, Integer> e : result.getExpectedItems().entrySet()) {
+            notifyItemGain(playerRef, e.getKey(), e.getValue());
+        }
+        for (Map.Entry<String, Integer> e : result.getFoundItems().entrySet()) {
             notifyLuckyFind(playerRef, e.getKey(), e.getValue());
         }
         for (String cue : result.getCues()) {
@@ -7382,12 +8472,16 @@ public final class StationService {
         return primary != null ? primary.getItemId() : null;
     }
 
-    /** {@code buildFactorContext}'s gatherer twin: no session, so session seconds read 0 and the cycle index is the granted batch size. */
+    /**
+     * {@code buildFactorContext}'s gatherer twin: no session, so session seconds read 0 and the
+     * cycle index is the granted batch size; {@code item} is the piece the gathered work was about
+     * (the gathered pile's unique stack, else a bare stack of what it settled).
+     */
     @Nonnull
     private static FactorContext buildGatherFactorContext(@Nonnull Store<EntityStore> store,
             @Nonnull PlayerRef playerRef, @Nonnull UUID playerId, @Nonnull String stationId,
             @Nullable String actionTarget, @Nonnull ActionResolver.ResolvedAction action,
-            @Nonnull Player player, int cycleIndex) {
+            @Nonnull Player player, int cycleIndex, @Nullable ItemStack item) {
         return FactorContext.builder()
                 .store(store)
                 .playerRef(playerRef)
@@ -7402,7 +8496,27 @@ public final class StationService {
                 .toolQuality(resolveHeldToolQuality(player))
                 .toolItemLevel(resolveHeldToolItemLevel(player))
                 .contributions(contributionParams(stationId, actionTarget, action.getWork()))
+                .item(item)
                 .build();
+    }
+
+    /**
+     * The piece a GATHER is about, for the sessionless factor context: the first gathered pile's
+     * unique stack, else a bare stack of the oldest item standing in it, else null.
+     */
+    @Nullable
+    private static ItemStack gatheredPiece(@Nonnull StationCustodyClaim claim, @Nonnull List<String> socketIds) {
+        for (String socketId : socketIds) {
+            ItemStack unique = claim.uniqueStack(socketId);
+            if (unique != null) {
+                return unique;
+            }
+            String oldest = oldestPlacedItemId(claim, socketId);
+            if (oldest != null) {
+                return bareStack(oldest);
+            }
+        }
+        return null;
     }
 
     /**
@@ -7519,18 +8633,39 @@ public final class StationService {
      */
     @Nullable
     private static String selectActionForHeld(@Nonnull StationAsset asset, @Nonnull Player player,
-            @Nonnull PlayerRef playerRef, @Nonnull Map<String, Boolean> socketsFilled) {
+            @Nonnull PlayerRef playerRef, @Nonnull Map<String, Boolean> socketsFilled,
+            @Nullable StationCustodyClaim claim) {
         ItemStack held = PlayerAccess.activeHotbarItem(player);
         String heldItemId = held != null ? held.getItemId() : null;
         List<String> candidates = ActionResolver.selectActionsByFamily(asset, heldItemId,
                 liveResourceTypeIdsOf(heldItemId), liveRawTagsOf(heldItemId), liveFunctionOf(heldItemId));
         for (String actionId : candidates) {
             ActionResolver.ResolvedAction candidate = ActionResolver.resolve(asset, actionId);
-            if (checkRequires(candidate.getRequires(), playerRef, asset, candidate, socketsFilled)) {
+            if (checkRequires(candidate.getRequires(), playerRef, asset, candidate, socketsFilled,
+                    gatePiece(claim, candidate))) {
                 return actionId;
             }
         }
         return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    /**
+     * The piece a {@code Requires} gate is about, at a press: the SAME capture a program pass makes
+     * for the item factors ({@link #pieceInCustody}: the first Item socket's unique stack, else a
+     * bare stack of its oldest material) read off the block's standing claim, so a gate over
+     * {@code hytale:item_*} judges the piece already placed. Null when the action authors no
+     * custody or nothing stands in it: the inventory route's piece is the chosen conversion's
+     * input, and no conversion is chosen before a session exists, so that route's gate reads no
+     * item (the item factors answer null there, and a condition over them fails closed).
+     */
+    @Nullable
+    private static ItemStack gatePiece(@Nullable StationCustodyClaim claim,
+            @Nonnull ActionResolver.ResolvedAction action) {
+        Custody custody = action.getCustody();
+        if (custody == null || claim == null) {
+            return null;
+        }
+        return pieceInCustody(claim, custody.effectiveSockets(), null, null);
     }
 
     /**
@@ -7623,11 +8758,13 @@ public final class StationService {
      * {@link #selectActionForHeld} walk. {@code action} anchors the context either way: the
      * running action owns the contribution channels a condition may read, extension-appended
      * entries included. {@code socketsFilled} is the press's one socket-satisfaction snapshot
-     * ({@link #socketsFilledAt}), backing {@code rpgstations:socket_filled}.
+     * ({@link #socketsFilledAt}), backing {@code rpgstations:socket_filled}; {@code piece} is the
+     * custody piece the press is about ({@link #gatePiece}), backing the {@code hytale:item_*}
+     * factors, null on the inventory route.
      */
     private static boolean checkRequires(@Nullable Requires reqs, @Nonnull PlayerRef playerRef,
             @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action,
-            @Nonnull Map<String, Boolean> socketsFilled) {
+            @Nonnull Map<String, Boolean> socketsFilled, @Nullable ItemStack piece) {
         if (reqs == null || reqs.isEmpty()) {
             return true;
         }
@@ -7653,6 +8790,7 @@ public final class StationService {
                 .contributions(contributionParams(asset.getId(),
                         ActionResolver.actionTargetId(asset, action.getActionId()), action.getWork()))
                 .socketsFilled(socketsFilled)
+                .item(piece)
                 .build();
         String failed = FactorRegistryImpl.getInstance().firstFailedCondition(conditions, ctx);
         if (failed != null) {

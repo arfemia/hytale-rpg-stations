@@ -38,11 +38,12 @@ import com.ziggfreed.common.loot.stamp.StampSpec;
  * <p><b>Phase groups</b> (all nullable): {@link #walk}, {@link #consume}, {@link #stamp},
  * {@link #produce}, {@link #roll} (a {@link LootRef}), {@link #commands} ({@code String[]}).
  *
- * <p><b>Execution order within ONE step iteration (fixed, honored by the engine - leg A3):</b>
+ * <p><b>Execution order within ONE step iteration (fixed, honored by the engine):</b>
  * Conditions gate -&gt; {@link #walk} -&gt; {@link #consume} -&gt; {@link #stamp} -&gt;
- * {@link #produce} -&gt; {@link #roll} -&gt; {@link #commands} -&gt; {@link #presentation}/
- * {@link #puppet} clip (fire at iteration entry, listed here for the mental model) -&gt;
- * {@link #duration} hold (suspend) -&gt; next iteration or next step.
+ * {@link #convert} -&gt; {@link #produce} -&gt; {@link #roll} (then a {@link #rollBonus} beat's
+ * Bonus pass) -&gt; {@link #commands} -&gt; {@link #presentation}/{@link #puppet} clip (fire at
+ * iteration entry, listed here for the mental model) -&gt; {@link #duration} hold (suspend,
+ * stretched by the action's pace on a {@link #paced} step) -&gt; next iteration or next step.
  *
  * <p><b>Every field here EXECUTES.</b> There are no decode-only decoys on this type: {@link #walk},
  * {@link #at}, and {@code Produce.To: "Custody"} run the multi-station seam for real, alongside
@@ -63,10 +64,15 @@ public final class StationStep {
     @Nullable protected Walk walk;
     @Nullable protected Consume consume;
     @Nullable protected Produce produce;
+    @Nullable protected Convert convert;
     @Nullable protected LootRef roll;
     @Nullable protected String[] commands;
     @Nullable protected Stamp stamp;
     @Nullable protected Boolean isWork;
+    @Nullable protected Boolean paced;
+    @Nullable protected Boolean rollBonus;
+    @Nullable protected String state;
+    @Nullable protected Custody.Display display;
 
     public static final BuilderCodec<StationStep> CODEC = BuilderCodec.builder(StationStep.class, StationStep::new)
             .appendInherited(new KeyedCodec<>("Id", Codec.STRING, false),
@@ -103,6 +109,9 @@ public final class StationStep {
             .appendInherited(new KeyedCodec<>("Produce", Produce.CODEC, false),
                     (o, v) -> o.produce = v, o -> o.produce, (o, p) -> o.produce = p.produce)
             .documentation("Produce every Items entry To Inventory (default) or Custody (the At-anchor's claim).").add()
+            .appendInherited(new KeyedCodec<>("Convert", Convert.CODEC, false),
+                    (o, v) -> o.convert = v, o -> o.convert, (o, p) -> o.convert = p.convert)
+            .documentation("Run the action's Recipe at this beat: the matched conversion's inputs are consumed (from custody when the action authors Custody, else the inventory) and its outputs produced to the inventory, exactly as the classic convert loop does per cycle. Authoring the group turns it on.").add()
             .appendInherited(new KeyedCodec<>("Roll", LootRef.CODEC, false),
                     (o, v) -> o.roll = v, o -> o.roll, (o, p) -> o.roll = p.roll)
             .documentation("Evaluate a loot pass through the shared LootRef (Lootables + inline Rolls) vocabulary.").add()
@@ -114,7 +123,21 @@ public final class StationStep {
             .documentation("The enhance-commit phase (reagents + durability + stat rolls) - see Stamp.").add()
             .appendInherited(new KeyedCodec<>("IsWork", Codec.BOOLEAN, false),
                     (o, v) -> o.isWork = v, o -> o.isWork, (o, p) -> o.isWork = p.isWork)
-            .documentation("Does this step count as WORK at its At-anchor block (driving that block's Custody.States.Working look)? Default: true for a Consume+Produce convert step, false otherwise. Author true on a pure beat that IS the work (a cook hold), false to suppress.").add()
+            .documentation("Does this step count as WORK at its At-anchor block (driving that block's Custody.States.Working look)? Default: true for a Convert step or a Consume+Produce pair, false otherwise. Author true on a pure beat that IS the work (a cook hold), false to suppress.").add()
+            .appendInherited(new KeyedCodec<>("Paced", Codec.BOOLEAN, false),
+                    (o, v) -> o.paced = v, o -> o.paced, (o, p) -> o.paced = p.paced)
+            .metadata(EditorSchema.defaultValue(false))
+            .documentation("Does the action's Pace scale this step? True multiplies this step's Duration.Ms, and the DelayMs and every burst's DurationSeconds of its own presentation, by the resolved pace. Default false: the beat keeps its authored length whatever the pace.").add()
+            .appendInherited(new KeyedCodec<>("RollBonus", Codec.BOOLEAN, false),
+                    (o, v) -> o.rollBonus = v, o -> o.rollBonus, (o, p) -> o.rollBonus = p.rollBonus)
+            .metadata(EditorSchema.defaultValue(false))
+            .documentation("Roll the action's Bonus (its own Lootables and Rolls plus every matching extension's) at this beat, once per iteration, instead of once when the program completes. Default false. A program with no step authoring this rolls the Bonus at completion as before.").add()
+            .appendInherited(new KeyedCodec<>("State", Codec.STRING, false),
+                    (o, v) -> o.state = v, o -> o.state, (o, p) -> o.state = p.state)
+            .documentation("The block State.Definitions name this beat holds its At-anchor block in while it runs, instead of the Custody.States.Working name: a deeper look for a later beat of one ritual. It applies only on a step that counts as work (IsWork) at a block whose Custody authors States, must exist in the block's own definitions (an unknown name is a silent no-op), and gives way to the resting look on the next non-work step and every session stop, exactly as Working does. Absent, a work step wears Working.").add()
+            .appendInherited(new KeyedCodec<>("Display", Custody.Display.CODEC, false),
+                    (o, v) -> o.display = v, o -> o.display, (o, p) -> o.display = p.display)
+            .documentation("A per-beat overlay on the placed piece's Display (the socket a ritual queue is working, else the first socket that shows a prop): the leaves it authors replace the socket's own for this beat, so a beat can lift the piece (Offset), turn it (Animated) or enlarge it (Scale). The prop is respawned with the overlay at iteration entry and stays that way until another beat overlays it or the piece leaves; a freshly respawned prop is seen by nobody until the next tick, so a cue targeting it in the same beat plays at its position. Absent leaves the prop as it stands.").add()
             .build();
 
     public StationStep() {
@@ -186,12 +209,80 @@ public final class StationStep {
      * pre-knob station stays byte-identical.
      */
     public boolean effectiveIsWork() {
-        return isWork != null ? isWork : (consume != null && produce != null);
+        return isWork != null ? isWork
+                : ((convert != null && convert.effectiveEnabled()) || (consume != null && produce != null));
+    }
+
+    /** The raw authored {@code Paced} knob; {@code null} = the beat keeps its authored length. */
+    @Nullable
+    public Boolean getPaced() {
+        return paced;
+    }
+
+    /** {@link #paced}, reader-defaulted to {@code false} when null. */
+    public boolean effectivePaced() {
+        return paced != null && paced;
+    }
+
+    /** Java-side setter for a procedurally-built program (mirrors the {@code with*} phase setters). */
+    @Nonnull
+    public StationStep withPaced(@Nullable Boolean v) {
+        this.paced = v;
+        return this;
+    }
+
+    /** The raw authored {@code RollBonus} knob; {@code null} = the Bonus rolls at program completion. */
+    @Nullable
+    public Boolean getRollBonus() {
+        return rollBonus;
+    }
+
+    /** {@link #rollBonus}, reader-defaulted to {@code false} when null. */
+    public boolean effectiveRollBonus() {
+        return rollBonus != null && rollBonus;
+    }
+
+    /** Java-side setter for a procedurally-built program (mirrors the {@code with*} phase setters). */
+    @Nonnull
+    public StationStep withRollBonus(@Nullable Boolean v) {
+        this.rollBonus = v;
+        return this;
     }
 
     @Nonnull
     public StationStep withAt(@Nullable String v) {
         this.at = v;
+        return this;
+    }
+
+    /** The block state this beat holds its anchor block in while it runs; null = the custody's Working name. */
+    @Nullable
+    public String getState() {
+        return state;
+    }
+
+    /** True when {@link #state} is authored (a non-blank state name). */
+    public boolean hasState() {
+        return state != null && !state.isBlank();
+    }
+
+    /** Java-side setter for a procedurally-built program (mirrors the {@code with*} phase setters). */
+    @Nonnull
+    public StationStep withState(@Nullable String v) {
+        this.state = v;
+        return this;
+    }
+
+    /** The per-beat overlay on the worked piece's display prop; null = the prop stays as it stands. */
+    @Nullable
+    public Custody.Display getDisplay() {
+        return display;
+    }
+
+    /** Java-side setter for a procedurally-built program (mirrors the {@code with*} phase setters). */
+    @Nonnull
+    public StationStep withDisplay(@Nullable Custody.Display v) {
+        this.display = v;
         return this;
     }
 
@@ -264,6 +355,18 @@ public final class StationStep {
         return this;
     }
 
+    /** The recipe-running phase; null = this step converts nothing. */
+    @Nullable
+    public Convert getConvert() {
+        return convert;
+    }
+
+    @Nonnull
+    public StationStep withConvert(@Nullable Convert v) {
+        this.convert = v;
+        return this;
+    }
+
     /** The loot phase (a {@link LootRef}); null = no roll. */
     @Nullable
     public LootRef getRoll() {
@@ -313,8 +416,53 @@ public final class StationStep {
 
     /** True when NO phase group is authored - a pure beat (presentation + clip + duration only). */
     public boolean isPureBeat() {
-        return walk == null && consume == null && produce == null && roll == null
-                && (commands == null || commands.length == 0) && stamp == null;
+        return walk == null && consume == null && produce == null && convert == null && roll == null
+                && (commands == null || commands.length == 0) && stamp == null && !effectiveRollBonus();
+    }
+
+    /**
+     * The CONVERT phase: run the action's {@code Recipe} at this beat. The matched conversion is
+     * selected exactly as the classic convert loop selects one per cycle (authored rows, then
+     * derived rows, then the fallback routes; narrowed to the session's chosen output category),
+     * its inputs are consumed from custody when the action authors {@code Custody} (else from the
+     * inventory), {@code Recipe.Yield} is applied and its outputs are produced to the inventory as
+     * ordinary rows. The engine's implicit program is this one phase plus the action's
+     * {@code Roll}, so an authored program and the classic loop convert through ONE code path.
+     * AUTHORING THIS GROUP AT ALL OPTS IN ({@link #enabled} reader-defaults to {@code true}); the
+     * leaf survives so a native {@code Parent} child can switch the phase off.
+     */
+    public static final class Convert {
+        @Nullable protected Boolean enabled;
+
+        public static final BuilderCodec<Convert> CODEC = BuilderCodec.builder(Convert.class, Convert::new)
+                .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
+                        (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled)
+                .metadata(EditorSchema.defaultValue(true))
+                .documentation("Whether this beat runs the recipe. Reader-defaults to TRUE when the group is authored; author false to inherit a Parent's step with its conversion switched off.").add()
+                .build();
+
+        @Nonnull
+        public static Convert of(@Nullable Boolean enabled) {
+            Convert c = new Convert();
+            c.enabled = enabled;
+            return c;
+        }
+
+        /** The always-on shape the implicit program builds. */
+        @Nonnull
+        public static Convert on() {
+            return of(null);
+        }
+
+        @Nullable
+        public Boolean getEnabled() {
+            return enabled;
+        }
+
+        /** {@link #enabled}, reader-defaulted to {@code true} when null (an authored group means on). */
+        public boolean effectiveEnabled() {
+            return enabled == null || enabled;
+        }
     }
 
     /** True when the phase, or any of its entries, authors a custody socket address. */

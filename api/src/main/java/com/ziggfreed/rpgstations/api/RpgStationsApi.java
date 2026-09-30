@@ -12,18 +12,22 @@ import javax.annotation.Nonnull;
  * installs at {@code setup()}. Paired with the observe-only native events in
  * {@link com.ziggfreed.rpgstations.api.event} (station session/cycle lifecycle).
  *
- * <p>Everything reachable from here is FROZEN once RpgStations 1.0.0 releases; until then it is
- * free to reshape. See {@code api/CLAUDE.md}'s "Additive growth policy" section for the exact
- * rule a POST-1.0.0 addition must follow.
+ * <p>Everything reachable from here grows ADDITIVELY: a new default-bodied method, a new event
+ * class, a new additive getter, never a changed or removed member. Whether the surface is ever
+ * declared frozen is a decision the maintainer takes, not something a release number triggers.
+ * See {@code api/CLAUDE.md}'s "Additive growth policy" section for the exact rule an addition
+ * follows.
  */
 public interface RpgStationsApi {
 
     /**
-     * The api surface version, bumped additively whenever a growth-policy-compliant addition
+     * The api CONTRACT number, bumped by one whenever a growth-policy-compliant addition batch
      * lands (a new default-bodied method, a new event class, a new additive event getter) - never
-     * on a signature change, since the frozen contract permits none. A consumer that cares which
-     * optional members exist can branch on this instead of reflecting on the interface. See
-     * {@code api/CLAUDE.md}'s "Additive growth policy" section.
+     * on a signature change, since the additive policy permits none. A consumer that cares which
+     * optional members exist can branch on this instead of reflecting on the interface. It is its
+     * own scale, separate from the api ARTIFACT's version, which is the RpgStations release the
+     * jar shipped in (1.0.0 carried contract 9, 1.1.0 carries 10). See {@code api/CLAUDE.md}'s
+     * "Additive growth policy" section.
      */
     int apiVersion();
 

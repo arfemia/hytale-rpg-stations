@@ -1,0 +1,13 @@
+{
+  "$Comment": "The Disenchanting Table, the standalone stand-in for the vanilla Salvage bench the way the Sawmill stands in for the Builders bench. The whole ritual is the standalone action Actions/Disenchant.json, attached here by Ref with no overlay, so this file is only the station's own identity and block rule; read that action for what the table does, what it takes and what it pays. The Id authored on the entry is what an ExtensionAsset targets and what a flair keys a beat on (Step:Disenchant:Unmake is the unmaking beat). Icon is left out: the summary crest falls back to the placed block's own item, RPG_Station_Disenchanting_Table.",
+  "Identity": {
+    "NameKey": "rpgstations.station.disenchanting_table.name",
+    "DescKey": "rpgstations.station.disenchanting_table.desc"
+  },
+  "Block": {
+    "Exclusive": true
+  },
+  "Actions": [
+    { "Id": "Disenchant", "Ref": "Disenchant" }
+  ]
+}

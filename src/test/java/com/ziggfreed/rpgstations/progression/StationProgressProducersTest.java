@@ -13,6 +13,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.rpgstations.api.event.StationCycleCompletedEvent;
+import com.ziggfreed.rpgstations.api.event.StationInputConsumedEvent;
 import com.ziggfreed.rpgstations.api.event.StationOutputProducedEvent;
 
 /**
@@ -86,6 +87,37 @@ class StationProgressProducersTest {
         assertDoesNotThrow(() -> producers.onOutputProduced(event));
 
         assertTrue(fired.isEmpty(), "a batch nothing landed from advances nothing");
+    }
+
+    @Test
+    void kindIds_includeTheInputKind() {
+        assertEquals("STATION_INPUT", StationProgressProducers.STATION_INPUT);
+    }
+
+    @Test
+    void anUnattendedConsumption_creditsNobody_andNeverThrows() {
+        // No worker at all: the station consumed with nobody engaged. The event still fires for a
+        // listener, but progress belongs to a player who was there, so the producer fires nothing.
+        StationInputConsumedEvent event = new StationInputConsumedEvent(null, null, null, null,
+                WORLD_ID, 0, 64, 0, "sawmill", "Mill", List.of());
+        assertFalse(StationProgressProducers.creditsSomeone(event));
+        assertFalse(event.attended());
+
+        assertDoesNotThrow(() -> producers.onInputConsumedEvent(event));
+
+        assertTrue(fired.isEmpty(), "an unattended settle advances nobody");
+    }
+
+    @Test
+    void anEmptyInputBatch_firesNothingAndNeverThrows() {
+        // The worker's live ref cannot be built here, so the attended shape is pinned over the
+        // empty batch: nothing consumed, nothing fired, no throw.
+        StationInputConsumedEvent event = new StationInputConsumedEvent(null, null, null, PLAYER_ID,
+                WORLD_ID, 0, 64, 0, "sawmill", "Mill", List.of());
+
+        assertDoesNotThrow(() -> producers.onInputConsumedEvent(event));
+
+        assertTrue(fired.isEmpty(), "a batch nothing was taken in advances nothing");
     }
 
     private static StationCycleCompletedEvent cycle(boolean idle) {

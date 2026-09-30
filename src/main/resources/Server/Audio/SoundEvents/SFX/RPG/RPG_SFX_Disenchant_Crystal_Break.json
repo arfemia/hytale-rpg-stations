@@ -1,0 +1,5 @@
+{
+  "$Comment": "The crystal break the Unmake beat plays, as a one-line copy of vanilla's SFX_Crystal_Break that bypasses ducking: the greater table's hum ducks the block-sounds category this event belongs to, and the shatter must be heard over it.",
+  "Parent": "SFX_Crystal_Break",
+  "BypassDucking": true
+}

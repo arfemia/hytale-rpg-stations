@@ -38,11 +38,20 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
 | `Moments` | one entry: `Refused` | The engine-wide default cue layer, keyed by moment id exactly like an action's own `Moments` map (see [Flairs](flairs.md) for the vocabulary). An entry here sits UNDER every action's entry for the same id, per leaf: the action's authored leaves win, the leaves it omits fall through to this one, so a moment no action dressed still plays. The jar ships exactly one entry, `Refused`, playing `SFX_Generic_Crafting_Failed` - the same sound the vanilla benches play when they cannot proceed. |
 | `Refusals.RepeatWindowMs` | `1500` | How long, in milliseconds, the same player pressing the same station again for the SAME reason is answered by the refusal cue's sound alone: no second notice stacks on the first, no second particle burst or camera shake, and no event for a listening mod. `0` answers every press in full. See [Refusals](#refusals) below. |
 
-The top-level knobs (`Enabled`, `SummaryHud`, `Limits`, `Moments`, `Refusals`) are independent and
-composable - disabling the summary HUD does not disable the engine, and vice versa. Every leaf is nullable, so a
-partial owner override changes only what it mentions. `Limits` is deliberately unauthored in the jar
-default: every leaf means unlimited when absent, and the right ceiling depends on a server's own
-player count and hardware - a busy server sets its own numbers rather than inheriting a guess.
+The top-level knobs (`Enabled`, `SummaryHud`, `Limits`, `Moments`, `Refusals`) are independent
+and composable - disabling the summary HUD does not disable the engine, and vice versa. Every leaf
+is nullable within the one file, but the server reads ONE settings file: the jar's default and
+each pack's `Settings.json` go through the asset store's own merge, and the one file that survives
+it is the whole of the settings (there is no owner layer here), so a pack's file replaces the
+jar's whole rather than merging with it, and a pack that wants the jar's `Refused` cue beside its
+own changes authors both in its file. `Limits` is
+deliberately unauthored in the jar default: every leaf means unlimited when absent, and the right
+ceiling depends on a server's own player count and hardware - a busy server sets its own numbers
+rather than inheriting a guess.
+
+What no station may take as placed input is not a settings knob. The server-wide protect-list is
+a store of its own, `Server/RpgStations/ProtectLists/`, where every file counts rather than one
+replacing another: see [What a station will not take](custody-and-placed-display.md#what-a-station-will-not-take).
 
 <a id="refusals"></a>
 ## Refusals

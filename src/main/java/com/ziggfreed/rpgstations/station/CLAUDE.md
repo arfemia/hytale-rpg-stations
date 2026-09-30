@@ -16,6 +16,32 @@
 - Keep the per-burst particle `DurationSeconds` cap (default 4s): some vanilla spawners never stop (`TotalParticles` -1, as in `Block_Gem_Sparks`). Author `DurationSeconds: 0` only for a system that ends on its own.
 - A press the station turns away answers through `StationRefusals` (`press.refuse(<ui.station.* key>)`), never a bare `toast`: the seam plays the `Refused:<Reason>` cue, throttles repeats and fires `StationRefusedEvent`, and the reason is the key's tail after `ui.station.`.
 
+## Conversion, consumption and pacing
+
+- A conversion has ONE code path: the `Convert` phase (`StationStepHandlers#convertPhase`). The implicit program is `{Convert, Roll, Presentation}`; the pre-dispatch `selectConversion` only drives idle practice, stops and pace and rides the dispatch as `preselected`.
+- Every consuming path reaches `StationService#onInputConsumed` EXACTLY ONCE, AFTER the consumption commits, and a refunded consumption never reaches it: session consume records into the ledger's hook half and `commitIteration` reports it; `Stamp` reagents report after the stack commits; an unattended settle reports with no worker. Add a new consuming path to this hook in the same change (`InputConsumedHookOrderTest` pins the order).
+- Every commit point makes the ONE call `commitIteration`; a `Convert` phase commits whether or not it produced anything.
+- A single-item socket's last consume takes the piece's `Unique` stack off the pile and ledgers that REAL stack so an interrupted iteration puts it back intact; only a stack THIS drain took is ledgered (`StationCustodyLedger#pieceTaken`).
+- A fallback row is offered ONE at a time (`StationFallbackRoutes#offeredRows`), so a crafting-share row with no room answers NO_ROOM and the essence-only row never rescues it. Derived rows sort by primary output id then recipe id, and the derived cache re-derives when the recipe index's `generation()` moves.
+- A step's pace resolves ONCE at its fresh entry (`StationPacing`, `StationSession.stepPaceScale`); a `Paced` step stretches its `Duration` and its entry presentation's timing. A program with a `RollBonus` beat skips the completion-time `Bonus` pass.
+- The ritual queue (`Work.Queue`) sets `StationSession.queueSocketId` to the next filled Item socket (`StationCustody#nextFilledSocket`) before each pass, and `Convert` drains that socket.
+- `OutputItems` has a cycle output only once a `Convert` beat has run; a program with none is what `LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT` warns about.
+
+## Placement
+
+- Acceptance against an `ActionInput` is ONE rule, `StationCustody.accepts`; `matchesInput` is the routes-only seam behind it, never an acceptance site.
+- Placement (`StationService#socketAcceptsInput`, `routeStack`) layers three rules over it: a route-less matcher's `Except` holes carve out what the station DERIVES, never everything; a hole-refused or protect-listed material (`ProtectListCatalog.protects`) is `PlacementDenial.PROTECTED`, which outranks every other reason and keeps its own `ui.station.protected` key; a count pile refuses per-instance data.
+- A press that placed nothing refuses only at a station that was EMPTY before it (`unplacedPressRefusal`), Protected included, so a loaded station judges the held item as a tool and protecting a trophy tool never locks its owner out.
+
+## Presentation targets and working state
+
+- A moment's `Target` resolves at PLAY time (`playMoment` -> `resolveAim`), never at emit time, so a delayed cue lands where its target is when due. `Puppet` falls to the BLOCK when no double stands: a cue never lands on the worker's own body.
+- At an entity aim sounds go through zc `Sound3D.playOn`, and a burst rides the entity (`ModelParticleService.spawnOn`) only when `MomentBursts.plan` proves it ends on its own (zc `ParticleLifetimes`); everything else plays at the entity's position under its cap. A cue at a freshly spawned entity nobody has been shown yet falls back to its position.
+- An effect with `Target "Puppet"` goes on the double with NO expiry (`NativeEffectUtil.applyInfinite`; the double has no `EntityStatMap`, so the engine's timer never runs), and an authored `DurationMs` is kept on this engine's own cue clock (`queueEffectRemoval`); track every effect on the session so teardown strips it.
+- `enterWorkingState` is idempotent per block AND state name: a different name (a step's `State`) re-flips in place without the resting look between (`workingMove`, `workingStateName`).
+- `Display.Animated` is a spawn-time option; a step's `Display` overlay RESPAWNS the prop when `sameLook` says the look changed. A `Display` cue after the piece is consumed lands where the prop last stood (`displayRestingPosition`).
+- `MomentBursts` and `ProtectListCatalog` are the station policy classes over zc's `ParticleLifetimes` and the `ProtectListAsset` store.
+
 ## Client stability (observed in game)
 
 - Engage the work camera with `ClientCameraView.Custom` and a fully populated `ServerCameraSettings`, and release it with zc's `ServerCameraService.reset` (`Custom`, `false`, `null`); other shapes correlated with a client `NullReferenceException` after walk-off.
@@ -38,6 +64,7 @@
 - While its block stands, demote a pattern-marked stash through `removeOrDemoteStashAt`, never delete it: the mark is what lets a later break revert the structure. Only the block-gone path removes it.
 - A `NetworkId` is per world and not boot-stable: keep it only in the volatile `displayByBlock` map and scope every match to the presser's world (`StationCustodyRetrieval#owns`).
 - The `doneness:` prefix in a pile's `PendingCycles` is reserved; the unattended accrual keys (`accrual:conversion:<index>`) sit beside it.
+- An unattended settle reports what it drained per pile (`Settle#drains`) to the input hook after its `markDirty`, and a drain that takes a single-item socket's last also drops that socket's prop.
 - Volatile block-keyed maps are global, keyed `"<worldUuid>:<x>:<y>:<z>"`; a new one joins `forgetBlockKeyedState`, so a world unload evicts it.
 
 ## Content and validation

@@ -76,6 +76,19 @@ class SocketBlockMatchTest {
     }
 
     @Test
+    void match_aCatchAllWithAnExcept_takesAnyRealBlockButTheHole() {
+        // The shared matcher's ONE rule at the Block-socket site: a route-less Match with an
+        // Except accepts any real block except what the hole names.
+        ActionInput anyButStone = ActionInput.of(null, null, null, null,
+                ActionInput.of("Rock_Stone", null, null, null));
+        assertTrue(StationCustody.blockSocketMatches("Deco_Campfire_Off", anyButStone, RESOURCE_TYPES, TAGS));
+        assertFalse(StationCustody.blockSocketMatches("Rock_Stone", anyButStone, RESOURCE_TYPES, TAGS),
+                "the hole is carved out of the catch-all too");
+        assertFalse(StationCustody.blockSocketMatches("Empty", anyButStone, RESOURCE_TYPES, TAGS),
+                "air never satisfies a socket, hole or no hole");
+    }
+
+    @Test
     void match_stateVariantMatchesThroughItsBaseId() {
         // The caller normalizes a placed state variant onto its base item id BEFORE matching
         // (BlockOps.baseItemIdOf) - so what reaches this core for a lit fire is the base id, and

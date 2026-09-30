@@ -1,0 +1,5 @@
+{
+  "$Comment": "The void eye's summon call, played when the table finds Void essence, as a one-line copy of vanilla's SFX_Eye_Void_Attack_Summon that bypasses ducking: the greater table's hum ducks the creature category this event belongs to.",
+  "Parent": "SFX_Eye_Void_Attack_Summon",
+  "BypassDucking": true
+}

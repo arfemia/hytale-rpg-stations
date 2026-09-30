@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -16,7 +17,10 @@ import javax.annotation.Nullable;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Ingredient;
+import com.ziggfreed.rpgstations.asset.ProtectListAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
+import com.ziggfreed.common.entity.ItemReadings;
 import com.ziggfreed.common.match.ItemMatch;
 
 /**
@@ -160,6 +164,62 @@ final class StationCustody {
             }
         }
         return quantity - remaining;
+    }
+
+    /**
+     * PURE: the OLDEST-placed pile entry {@code matches} accepts (the one a drain would take
+     * first), or null when the pile holds none - what the factor context's item leaf reads for a
+     * count pile, where the "piece" is a bare stack of that material.
+     */
+    @Nullable
+    static String firstMatchingInPile(@Nullable Map<String, Integer> items, @Nonnull Predicate<String> matches) {
+        if (items == null) {
+            return null;
+        }
+        for (Map.Entry<String, Integer> e : items.entrySet()) {
+            if (e.getKey() != null && e.getValue() != null && e.getValue() > 0 && matches.test(e.getKey())) {
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * PURE (the custody consume fix): is a pile's metadata-bearing {@code Unique} stack DRAINED -
+     * present on the pile while the tally holds none of its item any more? A consume that took
+     * the last of that item took the piece itself, so the stack must go with it (or it would be
+     * handed back as a piece that no longer exists); and a pile saved with a dangling stack reads
+     * as holding nothing until the next touch clears it. False when there is no unique stack, or
+     * the tally still counts at least one of its item.
+     */
+    static boolean uniqueDrained(@Nullable String uniqueItemId, @Nullable Map<String, Integer> items) {
+        if (uniqueItemId == null || uniqueItemId.isBlank()) {
+            return false;
+        }
+        if (items == null) {
+            return true;
+        }
+        for (Map.Entry<String, Integer> e : items.entrySet()) {
+            if (e.getValue() != null && e.getValue() > 0 && ItemMatch.itemId(uniqueItemId, e.getKey())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * PURE (the ritual queue, {@code Work.Queue}): the NEXT filled Item socket in authored order -
+     * the first whose pile still counts something - or null when every socket is empty and the
+     * queue is done. {@code filled} answers per socket id (the live caller reads the claim).
+     */
+    @Nullable
+    static String nextFilledSocket(@Nonnull List<Custody.ResolvedSocket> sockets, @Nonnull Predicate<String> filled) {
+        for (Custody.ResolvedSocket socket : sockets) {
+            if (socket.itemRoute() && filled.test(socket.id())) {
+                return socket.id();
+            }
+        }
+        return null;
     }
 
     private static boolean matchesEntry(@Nonnull String entryItemId, @Nullable String wantItemId,
@@ -306,16 +366,138 @@ final class StationCustody {
     }
 
     /**
-     * The explicit {@link Custody#getInput()} placement matcher: {@code ActionInput}'s
-     * ItemId/ResourceTypeId/Tags/Function routes (match = ANY route satisfied, the {@code Tool}/
-     * {@code ActionInput} convention). SMOKE-FIX S4: the {@code Function} route now matches
-     * (previously "deferred to phase-2 leg E" per stale javadoc, but leg E's own
-     * {@code ActionResolver.matches}/{@code matchesAnyResourceType} DID land it for ACTION
-     * SELECTION - this custody PLACEMENT matcher was simply never updated to match, so the
-     * anvil's {@code enhance} action's {@code Custody.Input:{"Function":"Weapon"}} never accepted
-     * a held weapon for placement even though holding one correctly SELECTED the enhance action).
+     * THE acceptance rule of the shared matcher, the one every {@code ActionInput} site applies (an
+     * action's {@code Select}, a {@code Custody.Input}, a socket's {@code Match}, a fallback's
+     * {@code Input}): an absent or catch-all matcher accepts everything, an authored route set
+     * accepts what a route matches, and either way the {@code Except} hole is carved out of the
+     * answer. So a catch-all with an {@code Except} accepts everything BUT the hole, which is what
+     * lets a station refuse a short list of ids without listing everything it takes.
+     *
+     * <p>{@code heldResourceTypeIds} is the material's WHOLE resolved family set; a caller holding
+     * one family passes a one-element array.
+     */
+    static boolean accepts(@Nullable ActionInput matcher, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        if (matcher == null) {
+            return true;
+        }
+        if (!matcher.isCatchAll()
+                && !routesMatch(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+            return false;
+        }
+        // The Except holes: a material the routes (or the catch-all) accept is refused when any
+        // nested exclusion's ROUTES match it too. An absent Except excludes nothing, and so does a
+        // route-less entry: it matches no route, so it carves no hole (the validator warns
+        // EXCEPT_CATCH_ALL, since such an entry does nothing).
+        return !exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+    }
+
+    /**
+     * The hole alone: does any of {@code matcher}'s {@code Except} entries match the material? What
+     * turns a placement's generic "no place for that" into the Protected refusal, and what a
+     * derived acceptance (a {@code Custody.Input} or a socket {@code Match} that authors ONLY an
+     * {@code Except}) carves out of the rows and routes the station would otherwise accept. A null
+     * matcher, or one with no entry, refuses nothing.
+     */
+    static boolean exceptRefuses(@Nullable ActionInput matcher, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        ActionInput[] excepts = matcher != null ? matcher.getExcepts() : null;
+        if (excepts == null) {
+            return false;
+        }
+        for (ActionInput except : excepts) {
+            if (except != null && routesMatch(except, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * PURE: is the material on the server-wide protect-list at this station and action? Every
+     * file in {@code lists} that applies here ({@link ProtectListAsset#appliesTo}: its
+     * {@code Stations} and {@code Actions} scope) is asked, and ANY of them protecting the material
+     * refuses it, so the files add up rather than replace each other. A file protects what one of
+     * its {@code Protects} entries' routes match, minus that entry's {@code Except} holes
+     * ({@link #matchesInput}); an entry authoring no route protects nothing. An empty list
+     * protects nothing.
+     */
+    static boolean isProtected(@Nonnull Iterable<ProtectListAsset> lists, @Nullable String stationId,
+            @Nullable String actionId, @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds,
+            @Nullable Map<String, String[]> heldTags, @Nullable String heldFunction) {
+        for (ProtectListAsset list : lists) {
+            if (list == null || list.getProtects() == null || !list.appliesTo(stationId, actionId)) {
+                continue;
+            }
+            for (ActionInput entry : list.getProtects()) {
+                if (entry != null && matchesInput(entry, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Does a stack carry per-instance data a COUNT pile cannot keep? Reads the stack and asks
+     * {@link #carriesInstanceData(double, boolean, Set)}. A stack whose durability cannot be read
+     * is treated as bare on that axis, and the metadata read still decides.
+     */
+    static boolean carriesInstanceData(@Nullable ItemStack stack) {
+        if (stack == null) {
+            return false;
+        }
+        double maxDurability = 0.0;
+        boolean unbreakable = true;
+        try {
+            maxDurability = stack.getMaxDurability();
+            unbreakable = stack.isUnbreakable();
+        } catch (Throwable ignored) {
+            // Unreadable durability: bare on that axis, the metadata keys below still decide.
+        }
+        return carriesInstanceData(maxDurability, unbreakable, ItemReadings.metadataKeys(stack));
+    }
+
+    /**
+     * PURE, over the raw readings: does a stack carry per-instance data a COUNT pile cannot keep? A
+     * count pile stores ids and counts only, so a stack that tracks durability (a positive maximum
+     * on a breakable item, worn or not) or carries metadata would come back as a bare fresh stack:
+     * a free repair, or a lost enhancement. Such a stack is refused by every socket whose capacity
+     * is above one; a single-item socket keeps the real stack and takes it. Metadata keys the
+     * reader could not inspect ({@code null}) count as carried, so an unreadable stack is refused.
+     */
+    static boolean carriesInstanceData(double maxDurability, boolean unbreakable,
+            @Nullable Set<String> metadataKeys) {
+        if (maxDurability > 0 && !unbreakable) {
+            return true;
+        }
+        return metadataKeys == null || !metadataKeys.isEmpty();
+    }
+
+    /**
+     * The ROUTES half of {@link #accepts}: a matcher that authors at least one route, its
+     * {@code Except} hole applied ({@code ActionInput}'s ItemId/ResourceTypeId/Tags/Function
+     * routes, match = ANY route satisfied, the {@code Tool}/{@code ActionInput} convention). A
+     * catch-all answers false here, because no route matched; a SITE never asks this directly, it
+     * asks {@link #accepts}, which is where a catch-all means "everything". Kept as its own seam
+     * so the route parity with {@link #matchesIngredient} stays pinned
+     * ({@code IngredientActionInputRouteParityTest}). SMOKE-FIX S4: the {@code Function} route
+     * matches here too (the anvil's {@code Custody.Input:{"Function":"Weapon"}} accepts a held
+     * weapon for placement, as selection accepts it).
      */
     static boolean matchesInput(@Nonnull ActionInput matcher, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        if (!routesMatch(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+            return false;
+        }
+        return !exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+    }
+
+    /** One matcher's four routes alone (match = ANY), the {@code Except} hole not yet applied. */
+    private static boolean routesMatch(@Nonnull ActionInput matcher, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
             @Nullable String heldFunction) {
         if (ItemMatch.any(matcher.getItemId(), matcher.getTags(), matcher.getResourceTypeId(),
@@ -459,6 +641,13 @@ final class StationCustody {
 
     /** Why a press placed nothing, most specific first - drives the keyed refusal toast. */
     enum PlacementDenial {
+        /**
+         * The material is protected: on the server-wide protect-list, or in the hole an Except carves
+         * out of what a socket accepts. The most specific reason, and the one that survives a
+         * socket-less custody's generic mapping, so a player is told the station will not take
+         * the piece rather than that they hold nothing it works with.
+         */
+        PROTECTED,
         /** A socket accepted the material but its pile belongs to someone else (or Share.Place denied a fresh pile). */
         NOT_SHARED,
         /** A socket accepted the material but has no room left (its own cap, or the block total). */
@@ -559,8 +748,9 @@ final class StationCustody {
      * the block that authored the family); null, blank, or the engine's empty key means no block
      * stands there and nothing matches - a catch-all {@code Match} still needs a real block. The
      * identity resolvers are injected ({@code resourceTypesOf}/{@code tagsOf} answer for the base
-     * id) so this stays testable without a live asset map; the match itself is the SAME any-route
-     * {@link #matchesInput} every other {@code ActionInput} site uses (the Function route reads
+     * id) so this stays testable without a live asset map; the match itself is the ONE
+     * {@link #accepts} rule every other {@code ActionInput} site uses, so a catch-all
+     * {@code Match} with an {@code Except} takes any block but the hole (the Function route reads
      * null - a block has no held-item function).
      */
     static boolean blockSocketMatches(@Nullable String baseItemId, @Nullable ActionInput match,
@@ -569,10 +759,7 @@ final class StationCustody {
         if (baseItemId == null || baseItemId.isBlank() || "Empty".equalsIgnoreCase(baseItemId)) {
             return false;
         }
-        if (match == null || match.isCatchAll()) {
-            return true;
-        }
-        return matchesInput(match, baseItemId, resourceTypesOf.apply(baseItemId), tagsOf.apply(baseItemId), null);
+        return accepts(match, baseItemId, resourceTypesOf.apply(baseItemId), tagsOf.apply(baseItemId), null);
     }
 
     // ==================== socket addressing defaults ====================

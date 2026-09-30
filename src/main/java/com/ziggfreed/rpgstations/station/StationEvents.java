@@ -1,5 +1,6 @@
 package com.ziggfreed.rpgstations.station;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -15,9 +16,11 @@ import com.hypixel.hytale.server.core.HytaleServer;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
+import com.ziggfreed.common.entity.ItemReadings;
 import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.api.event.StationCycleCompletedEvent;
 import com.ziggfreed.rpgstations.api.event.StationEnhanceCompletedEvent;
+import com.ziggfreed.rpgstations.api.event.StationInputConsumedEvent;
 import com.ziggfreed.rpgstations.api.event.StationOutputProducedEvent;
 import com.ziggfreed.rpgstations.api.event.StationRefusedEvent;
 import com.ziggfreed.rpgstations.api.event.StationSessionCompletedEvent;
@@ -213,6 +216,53 @@ final class StationEvents {
         } catch (Throwable t) {
             log("StationToolBroke", t);
         }
+    }
+
+    /**
+     * Fires the input-consumed moment from {@code StationService#onInputConsumed}, the ONE hook every
+     * consuming path reaches exactly once AFTER its consumption committed (never on a refund):
+     * the worker (all three of handle, ref and uuid, or none of them on an unattended settle), the
+     * world and the block the pile stood at, the station and action ids, and each consumed stack
+     * as an immutable copy with the socket it left and the quality index and item level read off
+     * it through the shared item reader (null where the stack cannot tell).
+     */
+    static void fireInputConsumed(@Nonnull Store<EntityStore> store, @Nullable PlayerRef playerRef,
+            @Nullable Ref<EntityStore> worker, @Nullable UUID workerId, @Nonnull UUID worldUuid,
+            int blockX, int blockY, int blockZ, @Nonnull String stationId, @Nonnull String actionId,
+            @Nonnull List<ConsumedInput> consumed) {
+        try {
+            IEventDispatcher<StationInputConsumedEvent, StationInputConsumedEvent> d =
+                    HytaleServer.get().getEventBus().dispatchFor(StationInputConsumedEvent.class);
+            if (d.hasListener()) {
+                List<StationInputConsumedEvent.Consumed> inputs = new ArrayList<>(consumed.size());
+                for (ConsumedInput input : consumed) {
+                    if (input != null) {
+                        inputs.add(consumedRecord(input));
+                    }
+                }
+                d.dispatch(new StationInputConsumedEvent(store, playerRef, worker, workerId, worldUuid,
+                        blockX, blockY, blockZ, stationId, actionId, inputs));
+            }
+        } catch (Throwable t) {
+            log("StationInputConsumed", t);
+        }
+    }
+
+    /**
+     * One consumed stack as the api reports it: an immutable copy, its socket, and its quality
+     * index and item level through the shared item reader, each null where the stack cannot tell.
+     */
+    @Nonnull
+    static StationInputConsumedEvent.Consumed consumedRecord(@Nonnull ConsumedInput input) {
+        ItemStack stack = input.stack();
+        return new StationInputConsumedEvent.Consumed(stack, input.socketId(),
+                wholeNumber(ItemReadings.quality(stack)), wholeNumber(ItemReadings.itemLevel(stack)));
+    }
+
+    /** A reading as the whole number it names, or null when the reader could not tell. */
+    @Nullable
+    private static Integer wholeNumber(@Nullable Double reading) {
+        return reading == null ? null : (int) Math.round(reading);
     }
 
     private static void log(@Nonnull String which, @Nonnull Throwable t) {

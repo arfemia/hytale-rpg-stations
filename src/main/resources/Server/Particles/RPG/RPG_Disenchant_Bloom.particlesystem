@@ -1,0 +1,28 @@
+{
+  "$Comment": "The Payout beat's bloom where the piece stood: the vanilla morph burst (Potion_Morph_Burst, greyscale and built for tinting) in green-gold copies (Spawners/RPG_Disenchant_Bloom_*), an expanding ring and rising sparks, with the uncommon drop's own glow (Drop_Uncommon's ground disc, ray and centre ray, listed by id; they are already the Life-essence green) folded in under it, so the whole bloom is one bounded system. LifeSpan 2 seconds ends it on its own; the drop-glow entries keep vanilla's stagger but sit lower, since they play around a piece in the air rather than an item on the ground.",
+  "Spawners": [
+    { "SpawnerId": "RPG_Disenchant_Bloom_Ring" },
+    {
+      "SpawnerId": "RPG_Disenchant_Bloom_Sparks",
+      "PositionOffset": { "Y": 0.25 }
+    },
+    {
+      "SpawnerId": "Drop_Uncommon_Ground",
+      "PositionOffset": { "Y": -0.3 },
+      "StartDelay": 0.5
+    },
+    {
+      "SpawnerId": "Drop_Uncommon_Ray",
+      "PositionOffset": { "Y": 0.3 },
+      "StartDelay": 0.2
+    },
+    {
+      "SpawnerId": "Drop_Uncommon_Ray_Center",
+      "PositionOffset": { "Y": 0.2 },
+      "StartDelay": 0.5
+    }
+  ],
+  "CullDistance": 30.0,
+  "IsImportant": false,
+  "LifeSpan": 2.0
+}

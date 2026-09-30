@@ -6,10 +6,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.ziggfreed.common.recipe.RecipeIndex;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 
 /**
@@ -34,6 +36,14 @@ public final class StationCatalog {
      */
     private final ConcurrentHashMap<String, StationAsset.Conversion[]> resolvedConversions =
             new ConcurrentHashMap<>();
+
+    /**
+     * The shared recipe index's {@link RecipeIndex#generation()} the cache above was derived at.
+     * {@code FromCrafting} rows come out of that index, and the library moves the number on every
+     * recipe and item reload, so a read that finds it moved drops the cache and re-derives - the
+     * "has anything I derived from gone stale" question in one comparison.
+     */
+    private final AtomicLong derivedAtGeneration = new AtomicLong(Long.MIN_VALUE);
 
     private StationCatalog() {
     }
@@ -72,7 +82,8 @@ public final class StationCatalog {
      * ONE action's EFFECTIVE conversions - its recipe's authored {@code Conversions} FIRST, then any
      * {@code FromCrafting}-derived ones (see {@link StationRecipeDeriver}), then any appended by an
      * {@code Action}-targeted {@code ExtensionAsset} - computed lazily and cached until the next
-     * {@link #fold} or {@link #invalidateResolvedConversions}.
+     * {@link #fold} or {@link #invalidateResolvedConversions}, or until the shared recipe index the
+     * derived rows come from reloads ({@link RecipeIndex#generation()}).
      *
      * <p>{@code recipe} is the caller's ALREADY {@code ActionResolver}-resolved {@code Recipe},
      * never re-derived here. The cache key is {@code "<stationId>::<actionId>"}: one recipe per
@@ -90,6 +101,11 @@ public final class StationCatalog {
         String id = asset.getId();
         String cacheKey = (id != null ? id.toLowerCase(Locale.ROOT) : "?")
                 + "::" + actionId.toLowerCase(Locale.ROOT);
+        // A recipe or item reload moved the index on: everything derived from it is stale.
+        long generation = RecipeIndex.live().generation();
+        if (derivedAtGeneration.getAndSet(generation) != generation) {
+            resolvedConversions.clear();
+        }
         return resolvedConversions.computeIfAbsent(cacheKey, k -> {
             StationAsset.Conversion[] derived =
                     StationRecipeDeriver.resolve(recipe, StationRecipeDeriver.liveCandidates());

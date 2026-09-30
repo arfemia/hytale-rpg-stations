@@ -14,12 +14,12 @@ import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.rpgstations.asset.Pace;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
-import com.ziggfreed.common.match.ItemMatch;
 
 /**
  * Resolves ONE of a station's ordered actions into the flat group view every engine read uses. The
@@ -240,6 +240,7 @@ public final class ActionResolver {
                 pick(def, base, ActionDef::getSteps),
                 pick(def, base, ActionDef::getBonus),
                 pick(def, base, ActionDef::getContributionScale),
+                pick(def, base, ActionDef::getPace),
                 worker != null ? worker.getHold() : null,
                 worker != null ? worker.getCamera() : null,
                 worker != null ? worker.getAnimation() : null,
@@ -314,29 +315,18 @@ public final class ActionResolver {
 
     /**
      * Action selection: the FIRST action in AUTHORED ORDER whose effective {@code Select} (its own,
-     * or its {@code Ref} base's) is absent, catch-all, or matches. {@code null} when nothing matches
-     * or the station authors no actions.
+     * or its {@code Ref} base's) accepts the held material under the shared matcher's ONE rule
+     * ({@link StationCustody#accepts}: absent or catch-all accepts everything, a route set accepts
+     * what a route matches, and the {@code Except} hole is carved out either way). {@code null}
+     * when nothing matches or the station authors no actions.
      */
     @Nullable
     public static String selectAction(@Nonnull StationAsset asset, @Nullable String heldItemId,
             @Nullable String heldResourceTypeId, @Nullable Map<String, String[]> heldTags,
             @Nullable String heldFunction) {
-        ActionDef[] actions = effectiveActions(asset);
-        if (actions == null) {
-            return null;
-        }
-        for (int i = 0; i < actions.length; i++) {
-            ActionDef def = actions[i];
-            if (def == null) {
-                continue;
-            }
-            ActionInput select = effectiveSelectOf(def);
-            if (select == null || select.isCatchAll()
-                    || matches(select, heldItemId, heldResourceTypeId, heldTags, heldFunction)) {
-                return effectiveActionId(def, i);
-            }
-        }
-        return null;
+        String[] heldResourceTypeIds = heldResourceTypeId != null ? new String[] {heldResourceTypeId} : null;
+        List<String> matches = selectActionsByFamily(asset, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+        return matches.isEmpty() ? null : matches.get(0);
     }
 
     /**
@@ -353,8 +343,8 @@ public final class ActionResolver {
     }
 
     /**
-     * EVERY action whose effective {@code Select} is absent, catch-all, or matches the held
-     * identity, in AUTHORED ORDER - the candidate list behind {@link #selectActionByFamily}
+     * EVERY action whose effective {@code Select} accepts the held identity under the shared
+     * matcher's ONE rule ({@link StationCustody#accepts}), in AUTHORED ORDER - the candidate list behind {@link #selectActionByFamily}
      * (whose answer is simply the first entry). The engage path walks this list with each
      * candidate's own {@code Requires} gate: the first candidate whose gate passes wins, and when
      * none passes the FIRST candidate is engaged anyway so its gate denies with the honest
@@ -376,9 +366,7 @@ public final class ActionResolver {
             if (def == null) {
                 continue;
             }
-            ActionInput select = effectiveSelectOf(def);
-            if (select == null || select.isCatchAll()
-                    || matchesAnyResourceType(select, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+            if (StationCustody.accepts(effectiveSelectOf(def), heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
                 matches.add(effectiveActionId(def, i));
             }
         }
@@ -408,32 +396,6 @@ public final class ActionResolver {
         return null;
     }
 
-    private static boolean matchesAnyResourceType(@Nonnull ActionInput input, @Nullable String heldItemId,
-            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
-            @Nullable String heldFunction) {
-        if (heldResourceTypeIds != null && heldResourceTypeIds.length > 0) {
-            for (String rt : heldResourceTypeIds) {
-                if (matches(input, heldItemId, rt, heldTags, heldFunction)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        return matches(input, heldItemId, null, heldTags, heldFunction);
-    }
-
-    private static boolean matches(@Nonnull ActionInput input, @Nullable String heldItemId,
-            @Nullable String heldResourceTypeId, @Nullable Map<String, String[]> heldTags,
-            @Nullable String heldFunction) {
-        if (ItemMatch.itemId(input.getItemId(), heldItemId)
-                || ItemMatch.resourceFamily(input.getResourceTypeId(), heldResourceTypeId)
-                || ItemMatch.tags(input.getTags(), heldTags)) {
-            return true;
-        }
-        String wantFunction = input.getFunction();
-        return wantFunction != null && !wantFunction.isBlank() && wantFunction.equalsIgnoreCase(heldFunction);
-    }
-
     /**
      * The resolved, FLAT view of one action. Every accessor is the group a {@code station.step}
      * handler / the direct-Java engine path should read - never the raw {@link StationAsset}/
@@ -453,6 +415,7 @@ public final class ActionResolver {
         @Nullable private final StationStep[] steps;
         @Nullable private final LootRef bonus;
         @Nullable private final ContributionScale contributionScale;
+        @Nullable private final Pace pace;
         @Nullable private final StationAsset.Hold hold;
         @Nullable private final StationAsset.Camera camera;
         @Nullable private final StationAsset.Animation animation;
@@ -464,6 +427,7 @@ public final class ActionResolver {
                 @Nullable StationAsset.Work work, @Nullable Custody custody,
                 @Nullable Map<String, ActionDef.Anchor> anchors, @Nullable StationStep[] steps,
                 @Nullable LootRef bonus, @Nullable ContributionScale contributionScale,
+                @Nullable Pace pace,
                 @Nullable StationAsset.Hold hold, @Nullable StationAsset.Camera camera,
                 @Nullable StationAsset.Animation animation, @Nullable Puppet puppet,
                 @Nullable Map<String, Presentation> moments) {
@@ -478,6 +442,7 @@ public final class ActionResolver {
             this.steps = steps;
             this.bonus = bonus;
             this.contributionScale = contributionScale;
+            this.pace = pace;
             this.hold = hold;
             this.camera = camera;
             this.animation = animation;
@@ -490,7 +455,7 @@ public final class ActionResolver {
         ResolvedAction with(@Nullable Custody newCustody, @Nullable Puppet newPuppet,
                 @Nullable ContributionScale newScale, @Nullable Map<String, ActionDef.Anchor> newAnchors) {
             return new ResolvedAction(actionId, select, requires, tool, recipe, work, newCustody, newAnchors,
-                    steps, bonus, newScale, hold, camera, animation, newPuppet, moments);
+                    steps, bonus, newScale, pace, hold, camera, animation, newPuppet, moments);
         }
 
         /** The id this action answers to (its authored {@code Id}, or the documented fallback). */
@@ -569,6 +534,12 @@ public final class ActionResolver {
         @Nullable
         public ContributionScale getContributionScale() {
             return contributionScale;
+        }
+
+        /** The action-level pace over its Paced beats (its OWN ladder and clamp; an extension's ladders multiply in at the read); null = every beat runs at its authored length. */
+        @Nullable
+        public Pace getPace() {
+            return pace;
         }
 
         /** {@code Worker.Hold} - the movement lock / mount. */

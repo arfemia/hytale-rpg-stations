@@ -1,0 +1,17 @@
+{
+  "$Comment": "The Surge beat's shell around the lifted piece: the vanilla blue beam's two-stage explosion (Blue_Beam) in green-gold copies (Spawners/RPG_Disenchant_Surge_*) shrunk to a table's scale, a bright shell that collapses inward and a gold core a second behind it. LifeSpan 3.5 seconds ends the system on its own, so it rides the prop. The copies' EmitOffset sets the shell's radius and their TotalParticles its density.",
+  "Spawners": [
+    {
+      "SpawnerId": "RPG_Disenchant_Surge_Shell",
+      "PositionOffset": { "X": 0, "Y": 0, "Z": 0 }
+    },
+    {
+      "SpawnerId": "RPG_Disenchant_Surge_Core",
+      "PositionOffset": { "X": 0, "Y": 0, "Z": 0 },
+      "StartDelay": 1
+    }
+  ],
+  "BoundingRadius": 3,
+  "IsImportant": false,
+  "LifeSpan": 3.5
+}

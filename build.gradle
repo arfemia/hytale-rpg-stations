@@ -90,6 +90,9 @@ compileJava {
 
 test {
     useJUnitPlatform()
+    // MmoAgnosticismTest scans the in-repo docs/ prose as well as the code and resources, so a
+    // docs-only change must re-run the tests rather than leave the task UP-TO-DATE.
+    inputs.dir('docs').withPropertyName('docsProse').withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 // Regenerate the repo-root SCHEMA.md schema reference from the actual asset codecs, the

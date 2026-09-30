@@ -27,3 +27,26 @@ RPG_Food_Hearty_Stew.description = A bowl of whatever went into the pot, simmere
 
 RPG_Tool_Hatchet_Sawmiller.name = Sawmiller's Hatchet
 RPG_Tool_Hatchet_Sawmiller.description = A masterwork mithril hatchet, balanced by countless hours at the sawmill. Keener and sturdier than the forge original.
+
+RPG_Station_Disenchanting_Table.name = Disenchanting Table
+RPG_Station_Disenchanting_Table.description = A work station that unmakes a piece of gear over one long ritual, giving back what the Salvage bench would plus Life essence and the occasional find. Place a piece and press use to begin.
+RPG_Station_Disenchanting_Table.hint.empty = Press [{key}] to place a piece of gear
+RPG_Station_Disenchanting_Table.hint.loaded = Press [{key}] to begin the ritual
+RPG_Station_Disenchanting_Table.hint.working = The ritual is under way
+RPG_Station_Disenchanting_Table_Greater.name = Greater Disenchanting Table
+RPG_Station_Disenchanting_Table_Greater.description = A wider table that holds three pieces of gear side by side and unmakes them one ritual after another, paying more essence and finding void more often. Place your pieces and press use to begin.
+RPG_Station_Disenchanting_Table_Greater.hint.empty = Press [{key}] to place a piece of gear
+RPG_Station_Disenchanting_Table_Greater.hint.loaded = Press [{key}] to begin the ritual
+RPG_Station_Disenchanting_Table_Greater.hint.working = The ritual is under way
+RPG_Weapon_Spellbook_Grimoire_Disenchanter.name = Disenchanter's Grimoire
+RPG_Weapon_Spellbook_Grimoire_Disenchanter.description = A grimoire drawn whole out of a hundred unmade pieces. It casts like any other, and in hand it hurries the ritual along. The tables will not take it back.
+RPG_Armor_Disenchanter_Head.name = Disenchanter's Hood
+RPG_Armor_Disenchanter_Head.description = Silk hood of the disenchanter's kit, found only at the table. Steadies the hands for the ritual; wear the kit together for more.
+RPG_Armor_Disenchanter_Chest.name = Disenchanter's Robe
+RPG_Armor_Disenchanter_Chest.description = Silk robe of the disenchanter's kit, found only at the table. Steadies the hands for the ritual; wear the kit together for more.
+RPG_Armor_Disenchanter_Hands.name = Disenchanter's Gloves
+RPG_Armor_Disenchanter_Hands.description = Silk gloves of the disenchanter's kit, found only at the table. Steadies the hands for the ritual; wear the kit together for more.
+RPG_Armor_Disenchanter_Legs.name = Disenchanter's Leggings
+RPG_Armor_Disenchanter_Legs.description = Silk leggings of the disenchanter's kit, found only at the table. Steadies the hands for the ritual; wear the kit together for more.
+RPG_Potion_Disenchanters_Draught.name = Disenchanter's Draught
+RPG_Potion_Disenchanters_Draught.description = Life essence cut with a thread of void. For five minutes the ritual at a Disenchanting Table runs faster.

@@ -145,9 +145,12 @@ over every folded station/lootable/action/extension and chats a summary line plu
 finding is warn-only by design (a content mistake never blocks the server from starting); read the
 finding codes to catch typos and missing references before a player does.
 
-That is a complete station. From here, [Actions & Step Programs](actions-and-steps.md) covers giving
-one station multiple actions and authoring a step-by-step ritual instead of the classic convert loop.
+That is a complete station. From here, [Derive from Any Bench](derive-from-any-bench.md) covers a
+station that stands in for a vanilla bench and takes its recipes from the game's own catalog,
+[Disenchanting](disenchanting.md) walks one staged ritual end to end, and
+[Actions & Step Programs](actions-and-steps.md) covers giving one station multiple actions and
+authoring a step-by-step ritual instead of the classic convert loop.
 
 ---
 
-Previous: [Concepts](concepts.md) · Next: [Actions & Step Programs](actions-and-steps.md)
+Previous: [Concepts](concepts.md) · Next: [Derive from Any Bench](derive-from-any-bench.md)

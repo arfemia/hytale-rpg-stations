@@ -42,7 +42,7 @@ import com.ziggfreed.common.loot.stamp.StatRollEntry;
  * {@code EXTENSION_PAYLOAD_MISMATCH} - see {@link #payloadAllowedFor}):
  * <table><tr><th>Target</th><th>Payload keys</th></tr>
  * <tr><td>Station</td><td>Actions</td></tr>
- * <tr><td>Action (bare or {@code {Station, Action}}-scoped)</td><td>Steps, Anchors, Bonus, Conversions, PerCycleContributions, ContributionScale, Puppet, Custody</td></tr>
+ * <tr><td>Action (bare or {@code {Station, Action}}-scoped)</td><td>Steps, Anchors, Bonus, Conversions, PerCycleContributions, ContributionScale, Pace, Puppet, Custody</td></tr>
  * <tr><td>Lootable</td><td>Rolls</td></tr>
  * <tr><td>RollPool</td><td>Entries</td></tr></table>
  *
@@ -104,6 +104,7 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     public static final String PAYLOAD_PER_CYCLE_CONTRIBUTIONS = "PerCycleContributions";
     public static final String PAYLOAD_BONUS = "Bonus";
     public static final String PAYLOAD_CONTRIBUTION_SCALE = "ContributionScale";
+    public static final String PAYLOAD_PACE = "Pace";
     public static final String PAYLOAD_ACTIONS = "Actions";
     public static final String PAYLOAD_CONVERSIONS = "Conversions";
     public static final String PAYLOAD_STEPS = "Steps";
@@ -131,6 +132,7 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     @Nullable private Contribution[] perCycleContributions;
     @Nullable private LootRef bonus;
     @Nullable private ContributionScale contributionScale;
+    @Nullable private Pace pace;
     @Nullable private ActionDef[] actions;
     @Nullable private StationAsset.Conversion[] conversions;
     @Nullable private StepInsertion[] steps;
@@ -170,6 +172,9 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
                     (a, v) -> a.contributionScale = v, a -> a.contributionScale,
                     (a, p) -> a.contributionScale = p.contributionScale)
             .documentation("ContributionScale overlay (Action target), merged PER LEAF: an overlay authoring only Floors keeps the base action's own Factors.").add()
+            .appendInherited(new KeyedCodec<>("Pace", Pace.LADDER_ONLY_CODEC, false),
+                    (a, v) -> a.pace = v, a -> a.pace, (a, p) -> a.pace = p.pace)
+            .documentation("This extension's OWN complete Pace ladder (Action target), {Ladder} only and never an overlay: it resolves from its own Factors and Floors, and its scale MULTIPLIES the action's and every other extension's; the action's own Clamp bounds the product, so there is no Clamp to author here.").add()
             .appendInherited(new KeyedCodec<>("Actions", new ArrayCodec<>(ActionDef.CODEC, ActionDef[]::new), false),
                     (a, v) -> a.actions = v, a -> a.actions, (a, p) -> a.actions = p.actions)
             .documentation("NEW actions appended to a station's ordered Actions list (Station target); the base wins an Id collision, and an appended action is selected only after every base action.").add()
@@ -248,6 +253,17 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     @Nullable
     public ContributionScale getContributionScale() {
         return contributionScale;
+    }
+
+    /**
+     * This extension's own {@code Pace} ladder (Action target); null = none. NOT an overlay: the
+     * ladder resolves on its own and its scale multiplies the action's, so a pack scales the pace
+     * by a factor of its own without restating the base ladder. Typed {@code {Ladder}} only
+     * ({@link Pace#LADDER_ONLY_CODEC}), so its {@code getClamp()} is always null.
+     */
+    @Nullable
+    public Pace getPace() {
+        return pace;
     }
 
     /** NEW actions appended to a station's ordered list (Station target); null = none. */
@@ -335,7 +351,7 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
                 return PAYLOAD_STEPS.equals(payloadKey) || PAYLOAD_ANCHORS.equals(payloadKey)
                         || PAYLOAD_BONUS.equals(payloadKey) || PAYLOAD_CONVERSIONS.equals(payloadKey)
                         || PAYLOAD_PER_CYCLE_CONTRIBUTIONS.equals(payloadKey)
-                        || PAYLOAD_CONTRIBUTION_SCALE.equals(payloadKey)
+                        || PAYLOAD_CONTRIBUTION_SCALE.equals(payloadKey) || PAYLOAD_PACE.equals(payloadKey)
                         || PAYLOAD_PUPPET.equals(payloadKey) || PAYLOAD_CUSTODY.equals(payloadKey);
             case Target.LOOTABLE:
                 return PAYLOAD_ROLLS.equals(payloadKey);

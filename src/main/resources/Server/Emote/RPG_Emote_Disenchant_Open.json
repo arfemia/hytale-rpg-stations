@@ -1,0 +1,7 @@
+{
+  "Name": "avatarCustomization.emotes.RPG_Emote_Disenchant_Open.name",
+  "Animation": "Characters/Animations/Items/Dual_Handed/Staff/Interact.blockyanim",
+  "Icon": "Icons/Emotes/Wave@2x.png",
+  "IsLooping": false,
+  "HideItemInHand": false
+}

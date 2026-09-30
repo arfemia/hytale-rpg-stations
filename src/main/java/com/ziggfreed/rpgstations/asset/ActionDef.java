@@ -56,6 +56,7 @@ public final class ActionDef {
     @Nullable protected StationStep[] steps;
     @Nullable protected LootRef bonus;
     @Nullable protected ContributionScale contributionScale;
+    @Nullable protected Pace pace;
     @Nullable protected Worker worker;
     @Nullable protected Map<String, Presentation> moments;
 
@@ -106,6 +107,9 @@ public final class ActionDef {
                     (o, v) -> o.contributionScale = v, o -> o.contributionScale,
                     (o, p) -> o.contributionScale = p.contributionScale)
             .documentation("A factor ladder multiplying every Work.PerCycleContributions amount before it is forwarded; the engine pre-scales, so a listener grants the amount verbatim.").add()
+            .appendInherited(new KeyedCodec<>("Pace", Pace.CODEC, false),
+                    (o, v) -> o.pace = v, o -> o.pace, (o, p) -> o.pace = p.pace)
+            .documentation("The pace of this action's Steps program: a factor Ladder (the ContributionScale shape) whose scale multiplies the Duration of every step marked Paced, bounded by Clamp; an extension's own Pace ladder multiplies in. Null = every beat runs at its authored length.").add()
             .appendInherited(new KeyedCodec<>("Worker", Worker.CODEC, false),
                     (o, v) -> o.worker = v, o -> o.worker, (o, p) -> o.worker = p.worker)
             .documentation("How the person looks doing this: Hold, Camera, Animation, Puppet.").add()
@@ -213,6 +217,12 @@ public final class ActionDef {
     }
 
     @Nonnull
+    public ActionDef withPace(@Nullable Pace pace) {
+        this.pace = pace;
+        return this;
+    }
+
+    @Nonnull
     public ActionDef withWorker(@Nullable Worker worker) {
         this.worker = worker;
         return this;
@@ -307,6 +317,12 @@ public final class ActionDef {
     @Nullable
     public ContributionScale getContributionScale() {
         return contributionScale;
+    }
+
+    /** The pace ladder over this action's paced beats; null = every beat runs at its authored length. */
+    @Nullable
+    public Pace getPace() {
+        return pace;
     }
 
     /** How the person looks doing this ({@code Hold}/{@code Camera}/{@code Animation}/{@code Puppet}). */

@@ -12,6 +12,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 
@@ -44,6 +45,7 @@ public final class FactorContext {
     private final double toolItemLevel;
     @Nonnull private final Map<String, List<String>> contributionParams;
     @Nonnull private final Map<String, Boolean> socketsFilled;
+    @Nullable private final ItemStack item;
 
     private FactorContext(@Nonnull Builder b) {
         this.store = b.store;
@@ -60,6 +62,7 @@ public final class FactorContext {
         this.toolItemLevel = b.toolItemLevel;
         this.contributionParams = copyChannelMap(b.contributionParams);
         this.socketsFilled = copyFilledMap(b.socketsFilled);
+        this.item = b.item;
     }
 
     @Nonnull
@@ -273,6 +276,19 @@ public final class FactorContext {
         return filled == null ? null : (filled ? 1.0 : 0.0);
     }
 
+    /**
+     * The item this evaluation is ABOUT, or null when the moment has none: the piece placed on the
+     * station (captured when the work began and carried across a resume, so a paused program reads
+     * the same piece) or the stack the cycle consumed. It is its own leaf, never a reading of the
+     * worker's hand: the held tool and the piece on the bench are two different items, and a
+     * formula may weigh either. Every factor that reads it answers null when it is absent, so a
+     * gate on an item a moment does not have stays shut. A plain value, safe to retain.
+     */
+    @Nullable
+    public ItemStack item() {
+        return item;
+    }
+
     @Nonnull
     public static Builder builder() {
         return new Builder();
@@ -294,6 +310,7 @@ public final class FactorContext {
         private double toolItemLevel;
         @Nullable private Map<String, List<String>> contributionParams;
         @Nullable private Map<String, Boolean> socketsFilled;
+        @Nullable private ItemStack item;
 
         private Builder() {
         }
@@ -396,6 +413,17 @@ public final class FactorContext {
         @Nonnull
         public Builder socketsFilled(@Nullable Map<String, Boolean> socketsFilled) {
             this.socketsFilled = socketsFilled;
+            return this;
+        }
+
+        /**
+         * The item this evaluation is about (the piece placed on the station, or the stack the
+         * cycle consumed), independent of what the worker holds; see {@link FactorContext#item()}.
+         * Null when the moment has none.
+         */
+        @Nonnull
+        public Builder item(@Nullable ItemStack item) {
+            this.item = item;
             return this;
         }
 

@@ -1,0 +1,7 @@
+{
+  "Name": "avatarCustomization.emotes.RPG_Emote_Disenchant_Release.name",
+  "Animation": "Characters/Animations/Items/Dual_Handed/Spellbook/Attacks/Cast_Push_Charged/Cast_Push_Charged.blockyanim",
+  "Icon": "Icons/Emotes/Wave@2x.png",
+  "IsLooping": false,
+  "HideItemInHand": false
+}

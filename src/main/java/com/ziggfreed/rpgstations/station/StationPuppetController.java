@@ -40,7 +40,7 @@ import com.ziggfreed.rpgstations.util.Log;
  * spawn a visual of their own character model performing the steps. Sibling to {@link
  * StationEntityMountController}/{@link StationHoldController}: this class owns ONLY the puppet's
  * spawn/hide/reveal/despawn/animation MECHANISM (the offset/yaw/prop resolution against the
- * station's own block-top anchor - FACING-RELATIVE to the placed block's own yaw, see
+ * station's own block-centre anchor - FACING-RELATIVE to the placed block's own yaw, see
  * {@link #resolveWorldOffset}/{@link #resolveYawRadians} and the shared {@link StationBlockFacing}
  * reader - which hide route an author picked, and the swing-beat cadence caller policy) - the
  * generic "clone-a-skin-onto-a-networked-entity" + "scale self-hide" primitives themselves live in
@@ -634,7 +634,7 @@ final class StationPuppetController {
      * PURE: {@code offset}'s authored horizontal X/Z ROTATED into world space by the placed station
      * block's own {@code blockYawRadians} facing, with {@code Offset.Y} left VERTICAL (never
      * rotated). Returns {@code [worldOffsetX, offsetY, worldOffsetZ]}, ready to feed
-     * {@link PlayerPuppetService#offsetPosition}'s block-top anchor - kept primitive so it needs no
+     * {@link PlayerPuppetService#offsetPosition}'s block-centre anchor - kept primitive so it needs no
      * live Hytale type.
      *
      * <p><b>Facing-relative convention</b> (the same one {@code Custody.Display} follows): the

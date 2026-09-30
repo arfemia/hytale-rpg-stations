@@ -26,7 +26,7 @@ import com.ziggfreed.rpgstations.util.Log;
 /**
  * The placed-input PLACED-AS-ENTITY visual (design section 9, phase 2 leg G): a static,
  * network-replicated, pickup-immune, physics-free prop entity rendering the custody claim's item
- * at the station's block-top anchor - the SAME point every cycle/swing/impact/rare-find moment
+ * at the station's block-centre anchor - the SAME point every cycle/swing/impact/rare-find moment
  * already targets ({@code blockX+0.5, blockY+0.5, blockZ+0.5}, offset-adjustable via
  * {@link Custody.Display}). Maintainer-directed route over a Blockbench baked-node model swap.
  *
@@ -37,7 +37,7 @@ import com.ziggfreed.rpgstations.util.Log;
  * class's own prior verbatim copy (itself copied from the engine's sanctioned admin "Entity Spawn
  * Page" Items tab exemplar), per the root additional-mods PARADIGM (a reusable Hytale primitive
  * belongs in common, not duplicated here). This class now owns only STATION-SPECIFIC policy: the
- * block-top-anchor offset/yaw/scale resolution against {@link Custody.Display}'s knobs, and the
+ * block-centre-anchor offset/yaw/scale resolution against {@link Custody.Display}'s knobs, and the
  * press-F retrieve interaction wiring (below) added onto the common primitive's two-phase
  * {@code buildHolder}/{@code spawn} API before the entity commits.
  *
@@ -172,7 +172,13 @@ final class StationCustodyDisplay {
             Rotation3f rotation = new Rotation3f(rot[0], rot[1], rot[2]);
             float scale = resolveScale(display);
 
-            Holder<EntityStore> holder = ItemPropEntityService.buildHolder(commandBuffer, itemId, position, rotation, scale);
+            // The prop's motion is a spawn-time option of the primitive: a still prop (the
+            // default) or the client's own dropped-item turn and bob (Display.Animated).
+            ItemPropEntityService.Options options = display.effectiveAnimated()
+                    ? ItemPropEntityService.Options.DEFAULT.withDroppedItemAnimation()
+                    : ItemPropEntityService.Options.DEFAULT;
+            Holder<EntityStore> holder = ItemPropEntityService.buildHolder(commandBuffer, itemId, position, rotation,
+                    scale, options);
             if (holder == null) {
                 Log.warn("STATION custody display spawn produced no holder for '" + itemId + "'");
                 return null;
@@ -226,7 +232,7 @@ final class StationCustodyDisplay {
     }
 
     /**
-     * Pure: the block-top anchor ({@code blockX+0.5, blockY+0.5, blockZ+0.5}) shifted by
+     * Pure: the block-centre anchor ({@code blockX+0.5, blockY+0.5, blockZ+0.5}) shifted by
      * {@code display}'s authored {@code Offset}, the horizontal (X/Z) part rotated into world space by
      * the placed block's own {@code blockYawRadians} facing (see {@link #resolveWorldOffset}; Y stays
      * vertical). Returns {@code [x, y, z]} - kept primitive so it needs no live Hytale type.

@@ -204,6 +204,24 @@ public class ActionResolverTest {
     }
 
     @Test
+    void selectAction_aCatchAllWithAnExcept_takesEverythingButTheHole() {
+        // The shared matcher's ONE rule at the selection site: a route-less Select with an Except
+        // accepts any held material except what the hole names, so the hole falls through to
+        // the next action (or to nothing) instead of being swallowed by the catch-all.
+        StationAsset a = station(
+                def("Unmake").withSelect(ActionInput.of(null, null, null, null,
+                        ActionInput.of("Fixture_Grimoire", null, null, null))),
+                def("Read").withSelect(ActionInput.of("Fixture_Grimoire", null, null, null)));
+        assertEquals("Unmake", ActionResolver.selectAction(a, "Fixture_Sword", null, null, "Weapon"));
+        assertEquals("Read", ActionResolver.selectAction(a, "Fixture_Grimoire", null, null, "Weapon"),
+                "the grimoire is the hole, so the catch-all yields it to the next action");
+        assertEquals(List.of("Read"), ActionResolver.selectActionsByFamily(a, "Fixture_Grimoire",
+                new String[] {"Fixture_Book"}, null, "Weapon"));
+        assertEquals(List.of("Unmake"), ActionResolver.selectActionsByFamily(a, "Fixture_Sword",
+                new String[] {"Fixture_Blade"}, null, "Weapon"));
+    }
+
+    @Test
     void selectActionsByFamily_returnsEveryMatch_inAuthoredOrder_andTheSingleFormIsItsHead() {
         ActionInput sameRoute = ActionInput.of(null, "Fixture_Family", null, null);
         StationAsset a = station(

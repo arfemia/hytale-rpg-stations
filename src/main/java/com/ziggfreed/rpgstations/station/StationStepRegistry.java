@@ -14,7 +14,7 @@ import com.ziggfreed.rpgstations.util.Log;
  * pre-scope-2 per-{@code Type} handler table (Consume/Produce/Wait/Roll/Command/Present/Stamp) is
  * REPLACED by ONE composite handler ({@link StationStepHandlers.CompositeStepHandler}) registered
  * under the single {@link #STEP_KEY}. That handler walks the FIXED phase order per iteration
- * ({@code Walk} -&gt; {@code Consume} -&gt; {@code Stamp} -&gt; {@code Produce} -&gt; {@code Roll}
+ * ({@code Walk} -&gt; {@code Consume} -&gt; {@code Stamp} -&gt; {@code Convert} -&gt; {@code Produce} -&gt; {@code Roll}
  * -&gt; {@code Commands} -&gt; {@code Presentation}/{@code Puppet.Clip} -&gt; {@code Duration}) and
  * owns the per-step {@code Repeat} + {@code Duration} suspend/resume machinery.
  *

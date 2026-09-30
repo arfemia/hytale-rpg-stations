@@ -13,23 +13,24 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.objectives.producer.ProgressDispatch;
 import com.ziggfreed.common.progress.runtime.MomentPayload;
 import com.ziggfreed.rpgstations.api.event.StationCycleCompletedEvent;
+import com.ziggfreed.rpgstations.api.event.StationInputConsumedEvent;
 import com.ziggfreed.rpgstations.api.event.StationOutputProducedEvent;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * The two progression producers this engine owns. It fires {@link #WORK_STATION} and
- * {@link #STATION_OUTPUT} into ziggfreed-common's shared progression runtime itself, the way the
- * library's own producers fire a block broken or an item crafted, so a quest or achievement
- * authored against either kind advances from real station play with no other mod installed. The
- * two kinds are DESCRIBED by the kind files this jar ships
+ * The three progression producers this engine owns. It fires {@link #WORK_STATION},
+ * {@link #STATION_OUTPUT} and {@link #STATION_INPUT} into ziggfreed-common's shared progression
+ * runtime itself, the way the library's own producers fire a block broken or an item crafted, so
+ * a quest or achievement authored against any of the kinds advances from real station play with
+ * no other mod installed. The three kinds are DESCRIBED by the kind files this jar ships
  * ({@code Server/ZiggfreedCommon/ObjectiveKinds/RpgStations/*.json}), which the library folds into
  * its kind registry when assets load; nothing is registered from Java, and this class carries no
- * vocabulary beyond the two ids.
+ * vocabulary beyond the three ids.
  *
- * <p><b>Both producers listen to this engine's OWN api events</b>, on purpose: they see exactly
+ * <p><b>Every producer listens to this engine's OWN api events</b>, on purpose: they see exactly
  * what a third-party consumer sees, so the moment content advances on and the moment a consumer
  * counts can never disagree, and every rule the events already state (an unattended settle fires
- * nothing, a command payout is invisible, a gathered batch reports once) holds here for free.
+ * no output, a command payout is invisible, a gathered batch reports once) holds here for free.
  *
  * <ul>
  *   <li>{@link #WORK_STATION} - one moment per REAL completed cycle, off
@@ -41,13 +42,18 @@ import com.ziggfreed.rpgstations.util.Log;
  *   finds): target the item id, qualifier the station id (content scopes to one station by naming
  *   it, or counts every station by leaving the qualifier off), amount the stack's quantity. A
  *   blank id or an empty stack fires nothing ({@link #countable}).
+ *   <li>{@link #STATION_INPUT} - one moment per stack {@link StationInputConsumedEvent} carries
+ *   (a piece a ritual unmade, a material a cycle drained, a reagent a stamp spent): target the
+ *   item id, qualifier the station id, amount the stack's quantity, credited to the WORKER. An
+ *   unattended settle names no worker, so it credits nobody ({@link #creditsSomeone}): the event
+ *   still fires for a listener, but progress belongs to a player who was there.
  * </ul>
  *
  * <p>Each moment carries a typed {@link MomentPayload} ({@link StationWorkPayload} /
- * {@link StationOutputPayload}) wrapping the api event it came off, so a listener in another mod
- * keying per action, per cycle or per socket reads those from the event instead of re-deriving
- * them. Every handler is guarded whole: a producer that throws costs its own moment and never the
- * engine's cycle.
+ * {@link StationOutputPayload} / {@link StationInputPayload}) wrapping the api event it came off,
+ * so a listener in another mod keying per action, per cycle or per socket reads those from the
+ * event instead of re-deriving them. Every handler is guarded whole: a producer that throws costs
+ * its own moment and never the engine's cycle.
  */
 public final class StationProgressProducers {
 
@@ -56,6 +62,9 @@ public final class StationProgressProducers {
 
     /** The objective kind one landed stack advances; its target is the item id, its qualifier the station id. */
     public static final String STATION_OUTPUT = "STATION_OUTPUT";
+
+    /** The objective kind one consumed stack advances; its target is the item id, its qualifier the station id. */
+    public static final String STATION_INPUT = "STATION_INPUT";
 
     /** One real cycle is one unit of work. */
     static final long WORK_AMOUNT = 1L;
@@ -79,11 +88,12 @@ public final class StationProgressProducers {
         this.dispatch = dispatch;
     }
 
-    /** Subscribes both producers to the api events on the plugin's own event registry. */
+    /** Subscribes the three producers to the api events on the plugin's own event registry. */
     public static void register(@Nonnull EventRegistry registry) {
         StationProgressProducers producers = new StationProgressProducers(ProgressDispatch::fire);
         registry.registerGlobal(StationCycleCompletedEvent.class, producers::onCycleCompleted);
         registry.registerGlobal(StationOutputProducedEvent.class, producers::onOutputProduced);
+        registry.registerGlobal(StationInputConsumedEvent.class, producers::onInputConsumedEvent);
     }
 
     void onCycleCompleted(@Nonnull StationCycleCompletedEvent event) {
@@ -118,9 +128,34 @@ public final class StationProgressProducers {
         }
     }
 
+    void onInputConsumedEvent(@Nonnull StationInputConsumedEvent event) {
+        try {
+            if (!creditsSomeone(event)) {
+                return;
+            }
+            for (StationInputConsumedEvent.Consumed consumed : event.inputs()) {
+                if (consumed == null || !countable(consumed.itemId(), consumed.quantity())) {
+                    continue;
+                }
+                dispatch.fire(event.store(), event.worker(), null, STATION_INPUT, consumed.itemId(),
+                        event.stationId(), consumed.quantity(), new StationInputPayload(event, consumed));
+            }
+        } catch (Throwable t) {
+            Log.warn("STATION input moment failed: " + t.getMessage(), t);
+        }
+    }
+
     /** A real cycle is work; an idle-practice cycle produced nothing and counts for nothing. */
     static boolean countsAsWork(@Nonnull StationCycleCompletedEvent event) {
         return !event.idle();
+    }
+
+    /**
+     * A consumption credits progress only when a worker was there to earn it: an unattended settle
+     * names no worker, so its event fires for a listener and advances nobody.
+     */
+    static boolean creditsSomeone(@Nonnull StationInputConsumedEvent event) {
+        return event.worker() != null;
     }
 
     /** A stack counts when it names an item and holds at least one of it. */

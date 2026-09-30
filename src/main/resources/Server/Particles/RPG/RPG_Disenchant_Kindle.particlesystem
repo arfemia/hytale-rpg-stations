@@ -1,0 +1,11 @@
+{
+  "$Comment": "The Kindle beat's sparks and motes on the placed piece: the vanilla gem sparks (Gem_Sparks, the spawner behind Block_Gem_Sparks) in a green-gold copy (Spawners/RPG_Disenchant_Kindle_Sparks) with the eternal-seed motes (Seeds_Eternal, listed by id; they are already the Life-essence green) rising under them. LifeSpan 7.5 seconds ends the system on its own, which is what lets it ride the piece's prop rather than play at a fixed spot; the Kindle beat is 8 seconds untrained, and a faster ritual's Draw beat respawns the prop and ends whatever still rides it. Tint by editing the copy's Color keyframes; a child system listing Spawners replaces this list whole.",
+  "Spawners": [
+    { "SpawnerId": "RPG_Disenchant_Kindle_Sparks", "FixedRotation": true },
+    { "SpawnerId": "Seeds_Eternal" }
+  ],
+  "BoundingRadius": 2,
+  "CullDistance": 30.0,
+  "IsImportant": false,
+  "LifeSpan": 7.5
+}

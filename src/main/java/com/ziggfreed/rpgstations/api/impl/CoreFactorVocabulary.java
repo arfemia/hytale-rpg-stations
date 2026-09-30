@@ -9,6 +9,7 @@ import javax.annotation.Nullable;
 
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.common.factor.FactorConditions;
@@ -33,8 +34,9 @@ import com.ziggfreed.common.registry.RegistryLedger;
  * <p><b>The station evaluation rides as the shared question's PAYLOAD.</b> A registered station
  * provider is handed this mod's own evaluation context (session seconds, cycle index, the tool the
  * session is working with), which the shared context carries opaquely; the store and the acting
- * entity are ALSO published as the shared subject leaves, which is what lets a portable provider
- * written against the shared vocabulary answer here with no station knowledge at all.
+ * entity are ALSO published as the shared subject leaves, and the piece the station is working on
+ * as the shared ITEM leaf, which is what lets a portable provider written against the shared
+ * vocabulary answer here with no station knowledge at all.
  *
  * <p><b>Fail-closed is the shared registry's own rule</b> and is inherited whole: an unregistered
  * id, a provider that throws, and a non-finite answer all resolve to {@code null}, and a gate on
@@ -110,8 +112,8 @@ final class CoreFactorVocabulary {
      */
     @Nullable
     Double resolve(@Nullable String factorId, @Nullable String param, @Nullable Store<EntityStore> store,
-            @Nullable Ref<EntityStore> subject, @Nonnull Object payload) {
-        return registry.resolve(factorId, question(param, store, subject, payload));
+            @Nullable Ref<EntityStore> subject, @Nullable ItemStack item, @Nonnull Object payload) {
+        return registry.resolve(factorId, question(param, store, subject, item, payload));
     }
 
     /**
@@ -122,8 +124,8 @@ final class CoreFactorVocabulary {
      */
     @Nonnull
     FactorLookup snapshot(@Nullable Store<EntityStore> store, @Nullable Ref<EntityStore> subject,
-            @Nonnull Object payload) {
-        return new FactorSnapshot(registry, question(null, store, subject, payload));
+            @Nullable ItemStack item, @Nonnull Object payload) {
+        return new FactorSnapshot(registry, question(null, store, subject, item, payload));
     }
 
     /**
@@ -132,8 +134,8 @@ final class CoreFactorVocabulary {
      */
     @Nullable
     String firstFailedCondition(@Nullable FactorCondition[] conditions, @Nullable Store<EntityStore> store,
-            @Nullable Ref<EntityStore> subject, @Nonnull Object payload) {
-        return FactorConditions.firstFailure(conditions, registry, question(null, store, subject, payload));
+            @Nullable Ref<EntityStore> subject, @Nullable ItemStack item, @Nonnull Object payload) {
+        return FactorConditions.firstFailure(conditions, registry, question(null, store, subject, item, payload));
     }
 
     /**
@@ -156,11 +158,12 @@ final class CoreFactorVocabulary {
 
     @Nonnull
     private static FactorContext question(@Nullable String param, @Nullable Store<EntityStore> store,
-            @Nullable Ref<EntityStore> subject, @Nonnull Object payload) {
+            @Nullable Ref<EntityStore> subject, @Nullable ItemStack item, @Nonnull Object payload) {
         return FactorContext.builder()
                 .param(param)
                 .store(store)
                 .subject(subject)
+                .item(item)
                 .payload(payload)
                 .build();
     }

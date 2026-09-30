@@ -11,6 +11,7 @@ import java.util.function.Function;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Ingredient;
@@ -148,19 +149,34 @@ final class StationUnattended {
 
     // ==================== the analytic settle ====================
 
-    /** What one settle committed (or why it did nothing). */
+    /**
+     * What one settle committed (or why it did nothing), including what it CONSUMED: one
+     * {@link PileDrain} per socket pile the transform drained, in the order the row's inputs first
+     * address them - what the caller reports to the ONE input-consumed hook once the transform is
+     * in the stash. Empty whenever nothing was transformed.
+     */
     record Settle(int settledCycles, int conversionIndex, @Nullable String produceSocketId,
-            boolean clockStamped) {
+            boolean clockStamped, @Nonnull List<PileDrain> drains) {
 
         /** Nothing ran and the clock was left alone (sub-cycle time keeps banking). */
-        static final Settle NOTHING = new Settle(0, -1, null, false);
+        static final Settle NOTHING = new Settle(0, -1, null, false, List.of());
 
         /** Nothing ran but the clock was written (first stamp, or a clamped/forfeited backlog). */
-        static final Settle CLOCK_ONLY = new Settle(0, -1, null, true);
+        static final Settle CLOCK_ONLY = new Settle(0, -1, null, true, List.of());
 
         boolean transformed() {
             return settledCycles > 0;
         }
+    }
+
+    /**
+     * What a settle drained out of ONE socket pile: the REAL item ids and counts the drain took
+     * (every settled cycle's share at once), plus the metadata-bearing stack the drain took off the
+     * pile once its tally no longer counted that item ({@code unique}, taken the way every custody
+     * consume takes it; null otherwise). Whether that stack is reported as consumed is
+     * {@code ConsumedInput#fromPile}'s call: only when this drain counted its item.
+     */
+    record PileDrain(@Nonnull String socketId, @Nonnull Map<String, Integer> drained, @Nullable ItemStack unique) {
     }
 
     /**
@@ -172,8 +188,9 @@ final class StationUnattended {
      * socket, the produce pile inheriting the FIRST-consumed socket's owner per decision 82), and
      * accrue the settled count on the produce pile under {@link #accrualKey}. Mutates only the
      * claim; the caller marks dirty (for a TRANSFORM - a clock-only stamp is deliberately
-     * best-effort volatile, see the caller), stamps doneness batches, and refreshes
-     * displays/states.
+     * best-effort volatile, see the caller), stamps doneness batches, refreshes displays/states,
+     * and reports what the settle consumed ({@link Settle#drains()}) to the input-consumed hook
+     * once the transform is committed.
      *
      * @param workCycleMs the resolved {@code Work.CycleMs} fallback (a conversion's own
      *                    {@code DurationMs} outranks it, the attended pace rule)
@@ -244,19 +261,35 @@ final class StationUnattended {
                 producedOwner = claim.ownerId;
             }
 
+            // The consume: every input drains its settled share oldest-first, and what each pile
+            // gave up is recorded per socket (a drain that took a single-item socket's last takes
+            // the piece's own stack off the pile with it, as every custody consume does).
+            Map<String, Map<String, Integer>> drainedBySocket = new LinkedHashMap<>();
             for (Ingredient in : c.getInput()) {
                 String socketId = StationCustody.socketIdFor(in.getSocket(), null, sockets);
                 StationCustody.drainFromPile(claim.items(socketId),
                         StationCustody.ingredientEntryMatcher(in, resourceTypesOf, tagsOf),
-                        in.effectiveQuantity() * settled, null);
+                        in.effectiveQuantity() * settled,
+                        drainedBySocket.computeIfAbsent(socketId, k -> new LinkedHashMap<>()));
+            }
+            List<PileDrain> drains = new ArrayList<>(drainedBySocket.size());
+            for (Map.Entry<String, Map<String, Integer>> drained : drainedBySocket.entrySet()) {
+                if (!drained.getValue().isEmpty()) {
+                    drains.add(new PileDrain(drained.getKey(), drained.getValue(),
+                            claim.takeUniqueIfDrained(drained.getKey())));
+                }
             }
             String produceSocketId = null;
-            for (Ingredient out : c.getOutput()) {
+            Ingredient[] outputs = c.getOutput();
+            for (int outIndex = 0; outIndex < outputs.length; outIndex++) {
+                Ingredient out = outputs[outIndex];
                 String socketId = StationCustody.socketIdFor(out.getSocket(), null, sockets);
                 if (produceSocketId == null) {
                     produceSocketId = socketId;
                 }
-                int perCycle = StationYield.resolveQuantity(yield, out.effectiveQuantity());
+                // Yield.Base lands on the row's primary (first) output alone; Scale and the clamps
+                // apply to every output - the one composition rule StationYield states.
+                int perCycle = StationYield.resolveQuantity(yield, out.effectiveQuantity(), outIndex == 0);
                 claim.addTo(socketId, producedOwner, out.getItemId(), perCycle * settled);
             }
             if (produceSocketId != null) {
@@ -264,7 +297,7 @@ final class StationUnattended {
             }
             claim.setUnattendedLastGameTime(
                     advancedLastGameTime(nowGameMs, usable, raw, settled, cycleMs));
-            return new Settle(settled, index, produceSocketId, true);
+            return new Settle(settled, index, produceSocketId, true, List.copyOf(drains));
         }
 
         // No conversion can run at all (no inputs, contaminated exact set, or no room): the
@@ -302,9 +335,11 @@ final class StationUnattended {
             @Nonnull List<Custody.ResolvedSocket> sockets, @Nonnull StationAsset.Conversion c,
             @Nullable StationAsset.Yield yield) {
         Map<String, Integer> out = new LinkedHashMap<>();
-        for (Ingredient produced : c.getOutput()) {
+        Ingredient[] outputs = c.getOutput();
+        for (int outIndex = 0; outIndex < outputs.length; outIndex++) {
+            Ingredient produced = outputs[outIndex];
             String socketId = StationCustody.socketIdFor(produced.getSocket(), null, sockets);
-            out.merge(socketId, StationYield.resolveQuantity(yield, produced.effectiveQuantity()),
+            out.merge(socketId, StationYield.resolveQuantity(yield, produced.effectiveQuantity(), outIndex == 0),
                     Integer::sum);
         }
         return out;

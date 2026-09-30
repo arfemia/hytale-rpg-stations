@@ -47,7 +47,7 @@ content type) lives in the mod's [GitHub repository](https://github.com/arfemia/
 
 ## Required dependency: ZiggfreedCommon
 
-RPG Stations has exactly **one hard dependency**: **ZiggfreedCommon `>=2.1.0`**. Install it first -
+RPG Stations has exactly **one hard dependency**: **ZiggfreedCommon `>=2.2.0`**. Install it first -
 the server loads it before RPG Stations. That is the whole list - **no other mod is required**. RPG
 Stations is a complete, standalone reward loop (conditional loot, command rewards, enhancement) on
 its own. See [Integrations](#integrations) below for how an add-on hooks it.
@@ -174,7 +174,7 @@ session-summary HUD tuning, layered like any other asset - there is no separate 
 
 ## Installation
 
-1. Install **ZiggfreedCommon** (`>=2.1.0`) - drop it into your server's `Mods/` folder.
+1. Install **ZiggfreedCommon** (`>=2.2.0`) - drop it into your server's `Mods/` folder.
 2. Drop the **RPG Stations** jar into the same `Mods/` folder.
 3. Optionally add a content pack that ships station catalog content.
 4. Restart the server. Confirm the boot log shows each loaded station id and no asset validation
@@ -209,7 +209,12 @@ consumer needs.
 
 ## Changelog
 
-See `CHANGELOG.md` in this mod's repository for the full version history.
+See `CHANGELOG.md` in this mod's repository for the full version history. The next version, 1.1.0,
+is held and unreleased; its entries live under that heading there until it ships. The Disenchanting
+Table is in it. Place a piece of gear on the table and it comes apart over a staged ritual, giving
+back what the Salvage bench would plus Life Essence and the occasional find. A four-piece
+disenchanter's kit, a grimoire and a draught each speed the ritual up. The Greater Disenchanting
+Table works three pieces in a row and pays more.
 
 ## Links & Support
 

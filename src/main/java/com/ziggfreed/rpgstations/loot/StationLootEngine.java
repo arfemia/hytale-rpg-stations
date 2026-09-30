@@ -87,6 +87,8 @@ public final class StationLootEngine {
     public static final class GrantResult implements StationRewardKinds.Sink {
 
         private final Map<String, Integer> dropListItems = new LinkedHashMap<>();
+        private final Map<String, Integer> expectedItems = new LinkedHashMap<>();
+        private final Map<String, Integer> foundItems = new LinkedHashMap<>();
         private final List<String> cues = new ArrayList<>();
         private final List<EffectRef> effectGrants = new ArrayList<>();
         private final List<Contribution> contributions = new ArrayList<>();
@@ -98,10 +100,30 @@ public final class StationLootEngine {
             this.cycleTrigger = cycleTrigger;
         }
 
-        /** Every item that reached the player this pass (item id -&gt; total quantity), merged. */
+        /** Every item that reached the player this pass (item id -&gt; total quantity), merged, whatever its origin. */
         @Nonnull
         public Map<String, Integer> getDropListItems() {
             return dropListItems;
+        }
+
+        /**
+         * The part of {@link #getDropListItems()} paid by a roll authored {@code Expected}: the
+         * moment's expected payout, shown as ORDINARY produced output (the plain item row, the
+         * produced ledger row), never as a find. Empty for every table that authors no
+         * {@code Expected}, which is every table shipped before the knob existed.
+         */
+        @Nonnull
+        public Map<String, Integer> getExpectedItems() {
+            return expectedItems;
+        }
+
+        /**
+         * The part of {@link #getDropListItems()} paid by a find: a roll not authored
+         * {@code Expected}, or a pool pick. Shown as a windfall (the gold row).
+         */
+        @Nonnull
+        public Map<String, Integer> getFoundItems() {
+            return foundItems;
         }
 
         /**
@@ -303,10 +325,21 @@ public final class StationLootEngine {
         return result;
     }
 
-    /** Fold one shared-engine pass into the station tally, so two calls read as one pass. */
-    private static void absorb(@Nonnull GrantResult result, @Nonnull LootEngine.Result shared) {
+    /**
+     * Fold one shared-engine pass into the station tally, so two calls read as one pass. The
+     * merged item map is kept whole, and the shared engine's per-roll origin rides beside it: what
+     * an {@code Expected} roll paid and what a find paid, so the caller can show the one as
+     * ordinary output and the other as a windfall.
+     */
+    static void absorb(@Nonnull GrantResult result, @Nonnull LootEngine.Result shared) {
         for (Map.Entry<String, Integer> entry : shared.getItems().entrySet()) {
             result.dropListItems.merge(entry.getKey(), entry.getValue(), Integer::sum);
+        }
+        for (Map.Entry<String, Integer> entry : shared.getExpectedItems().entrySet()) {
+            result.expectedItems.merge(entry.getKey(), entry.getValue(), Integer::sum);
+        }
+        for (Map.Entry<String, Integer> entry : shared.getFoundItems().entrySet()) {
+            result.foundItems.merge(entry.getKey(), entry.getValue(), Integer::sum);
         }
         result.cues.addAll(shared.getCues());
         result.commandsRun += shared.getCommandsRun();

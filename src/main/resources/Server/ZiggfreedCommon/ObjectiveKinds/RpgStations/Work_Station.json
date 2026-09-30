@@ -13,6 +13,12 @@
     "TargetIcons": {
       "sawmill": {
         "ItemId": "RPG_Station_Sawmill"
+      },
+      "Disenchanting_Table": {
+        "ItemId": "RPG_Station_Disenchanting_Table"
+      },
+      "Disenchanting_Table_Greater": {
+        "ItemId": "RPG_Station_Disenchanting_Table_Greater"
       }
     }
   }

@@ -3,12 +3,14 @@ package com.ziggfreed.rpgstations.station;
 import java.util.List;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.loot.FactorLookup;
+import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
 /**
@@ -25,6 +27,8 @@ final class StationStepContext {
     @Nonnull final Store<EntityStore> store;
     @Nonnull final CommandBuffer<EntityStore> commandBuffer;
     @Nonnull final Player player;
+    /** The station the program runs at: what the Convert phase's selection and the Bonus pass resolve against. */
+    @Nonnull final StationAsset asset;
     @Nonnull final ActionResolver.ResolvedAction action;
     @Nonnull final FactorLookup snapshot;
     @Nonnull final List<StationStep> steps;
@@ -39,17 +43,36 @@ final class StationStepContext {
      */
     final int cycleIndex;
 
+    /**
+     * The action's composed PACE (its own ladder and clamp plus every matching extension's ladder),
+     * resolved against {@link #snapshot} once per fresh step entry by the composite handler.
+     */
+    @Nonnull final StationPacing.Composed pace;
+
+    /**
+     * The conversion the classic convert loop already chose BEFORE dispatch (its pre-dispatch
+     * selection drives idle practice, the out-of-inputs and inventory-full stops, the per-conversion
+     * pace and the feedable-cycles count), handed to the implicit program's {@code Convert} phase so
+     * it runs exactly that row. Null for an authored program, whose {@code Convert} phase selects
+     * at the beat.
+     */
+    @Nullable final StationService.ConversionCheck preselected;
+
     StationStepContext(@Nonnull StationSession session, @Nonnull Store<EntityStore> store,
             @Nonnull CommandBuffer<EntityStore> commandBuffer, @Nonnull Player player,
-            @Nonnull ActionResolver.ResolvedAction action, @Nonnull FactorLookup snapshot,
-            @Nonnull List<StationStep> steps, int cycleIndex) {
+            @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action,
+            @Nonnull FactorLookup snapshot, @Nonnull List<StationStep> steps, int cycleIndex,
+            @Nonnull StationPacing.Composed pace, @Nullable StationService.ConversionCheck preselected) {
         this.session = session;
         this.store = store;
         this.commandBuffer = commandBuffer;
         this.player = player;
+        this.asset = asset;
         this.action = action;
         this.snapshot = snapshot;
         this.steps = steps;
         this.cycleIndex = cycleIndex;
+        this.pace = pace;
+        this.preselected = preselected;
     }
 }

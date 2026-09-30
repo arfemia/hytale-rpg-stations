@@ -16,11 +16,14 @@ Diegetic interactive work-station engine (a Hytale mod). Router only: the author
 
 ## Release scope
 
-- 1.0.0 shipped the Sawmill only. Finished held content (cooking pit, fire, cutting board, mount spike, the unwired `NpcPerformerSpike` harness) sits in `unreleased/`, a mirror of `src/main/resources` outside the resource roots. Restore it with `unreleased/restore.ps1`, never re-create it (inventory: `unreleased/README.md`), and restore the `skill-stations-pack`'s `unreleased/` in lockstep.
+- The current version (1.1.0) is HELD and unreleased: the disenchanting wave (two Disenchanting Tables, the ritual queue and paced beats, the protect-list store, `STATION_INPUT`, api 1.1.0 at contract 10, `ziggfreed-common` floor `>=2.2.0`). The last public release is 1.0.0, which shipped the Sawmill only. Finished held content (cooking pit, fire, cutting board, mount spike, the unwired `NpcPerformerSpike` harness) sits in `unreleased/`, a mirror of `src/main/resources` outside the resource roots. Restore it with `unreleased/restore.ps1`, never re-create it (inventory: `unreleased/README.md`), and restore the `skill-stations-pack`'s `unreleased/` in lockstep.
 - The api is not frozen; declaring it frozen is the maintainer's decision, never implied by a version number.
 
 ## Gotchas
 
+- A station's anchor is the block CENTRE (`blockX+0.5, blockY+0.5, blockZ+0.5`), not the block top, for the placed-piece prop and the puppet `Offset`.
+- A custody block-state flip swaps the block to the state's own child `BlockType`, so its texture, animation, light, loop and particles come with it.
+- Server-wide protect-lists are their own asset store (`Server/RpgStations/ProtectLists/`), not a `Settings` leaf: every loaded file adds to one list, so a pack's `Settings.json` never carries one.
 - Spawn entities from a cycle or interaction handler through the threaded `CommandBuffer<EntityStore>`. `store.addEntity` inside a system throws "Store is currently processing!" and the surrounding catch hides it (`util.ItemDropUtil` and `StationCustodyDisplay` are the examples).
 - An `ItemDropList` whose tree holds only `Droplist` references fails validation ("Container must have something to drop!") and takes the whole mod down. Pair every `Droplist` with a concrete `Single`, as every vanilla table does.
 - Use `ItemGrantUtil.grantOrDrop` when the result decides counting, notifying or summarising; `grant()`'s `FALLBACK` only means a drop was attempted.

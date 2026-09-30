@@ -17,8 +17,10 @@ Reading a number in and posting a number out are the same shape, mirrored.
 
 The one asymmetry is deliberate: the engine ships built-in FACTORS (`rpgstations:session_seconds`,
 `rpgstations:cycle_count`, `hytale:tool_power`, `hytale:tool_quality`, `hytale:tool_item_level`,
-`hytale:tool_durability_percent`, and `hytale:stat`) because it can compute them. It ships **zero**
-built-in channels, because it interprets none.
+`hytale:tool_durability_percent`, `hytale:stat`, and the item family a placed or consumed piece
+answers: `hytale:item_quality`, `hytale:item_level`, `hytale:item_durability_percent` and
+`hytale:item_stat`, see [Loot and factors](loot-and-factors.md)) because it can compute them. It
+ships **zero** built-in channels, because it interprets none.
 
 ## Reads: Factor and Param
 

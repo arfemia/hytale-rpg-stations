@@ -236,6 +236,26 @@ public final class ExtensionCatalog {
     }
 
     /**
+     * Every matching extension's OWN {@code Pace} ladder, in {@link ExtensionAsset#APPLY_ORDER}: the
+     * ladders that MULTIPLY into the action's pace (never an overlay of it - each resolves from its
+     * own thresholds; see {@link StationPacing}). Empty with no extension in play.
+     */
+    @Nonnull
+    public List<ContributionScale> paceLaddersFor(@Nullable String stationId, @Nonnull String actionId) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
+        if (exts.isEmpty()) {
+            return List.of();
+        }
+        List<ContributionScale> ladders = new ArrayList<>();
+        for (ExtensionAsset ext : exts) {
+            if (ext.getPace() != null && ext.getPace().getLadder() != null) {
+                ladders.add(ext.getPace().getLadder());
+            }
+        }
+        return ladders.isEmpty() ? List.of() : List.copyOf(ladders);
+    }
+
+    /**
      * An action's effective {@code Recipe.Conversions}: {@code base} plus every matching extension's
      * own {@code Conversions}, appended in {@link ExtensionAsset#APPLY_ORDER}. {@code base} is the
      * already-derived array (authored conversions plus any {@code FromCrafting}-derived ones), so an
@@ -427,9 +447,9 @@ public final class ExtensionCatalog {
                 overlayEffectRef(base.getEffect(), overlay.getEffect()));
     }
 
-    /** Per-leaf overlay of the shared {@code EffectRef} group ({@code Id}/{@code DurationMs}). */
+    /** Per-leaf overlay of the shared {@code EffectRef} group ({@code Id}/{@code DurationMs}/{@code Target}). */
     @Nullable
-    private static EffectRef overlayEffectRef(@Nullable EffectRef base, @Nullable EffectRef overlay) {
+    static EffectRef overlayEffectRef(@Nullable EffectRef base, @Nullable EffectRef overlay) {
         if (overlay == null) {
             return base;
         }
@@ -438,7 +458,8 @@ public final class ExtensionCatalog {
         }
         return EffectRef.of(
                 firstNonNull(overlay.getId(), base.getId()),
-                firstNonNull(overlay.getDurationMs(), base.getDurationMs()));
+                firstNonNull(overlay.getDurationMs(), base.getDurationMs()),
+                firstNonNull(overlay.getTarget(), base.getTarget()));
     }
 
     @Nullable
@@ -566,6 +587,8 @@ public final class ExtensionCatalog {
         return Custody.of(
                 firstNonNull(overlay.getMaxQuantity(), base.getMaxQuantity()),
                 firstNonNull(overlay.getSingleFamily(), base.getSingleFamily()),
+                firstNonNull(overlay.getHeldOnly(), base.getHeldOnly()),
+                firstNonNull(overlay.getPreview(), base.getPreview()),
                 overlayInput(base.getInput(), overlay.getInput()),
                 overlayStates(base.getStates(), overlay.getStates()),
                 overlayDisplay(base.getDisplay(), overlay.getDisplay()),
@@ -691,7 +714,11 @@ public final class ExtensionCatalog {
     /**
      * Per-leaf {@code Custody.Input} overlay. Every {@link ActionInput} route is independently
      * orthogonal ("match = ANY route satisfied"), so overlaying route by route WIDENS acceptance
-     * predictably rather than silently swapping one matcher for another.
+     * predictably rather than silently swapping one matcher for another. The {@code Except} holes
+     * ADD: the overlay's entries go beside the base's ({@link #concatExcepts}), never in their
+     * place, so a pack protects its own item from a station without restating what the jar
+     * already protects, and an addition never removes a hole (additive-only, the rule every
+     * extension payload follows).
      */
     @Nullable
     private static ActionInput overlayInput(@Nullable ActionInput base, @Nullable ActionInput overlay) {
@@ -705,17 +732,33 @@ public final class ExtensionCatalog {
                 firstNonNull(overlay.getItemId(), base.getItemId()),
                 firstNonNull(overlay.getResourceTypeId(), base.getResourceTypeId()),
                 firstNonNull(overlay.getTags(), base.getTags()),
-                firstNonNull(overlay.getFunction(), base.getFunction()));
+                firstNonNull(overlay.getFunction(), base.getFunction()),
+                concatExcepts(base.getExcepts(), overlay.getExcepts()));
+    }
+
+    /** PURE: the base's {@code Except} entries followed by the overlay's; null when neither authors any. */
+    @Nullable
+    static ActionInput[] concatExcepts(@Nullable ActionInput[] base, @Nullable ActionInput[] overlay) {
+        if (overlay == null || overlay.length == 0) {
+            return base;
+        }
+        if (base == null || base.length == 0) {
+            return overlay;
+        }
+        ActionInput[] out = new ActionInput[base.length + overlay.length];
+        System.arraycopy(base, 0, out, 0, base.length);
+        System.arraycopy(overlay, 0, out, base.length, overlay.length);
+        return out;
     }
 
     /**
      * Per-leaf {@code Custody.States} overlay. Every state name is an independent nullable knob, so
-     * each overlays on its own. NOTE for whoever adds the FOURTH state name: add it here in the same
-     * change, or an overlay silently drops it (a leaf missing from this factory call reads as
+     * each of the five overlays on its own. NOTE for whoever adds a state name: add it here in the
+     * same change, or an overlay silently drops it (a leaf missing from this factory call reads as
      * "neither side authored one" and the merged group loses it).
      */
     @Nullable
-    private static Custody.States overlayStates(@Nullable Custody.States base, @Nullable Custody.States overlay) {
+    static Custody.States overlayStates(@Nullable Custody.States base, @Nullable Custody.States overlay) {
         if (overlay == null) {
             return base;
         }
@@ -725,21 +768,15 @@ public final class ExtensionCatalog {
         return Custody.States.of(
                 firstNonNull(overlay.getEmpty(), base.getEmpty()),
                 firstNonNull(overlay.getLoaded(), base.getLoaded()),
-                firstNonNull(overlay.getWorking(), base.getWorking()));
+                firstNonNull(overlay.getWorking(), base.getWorking()),
+                firstNonNull(overlay.getReady(), base.getReady()),
+                firstNonNull(overlay.getOverdone(), base.getOverdone()));
     }
 
+    /** The ONE per-leaf {@code Display} overlay, shared with a step's per-beat overlay: {@link Custody.Display#overlaid}. */
     @Nullable
     private static Custody.Display overlayDisplay(@Nullable Custody.Display base, @Nullable Custody.Display overlay) {
-        if (overlay == null) {
-            return base;
-        }
-        if (base == null) {
-            return overlay;
-        }
-        return Custody.Display.of(
-                overlayVec3(base.getOffset(), overlay.getOffset()),
-                firstNonNull(overlay.getScale(), base.getScale()),
-                overlayRotation(base.getRotation(), overlay.getRotation()));
+        return Custody.Display.overlaid(base, overlay);
     }
 
     /** Per-leaf overlay of the ONE shared {@code Vec3} group, used at every offset site. */
@@ -1012,6 +1049,9 @@ public final class ExtensionCatalog {
         }
         if (ext.getContributionScale() != null) {
             out.add(ExtensionAsset.PAYLOAD_CONTRIBUTION_SCALE);
+        }
+        if (ext.getPace() != null) {
+            out.add(ExtensionAsset.PAYLOAD_PACE);
         }
         if (ext.getActions() != null && ext.getActions().length > 0) {
             out.add(ExtensionAsset.PAYLOAD_ACTIONS);

@@ -1,0 +1,33 @@
+{
+  "$Comment": "The Disenchanting Table's void finds, two rolls, referenced from the Disenchant action's Bonus.Lootables and rolled once per ritual at its Payout beat. Both are FINDS (no Expected leaf), so they land as gold rows with their own cue. The first is Void essence: gated to gear of item level 20 and up (iron grade), with a Chance that rises with the piece's level (2 percent plus 0.4 per level, so an iron piece rolls about 10 percent and a mithril piece about 22, held under the 30 ceiling) for one or two essence. The second is a Voidheart, the rarest find: gear of level 45 and up only, a flat 0.8 percent, one heart. The guardrail behind these numbers: a piece whose own recipe holds Void essence (mithril armor takes 80 and salvages for 20) still comes back well short of what went in with this table's extra on top, and a mithril weapon, which costs a Voidheart to forge, averages far more than a hundred rituals per heart found, so unmaking gear never mints what it cost. Cue names the moment the action's Moments map dresses. Re-tune by shipping a same-id file.",
+  "Rolls": [
+    {
+      "Trigger": "Cycle",
+      "Conditions": [
+        { "Factor": "hytale:item_level", "Min": 20 }
+      ],
+      "Chance": {
+        "Base": 2.0,
+        "Factors": [ { "Factor": "hytale:item_level", "Weight": 0.4 } ],
+        "Clamp": { "Max": 30 }
+      },
+      "Grants": {
+        "Items": [ { "Item": "Ingredient_Void_Essence", "Count": 1, "CountMax": 2 } ]
+      },
+      "Cue": "Cue:Void_Find"
+    },
+    {
+      "Trigger": "Cycle",
+      "Conditions": [
+        { "Factor": "hytale:item_level", "Min": 45 }
+      ],
+      "Chance": {
+        "Base": 0.8
+      },
+      "Grants": {
+        "Items": [ { "Item": "Ingredient_Voidheart", "Count": 1 } ]
+      },
+      "Cue": "Cue:Voidheart"
+    }
+  ]
+}

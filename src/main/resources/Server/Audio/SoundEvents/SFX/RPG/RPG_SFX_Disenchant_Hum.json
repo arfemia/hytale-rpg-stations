@@ -1,0 +1,34 @@
+{
+  "$Comment": "The Greater Disenchanting Table's hum, the looping ambient sound its Working and Drawing block states play (Item/Items/RPG_Station_Disenchanting_Table_Greater.json). Parent SFX_Portal_Neutral supplies the two looping portal layers and the ambient category; this file quiets and lowers them and adds the ducking rules the vanilla Memories bench uses, so the music dips and the room's block and creature sounds fall away while a ritual runs. Those rules would also swallow the ritual's own accents, so every accent in a ducked category plays through a copy with BypassDucking set (RPG_SFX_Disenchant_Crystal_Break, RPG_SFX_Disenchant_Void_Summon, RPG_SFX_Disenchant_Void_Despawn). A looping event belongs on a block state and nowhere else: nothing can stop one fired from a step.",
+  "Parent": "SFX_Portal_Neutral",
+  "Volume": -8,
+  "Pitch": -4,
+  "MaxDistance": 9,
+  "PreventSoundInterruption": true,
+  "DuckingRules": [
+    {
+      "TargetCategory": "AudioCat_Music",
+      "DuckingVolumeDb": -6,
+      "AttackMs": 1000,
+      "ReleaseMs": 5000,
+      "Curve": "SCurve",
+      "ReleaseCurve": "SCurve"
+    },
+    {
+      "TargetCategory": "AudioCat_NPC",
+      "DuckingVolumeDb": -100,
+      "AttackMs": 1000,
+      "ReleaseMs": 5000,
+      "Curve": "SCurve",
+      "ReleaseCurve": "SCurve"
+    },
+    {
+      "TargetCategory": "AudioCat_BlockSounds",
+      "DuckingVolumeDb": -100,
+      "AttackMs": 1000,
+      "ReleaseMs": 5000,
+      "Curve": "SCurve",
+      "ReleaseCurve": "SCurve"
+    }
+  ]
+}

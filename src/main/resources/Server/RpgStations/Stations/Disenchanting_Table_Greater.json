@@ -1,0 +1,13 @@
+{
+  "$Comment": "The Greater Disenchanting Table: the same ritual on the wider Arcane table, three pieces at a time, paying more. The whole of it is the standalone action Actions/Disenchant_Greater.json (a child of Disenchant that adds the queue, its three single-item sockets and the extra payout table), attached here by Ref with no overlay, so this file is only the station's own identity and block rule; read that action, and its parent, for what the table does, what it takes and what it pays. Step:Disenchant_Greater:Unmake is the unmaking beat a flair keys on at this table. Icon is left out: the summary crest falls back to the placed block's own item, RPG_Station_Disenchanting_Table_Greater.",
+  "Identity": {
+    "NameKey": "rpgstations.station.disenchanting_table_greater.name",
+    "DescKey": "rpgstations.station.disenchanting_table_greater.desc"
+  },
+  "Block": {
+    "Exclusive": true
+  },
+  "Actions": [
+    { "Id": "Disenchant_Greater", "Ref": "Disenchant_Greater" }
+  ]
+}

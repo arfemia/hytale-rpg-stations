@@ -1,0 +1,69 @@
+{
+  "$Comment": "The Disenchanter's Grimoire, the table's trophy chase, paid by the one roll in Lootables/DisenchantTrophy.json. It is a WORKING spellbook: a verbatim copy of the vanilla purple grimoire's model, texture, icon, animation set, casting interactions and mana costs, so it casts exactly as its vanilla sibling does. What differs: Rare quality, one per stack, and Disenchanting Proficiency in its Weapon.StatModifiers, which the engine applies while the book is in hand, so the ritual runs faster for whoever holds it; it is also the held member of the disenchanter's kit set (ZiggfreedCommon/GearSets/RPG_Disenchanters_Kit.json), and the kit's third tier asks for it in hand over the four worn pieces. Authored STANDALONE with no Parent and no Recipe: a Parent off the vanilla grimoire would inherit any recipe it gains and make the trophy craftable, and this book exists only as the table's find. The tables refuse it as input (Custody.Input.Except names its id), so a found grimoire is never unmade by accident.",
+  "TranslationProperties": {
+    "Name": "items.RPG_Weapon_Spellbook_Grimoire_Disenchanter.name",
+    "Description": "items.RPG_Weapon_Spellbook_Grimoire_Disenchanter.description"
+  },
+  "Categories": [
+    "Items.Weapons"
+  ],
+  "Icon": "Icons/ItemsGenerated/Weapon_Spellbook_Grimoire_Purple.png",
+  "Quality": "Rare",
+  "ItemLevel": 40,
+  "Model": "Items/Weapons/Spellbook/Grimoire.blockymodel",
+  "Texture": "Items/Weapons/Spellbook/Grimoire_Purple_Texture.png",
+  "PlayerAnimationsId": "Spellbook",
+  "IconProperties": {
+    "Scale": 0.745,
+    "Translation": [-7.8, -7.8],
+    "Rotation": [45, 90, 0]
+  },
+  "Interactions": {
+    "Primary": "Spellbook_Primary",
+    "Secondary": "Spellbook_Primary"
+  },
+  "InteractionVars": {
+    "Spellbook_Cast_Hurl_Charged": {
+      "Interactions": [
+        {
+          "Parent": "Spellbook_Cast_Hurl_Charged",
+          "Costs": {
+            "Mana": 100
+          }
+        }
+      ]
+    },
+    "Spellbook_Cast_Hurl_Cost": {
+      "Interactions": [
+        {
+          "Parent": "Spellbook_Cast_Cost",
+          "StatModifiers": {
+            "Mana": -100
+          }
+        }
+      ]
+    },
+    "Spellbook_Cast_Hurl_Launch": "Spellbook_Cast_Launch",
+    "Spellbook_Cast_Hurl_Effect": "Spellbook_Cast_Effect",
+    "Spellbook_Cast_Hurl_Fail": "Spellbook_Cast_Fail",
+    "Block_Effect": "Block_Swing_Down_Effect",
+    "Block_Swing_Left_Damage": "Block_Swing_Left_Damage",
+    "Block_Swing_Right_Damage": "Block_Swing_Right_Damage",
+    "Block_Swing_Down_Damage": "Block_Swing_Down_Damage"
+  },
+  "DroppedItemAnimation": "Items/Animations/Dropped/Dropped_Diagonal_Left.blockyanim",
+  "MaxStack": 1,
+  "Scale": 1.2,
+  "Tags": {
+    "Type": ["Weapon"],
+    "Family": ["Spellbook"]
+  },
+  "Weapon": {
+    "StatModifiers": {
+      "RPG_Disenchanting_Proficiency": [
+        { "Amount": 14, "CalculationType": "Additive", "Target": "Max" }
+      ]
+    }
+  },
+  "ItemSoundSetId": "ISS_Weapons_Books"
+}

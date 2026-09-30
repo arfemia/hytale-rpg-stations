@@ -17,8 +17,12 @@ example.
 
 The extension surface is a small, typed contract published as its own jar (`rpg-stations-api`). A mod
 that wants to hook the engine links against it `compileOnly` and declares RPG Stations an optional
-dependency, then presence-checks the plugin at runtime before touching it. The api is split by shape,
-following the same native-events convention the rest of the ecosystem uses:
+dependency, then presence-checks the plugin at runtime before touching it. The api jar carries the
+version of the RPG Stations release it shipped in (`rpg-stations-api-1.1.0.jar` for 1.1.0), and the
+surface grows only additively; `RpgStationsApi.apiVersion()` is a separate contract number a mod
+branches on at runtime to learn which additions are present (1.0.0 carried contract 9, 1.1.0
+carries 10). The api is split by shape, following the same native-events convention the rest of the
+ecosystem uses:
 
 **The two-step idiom is not optional.** The JVM verifies a method's whole bytecode the first time it
 is invoked, so a method that both presence-checks RPG Stations AND references an api type throws
@@ -48,6 +52,7 @@ answer:
 | `StationToolBrokeEvent` | A tool the session was using breaks. |
 | `StationRefusedEvent` | A station turns a player's press away (the wrong tool, nothing to work with, a full socket, someone else's pile, a busy anchor, a locked gate, a structure that cannot be raised); carries the player, the world and block position, the station id, the action id (null when the press was refused before one was chosen) and the reason as an `Is_Like_This` id (`No_Materials`, `Wrong_Tool`, ...). Fires only for a refusal the repeat window let through, so one dispatch is one refusal worth reacting to - see [Settings](settings.md#refusals). |
 | `StationOutputProducedEvent` | A batch of items lands in an ATTENDED worker's hands, on two moments: a produce phase commits (into a placed custody pile, the receiving socket named, or the worker's inventory), and a loot pass pays out (the cycle's bonus output as the count that landed, every `Items` stack and every `DropLists` find; no socket, the paying action). Carries fresh immutable copies of what landed. A `Commands` payout is never reported (the engine cannot know what a command gave), and an unattended settle or gather deliberately fires nothing here: that output surfaces at gather, on the event below. |
+| `StationInputConsumedEvent` | A station CONSUMES input, once per committed batch and never for one the engine gave back: a session's `Consume` or `Convert` drain (reported when the iteration commits), a `Stamp` phase's reagents (when the enhanced stack commits), or an unattended settle. Carries the worker (absent on an unattended settle, the one shape with none), the world and the block the pile stood at, the station and action ids, and each consumed stack as an immutable copy with the custody socket it left and the quality index and item level read off it (absent where the stack cannot tell; an inventory-route stack is a bare id and count, so wear and metadata are not on it). |
 | `StationUnattendedGatheredEvent` | A player gathers a custody pile that accrued [unattended work](unattended-work.md) cycles; carries the gatherer (never null), the granted cycle count, and the batch's already-scaled contributions. |
 | `StationStructureChangedEvent` | A [multiblock structure](structures-and-sockets.md) changes standing state at its anchor - a completed build activates, or a broken one reverts; names the pattern, the block now standing, and the acting player (absent on an environment break). |
 
@@ -57,24 +62,29 @@ re-resolves the rest.
 
 ## Objective kinds (progression content)
 
-RPG Stations fires two objective kinds into ziggfreed-common's shared progression runtime itself, so a
-quest or achievement authored against either advances from station play with nothing else installed.
-Both are described by kind files this jar ships (`Server/ZiggfreedCommon/ObjectiveKinds/RpgStations/`),
-and both ride the events above, so what content advances on is exactly what a listener sees:
+RPG Stations fires three objective kinds into ziggfreed-common's shared progression runtime itself, so
+a quest or achievement authored against any of them advances from station play with nothing else
+installed. All three are described by kind files this jar ships
+(`Server/ZiggfreedCommon/ObjectiveKinds/RpgStations/`), and all three ride the events above, so what
+content advances on is exactly what a listener sees:
 
 | Kind | Fires | Target | Qualifier | Amount |
 |---|---|---|---|---|
 | `WORK_STATION` | once per REAL completed cycle (idle practice counts for nothing) | the station id (`sawmill`) | none | 1 |
 | `STATION_OUTPUT` | once per stack `StationOutputProducedEvent` carries: a produce phase's yield, a loot pass's bonus units, item grants and drop-list finds | the item id | the station id, or none to count the item from any station | the stack's quantity |
+| `STATION_INPUT` | once per stack `StationInputConsumedEvent` carries: a piece a ritual takes apart, a material a cycle drains, a reagent a stamp spends; credited to the worker, so an unattended settle advances nobody | the item id | the station id, or none to count the item at any station | the stack's quantity |
 
 A `Commands` payout and unattended work never count (see the event table). A pack adding a station
-ships nothing for this: its cycles and output are counted by the same two kinds, and it may ship its
-own copy of either kind file to add a `TargetIcons` picture for its station. The step sentences
-(`objective.text.work_station` / `objective.text.station_output`, each with an `.any` form for a step
-naming no target) ship in `rpgstations.lang` in every locale; a consumer mod that renders steps through
-its own templates keeps its own copies. Each moment also carries a typed payload wrapping the api
-event it came off (`StationWorkPayload` / `StationOutputPayload`), for a listener keying per action,
-per cycle or per socket.
+ships nothing for this: its cycles, output and input are counted by the same three kinds, and it may
+ship its own copy of any kind file to add a `TargetIcons` picture for its station. The step
+sentences (`objective.text.work_station` / `objective.text.station_output` /
+`objective.text.station_input`, each with an `.any` form for a step naming no target) ship in
+`rpgstations.lang` in every locale; a consumer mod that renders steps through its own templates keeps
+its own copies. Each moment also carries a typed payload wrapping the api event it came off
+(`StationWorkPayload` / `StationOutputPayload` / `StationInputPayload`), for a listener keying per
+action, per cycle, per socket or per consumed piece. A step that should count one station AND its
+greater tier authors the shared stem as its `Qualifier` with `QualifierMatchMode: "PREFIX"`
+(ziggfreed-common's objective leaf), since a qualifier is compared whole unless told otherwise.
 
 ## Typed registries (request/response)
 

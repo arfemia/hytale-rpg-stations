@@ -16,8 +16,8 @@ import javax.annotation.Nullable;
  *
  * <p>Every accessor returns a plain immutable snapshot taken at validate time; a hook may retain
  * whatever it likes. An interface rather than a record on purpose: it is the view most likely to
- * grow, and a new default-bodied accessor is the one post-freeze addition shape the growth policy
- * allows (see {@code api/CLAUDE.md}).
+ * grow, and a new default-bodied accessor is the one additive shape the growth policy allows (see
+ * {@code api/CLAUDE.md}).
  */
 public interface RollView {
 

@@ -44,6 +44,8 @@ import com.ziggfreed.rpgstations.api.EnhanceLine;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Ingredient;
+import com.ziggfreed.rpgstations.asset.Presentation;
+import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.CommandRewardExecutor;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
@@ -71,7 +73,7 @@ final class StationStepHandlers {
 
     /**
      * The composite handler: for each {@code Repeat} iteration, walk {@code Walk} (wave-3 deny)
-     * -&gt; {@code Consume} -&gt; {@code Stamp} -&gt; {@code Produce} -&gt; {@code Roll} -&gt;
+     * -&gt; {@code Consume} -&gt; {@code Stamp} -&gt; {@code Convert} -&gt; {@code Produce} -&gt; {@code Roll} -&gt;
      * {@code Commands} -&gt; {@code Presentation}/{@code Puppet.Clip}/{@code Puppet.Prop} entry cues
      * -&gt; {@code Duration} hold. A {@code Duration} suspends the walk (reusing the retired
      * {@code Wait} type's suspend/resume math); {@link StationSession#stepIteration} +
@@ -110,6 +112,9 @@ final class StationStepHandlers {
             // Repeat resolves ONCE at step entry (design 2.1, m1): a fresh entry computes the count;
             // a Duration-hold/walk resume reuses the value cached at the hold, so a factor-scaled
             // Repeat combined with a Duration hold never re-resolves its iteration count mid-loop.
+            // The PACE resolves under the same rule, beside it: a fresh entry reads the ladders
+            // once, and a resume reads the cached scale back, so a committed deadline is never
+            // re-scaled and a repeating paced step keeps one pace for all its iterations.
             int repeatCount;
             if (resumed) {
                 repeatCount = s.stepRepeatCount;
@@ -117,6 +122,8 @@ final class StationStepHandlers {
                 double contribution = StationStepDecisions.repeatFactorContribution(step.getRepeat(), ctx.snapshot::resolve);
                 repeatCount = StationStepDecisions.resolveRepeatCount(step.getRepeat(), contribution);
                 s.stepRepeatCount = repeatCount; // cache so a walk resume can read it back
+                s.stepPaceScale = step.effectivePaced()
+                        ? StationPacing.multiplier(ctx.pace, ctx.snapshot::resolve) : StationPacing.NEUTRAL;
             }
 
             return runIterations(ctx, step, now, false, repeatCount);
@@ -165,10 +172,19 @@ final class StationStepHandlers {
             // NOT cleared when the step SUCCEEDS: the next step (or stop()) owns the exit, so the
             // implicit convert program - one working step re-dispatched every cycle at the same
             // block - holds a steady look instead of flickering once per cycle.
+            // A step's own State names the look for THIS beat (a deeper state of one ritual); an
+            // unauthored one wears the custody's Working name. Entering the same block under a
+            // different name re-flips the block without darkening it in between.
             if (step.effectiveIsWork()) {
-                StationService.getInstance().enterWorkingState(s, step.getAt());
+                StationService.getInstance().enterWorkingState(s, step.getAt(), step.getState());
             } else {
                 StationService.getInstance().exitWorkingState(s);
+            }
+            // A step's Display overlay re-dresses the worked piece's prop for this beat (lifted,
+            // turning, enlarged) BEFORE the phases and the cues, so a Convert beat's despawn and a
+            // Display-targeted cue both find the prop as the beat authored it.
+            if (step.getDisplay() != null) {
+                StationService.getInstance().applyStepDisplay(s, step, ctx.commandBuffer);
             }
 
             StationStepResult phase;
@@ -180,6 +196,10 @@ final class StationStepHandlers {
                 s.stepIteration = 0;
                 return phase;
             }
+            if ((phase = convertPhase(ctx, step)) != null) {
+                s.stepIteration = 0;
+                return phase;
+            }
             if ((phase = producePhase(ctx, step)) != null) {
                 s.stepIteration = 0;
                 return phase;
@@ -187,6 +207,11 @@ final class StationStepHandlers {
             if ((phase = rollPhase(ctx, step)) != null) {
                 s.stepIteration = 0;
                 return phase;
+            }
+            // The beat-level Bonus knob: the action's own Bonus (extension tables included) rolls
+            // HERE, once per iteration, instead of at program completion.
+            if (step.effectiveRollBonus()) {
+                StationService.rollBonusAtBeat(ctx);
             }
             if ((phase = commandsPhase(ctx, step)) != null) {
                 s.stepIteration = 0;
@@ -196,8 +221,13 @@ final class StationStepHandlers {
             emitEntryCues(ctx, step);
 
             StationStep.Duration duration = step.getDuration();
-            if (duration != null && duration.effectiveMs() > 0) {
-                long deadline = StationStepDecisions.commitOrReadDeadline(now, duration.effectiveMs(), 0L);
+            // A paced beat's hold stretches by the pace resolved at step entry (cached on the
+            // session); an unpaced beat keeps its authored length whatever the pace.
+            long holdMs = duration != null
+                    ? StationPacing.scaleMs(duration.effectiveMs(), step.effectivePaced() ? s.stepPaceScale : StationPacing.NEUTRAL)
+                    : 0L;
+            if (duration != null && holdMs > 0) {
+                long deadline = StationStepDecisions.commitOrReadDeadline(now, holdMs, 0L);
                 s.stepDeadlineMs = deadline;
                 s.stepIteration = i;
                 s.stepRepeatCount = repeatCount; // cache the resolved count for the resume (m1)
@@ -358,9 +388,94 @@ final class StationStepHandlers {
             Vector3d blockPos = new Vector3d(ctx.session.blockX + 0.5, ctx.session.blockY + 0.5,
                     ctx.session.blockZ + 0.5);
             // A null base defers to the action's own Moments entry for this step (specificity wins
-            // when the step authors its own).
-            StationService.emitMoment(ctx.store, ctx.session, momentId, step.getPresentation(), blockPos);
+            // when the step authors its own). A PACED beat's presentation is stretched in time by
+            // the pace the step resolved at entry - whichever of the two authored it - so its
+            // accents keep their place inside the longer or shorter beat; the flair overlay still
+            // folds on top inside emitMoment.
+            Presentation base = step.getPresentation() != null
+                    ? step.getPresentation() : StationService.actionMoment(ctx.session, momentId);
+            if (step.effectivePaced()) {
+                base = StationPacing.scaleInTime(base, ctx.session.stepPaceScale);
+            }
+            StationService.emitMoment(ctx.store, ctx.session, momentId, base, blockPos);
         }
+    }
+
+    // ==================== Convert phase (the recipe, run at a beat) ====================
+
+    /**
+     * Runs the action's {@code Recipe} at this beat - the ONE conversion code path the classic
+     * convert loop and an authored {@code Convert} beat share. The row is the context's
+     * PRESELECTED check when the classic loop chose one before dispatch, else it is selected right
+     * here the way that loop selects one (authored rows, derived rows, then the fallback routes,
+     * addressed to the ritual queue's current socket). Then, in order: {@code Recipe.Yield} over
+     * the row's outputs and the yield breakdown, the cycle's output item (what an
+     * {@code OutputItems} grant adds to), the consume (custody or inventory, through the same
+     * body a {@code Consume} phase runs, which ledgers the consumption for the commit), the
+     * produce (through the same body a {@code Produce} phase runs, whose landing IS the commit; an
+     * essence-only row produces nothing), and LAST the conversion's own commit
+     * ({@link StationService#commitIteration}: the refund ledger clears and the ONE input-consumed
+     * hook fires, in that order; a no-op when the produce already committed, the one commit an
+     * essence-only row gets), since the inputs are spent for good only once the outputs have
+     * landed. A produce that fails returns before any commit, so the ledger still refunds the
+     * inputs at stop and no listener hears of a consumption that was undone. Returns
+     * {@code null} on success (or an absent / switched-off phase), or a Fail the composite handler
+     * propagates: a beat that finds no runnable row stops the session out of inputs (or inputs
+     * exhausted on a repeating program), no room stops it inventory-full.
+     */
+    @Nullable
+    static StationStepResult convertPhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        StationStep.Convert convert = step.getConvert();
+        if (convert == null || !convert.effectiveEnabled()) {
+            return null;
+        }
+        StationSession s = ctx.session;
+        boolean repeating = ctx.action.getWork() != null && ctx.action.getWork().effectiveLooping();
+        StationService.ConversionCheck check = ctx.preselected;
+        if (check == null) {
+            check = StationService.getInstance().selectConversionForStep(ctx, step);
+        }
+        if (check.state == StationService.ConversionState.NO_ROOM) {
+            return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL,
+                    "Convert step '" + step.getId() + "' has no inventory room for its outputs");
+        }
+        if (check.state != StationService.ConversionState.RUNNABLE || check.inputs == null) {
+            return StationStepResult.fail(StationService.shortInputStopReason(repeating),
+                    "Convert step '" + step.getId() + "' found no runnable conversion");
+        }
+        // Recipe.Yield: the per-cycle output-quantity transform (StationYield), deterministic end
+        // to end; the breakdown records what the yield did to each output for the summary panel.
+        StationAsset.Yield yield = check.recipe != null ? check.recipe.getYield() : null;
+        Ingredient[] authoredOutputs = check.outputs != null ? check.outputs : new Ingredient[0];
+        Ingredient[] yieldedOutputs = StationYield.applyToOutputs(yield, authoredOutputs);
+        StationService.recordYieldBreakdown(s, authoredOutputs, yieldedOutputs);
+        // A Bonus roll's Grants.OutputItems adds EXTRA items of this cycle's own primary output;
+        // an essence-only row has none, so such a grant lands nowhere on it.
+        Ingredient primaryOutput = yieldedOutputs.length > 0 ? yieldedOutputs[0] : null;
+        s.cycleOutputItemId = primaryOutput != null ? primaryOutput.getItemId() : null;
+
+        // An action authoring Custody ALWAYS draws its conversion from the claim, never the live
+        // inventory; the queue's current socket addresses which pile.
+        boolean fromCustody = ctx.action.getCustody() != null;
+        StationStep.Consume consume = StationStep.Consume.of(check.inputs,
+                fromCustody ? StationStep.Consume.FROM_CUSTODY : StationStep.Consume.FROM_INVENTORY,
+                fromCustody ? s.queueSocketId : null);
+        StationStepResult consumed = consumeItems(ctx, step, consume);
+        if (consumed != null) {
+            return consumed;
+        }
+        if (yieldedOutputs.length > 0) {
+            StationStepResult produced = produceItems(ctx, step,
+                    StationStep.Produce.of(yieldedOutputs, StationStep.Produce.TO_INVENTORY));
+            if (produced != null) {
+                return produced;
+            }
+        }
+        // The conversion committed: the inputs are spent whether or not anything was produced (the
+        // essence-only route produces nothing by design), so nothing is owed on a later stop, and
+        // only now is the consumption reported (already, when the produce above committed it).
+        StationService.commitIteration(s, ctx.store);
+        return null;
     }
 
     /**
@@ -392,11 +507,30 @@ final class StationStepHandlers {
      * entry that passes the pre-check but throws mid-removal) is covered by the pre-existing
      * ITERATION REFUND LEDGER: each removal is recorded into it as it lands, and the failing step
      * fails the program, whose {@code stop()} refunds every recorded id
-     * ({@code StationService#refundIterationLedger}) unless a committed {@code Produce} cleared it.
+     * ({@code StationService#refundIterationLedger}) unless a commit cleared it.
+     *
+     * <p><b>The input-consumed hook.</b> A consume is not final when it lands: the body records the
+     * REAL stacks it took into the ledger's hook half, and the consumption reaches the hook at the
+     * iteration's commit ({@code StationService#commitIteration}: the next committed produce, or
+     * the completed pass), or never, when a stop refunds it first.
      */
     @Nullable
     static StationStepResult consumePhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
-        StationStep.Consume consume = step.getConsume();
+        return consumeItems(ctx, step, step.getConsume());
+    }
+
+    /**
+     * The consume BODY, over an explicit {@code consume} group rather than the step's own, so the
+     * {@code Consume} phase and the {@code Convert} phase (which builds its group from the chosen
+     * row) drain through one code path. On success it records what it took into every half of the
+     * iteration ledger: the refund halves as each removal lands, and, once the whole batch has
+     * landed, the REAL stacks with their sockets into the hook half
+     * ({@code StationService#recordIterationConsumedInputs}), reported at the commit. Returns
+     * {@code null} on success (or an absent / empty group), or the failure that stopped it.
+     */
+    @Nullable
+    static StationStepResult consumeItems(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
+            @Nullable StationStep.Consume consume) {
         if (consume == null || consume.isEmpty()) {
             return null;
         }
@@ -417,7 +551,7 @@ final class StationStepHandlers {
             }
         }
         if (fromCustody) {
-            return consumeFromCustody(ctx, step, items);
+            return consumeFromCustody(ctx, step, consume, items);
         }
         if (!StationStep.Consume.FROM_INVENTORY.equalsIgnoreCase(consume.effectiveFrom())) {
             Log.warn("STATION Consume step '" + step.getId() + "' authors From '" + consume.effectiveFrom()
@@ -425,6 +559,7 @@ final class StationStepHandlers {
             return StationStepResult.fail(StationService.StopReason.STEP_FAILED,
                     "Consume.From '" + consume.effectiveFrom() + "' is not implemented");
         }
+        List<ConsumedInput> taken = new ArrayList<>();
         try {
             var combined = PlayerAccess.combinedBackpackStorageHotbar(ctx.player);
             boolean repeating = ctx.action.getWork() != null && ctx.action.getWork().effectiveLooping();
@@ -469,6 +604,7 @@ final class StationStepHandlers {
                     for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
                         ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
                         StationService.recordIterationConsumedItem(ctx.session, e.getKey(), e.getValue());
+                        taken.add(ConsumedInput.fromInventory(new ItemStack(e.getKey(), e.getValue())));
                     }
                 } else if (isResourceRoute(item)) {
                     String ref = consumeRef(item);
@@ -477,9 +613,12 @@ final class StationStepHandlers {
                             ? storageContainer(ctx.player).removeResource(resource)
                             : PlayerAccess.combinedBackpackStorageHotbar(ctx.player).removeResource(resource);
                     StationService.tallyResourceConsumption(ctx.session, tx, ref);
-                    // Iteration refund ledger (design 2.5/M1): record the REAL drained ids so a
-                    // mid-iteration stop refunds them - unless a Produce.To:Custody clears the ledger.
+                    // Iteration refund ledger: record the REAL drained ids so a mid-iteration stop
+                    // refunds them - unless a committed produce clears the ledger.
                     StationService.recordIterationConsumedResource(ctx.session, tx, ref);
+                    for (ItemStack drained : StampHandler.drainedStacksOf(tx)) {
+                        taken.add(ConsumedInput.fromInventory(drained));
+                    }
                 } else {
                     String ref = consumeRef(item);
                     ItemStack input = new ItemStack(ref, quantity);
@@ -490,12 +629,16 @@ final class StationStepHandlers {
                     }
                     ctx.session.consumedItems.merge(ref, quantity, Integer::sum);
                     StationService.recordIterationConsumedItem(ctx.session, ref, quantity);
+                    taken.add(ConsumedInput.fromInventory(input));
                 }
             }
         } catch (Throwable t) {
             Log.warn("STATION Consume step failed for '" + ctx.session.stationId + "': " + t.getMessage());
             return StationStepResult.fail(StationService.StopReason.INVENTORY_FULL, t.getMessage());
         }
+        // The whole batch landed: the hook half of the ledger holds it (an inventory stack left
+        // no pile, so it reports against the station's own block) until the commit reports it.
+        StationService.recordIterationConsumedInputs(ctx.session, null, taken);
         return null;
     }
 
@@ -548,16 +691,16 @@ final class StationStepHandlers {
      * merging piles). Availability is PEEKED across every entry first (a short claim fails before
      * any drain runs), so a multi-item custody consume is all-or-nothing too; a short drain fails
      * {@code OUT_OF_INPUTS}/{@code INPUTS_EXHAUSTED}, the same reasons an empty custody station
-     * denies at engage.
+     * denies at engage. The batch's REAL stacks, each with the socket it left, go into the hook half
+     * of the ledger against the {@code At} anchor's block, reported at the commit.
      */
     @Nullable
     private static StationStepResult consumeFromCustody(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
-            @Nonnull Ingredient[] items) {
-        // Custody drains from the step's At-anchor block (scope-2 wave 3, design 2.2) - the primary
-        // block for a null/self At, a remote anchor's claim otherwise.
+            @Nonnull StationStep.Consume consume, @Nonnull Ingredient[] items) {
+        // Custody drains from the step's At-anchor block - the primary block for a null/self At, a
+        // remote anchor's claim otherwise.
         StationCustodyClaim claim = StationService.getInstance().custodyClaimForAnchor(ctx.session, step.getAt());
-        StationStep.Consume consume = step.getConsume();
-        String groupSocket = consume != null ? consume.getSocket() : null;
+        String groupSocket = consume.getSocket();
         List<Custody.ResolvedSocket> sockets = actionSockets(ctx);
         for (Ingredient item : items) {
             String socketId = StationCustody.socketIdFor(item.getSocket(), groupSocket, sockets);
@@ -565,8 +708,8 @@ final class StationStepHandlers {
                     StationService.liveIngredientMatcher(item));
             int need = item.effectiveQuantity();
             if (have < need) {
-                // Design 2.4: a REPEATING program's shortage is the graceful natural end
-                // (INPUTS_EXHAUSTED); a non-repeating one keeps OUT_OF_INPUTS.
+                // A REPEATING program's shortage is the graceful natural end (INPUTS_EXHAUSTED); a
+                // non-repeating one keeps OUT_OF_INPUTS.
                 boolean repeating = ctx.action.getWork() != null && ctx.action.getWork().effectiveLooping();
                 return StationStepResult.fail(StationService.shortInputStopReason(repeating),
                         "Consume step '" + step.getId() + "' custody ran short ("
@@ -575,6 +718,7 @@ final class StationStepHandlers {
             }
         }
         String anchorBlockKey = StationService.anchorBlockKeyFor(ctx.session, step.getAt());
+        List<ConsumedInput> taken = new ArrayList<>();
         for (Ingredient item : items) {
             String socketId = StationCustody.socketIdFor(item.getSocket(), groupSocket, sockets);
             Map<String, Integer> drainedOut = new LinkedHashMap<>();
@@ -584,19 +728,33 @@ final class StationStepHandlers {
             for (Map.Entry<String, Integer> e : drainedOut.entrySet()) {
                 ctx.session.consumedItems.merge(e.getKey(), e.getValue(), Integer::sum);
             }
+            // The custody consume fix: a drain that took the last of a single-item socket's piece
+            // takes the metadata-bearing stack that WAS the piece off the pile with it (it is
+            // destroyed, never handed back) and drops the prop that rendered it in the same tick.
+            // Only a stack THIS drain consumed is ledgered for an interrupted-iteration refund: one
+            // already left dangling on its pile before the drain (the 1.0.0 leftover shape) is
+            // cleared off the pile but never put back, since the piece it stood for is gone.
+            ItemStack unique = claim != null ? claim.takeUniqueIfDrained(socketId) : null;
             if (anchorBlockKey != null) {
                 StationService.recordIterationConsumedCustody(ctx.session, anchorBlockKey, socketId, drainedOut);
+                StationService.recordIterationConsumedUnique(ctx.session, anchorBlockKey, socketId,
+                        StationCustodyLedger.pieceTaken(drainedOut, unique));
             } else {
                 // No resolvable pile address (an unresolved anchor) - the player hand-back half
                 // of the ledger still covers the refund.
                 StationService.recordIterationConsumedMap(ctx.session, drainedOut);
             }
+            if (unique != null) {
+                StationService.getInstance().onUniqueConsumed(ctx.session, step.getAt(), socketId, ctx.commandBuffer);
+            }
+            taken.addAll(ConsumedInput.fromPile(socketId, drainedOut, unique));
         }
         // One dirty mark for the whole drain batch: the claim is a view over the block's
         // chunk-persisted stash, and an unmarked mutation survives only until the section unloads.
         if (claim != null) {
             claim.markDirty();
         }
+        StationService.recordIterationConsumedInputs(ctx.session, step.getAt(), taken);
         return null;
     }
 
@@ -613,9 +771,10 @@ final class StationStepHandlers {
      * Commits a produce phase. {@code To:"Custody"} (wave 3) stores into the step's {@code At}-anchor
      * custody claim; {@code To:"Inventory"} adds {@code Produce.Quantity} of {@code Produce.ItemId} to
      * the player, hotbar-first then backpack storage then drop-at-block. EITHER committed destination
-     * clears the current iteration's refund ledger (review minor m1) - the consumed inputs became the
-     * produced output, so a later stop never both refunds the inputs AND keeps the output. Returns
-     * {@code null} on success/no-op.
+     * COMMITS the current iteration ({@code StationService#commitIteration}, review minor m1): the
+     * refund ledger clears - the consumed inputs became the produced output, so a later stop never
+     * both refunds the inputs AND keeps the output - and every consume the iteration ledgered then
+     * reaches the input-consumed hook, once. Returns {@code null} on success/no-op.
      *
      * <p>The inventory route grants through {@link ItemGrantUtil#grantOrDrop} rather than the plain
      * {@code grant}, because what it does next is COUNT and ANNOUNCE the stack: only
@@ -628,7 +787,17 @@ final class StationStepHandlers {
      */
     @Nullable
     static StationStepResult producePhase(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
-        StationStep.Produce produce = step.getProduce();
+        return produceItems(ctx, step, step.getProduce());
+    }
+
+    /**
+     * The produce BODY, over an explicit {@code produce} group rather than the step's own, so the
+     * {@code Produce} phase and the {@code Convert} phase (which builds its group from the chosen
+     * row's yielded outputs) land through one code path.
+     */
+    @Nullable
+    static StationStepResult produceItems(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
+            @Nullable StationStep.Produce produce) {
         if (produce == null || produce.isEmpty()) {
             return null;
         }
@@ -671,7 +840,9 @@ final class StationStepHandlers {
                     ctx.session.pendingCycleSocketCounts.merge(socketId, item.effectiveQuantity(), Integer::sum);
                     committed.add(new ItemStack(item.getItemId(), item.effectiveQuantity()));
                 }
-                StationService.clearIterationLedgerOnCommittedProduce(ctx.session);
+                // The COMMIT: the refund ledger clears and every consume this iteration ledgered
+                // reaches the input-consumed hook, once, now that its outputs stand in custody.
+                StationService.commitIteration(ctx.session, ctx.store);
                 // Doneness: ONE batch per committed produce phase (never per item) - the ready
                 // window sits on the phase's FIRST produced socket and (re)starts its game-time
                 // clock now that the whole batch stands in custody.
@@ -719,10 +890,11 @@ final class StationStepHandlers {
             }
             // M1 (review minor m1): the outputs are now committed to the inventory, so the consumed
             // inputs are spent - clear the refund ledger, exactly as the To:Custody branch does, or a
-            // stop on a later Duration suspend in this same iteration would double-grant. Cleared
+            // stop on a later Duration suspend in this same iteration would double-grant. Committed
             // ONCE after every item lands, so a mid-list grant failure still leaves the ledger able
-            // to refund the inputs.
-            StationService.clearIterationLedgerOnCommittedProduce(ctx.session);
+            // to refund the inputs; the commit is also where the iteration's consumes reach the
+            // input-consumed hook.
+            StationService.commitIteration(ctx.session, ctx.store);
             // ONE output-produced moment per committed phase (the inventory route; a stack that
             // reached neither the inventory nor the ground is excluded - the player never got it).
             StationService.fireOutputProduced(ctx.session, ctx.store, null, null, committed);
@@ -903,6 +1075,16 @@ final class StationStepHandlers {
             claim.markDirty();
 
             StationService.tallyConsumedStacks(ctx.session, consumedForRestore);
+            // The reagents are spent for good the moment the enhanced stack lands (they sit in no
+            // refund ledger - every failure above restored them first), so the ONE input-consumed
+            // hook hears of them now, once: inventory stacks, against the station's own block.
+            List<ConsumedInput> reagentsSpent = new ArrayList<>(consumedForRestore.size());
+            for (ItemStack reagent : consumedForRestore) {
+                if (reagent != null) {
+                    reagentsSpent.add(ConsumedInput.fromInventory(reagent));
+                }
+            }
+            StationService.reportCommittedConsumption(ctx.session, ctx.store, null, reagentsSpent);
 
             String weaponId = weaponStack.getItemId() != null ? weaponStack.getItemId() : "";
             StationEnhanceOutcome outcome = new StationEnhanceOutcome(weaponId, weaponStack, mutation.stack(),
@@ -1063,7 +1245,7 @@ final class StationStepHandlers {
 
         /** The REAL drained stack(s) for {@code tx} (a ResourceTypeId route can drain several concrete item ids), for a precise restore. */
         @Nonnull
-        private static List<ItemStack> drainedStacksOf(@Nullable ResourceTransaction tx) {
+        static List<ItemStack> drainedStacksOf(@Nullable ResourceTransaction tx) {
             List<ItemStack> out = new ArrayList<>();
             if (tx == null) {
                 return out;

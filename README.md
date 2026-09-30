@@ -6,7 +6,12 @@ Diegetic interactive work stations for Hytale - place a block, press `F`, and wa
 A standalone server mod, package root `com.ziggfreed.rpgstations`. It ships one complete jar-default
 station, a Sawmill, craftable at a tier 2 Workbench, with a tool-scaling yield curve, a
 session-loyalty find ladder, and a rare trophy hatchet to chase, so it is playable with no content
-pack at all; a Cooking Pit you BUILD rather than craft (a ring of stone around an unlit campfire,
+pack at all. The held, unreleased 1.1.0 adds a second: the Disenchanting Table, in two tiers, the
+stand-in for the vanilla Salvage bench, where a placed piece of gear comes apart over a staged
+ritual and gives back what the bench would plus Life essence, the occasional Void essence or
+Voidheart, a four-piece disenchanter's kit that forms a gear set, and a grimoire to chase; the
+Greater Disenchanting Table works three pieces in a row and pays more. A Cooking Pit you BUILD
+rather than craft (a ring of stone around an unlit campfire,
 grilling raw food over the bare flame and cooking whole meals unattended once its iron Cooking Pot
 is mounted, with dishes that burn if you forget them) is finished and held under `unreleased/` for
 a later release. The engine underneath - multi-action stations, step programs, multi-station
@@ -21,7 +26,7 @@ work into its own rewards, without either mod hard-depending on the other. See
 
 ## Install
 
-Requires **ZiggfreedCommon** (`>=2.1.0`), the one hard dependency - drop its jar into your server's
+Requires **ZiggfreedCommon** (`>=2.2.0`), the one hard dependency - drop its jar into your server's
 `Mods/` folder first, then drop the RPG Stations jar into the same folder and restart. See
 [Getting Started](docs/getting-started.md) for the full walkthrough.
 
@@ -40,7 +45,10 @@ for the developer guide.
 - [Getting Started](docs/getting-started.md) and [Concepts](docs/concepts.md) - install and the core
   vocabulary (station, session, action, step, custody, puppet).
 - [Your First Station](docs/your-first-station.md) - a worked walkthrough authoring one station end
-  to end, followed by [Actions & Step Programs](docs/actions-and-steps.md),
+  to end, and [Derive from Any Bench](docs/derive-from-any-bench.md) plus
+  [Disenchanting](docs/disenchanting.md), the two worked examples of a station that stands in for a
+  vanilla bench (the Sawmill for the Builders bench, the Disenchanting Table for the Salvage bench),
+  followed by [Actions & Step Programs](docs/actions-and-steps.md),
   [Multi-Station Programs](docs/multi-station-programs.md),
   [Custody & Placed Display](docs/custody-and-placed-display.md),
   [Unattended Work](docs/unattended-work.md),

@@ -100,7 +100,7 @@ public final class Puppet {
             .documentation("The puppet's appearance: whose model it wears and where that model comes from.").add()
             .appendInherited(new KeyedCodec<>("Offset", Vec3.CODEC, false),
                     (o, v) -> o.offset = v, o -> o.offset, (o, p) -> o.offset = p.offset)
-            .documentation("The puppet's stance shift off the station's block-top anchor, facing-relative: X/Z are in the block's own horizontal frame (+Z = its front), Y is vertical.").add()
+            .documentation("The puppet's stance shift off the station's block-centre anchor, facing-relative: X/Z are in the block's own horizontal frame (+Z = its front), Y is vertical.").add()
             .appendInherited(new KeyedCodec<>("Rotation", Rotation.CODEC, false),
                     (o, v) -> o.rotation = v, o -> o.rotation, (o, p) -> o.rotation = p.rotation)
             .documentation("The puppet's own orientation in degrees (Yaw/Pitch/Roll), each leaf defaulting to 0. Yaw is facing-relative (the placed block's facing folds in additively, so 0 faces the same way the block does); Pitch and Roll are the puppet's own tilt and are NOT composed with the block. Roll needs Look.Source \"PlayerClone\" or \"Model\": an NPC keeps its pose from a leash that carries heading and pitch only, so a banked pose is dropped under Look.Source \"NpcRole\" (the validator warns).").add()
@@ -153,7 +153,7 @@ public final class Puppet {
     }
 
     /**
-     * The puppet's stance shift off the station's block-top anchor, as the shared {@link Vec3}
+     * The puppet's stance shift off the station's block-centre anchor, as the shared {@link Vec3}
      * group (each leaf independently nullable, default 0). {@code X}/{@code Z} are FACING-RELATIVE
      * to the placed station block's own yaw - authored {@code +Z} is the block's FRONT,
      * {@code +X} its right - so a rotated station carries its puppet's side around with it
