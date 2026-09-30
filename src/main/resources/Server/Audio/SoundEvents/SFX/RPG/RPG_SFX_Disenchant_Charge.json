@@ -1,0 +1,49 @@
+{
+  "$Comment": "The Surge beat's layered charge at the Disenchanting Table (Actions/Disenchant.json): the staff's charging swell first, the skeleton mage's spellbook charge magic four tenths of a second in, and the crystal sweetener fading in from two seconds, all vanilla files played as one event with a moderate attenuation preset as its Parent. It sits in the staff-magic audio category, which the greater table's hum never ducks. Every layer here is mono, so the event plays positionally at the piece.",
+  "AudioCategory": "AudioCat_Magic_Staff",
+  "Layers": [
+    {
+      "Files": [
+        "Sounds/Weapons/Staff/Staff_Charging_01.ogg"
+      ],
+      "StartDelay": 0,
+      "Volume": 4.0,
+      "RandomSettings": {
+        "MinPitch": -1,
+        "MaxPitch": 1
+      }
+    },
+    {
+      "Files": [
+        "Sounds/Weapons/Spellbook/Skeleton_Spellbook_Charge_Magic_01.ogg",
+        "Sounds/Weapons/Spellbook/Skeleton_Spellbook_Charge_Magic_02.ogg",
+        "Sounds/Weapons/Spellbook/Skeleton_Spellbook_Charge_Magic_03.ogg"
+      ],
+      "StartDelay": 0.4,
+      "Volume": 4.0,
+      "RandomSettings": {
+        "MinPitch": -1.8240371213405997,
+        "MaxPitch": 1.6500422849992202
+      }
+    },
+    {
+      "Files": [
+        "Sounds/Blocks/Crystal/Crystal_Magic_Sweetener_01.ogg",
+        "Sounds/Blocks/Crystal/Crystal_Magic_Sweetener_02.ogg",
+        "Sounds/Blocks/Crystal/Crystal_Magic_Sweetener_03.ogg",
+        "Sounds/Blocks/Crystal/Crystal_Magic_Sweetener_04.ogg",
+        "Sounds/Blocks/Crystal/Crystal_Magic_Sweetener_05.ogg"
+      ],
+      "StartDelay": 2.0,
+      "FadeIn": 1.5,
+      "Volume": -2.0,
+      "RandomSettings": {
+        "MinPitch": -2,
+        "MaxPitch": 2
+      }
+    }
+  ],
+  "Volume": 0,
+  "PreventSoundInterruption": true,
+  "Parent": "SFX_Attn_Moderate"
+}

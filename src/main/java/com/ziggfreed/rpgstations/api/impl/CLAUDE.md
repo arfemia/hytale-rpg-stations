@@ -28,7 +28,11 @@ is used.
   `hytale:` one is a straight native read that means the same thing with no station involved -
   `tool_power` (an `ItemToolSpec` power, its native `GatherType` passed as the `Param` so the
   addressing is explicit, defaulting to the station's own when omitted), `tool_quality`,
-  `tool_item_level`, `tool_durability_percent`, and `stat`. So two mods converging on a `hytale:`
+  `tool_item_level`, `tool_durability_percent`, `stat`, and the item family (`item_quality`,
+  `item_level`, `item_durability_percent`, `item_stat`: the PIECE the session works, published
+  through the api `FactorContext.item()`, adopted wholesale beside `stat` through
+  `registerPortable`; `ziggfreedcommon:item_stamp_points` needs no line because the shared
+  registry falls through to the library's process-wide contribution). So two mods converging on a `hytale:`
   id is agreement, not a collision, and an author can tell portability from the id alone. See
   `registerBuiltins()`'s javadoc for the full rule. `resolve(...)` never propagates a throwing
   provider - a bad third-party factor provider must never crash a loot roll or a station gate

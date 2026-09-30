@@ -20,9 +20,11 @@ it names is generic; the table is the worked example.
 The jar ships two blocks and two station ids, `Disenchanting_Table` and
 `Disenchanting_Table_Greater`, each block carrying `Default`, `Loaded`, `Working` and `Drawing`
 interaction states. The ritual lives once, in a standalone `Actions/Disenchant.json` that both
-stations `Ref`; the greater tier's `Disenchant_Greater` is `"Parent": "Disenchant"` and overrides
-only what pays more and what looks deeper. Two transforms would be two actions; one transform in
-two tiers is one action and a parent chain.
+stations `Ref`; the greater tier's `Disenchant_Greater` is `"Parent": "Disenchant"` and authors
+only what the greater tier changes: the queue, its three sockets, the one extra payout table and
+where the double stands. The deeper violet look of that tier is not in the action at all; it lives
+on the greater block's own `Working` and `Drawing` states. Two transforms would be two actions;
+one transform in two tiers is one action and a parent chain.
 
 ## Custody: one piece at a time
 
@@ -31,7 +33,12 @@ two tiers is one action and a parent chain.
   "MaxQuantity": 1,
   "HeldOnly": true,
   "Preview": true,
-  "Input": { "Except": { "ItemId": "RPG_Weapon_Spellbook_Grimoire_Disenchanter" } },
+  "Input": {
+    "Except": [
+      { "ItemId": "RPG_Weapon_Spellbook_Grimoire_Disenchanter" },
+      { "Tags": { "Family": ["Disenchanter"] } }
+    ]
+  },
   "States": { "Empty": "Default", "Loaded": "Loaded", "Working": "Working" },
   "Display": { "Offset": { "Y": 1.05 }, "Scale": 0.6, "Animated": true }
 }
@@ -46,14 +53,23 @@ two tiers is one action and a parent chain.
   back on its own when only the essence route takes it.
 - `Input` authors only `Except`: acceptance stays whatever the recipe and the fallback routes
   derive (every piece the Salvage bench knows, and whatever the fallback's own `Input` scopes),
-  minus the hole. The table's own trophy is the hole. A pack's extension overlay adds its own holes
-  beside this one.
+  minus the holes: the table's own trophy and its kit (the `Disenchanter` family tag the four
+  pieces carry). What has a salvage recipe but is not gear (rocks, plants) and what is gear-shaped
+  but not gear (ammunition, bait, deployables, the tagless repair kits, fertilizers and capture
+  crate) is refused by the jar's protect-list file, `ProtectLists/Disenchanting_Tables.json`, one
+  file scoped to both tables, so those holes are written once rather than on every matcher.
+  Placement is the one gate, so the fallback's own `Input` needs only its routes. A pack's
+  extension overlay adds its own holes beside these.
 - `Display.Animated` shows the placed piece turning and bobbing the way a dropped item does.
 
-The greater table authors three single-item sockets instead of the implicit one, and
-`Work.Queue: true`: the ritual runs once per filled socket, in authored order, each run reading and
-consuming that socket's piece and playing its beats at that socket's prop. The session ends when
-every socket is empty; an interrupted run refunds only the socket in progress.
+The greater tier's action (`Disenchant_Greater`, a child of `Disenchant`) authors three single-item
+sockets in its own `Custody` instead of the implicit one, and `Work.Queue: true`. The `Custody`
+merges per leaf under `Parent`, so `HeldOnly`, `Preview` and `States` are inherited; an authored
+socket judges placement by its own `Match` alone, so each socket's `Match` carries the same two
+`Except` holes and otherwise derives its acceptance exactly as the lesser table's `Input` does. The
+ritual then runs once per filled socket, in authored order, each run reading and consuming that
+socket's piece and playing its beats at that socket's prop. The session ends when every socket is
+empty; an interrupted run refunds only the socket in progress.
 
 ## The seven beats
 
@@ -63,12 +79,12 @@ program is seven beats, four of fixed length and three that stretch with the wor
 | Beat | Length | The double | The bed | Accents |
 |---|---|---|---|---|
 | Open | 2.0 s, fixed | opens the book | `Working` | a page-turn charge; a sigil rising from the piece |
-| Kindle | elastic, 8 s untrained | raises the book | `Working` | a swell; motes on delays; tinted sparks at the piece |
-| Draw | elastic, 12 s | holds the channel | `Drawing`; the piece lifts and turns | a gather on the piece; a chime |
+| Kindle | elastic, 8 s untrained | raises the book into the charging pose | `Working` | a swell; mote chimes on delays; green-gold sparks and motes riding the piece |
+| Draw | elastic, 12 s | holds that pose (no clip of its own) | `Drawing`; the piece lifts and turns | after a 400 ms hold, a gather riding the lifted piece; a chime; the channel aura on the double |
 | Surge | elastic, 9 s | winds up | `Drawing` | a beam shell; a layered charge; a light shake, delayed |
 | Unmake | 1.5 s, fixed | releases | back to `Working` | the `Convert`; a shatter, a flash, a hard shake |
-| Payout | 2.5 s, fixed | eases | `Working` | a bloom; the find cues about 450 ms in |
-| Settle | 3.0 s, fixed | a hand on the heart | `Working` | motes; one last mote sound |
+| Payout | 2.5 s, fixed | holds the release (no clip of its own) | `Working` | a bloom; the find cues about 450 ms in |
+| Settle | 3.0 s, fixed | a hand on the heart | `Working` | motes where the piece stood; one last mote sound |
 
 One beat, in full:
 
@@ -76,12 +92,13 @@ One beat, in full:
 {
   "Id": "Draw", "Paced": true, "IsWork": true, "State": "Drawing",
   "Duration": { "Ms": 12000 },
-  "Puppet": { "Clip": "RPG_Emote_Disenchant_Channel" },
   "Display": { "Offset": { "Y": 1.4 }, "Rotation": { "Yaw": 45 }, "Animated": true },
   "Presentation": {
     "Target": "Display",
+    "DelayMs": 400,
     "Sounds": ["SFX_MemoryRestored"],
-    "Particles": [ { "SystemId": "RPG_Disenchant_Draw" } ]
+    "Particles": [ { "SystemId": "RPG_Disenchant_Draw" } ],
+    "Effect": { "Id": "RPG_Disenchant_Channel_Aura", "Target": "Puppet" }
   }
 }
 ```
@@ -90,16 +107,26 @@ One beat, in full:
   `DelayMs` and every burst's `DurationSeconds` of its own presentation, so its accents keep their
   place inside the beat. A beat without it holds its authored length at any speed, which keeps the
   gather, the flash and the linger crisp.
+- No `Puppet` clip: the double keeps the charging pose the Kindle beat put it in. A beat authors a
+  clip only where the pose changes.
 - `IsWork: true` on every beat keeps the table lit between beats. A pure beat (no `Convert`, no
   `Consume` plus `Produce`) would otherwise not count as work, and the block would fall back to its
   `Loaded` look.
 - `State` holds the block in a deeper state than `Custody.States.Working` for this beat: `Drawing`
   from the Draw on, `Working` again at the Unmake. Two beats in a row naming the same state keep it
   without a flicker; a beat naming a different one re-flips in place.
-- `Display` overlays the placed piece's prop for this beat only, the leaves it authors replacing the
-  socket's own: here the piece lifts and turns. The socket's own look comes back after.
+- `Display` overlays the placed piece's prop from this beat on, the leaves it authors replacing the
+  socket's own: here the piece lifts and turns, and it stays that way until another beat overlays
+  it or the piece leaves, so the Surge still shows the lifted piece and the Unmake's shatter plays
+  where it stood. The overlay
+  respawns the prop at the beat's entry, and a prop spawned this tick has been shown to nobody yet,
+  so a cue aimed at it in the same tick would play at its position instead of riding it: the
+  presentation's `DelayMs` holds the whole group past the next tick (400 ms here, and 84 ms at the
+  fastest pace, since a paced beat's delay scales with it).
 - `RPG_Disenchant_Draw` authors its own `LifeSpan`, so it rides the lifted piece and ends on its
   own; it needs no `DurationSeconds`, which only caps a burst played at a position.
+- `Effect` with `"Target": "Puppet"` puts the channel aura on the worker's double at the same
+  moment, and it stays for the rest of the session.
 
 ### Pace
 
@@ -107,21 +134,26 @@ One beat, in full:
 "Pace": {
   "Ladder": {
     "Factors": [ { "Factor": "hytale:stat", "Param": "RPG_Disenchanting_Proficiency" } ],
-    "Floors": [ { "Min": 0, "Scale": 1.0 }, { "Min": 25, "Scale": 0.7 },
-                { "Min": 50, "Scale": 0.45 } ]
+    "Floors": [ { "Min": 0, "Scale": 1.0 }, { "Min": 10, "Scale": 0.9 },
+                { "Min": 20, "Scale": 0.8 }, { "Min": 30, "Scale": 0.7 },
+                { "Min": 45, "Scale": 0.55 }, { "Min": 60, "Scale": 0.42 },
+                { "Min": 75, "Scale": 0.3 }, { "Min": 90, "Scale": 0.21 } ]
   },
-  "Clamp": { "Min": 0.375, "Max": 1.0 }
+  "Clamp": { "Min": 0.21, "Max": 1.0 }
 }
 ```
 
 `Pace` is the `ContributionScale` ladder shape ([Loot & Factors](loot-and-factors.md)): the factors
 are summed, the highest floor reached wins, and its scale multiplies every `Paced` beat. The jar's
-ladder reads a native entity stat, `RPG_Disenchanting_Proficiency`, which the table's own kit and
-grimoires carry through ordinary item `StatModifiers`, so a better-equipped worker finishes sooner
-with nothing else installed: forty seconds untrained, fifteen at the clamp. An extension adds its
-own `Pace` ladder from its own factors, and the ladders MULTIPLY; only the action's `Clamp` bounds
-the product. The pace is resolved once at each beat's entry, so a stat change mid-beat lands on the
-next.
+ladder reads a native entity stat, `RPG_Disenchanting_Proficiency`, which the table's own kit, its
+set tiers, its grimoire and its draught carry through ordinary item `StatModifiers`, set bonuses
+and an effect's `RawStatModifiers`, so a better-equipped worker finishes sooner with nothing else
+installed. Only the three elastic beats are paced (29 of the ritual's 38 seconds; the other 9 are
+fixed), which is why the clamp's floor is 0.21 rather than the ratio of the two lengths: at the
+floor the elastic beats shrink to about 6 seconds and the whole ritual to 15. An extension adds
+its own `Pace` ladder from its own factors, and the ladders MULTIPLY; only the action's `Clamp`
+bounds the product. The pace is resolved once at each beat's entry, so a stat change mid-beat lands
+on the next.
 
 ## Two layers: the bed and the accents
 
@@ -134,14 +166,18 @@ texture with a model animation, and ALL of it starts and stops with the state fl
 table's `Working` is the vanilla Salvage bench's own processing look, arms and door animating, with
 an ember effect on its fire part and a green-gold light; `Drawing` brightens the light and thickens
 the sparks. The greater table's `Working` is the vanilla Arcane table's idle animation (book, gem
-and candle bobbing) under a hum that ducks the music; `Drawing` adds violet motes. The step's
-`State` leaf is the whole mechanism: name the state, and the block does the rest.
+and candle bobbing) under a soft violet light and a hum that ducks the music; `Drawing` adds violet
+motes under a stronger violet light. The step's `State` leaf is the whole mechanism: name the state,
+and the block does the rest.
 
 **The accents are one-shots.** A step's `Presentation` fires one-shot sounds (always positional) and
 bounded particle bursts. `DurationSeconds` caps a burst played at a position that would otherwise
 never end; a system that ends on its own needs no cap. `Color` tints a vanilla system to the beat's
-palette through the engine's own colour argument, so the green-gold sparks are vanilla's
-`Block_Gem_Sparks` with one leaf, not a copied system.
+palette through the engine's own colour argument, one leaf instead of a copied system, and it tints
+a burst riding an entity as well as one played at a position. The ritual's own accents are derived
+copies anyway, because each has to end on its own to ride the piece (a vanilla system with no
+`LifeSpan` of its own plays at a position under a cap), so each copy carries its green-gold in its
+own keyframes.
 
 **Where a cue plays** is `Presentation.Target`:
 
@@ -177,7 +213,8 @@ own timer never runs there and the station keeps the clock.
   "Puppet": { "Clip": "RPG_Emote_Disenchant_Release" },
   "Convert": {},
   "Presentation": {
-    "Sounds": ["SFX_Crystal_Break", "SFX_Skeleton_Mage_Spellbook_Impact"],
+    "Target": "Display",
+    "Sounds": ["RPG_SFX_Disenchant_Crystal_Break", "SFX_Skeleton_Mage_Spellbook_Impact"],
     "Particles": [ { "SystemId": "RPG_Disenchant_Flash" } ],
     "Shake": { "EffectId": "Impact", "Intensity": 0.6 }
   }
@@ -188,7 +225,12 @@ own timer never runs there and the station keeps the clock.
 is selected (an authored row, a salvage-derived row, or a fallback route), the piece is consumed
 from custody, the outputs land in the worker's inventory, and the input event fires. It is the one
 conversion code path, so a ritual and a loop never drift. `Preview` had already told the player
-what this beat would return.
+what this beat would return. The prop is gone by the time the beat's cues play, so the `Display`
+target resolves to where the lifted piece last stood: `RPG_Disenchant_Flash` folds the magic hit,
+the glass break and the crystal break into one system with its own `LifeSpan`, so the whole shatter
+lands there. The crystal break plays through `RPG_SFX_Disenchant_Crystal_Break`, a one-line copy of
+the vanilla event with `BypassDucking` set, because the greater table's hum ducks the block-sounds
+category and would otherwise swallow it.
 
 ## What it pays
 
@@ -202,11 +244,18 @@ table's own payout is its `Bonus`:
 - **Finds, as finds.** Void essence is a `Chance` rising with the piece's level; a Voidheart is the
   rarest, gated to high-level gear; the grimoire trophy is a flat rare chance paid as an item grant.
   Each carries a `Cue` (`Cue:Void_Find`, `Cue:Voidheart`, `Cue:Trophy`) the action's `Moments` map
-  dresses, delayed about 450 ms so it lands after the shatter.
-- **The kit.** Four cloth pieces roll on their own flat chances, and the set they form carries the
-  proficiency stat the pace ladder reads.
+  dresses, delayed about 450 ms so it lands after the shatter. The two void cues play their creature
+  sounds through `BypassDucking` copies, for the same reason the crystal break does.
+- **The kit.** Four cloth pieces roll on their own flat chances (`Cue:Kit_Find` is their cue; the
+  engine's own `Rare_Find` id is never taken from an action's `Moments`, so a find that should
+  sound like this table names a cue of the table's own), and the
+  set they form with the grimoire (`Server/ZiggfreedCommon/GearSets/RPG_Disenchanters_Kit.json`)
+  carries the proficiency stat the pace ladder reads: a little at two pieces, more at four with the
+  set's look, the most at four with the grimoire in hand.
 - **The greater tier** references everything the lesser does plus one more table: more essence and
-  better odds, one extra file rather than a copied set.
+  better odds, one extra file rather than a copied set. The tables are `Disenchant_Essence`,
+  `Disenchant_Void`, `DisenchantTrophy`, `Disenchant_Kit` and `Disenchant_Greater_Bonus`, each
+  under `Server/ZiggfreedCommon/Lootables/`, so a pack re-tunes one concern by shipping one file.
 
 The piece in custody is what the factors read (captured on the session, so a resume reads the same
 piece), so an extension's own rolls size their payout from the piece through the same item factors,

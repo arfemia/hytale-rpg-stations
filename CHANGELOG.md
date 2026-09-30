@@ -161,9 +161,10 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   jar, a pack or the owner's own pack, so no layer's list replaces another's; a later layer's file
   with the same name replaces the earlier one inside the store, which is how an entry is taken
   back. The check runs before any socket is offered the piece (`StationCustody.isProtected` over the
-  files in scope at the station and action). The jar ships no file: the list is the server owner's
-  policy, and a station that must refuse one of its own pieces says so in its own
-  `Custody.Input.Except`, in the station's file. Validator: `PROTECT_LIST_EMPTY`,
+  files in scope at the station and action). The jar ships one file,
+  `ProtectLists/Disenchanting_Tables.json`, scoped to its two Disenchanting Tables (below); a
+  station that must refuse one of its own pieces says so in its own `Custody.Input.Except`, in the
+  station's file, or in a socket's `Match.Except`. Validator: `PROTECT_LIST_EMPTY`,
   `PROTECT_LIST_CATCH_ALL`, `PROTECT_LIST_UNKNOWN_STATION`, `PROTECT_LIST_UNKNOWN_ACTION`,
   `PROTECT_LIST_UNKNOWN_ITEM` (INFO), plus the shared `EXCEPT_CATCH_ALL` and
   `UNKNOWN_ACTION_FUNCTION` on each entry.
@@ -276,8 +277,12 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   `hytale:item_*` judges the placed piece; the inventory route's piece is unknown before a
   conversion is chosen, so that gate reads no item. The four portable item factors
   (`hytale:item_quality`, `hytale:item_level`, `hytale:item_durability_percent`,
-  `hytale:item_stat`) are adopted into the station vocabulary, and
-  `ziggfreedcommon:item_stamp_points` reaches it through the library's process-wide contribution.
+  `hytale:item_stat`) are adopted into the station vocabulary
+  (`FactorRegistryImpl.registerBuiltins()`, beside `hytale:stat`, through the same portable
+  forwarder), and `ziggfreedcommon:item_stamp_points` reaches it through the library's
+  process-wide contribution; `FactorRegistryImplTest` pins that the vocabulary knows each of the
+  five ids, attributes the four to this engine, and fails closed on them with no piece, so a
+  Lootable reading the piece never warns `UNKNOWN_FACTOR` or sits on its floor.
   The three `hytale:tool_*` readings moved onto the shared item reader (`StationToolReadings` over
   `ItemReadings`) with the station's own 0 / 100 defaults; `tool_quality` reads the held ITEM's
   current quality, never the stack's copied index, so its values are the 1.0.0 ones.
@@ -314,6 +319,92 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
 - **Extension overlays keep every leaf.** An extension's `Custody.States` overlay now keeps the
   base's `Ready` and `Overdone` names (before, authoring any `States` group dropped them), and its
   `EffectRef` overlay keeps the `Target`.
+- **The Disenchanting Table, in two tiers: the jar's second station, and the diegetic stand-in for
+  the vanilla Salvage bench.** `Stations/Disenchanting_Table.json` and
+  `Stations/Disenchanting_Table_Greater.json` each `Ref` one ritual: `Actions/Disenchant.json`, a
+  seven-beat `Steps` program (Open, Kindle, Draw, Surge, Unmake, Payout, Settle; 38 seconds
+  untrained) over one placed piece of gear, and `Actions/Disenchant_Greater.json`, its child through
+  `Parent`, which adds only `Work.Queue`, the three sockets, the extra payout table and the
+  double's stance. The
+  recipe is `FromCrafting` over the `Salvagebench` (every vanilla salvage recipe, full outputs at
+  native quantities) with a `Fallback` for the gear no salvage recipe names (a 0.3 share of the
+  piece's own crafting recipe, then essence only), scoped to weapons, armor and tools by `Type`
+  tag. Custody holds ONE real stack (`MaxQuantity 1`, so wear and stamps survive an interrupted
+  ritual), `HeldOnly`, with a `Preview`, and its `Input.Except` refuses the table's own trophy by
+  id and its kit by the `Disenchanter` family tag; the greater action's own `Custody` (merged per
+  leaf under `Parent`, so the held-only, preview and state leaves are inherited) adds three
+  single-item sockets side by side on the two-block table top, each socket's `Match.Except`
+  carrying the same two holes (an authored socket reads only its own `Match`), which the queue
+  works in authored order. The non-gear the Salvage bench knows recipes for (rocks and plants by
+  `Type`; arrows, bombs, bait and the deployable totems and turret by `Family`; the tagless repair
+  kits, fertilizers and capture crate by id) is refused at both tables by the jar's one protect-list
+  file, `ProtectLists/Disenchanting_Tables.json`, scoped to them. The three elastic beats are `Paced` over
+  `hytale:stat RPG_Disenchanting_Proficiency` with the clamp at `{Min 0.21, Max 1.0}`, so the
+  fastest ritual is 15 seconds; `Convert` runs on the Unmake beat and `RollBonus` on the Payout
+  beat. The two blocks (`RPG_Station_Disenchanting_Table` on the vanilla Salvage bench's model and
+  processing look, `RPG_Station_Disenchanting_Table_Greater` on the Arcane table's model with its
+  unused lit texture and idle animation) each define `Default`, `Loaded`, `Working` and `Drawing`
+  states, the beds of the ritual: the lit texture, the animation, a light, an ambient loop and
+  particles on named model parts, all starting and stopping with the flip. The lesser table is
+  crafted at a tier 2 Workbench, where vanilla crafts its own Salvage bench; the greater at the
+  Arcane bench from the lesser block plus thorium, silk and Void essence. Two Use interactions
+  (`RPG_Station_Disenchanting_Table_Use`, `RPG_Station_Disenchanting_Table_Greater_Use`); the
+  shared `RPG_Station_Retrieve` is unchanged. `Work_Station.json` gains a `TargetIcons` row per
+  table.
+- **The ritual's own presentation.** Seven derived particle systems under `Particles/RPG/`
+  (`RPG_Disenchant_Sigil`, `_Kindle`, `_Draw`, `_Surge`, `_Flash`, `_Bloom`, `_Settle`), each
+  with a positive `LifeSpan` so it rides the placed piece's prop: the sigil, the gather and the
+  surge are built from recoloured spawner copies (`Particles/RPG/Spawners/`) tinted to the
+  Life-essence green-gold, the shatter folds the vanilla magic hit, glass break and crystal break
+  into the one Flash system by id, the bloom mixes green-gold copies with the vanilla uncommon
+  drop glow, the Kindle sparks are one tinted copy over the vanilla eternal-seed motes, and the
+  Settle motes are the vanilla motes alone; so every `Display`-targeted burst ends on its own, and
+  on both tables the Kindle and Settle accents land on the piece being worked (riding its prop
+  while it stands, at its resting spot after the Convert) rather than at the block. The Draw
+  beat's presentation holds 400 ms (paced with the beat) so the prop its lift respawns has been
+  shown to its viewers before the gather rides it. Five
+  sound events under `Audio/SoundEvents/SFX/RPG/`: `RPG_SFX_Disenchant_Charge` (the staff swell,
+  the spellbook's charge magic at 0.4 s, the crystal sweetener fading in at 2 s),
+  `RPG_SFX_Disenchant_Hum` (the greater table's looping ambient, a quieter, lower copy of the
+  neutral portal loop carrying the vanilla Memories bench's ducking rules, so the music dips and
+  the room quiets while a ritual runs) and three one-line `BypassDucking` copies for the accents
+  those rules would swallow (`_Crystal_Break`, `_Void_Summon`, `_Void_Despawn`). Six emote
+  wrappers (`RPG_Emote_Disenchant_Read`, `_Open`, `_Channel`, `_Surge`, `_Release`, `_Bow`) over
+  vanilla clips, named in `avatarCustomization.lang`. Four effects under `Entity/Effects/RPG/`:
+  the channel aura the Draw beat puts on the worker's double (`RPG_Disenchant_Channel_Aura`, over
+  the `RPG_Disenchant_Channel_Glow` model visual), the trophy's 2D sting
+  (`RPG_Disenchant_Sting_Trophy`, a `LocalSoundEventId` for the stereo legendary-chest fanfare),
+  the draught's timed stat raise and the kit's look. The action's `Moments` dress `Cue:Void_Find`,
+  `Cue:Voidheart`, `Cue:Trophy`, `Cue:Kit_Find` and `Completion`, each find cue held 450 ms so it
+  lands after the shatter.
+- **The standalone payout, one table per concern** under `Server/ZiggfreedCommon/Lootables/`:
+  `Disenchant_Essence` (Life essence as EXPECTED output, a ladder over `hytale:item_level` and
+  `hytale:item_quality`, 1 to 8 per piece), `Disenchant_Void` (Void essence as a find whose chance
+  rises with the piece's level, and a Voidheart as the rarest find, gated to level 45 gear at a
+  flat 0.8 percent), `DisenchantTrophy` (the grimoire at a flat 0.5 percent on level 20 gear and
+  up, paid as an item grant so it counts as station output), `Disenchant_Kit` (four independent
+  1.5 percent piece rolls, each naming `Cue:Kit_Find`) and `Disenchant_Greater_Bonus` (more
+  essence and a second Void chance, the one extra table the greater tier names). Unmaking crafted
+  gear stays a net loss in materials, and a piece whose recipe holds Void essence comes back short
+  of what went in even with the finds on top. These tables read the placed piece through
+  `hytale:item_level` and `hytale:item_quality`, the item factors named above.
+- **The disenchanter's kit, the grimoire, the stat and the draught.** `Server/Entity/Stats/
+  RPG_Disenchanting_Proficiency.json` (base 0; the value lives on the stat's Max, which is what
+  `hytale:stat` reads), with its tooltip line in a NEW `client.lang`
+  (`itemTooltip.stats.RPG_Disenchanting_Proficiency`, en-US). Four standalone cloth pieces on the
+  vanilla silk art (`RPG_Armor_Disenchanter_Head`, `_Chest`, `_Hands`, `_Legs`; no `Parent`, no
+  `Recipe`, so no crafting or salvage recipe rides along; 36 points of proficiency between them in
+  their native `Armor.StatModifiers`), the set `Server/ZiggfreedCommon/GearSets/
+  RPG_Disenchanters_Kit.json` (members the four pieces plus the grimoire as the held member; tiers
+  `{Pieces 2}`, `{Armor 4, Effect}` and `{Armor 4, Held 1}` adding 6, 10 and 12 more; the look is
+  `RPG_Disenchanters_Kit_Look`, an effect dedicated to the set), the trophy
+  `RPG_Weapon_Spellbook_Grimoire_Disenchanter` (a WORKING spellbook copied from the vanilla purple
+  grimoire with its casting interactions kept; Rare, one per stack, 14 points in its
+  `Weapon.StatModifiers`) and `RPG_Potion_Disenchanters_Draught`, an Alchemy bench potion whose
+  effect raises the stat by 20 for five minutes through `RawStatModifiers`. Names and descriptions
+  ship in en-US `items.lang` and `rpgstations.lang` (the station, action, socket and gear-set
+  lines); the other locales follow. `ShippedAssetDecodeTest` gains a `GearSets` decoder over the
+  library's `GearSetAsset` codec, so the set file is decoded the way the server decodes it.
 - **Docs.** `SCHEMA.md` regenerated for every leaf above. New guides:
   `docs/derive-from-any-bench.md` (the Sawmill and the Disenchanting Table as the two worked
   examples) and `docs/disenchanting.md` (the staged ritual, end to end). `docs/loot-and-factors.md`

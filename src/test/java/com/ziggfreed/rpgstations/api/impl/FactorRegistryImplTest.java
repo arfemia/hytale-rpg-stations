@@ -5,11 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
+import com.ziggfreed.common.factor.HytaleFactors;
+import com.ziggfreed.common.loot.stamp.StampFactors;
 import com.ziggfreed.rpgstations.api.FactorContext;
 
 /**
@@ -47,6 +50,55 @@ public class FactorRegistryImplTest {
         assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:tool_quality"));
         assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:tool_item_level"));
         assertTrue(FactorRegistryImpl.getInstance().isKnown("hytale:stat"));
+    }
+
+    /** The portable item family a payout table reads the worked piece through. */
+    private static final List<String> ITEM_FAMILY = List.of(
+            HytaleFactors.ITEM_QUALITY,
+            HytaleFactors.ITEM_LEVEL,
+            HytaleFactors.ITEM_DURABILITY_PERCENT,
+            HytaleFactors.ITEM_STAT);
+
+    @Test
+    void registerBuiltins_adoptsTheItemFamilyIntoTheStationVocabulary() {
+        FactorRegistryImpl.getInstance().registerBuiltins();
+        for (String id : ITEM_FAMILY) {
+            assertTrue(FactorRegistryImpl.getInstance().isKnown(id),
+                    id + " must be known, or a Lootable reading the piece warns UNKNOWN_FACTOR and fails closed");
+            assertTrue(FactorRegistryImpl.getInstance().registeredIds().contains(id),
+                    id + " must be listed for the Asset Editor's factor dropdown");
+            assertEquals("rpgstations", FactorRegistryImpl.getInstance().info().get(id).owner(),
+                    id + " is adopted by this engine, so the ledger attributes it here");
+        }
+    }
+
+    @Test
+    void itemFamily_resolvesThroughThePortableForwarder_failingClosedWithNoPiece() {
+        FactorRegistryImpl.getInstance().registerBuiltins();
+        // A station question with no piece in it (a pattern gate, a context built before a
+        // conversion is chosen) reaches the shared resolver and comes back "cannot tell": null,
+        // never a throw and never a substituted zero a Min 0 floor would open on. A real stack
+        // needs the engine's own log manager to build, so the value read is the dev-server's job.
+        FactorContext noPiece = ctx(0L, 0, 0.0, 100.0);
+        for (String id : ITEM_FAMILY) {
+            assertNull(FactorRegistryImpl.getInstance().resolve(id, null, noPiece),
+                    id + " must answer nothing with no piece, so a gate on it stays shut");
+            assertNull(FactorRegistryImpl.getInstance().resolve(id, "RPG_Disenchanting_Proficiency", noPiece),
+                    id + " must answer nothing with no piece whatever the Param names");
+        }
+    }
+
+    @Test
+    void itemStampPoints_reachesTheStationVocabularyThroughTheLibrarysContribution() {
+        // The library claims the id process-wide at its own setup; the shared registry falls
+        // through to that claim on a local miss, so this vocabulary needs no line of its own.
+        StampFactors.contribute();
+        FactorRegistryImpl.getInstance().registerBuiltins();
+        assertTrue(FactorRegistryImpl.getInstance().isKnown(StampFactors.ITEM_STAMP_POINTS));
+        assertTrue(FactorRegistryImpl.getInstance().registeredIds().contains(StampFactors.ITEM_STAMP_POINTS));
+        assertNull(FactorRegistryImpl.getInstance().resolve(StampFactors.ITEM_STAMP_POINTS, null,
+                ctx(0L, 0, 0.0, 100.0)),
+                "with no piece the stamp read has nothing to inspect and fails closed");
     }
 
     @Test

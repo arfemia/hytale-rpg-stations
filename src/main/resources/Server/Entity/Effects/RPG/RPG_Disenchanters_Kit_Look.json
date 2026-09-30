@@ -1,0 +1,9 @@
+{
+  "$Comment": "The disenchanter's kit's look, held on the player while the set's four-piece armor tier is active (ZiggfreedCommon/GearSets/RPG_Disenchanters_Kit.json names it as that tier's Effect): a faint green-gold sheen over the model and a mossy underglow, the Life-essence palette the table works in. Infinite with OverlapBehavior Ignore, as a gear-set effect must be: the set engine puts it on when the tier comes on and again at every login, and takes it off itself when no active tier wants it. This id is dedicated to the set; do not apply it from anything else.",
+  "Infinite": true,
+  "OverlapBehavior": "Ignore",
+  "ApplicationEffects": {
+    "ModelVFXId": "RPG_Disenchanter_Sheen",
+    "EntityBottomTint": "#3f6a1f"
+  }
+}

@@ -17,6 +17,7 @@ import com.hypixel.hytale.codec.util.RawJsonReader;
 import com.ziggfreed.common.loot.LootableAsset;
 import com.ziggfreed.common.loot.stamp.RollPoolAsset;
 import com.ziggfreed.common.progress.asset.ObjectiveKindAsset;
+import com.ziggfreed.common.stats.gearset.GearSetAsset;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -40,8 +41,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  * {@code PerStat} / {@code Tags} group - the list {@code asset/CLAUDE.md} keeps current.
  *
  * <p>Two jar roots are walked: this mod's own {@code Server/RpgStations} stores, and the files it
- * ships into the SHARED library's {@code Server/ZiggfreedCommon} stores (its lootables and the two
- * objective kinds it fires), decoded through the library's codecs the same way. A file is judged by
+ * ships into the SHARED library's {@code Server/ZiggfreedCommon} stores (its lootables, the three
+ * objective kinds it fires and its gear set), decoded through the library's codecs the same way. A file is judged by
  * the store folder directly under its root, so a store may group its files in a sub-folder (the
  * objective kinds sit under {@code ObjectiveKinds/RpgStations/}) without that grouping reading as an
  * unknown store. An unmapped store folder under a scanned root FAILS rather than being skipped, so
@@ -73,6 +74,8 @@ public class ShippedAssetDecodeTest {
                     RawJsonReader.fromJsonString(body), null, info(RollPoolAsset.class, key))),
             Map.entry("ObjectiveKinds", (body, key) -> ObjectiveKindAsset.CODEC.decodeAndInheritJsonAsset(
                     RawJsonReader.fromJsonString(body), null, info(ObjectiveKindAsset.class, key))),
+            Map.entry("GearSets", (body, key) -> GearSetAsset.CODEC.decodeAndInheritJsonAsset(
+                    RawJsonReader.fromJsonString(body), null, info(GearSetAsset.class, key))),
             Map.entry("Flairs", (body, key) -> FlairAsset.CODEC.decodeAndInheritJsonAsset(
                     RawJsonReader.fromJsonString(body), null, info(FlairAsset.class, key))),
             Map.entry("Patterns", (body, key) -> StructurePatternAsset.CODEC.decodeAndInheritJsonAsset(

@@ -912,8 +912,12 @@ resolution section for the engine half.
   placement (`StationService#routeStack`) and answered `Refused:Protected` (`ui.station.protected`),
   the one denial that keeps its own key on a socket-less custody; like every placement denial it
   refuses only at a station that was empty before the press (`StationService#unplacedPressRefusal`),
-  so a loaded station judges the held item as a tool. The jar ships no file (the list is the
-  server owner's policy; a station refuses its own pieces through its own `Custody.Input.Except`).
+  so a loaded station judges the held item as a tool. The jar ships ONE file,
+  `ProtectLists/Disenchanting_Tables.json`, scoped to the two Disenchanting Tables (the non-gear
+  the Salvage bench knows recipes for: rocks, plants, ammunition, bait, deployables, the tagless
+  repair kits, fertilizers and capture crate); a station refuses its OWN pieces through its own
+  `Custody.Input.Except`, or each socket's `Match.Except` once sockets are authored, since an
+  authored socket reads only its own `Match`.
   Validator (`StationValidator.validateProtectLists`): `PROTECT_LIST_EMPTY`,
   `PROTECT_LIST_CATCH_ALL`, `PROTECT_LIST_UNKNOWN_STATION` / `PROTECT_LIST_UNKNOWN_ACTION` (full
   pass only), `PROTECT_LIST_UNKNOWN_ITEM` (INFO), plus the shared `EXCEPT_CATCH_ALL` per entry.

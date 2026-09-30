@@ -1,0 +1,16 @@
+# RPG Stations - client-namespace additions, en-US (authoritative).
+# This file's basename ("client") targets Hytale's own built-in "client" language namespace, not
+# this mod's "rpgstations" namespace (see rpgstations.lang in this same folder). Server-shipped .lang
+# files merge per-key-additively into a namespace, so this file adds ONLY brand-new keys and never
+# overrides a client-owned one.
+#
+# The client renders an item's custom EntityStat tooltip line through the fixed key convention
+# itemTooltip.stats.<StatId> (the client's own en-US client.lang carries e.g.
+# itemTooltip.stats.Health = Health: {value}). Without a matching key the client prints the raw stat
+# id. {value} is a NAMED placeholder the client itself formats and substitutes; it is not one of this
+# mod's positional {0}/{1} arguments.
+#
+# A pack or server owner adding a stat id of its own ships its own client.lang with just its new
+# itemTooltip.stats.<StatId> key (the same per-key-additive rule). No em-dashes.
+
+itemTooltip.stats.RPG_Disenchanting_Proficiency = Disenchanting Proficiency: {value}

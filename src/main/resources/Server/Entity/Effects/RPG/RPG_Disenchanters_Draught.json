@@ -1,0 +1,10 @@
+{
+  "$Comment": "What the Disenchanter's Draught does when drunk: twenty points of Disenchanting Proficiency for five minutes. RawStatModifiers (not StatModifiers, which is a per-tick value change) raises the stat's Max while the effect lasts, which is the reading the ritual's pace takes; Overwrite means a second bottle restarts the clock rather than stacking.",
+  "RawStatModifiers": {
+    "RPG_Disenchanting_Proficiency": [
+      { "Amount": 20, "CalculationType": "Additive", "Target": "Max" }
+    ]
+  },
+  "Duration": 300,
+  "OverlapBehavior": "Overwrite"
+}

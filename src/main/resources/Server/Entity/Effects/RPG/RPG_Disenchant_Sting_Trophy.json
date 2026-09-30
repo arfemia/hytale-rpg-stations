@@ -1,0 +1,7 @@
+{
+  "$Comment": "The grimoire trophy's sting, reaching the worker in 2D: a tiny effect whose only job is a LocalSoundEventId, applied to the worker by the Cue:Trophy moment (Actions/Disenchant.json, Presentation.Effect with Target Player). The legendary-chest fanfare is a stereo file, which is why it plays this way rather than as a positional sound at the table.",
+  "ApplicationEffects": {
+    "LocalSoundEventId": "SFX_Chest_Legendary_FirstOpen_Player"
+  },
+  "Duration": 0.2
+}

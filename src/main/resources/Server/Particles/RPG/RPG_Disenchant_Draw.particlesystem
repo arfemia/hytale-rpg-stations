@@ -1,0 +1,31 @@
+{
+  "$Comment": "The Draw beat's gather on the lifted piece: the vanilla memory-unlock sequence (MemoryUnlock) in green-gold copies (Spawners/RPG_Disenchant_Draw_*), with the gather's radius cut from eight blocks to three so it reads as motes pulled out of one piece rather than out of the whole room. Shards stream in and implode, a ring and a spiral follow at 1.1 seconds with lingering sparks, and a soft glow sits under all of it. LifeSpan 4.5 seconds ends the system on its own, which is what lets it ride the prop; shrink a gather through the copy's EmitOffset, never a system Scale.",
+  "Spawners": [
+    {
+      "SpawnerId": "RPG_Disenchant_Draw_Gather",
+      "StartDelay": 0.0,
+      "RotationOffset": { "Roll": -90 }
+    },
+    {
+      "SpawnerId": "RPG_Disenchant_Draw_Ring",
+      "RotationOffset": { "Roll": 0 }
+    },
+    {
+      "SpawnerId": "RPG_Disenchant_Draw_Spiral",
+      "StartDelay": 1.1,
+      "RotationOffset": { "Roll": 0 }
+    },
+    {
+      "SpawnerId": "RPG_Disenchant_Draw_Sparks",
+      "StartDelay": 1.1,
+      "RotationOffset": { "Roll": 0 }
+    },
+    {
+      "SpawnerId": "RPG_Disenchant_Draw_Glow",
+      "RotationOffset": { "Roll": 0 }
+    }
+  ],
+  "BoundingRadius": 3,
+  "IsImportant": false,
+  "LifeSpan": 4.5
+}

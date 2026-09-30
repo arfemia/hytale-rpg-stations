@@ -302,17 +302,34 @@ api/                                                   the extension-surface (NO
 src/main/resources/
   manifest.json                                        Group Ziggfreed, IncludesAssetPack:true, ServerVersion >=0.6.0-pre.13 <0.7.0 (Update 6)
   Server/RpgStations/{Stations,Actions,Patterns,Flairs,Extensions,Settings,ProtectLists}/
-                                                        the seven Pattern A asset stores this mod registers
-  Server/ZiggfreedCommon/Lootables/                      the Sawmill's loot tables (the SHARED library's store)
+                                                        the seven Pattern A asset stores this mod registers: the Sawmill
+                                                        and the two Disenchanting Tables (Stations/), the Disenchant ritual
+                                                        and its Parent child Disenchant_Greater (Actions/), and the one
+                                                        protect-list file scoped to both tables (ProtectLists/)
+  Server/ZiggfreedCommon/Lootables/                      the Sawmill's and the Disenchanting Tables' loot tables (the SHARED
+                                                        library's store; one Disenchant_* file per payout concern)
+  Server/ZiggfreedCommon/GearSets/                       RPG_Disenchanters_Kit.json, the disenchanter's kit (the SHARED
+                                                        library's gear-set store)
   Server/ZiggfreedCommon/ObjectiveKinds/RpgStations/     the three objective kinds this engine fires (WORK_STATION /
                                                         STATION_OUTPUT / STATION_INPUT), in the SHARED library's store; see progression/
   Server/Item/{Items,RootInteractions}/                 the jar's OWN default blocks + their RootInteractions: the Sawmill
-                                                        (+ its trophy hatchet) and the shared RPG_Station_Retrieve
-                                                        (the cooking-pit family's blocks and Use chain are held
-                                                        under unreleased/)
+                                                        (+ its trophy hatchet), the two Disenchanting Table blocks (+ the
+                                                        grimoire trophy, the four kit pieces and the draught) and the shared
+                                                        RPG_Station_Retrieve (the cooking-pit family's blocks and Use chain
+                                                        are held under unreleased/)
   Server/Drops/                                         the standalone Sawmill's native-namespace drop tables
-  Server/Entity/Effects/RPG/                             RPG_Station_Hold.json (the effect-mode movement-lock effect)
+  Server/Entity/Effects/RPG/                             RPG_Station_Hold.json (the effect-mode movement-lock effect) + the
+                                                        Disenchanting Table's four: the channel aura, the trophy sting, the
+                                                        draught's stat raise and the kit's look
+  Server/Entity/Stats/                                   RPG_Disenchanting_Proficiency.json (the native stat the ritual's Pace reads)
+  Server/Entity/ModelVFX/                                the channel glow and the kit sheen the two effects above wear
+  Server/Particles/RPG/{,Spawners/}                      the ritual's seven derived particle systems (each with a LifeSpan so it
+                                                        rides the piece) + their recoloured spawner copies
+  Server/Audio/SoundEvents/SFX/RPG/                      the layered charge, the greater table's ducking hum and the three
+                                                        BypassDucking accent copies
+  Server/Emote/                                          the six RPG_Emote_Disenchant_* wrappers the double plays
   Server/Languages/<bcp47>/                             rpgstations.lang (all 9 locales) + native items.lang/avatarCustomization.lang
+                                                        + client.lang (en-US only so far: the proficiency stat's tooltip line)
   Common/UI/Custom/Pages/                               RpgStationSummary.ui (the session-summary panel) + RpgStationPicker.ui/RpgStationPickerTab.ui (the sneak+F recipe picker)
 src/main/java/com/ziggfreed/rpgstations/
   RpgStationsPlugin.java     JavaPlugin entry: injects the api singleton, registers the built-in

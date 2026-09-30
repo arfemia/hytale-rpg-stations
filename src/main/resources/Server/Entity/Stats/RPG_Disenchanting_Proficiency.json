@@ -1,0 +1,8 @@
+{
+  "$Comment": "Disenchanting Proficiency, the native stat the Disenchanting Table's pace ladder reads (Actions/Disenchant.json, Pace over hytale:stat). It sets the SPEED of the ritual and nothing else: 0 is the full ritual, higher is faster, down to the clamp the action authors. The value lives on the stat's MAX: gear writes it through ordinary Armor or Weapon StatModifiers (the disenchanter's kit and the grimoire trophy), a set tier through the gear-set engine, a potion through an effect's RawStatModifiers (the draught); every one of those is Additive on the Max, and the pace reads that Max. Base Max 0 so a player with none of them is untouched. Its tooltip line is the client.lang key itemTooltip.stats.RPG_Disenchanting_Proficiency.",
+  "InitialValue": 0.0,
+  "Min": 0.0,
+  "Max": 0.0,
+  "Shared": false,
+  "HideFromTooltip": false
+}

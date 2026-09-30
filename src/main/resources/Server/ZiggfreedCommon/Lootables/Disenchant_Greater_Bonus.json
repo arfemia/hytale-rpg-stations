@@ -1,0 +1,35 @@
+{
+  "$Comment": "What the Greater Disenchanting Table pays over the lesser one: the one extra table its action (Actions/Disenchant_Greater.json) names beside the four both tiers share, rolled once per ritual at the Payout beat. Two rolls. The first is more Life essence, marked Expected so it lands on the ordinary output row with the rest: a ladder over the same piece factors as Disenchant_Essence (item level at 1, quality at 5), paying 1 more for any piece, 2 more from about a cobalt piece up and 3 more from a mithril piece up. The second is a second chance at Void essence, one essence at 2 percent plus 0.3 per item level under a 20 percent ceiling, again gated to level 20 gear, so the greater tier finds void more often without lifting the Voidheart odds. Even with this on top a mithril chest (80 Void essence to forge, 20 back from the salvage return) stays far short of what went in. Re-tune by shipping a same-id file.",
+  "Rolls": [
+    {
+      "Trigger": "Cycle",
+      "Expected": true,
+      "Ladder": {
+        "Factors": [
+          { "Factor": "hytale:item_level", "Weight": 1.0 },
+          { "Factor": "hytale:item_quality", "Weight": 5.0 }
+        ],
+        "Floors": [
+          { "Min": 0, "Grants": { "Items": [ { "Item": "Ingredient_Life_Essence", "Count": 1 } ] } },
+          { "Min": 45, "Grants": { "Items": [ { "Item": "Ingredient_Life_Essence", "Count": 2 } ] } },
+          { "Min": 70, "Grants": { "Items": [ { "Item": "Ingredient_Life_Essence", "Count": 3 } ] } }
+        ]
+      }
+    },
+    {
+      "Trigger": "Cycle",
+      "Conditions": [
+        { "Factor": "hytale:item_level", "Min": 20 }
+      ],
+      "Chance": {
+        "Base": 2.0,
+        "Factors": [ { "Factor": "hytale:item_level", "Weight": 0.3 } ],
+        "Clamp": { "Max": 20 }
+      },
+      "Grants": {
+        "Items": [ { "Item": "Ingredient_Void_Essence", "Count": 1 } ]
+      },
+      "Cue": "Cue:Void_Find"
+    }
+  ]
+}

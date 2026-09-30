@@ -1,0 +1,7 @@
+{
+  "Name": "avatarCustomization.emotes.RPG_Emote_Disenchant_Read.name",
+  "Animation": "Characters/Animations/Poses/Book_Read.blockyanim",
+  "Icon": "Icons/Emotes/Ponder@2x.png",
+  "IsLooping": true,
+  "HideItemInHand": false
+}

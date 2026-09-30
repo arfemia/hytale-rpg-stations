@@ -82,9 +82,9 @@ row, authored or derived, covers it:
 
 ```json
 "Recipe": {
-  "FromCrafting": { "Benches": ["Salvagebench"] },
+  "FromCrafting": { "Benches": ["Salvagebench"], "Types": ["Processing"] },
   "Fallback": {
-    "Input": { "Function": "Weapon" },
+    "Input": { "Tags": { "Type": ["Weapon", "Armor", "Tool"] } },
     "CraftingShare": { "Share": 0.3 },
     "EssenceOnly": {}
   }
@@ -92,9 +92,12 @@ row, authored or derived, covers it:
 ```
 
 - `Input` scopes the routes: only a piece it matches is offered one (the same `ItemId` /
-  `ResourceTypeId` / `Tags` / `Function` routes an action's other matchers use). Its `Except`
-  carves holes out of that scope, for the arrows, bombs and bait a wide family would otherwise
-  sweep in.
+  `ResourceTypeId` / `Tags` / `Function` routes an action's other matchers use). Its `Except` can
+  carve holes out of that scope; the Disenchanting Table leaves it out, because it refuses the
+  same things one gate earlier, at placement, through its protect-list file (below), which also
+  covers the salvage-derived rows for rocks and plants that this scope never reaches. A route never
+  sees a piece that could not be placed, so the arrows, bombs and bait a wide family would
+  otherwise sweep in are refused before any route is tried.
 - `CraftingShare` gives back a share of the piece's OWN crafting recipe. Each exact-item line
   becomes `floor(Quantity x Share / OutputQuantity)`, `OutputQuantity` being how many pieces that
   recipe makes per craft, so a batch recipe pays per piece; a line that rounds to nothing is
@@ -116,11 +119,17 @@ weapon" is a wide door ([Custody & Placed Display](custody-and-placed-display.md
 - `Custody.Input.Except` names what THIS station refuses: one matcher or an array of them. An
   `Input` that authors only `Except` keeps everything the recipe and the fallback routes derive
   and carves the holes out of that, so a table that takes every weapon but its own trophy authors
-  one hole, never a list of every weapon. A pack's extension overlay ADDS its holes beside the
-  jar's.
-- The protect-list (`Server/RpgStations/ProtectLists/`) is the server owner's word: every file
-  in it counts, each optionally scoped to certain stations or actions, and no station in scope may
-  take what it protects.
+  one hole, never a list of every weapon. The Disenchanting Table's holes are its own pieces: the
+  trophy by id and the kit by the `Disenchanter` family tag, on the lesser table's `Input` and on
+  each of the greater table's three socket `Match`es (an authored socket reads only its own
+  `Match`). A pack's extension overlay ADDS its holes beside the jar's.
+- The protect-list (`Server/RpgStations/ProtectLists/`): every file in it counts, whichever layer
+  ships it, each optionally scoped to certain stations or actions, and no station in scope may take
+  what it protects. The jar ships one, `Disenchanting_Tables.json`, scoped to the two tables, for
+  the non-gear the Salvage bench knows recipes for: rocks and plants by `Type`, ammunition, bait
+  and deployables by `Family`, and the tagless repair kits, fertilizers and capture crate by id.
+  One file serves both tables and every socket, which is why those holes live there and not on
+  the matchers.
 - A count pile (`MaxQuantity` above one) refuses a stack that tracks wear or carries metadata,
   because it could only hand it back as a bare fresh stack. A single-item socket keeps the real
   stack and takes it.

@@ -1,0 +1,43 @@
+{
+  "$Comment": "The gloves of the disenchanter's kit, one of four cloth pieces paid only by the chance rolls in Lootables/Disenchant_Kit.json. A standalone copy of the vanilla silk gloves (Armor_Cloth_Silk_Hands): the same art, Health and Mana lines and cloth resistances, at Uncommon quality; no Parent and no Recipe, so no crafting or salvage recipe rides along, and the iron-parent leaves (Categories, the Block animation set, DurabilityLossOnHit, the EquipItem Interactions) are spelled out. Its own Disenchanting Proficiency is the smallest of the four; the set file (ZiggfreedCommon/GearSets/RPG_Disenchanters_Kit.json) adds the tier bonuses. Family Disenchanter keeps it off the tables as input.",
+  "TranslationProperties": {
+    "Name": "items.RPG_Armor_Disenchanter_Hands.name",
+    "Description": "items.RPG_Armor_Disenchanter_Hands.description"
+  },
+  "Categories": ["Items.Armors"],
+  "Quality": "Uncommon",
+  "ItemLevel": 35,
+  "PlayerAnimationsId": "Block",
+  "ItemSoundSetId": "ISS_Armor_Cloth",
+  "Icon": "Icons/ItemsGenerated/Armor_Cloth_Silk_Hands.png",
+  "IconProperties": {
+    "Rotation": [22.5, 45, 22.5],
+    "Scale": 0.6,
+    "Translation": [0.6, -31.2]
+  },
+  "Model": "Items/Armors/Silk/Hands.blockymodel",
+  "Texture": "Items/Armors/Silk/Hands_Texture.png",
+  "Interactions": {
+    "Primary": { "Interactions": [ { "Type": "EquipItem" } ] },
+    "Secondary": { "Interactions": [ { "Type": "EquipItem" } ] }
+  },
+  "Armor": {
+    "ArmorSlot": "Hands",
+    "BaseDamageResistance": 0,
+    "StatModifiers": {
+      "Health": [ { "Amount": 7, "CalculationType": "Additive" } ],
+      "Mana": [ { "Amount": 10, "CalculationType": "Additive" } ],
+      "RPG_Disenchanting_Proficiency": [ { "Amount": 6, "CalculationType": "Additive" } ]
+    },
+    "DamageResistance": {
+      "Physical": [ { "Amount": 0.04, "CalculationType": "Percent" } ],
+      "Projectile": [ { "Amount": 0.04, "CalculationType": "Percent" } ]
+    }
+  },
+  "MaxDurability": 120,
+  "DurabilityLossOnHit": 0.5,
+  "Tags": {
+    "Type": ["Armor"],
+    "Family": ["Disenchanter"]
+  }
+}

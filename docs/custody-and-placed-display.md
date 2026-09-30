@@ -201,8 +201,10 @@ this jar, a content pack, or the server owner's own pack. A pack's list never si
 jar's or another pack's, so each can protect its own pieces without restating anyone else's. To
 take an entry back, override its file BY ID: a later layer that ships the same file name replaces
 the earlier file whole, so the owner copies it, drops the entries to lift, and keeps the rest. The
-jar ships no protect-list of its own; it is the server owner's word, and a station that must
-refuse one of its own pieces says so in its own `Custody.Input.Except`. `/rpgstations validate`
+jar ships one file, `Disenchanting_Tables.json`, scoped to its two Disenchanting Tables: the rocks,
+plants, ammunition, bait, deployables and tagless odds and ends the Salvage bench knows recipes
+for, so neither table takes them; a station that must refuse one of its OWN pieces says so in its
+own `Custody.Input.Except` (or a socket's `Match.Except`) instead. `/rpgstations validate`
 warns about a file that protects nothing, an entry with no route, and a `Stations` or `Actions` id
 that names nothing in scope.
 

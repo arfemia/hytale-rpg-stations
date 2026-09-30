@@ -1,0 +1,5 @@
+{
+  "$Comment": "The void crawler's fade, played behind the portal opening when the table finds a Voidheart, as a one-line copy of vanilla's SFX_Crawler_Void_Despawn that bypasses ducking: the greater table's hum ducks the creature category this event belongs to.",
+  "Parent": "SFX_Crawler_Void_Despawn",
+  "BypassDucking": true
+}

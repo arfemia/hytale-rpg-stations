@@ -1,0 +1,22 @@
+{
+  "$Comment": "The Disenchanting Table's ordinary payout: Life essence, one roll, referenced from the Disenchant action's Bonus.Lootables and rolled once per ritual at its Payout beat. Expected true is what makes it ordinary output: the essence lands on the plain item row of the HUD and the produced ledger beside the salvage return, never as a gold find, so the player reads it as the wage of the work. No Chance, so it always pays. The Ladder reads the PIECE, through the item factors the station captures from the placed stack: item level at weight 1 and the stack's quality at weight 5, so a better piece draws more. Where vanilla gear lands: a crude sword (level 3, Common) reaches the first floor for 1; an iron piece (20, Uncommon) about 30 for 2; cobalt and adamantite (35 to 40, Rare) 50 to 55 for 3; a mithril piece (50, Epic) 70 for 5; the 78 floor and its 8 are reached only by a piece above vanilla's top ladder, an enhanced or a modded one. Life essence farms make it in bulk, so the table is one more source of it and never the best one; a Lootable folds by id and a later layer replaces the whole file, so a pack that wants a different curve ships its own Disenchant_Essence.json and inherits nothing else.",
+  "Rolls": [
+    {
+      "Trigger": "Cycle",
+      "Expected": true,
+      "Ladder": {
+        "Factors": [
+          { "Factor": "hytale:item_level", "Weight": 1.0 },
+          { "Factor": "hytale:item_quality", "Weight": 5.0 }
+        ],
+        "Floors": [
+          { "Min": 0, "Grants": { "Items": [ { "Item": "Ingredient_Life_Essence", "Count": 1 } ] } },
+          { "Min": 25, "Grants": { "Items": [ { "Item": "Ingredient_Life_Essence", "Count": 2 } ] } },
+          { "Min": 45, "Grants": { "Items": [ { "Item": "Ingredient_Life_Essence", "Count": 3 } ] } },
+          { "Min": 62, "Grants": { "Items": [ { "Item": "Ingredient_Life_Essence", "Count": 5 } ] } },
+          { "Min": 78, "Grants": { "Items": [ { "Item": "Ingredient_Life_Essence", "Count": 8 } ] } }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "$Comment": "The Greater Disenchanting Table's ritual: a child of Disenchant through Parent, so every beat, the pace ladder, the recipe and the cue moments are inherited and read from that file. What is authored here is exactly what the greater tier changes. Work.Queue runs the inherited ritual once per filled custody socket in authored order, each pass reading, lifting, unmaking and paying out that socket's piece before the next begins, until every socket is empty; the inherited Looping false then ends the session. Custody merges per leaf under Parent: HeldOnly, Preview and States are inherited from Disenchant, MaxQuantity rises to three, and Sockets adds the three single-item sockets the queue works, left to right, each keeping ONE real stack (MaxQuantity 1, so wear and stamps survive) and showing its piece on its own prop; the socket offsets sit on the two-block-wide Arcane table top, centred half a block to the left of the block itself. An authored socket judges placement by its OWN Match, never by the custody-level Input, so each socket's Match carries the two holes of the tables' own (the trophy by id, the kit by its Disenchanter family tag) and otherwise derives acceptance from the recipe and fallback routes exactly as the lesser table's Input does; the non-gear the Salvage bench knows is refused at both tables by ProtectLists/Disenchanting_Tables.json. Bonus is an ARRAY and a Parent replaces arrays whole, so the lesser table's four tables are restated beside Disenchant_Greater_Bonus, the one extra table that makes this tier pay more: more essence and a second Void chance. Worker is restated whole so the double stands half a block to the left of the block, at the centre of the table it works. The deeper violet look of this tier lives on the greater block's own Working and Drawing states, not here.",
+  "Label": "rpgstations.action.disenchant_greater.label",
+  "Parent": "Disenchant",
+  "Work": {
+    "Queue": true
+  },
+  "Custody": {
+    "MaxQuantity": 3,
+    "Sockets": {
+      "left": {
+        "Item": {
+          "PlacePerPress": 1,
+          "Match": {
+            "Except": [
+              { "ItemId": "RPG_Weapon_Spellbook_Grimoire_Disenchanter" },
+              { "Tags": { "Family": ["Disenchanter"] } }
+            ]
+          }
+        },
+        "MaxQuantity": 1,
+        "Label": "rpgstations.socket.disenchanting_table_greater.left",
+        "Display": { "Offset": { "X": -1.1, "Y": 0.6, "Z": 0.15 }, "Scale": 0.5, "Animated": true }
+      },
+      "middle": {
+        "Item": {
+          "PlacePerPress": 1,
+          "Match": {
+            "Except": [
+              { "ItemId": "RPG_Weapon_Spellbook_Grimoire_Disenchanter" },
+              { "Tags": { "Family": ["Disenchanter"] } }
+            ]
+          }
+        },
+        "MaxQuantity": 1,
+        "Label": "rpgstations.socket.disenchanting_table_greater.middle",
+        "Display": { "Offset": { "X": -0.5, "Y": 0.6, "Z": 0.15 }, "Scale": 0.5, "Animated": true }
+      },
+      "right": {
+        "Item": {
+          "PlacePerPress": 1,
+          "Match": {
+            "Except": [
+              { "ItemId": "RPG_Weapon_Spellbook_Grimoire_Disenchanter" },
+              { "Tags": { "Family": ["Disenchanter"] } }
+            ]
+          }
+        },
+        "MaxQuantity": 1,
+        "Label": "rpgstations.socket.disenchanting_table_greater.right",
+        "Display": { "Offset": { "X": 0.1, "Y": 0.6, "Z": 0.15 }, "Scale": 0.5, "Animated": true }
+      }
+    }
+  },
+  "Bonus": {
+    "Lootables": [
+      "Disenchant_Essence",
+      "Disenchant_Void",
+      "DisenchantTrophy",
+      "Disenchant_Kit",
+      "Disenchant_Greater_Bonus"
+    ]
+  },
+  "Worker": {
+    "Hold": {
+      "MovementLock": true,
+      "EffectId": "RPG_Station_Hold",
+      "InterruptOnDamage": true
+    },
+    "Camera": { "Recipe": "LookRot" },
+    "Animation": { "EmoteId": "RPG_Emote_Disenchant_Read" },
+    "Puppet": {
+      "Enabled": true,
+      "Hide": { "Route": "Scale" },
+      "Look": { "Source": "PlayerClone" },
+      "Offset": { "X": -0.5, "Y": -0.4, "Z": 1.15 },
+      "Rotation": { "Yaw": 0.0 },
+      "Prop": { "Source": "ItemId", "ItemId": "Weapon_Spellbook_Grimoire_Purple", "Slot": "Hotbar" }
+    }
+  }
+}

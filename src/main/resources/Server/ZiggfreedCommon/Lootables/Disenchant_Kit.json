@@ -1,0 +1,29 @@
+{
+  "$Comment": "The disenchanter's kit at the table: four independent rolls, one per cloth piece, referenced from the Disenchant action's Bonus.Lootables and rolled once per ritual at its Payout beat. Each is a flat 1.5 percent with no factors and no gate, so every ritual has the same small chance at every piece and a lucky ritual can pay two; the four pieces and the grimoire trophy form the set in ZiggfreedCommon/GearSets/RPG_Disenchanters_Kit.json, which adds Disenchanting Proficiency at two, four and four-plus-grimoire. Each roll names the table's own Cue:Kit_Find moment, which the Disenchant action dresses. A Lootable folds by id and a later layer replaces the whole file, so a pack that wants each piece found to make the next likelier, or luck to weigh in, ships its own Disenchant_Kit.json with the same four grants and its own chances.",
+  "Rolls": [
+    {
+      "Trigger": "Cycle",
+      "Chance": { "Base": 1.5 },
+      "Grants": { "Items": [ { "Item": "RPG_Armor_Disenchanter_Head", "Count": 1 } ] },
+      "Cue": "Cue:Kit_Find"
+    },
+    {
+      "Trigger": "Cycle",
+      "Chance": { "Base": 1.5 },
+      "Grants": { "Items": [ { "Item": "RPG_Armor_Disenchanter_Chest", "Count": 1 } ] },
+      "Cue": "Cue:Kit_Find"
+    },
+    {
+      "Trigger": "Cycle",
+      "Chance": { "Base": 1.5 },
+      "Grants": { "Items": [ { "Item": "RPG_Armor_Disenchanter_Hands", "Count": 1 } ] },
+      "Cue": "Cue:Kit_Find"
+    },
+    {
+      "Trigger": "Cycle",
+      "Chance": { "Base": 1.5 },
+      "Grants": { "Items": [ { "Item": "RPG_Armor_Disenchanter_Legs", "Count": 1 } ] },
+      "Cue": "Cue:Kit_Find"
+    }
+  ]
+}

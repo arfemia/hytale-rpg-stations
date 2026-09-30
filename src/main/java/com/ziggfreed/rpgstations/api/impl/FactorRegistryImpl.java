@@ -114,6 +114,15 @@ public final class FactorRegistryImpl implements FactorRegistry {
      *       value ({@code {"Factor":"hytale:stat","Param":"<StatId>"}}), so a mod that writes native
      *       stats participates in loot/gate/cap formulas with zero bridge code. Adopted wholesale
      *       from the shared standard library, which reads the acting entity's own stat map.</li>
+     *   <li>{@code hytale:item_quality} / {@code hytale:item_level} /
+     *       {@code hytale:item_durability_percent} / {@code hytale:item_stat} - the ITEM family,
+     *       adopted wholesale the same way: they read the PIECE a session is working (the placed
+     *       stack the api {@link FactorContext#item()} publishes into the shared item leaf, captured
+     *       per program pass), never whatever the worker holds, so a payout table sizes itself from
+     *       the piece being unmade. Null where the moment has no piece, so a gate on one stays
+     *       shut. {@code ziggfreedcommon:item_stamp_points} needs no line here: the library
+     *       contributes it process-wide and the shared registry falls through to that claim on a
+     *       local miss, so this vocabulary knows and resolves it as it stands.</li>
      * </ul>
      * The practical payoff: a {@code hytale:}-namespaced id means the same thing to every mod that
      * reads native data, so two mods converging on it is agreement rather than a collision, and an
@@ -142,6 +151,12 @@ public final class FactorRegistryImpl implements FactorRegistry {
         register(HytaleFactors.TOOL_QUALITY, OWNER, (ctx, param) -> ctx.toolQuality());
         register(HytaleFactors.TOOL_ITEM_LEVEL, OWNER, (ctx, param) -> ctx.toolItemLevel());
         core.registerPortable(HytaleFactors.STAT, OWNER);
+        // The item family reads the context ITEM leaf, which every station question carries as the
+        // piece the session works, so the portable resolver answers here with no station knowledge.
+        core.registerPortable(HytaleFactors.ITEM_QUALITY, OWNER);
+        core.registerPortable(HytaleFactors.ITEM_LEVEL, OWNER);
+        core.registerPortable(HytaleFactors.ITEM_DURABILITY_PERCENT, OWNER);
+        core.registerPortable(HytaleFactors.ITEM_STAT, OWNER);
     }
 
     /**

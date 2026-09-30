@@ -1,0 +1,10 @@
+{
+  "$Comment": "The sigil that rises from the placed piece as the Disenchanting Table's ritual opens: the vanilla memory-catch mark and its fog (Memory_Catch_Rune, Memory_Catch_Fog) in green-gold copies (Spawners/RPG_Disenchant_Sigil_*), one mark and two puffs of fog drifting up. LifeSpan 2.5 seconds ends the system on its own, which is what lets it ride the piece's prop instead of playing at a fixed spot; the copies' particle lifetimes are cut to match, so nothing lingers past the Open beat. Tint by editing the copies' Color keyframes; a child system listing Spawners replaces this list whole.",
+  "Spawners": [
+    { "SpawnerId": "RPG_Disenchant_Sigil_Mark" },
+    { "SpawnerId": "RPG_Disenchant_Sigil_Fog" }
+  ],
+  "BoundingRadius": 2,
+  "IsImportant": false,
+  "LifeSpan": 2.5
+}
