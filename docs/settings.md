@@ -40,9 +40,11 @@ overrides it the same way any other Pattern-A asset is overridden - a pack layer
 
 The top-level knobs (`Enabled`, `SummaryHud`, `Limits`, `Moments`, `Refusals`) are independent
 and composable - disabling the summary HUD does not disable the engine, and vice versa. Every leaf
-is nullable within the one file, but the server reads ONE settings file: a pack's own
-`Settings.json` replaces the jar's whole rather than merging with it, so a pack (or an owner) that
-wants the jar's `Refused` cue beside its own changes authors both in its file. `Limits` is
+is nullable within the one file, but the server reads ONE settings file: the jar's default and
+each pack's `Settings.json` go through the asset store's own merge, and the one file that survives
+it is the whole of the settings (there is no owner layer here), so a pack's file replaces the
+jar's whole rather than merging with it, and a pack that wants the jar's `Refused` cue beside its
+own changes authors both in its file. `Limits` is
 deliberately unauthored in the jar default: every leaf means unlimited when absent, and the right
 ceiling depends on a server's own player count and hardware - a busy server sets its own numbers
 rather than inheriting a guess.

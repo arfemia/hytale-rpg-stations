@@ -47,6 +47,7 @@ import com.ziggfreed.common.loot.stamp.StampSpec;
 import com.ziggfreed.common.loot.stamp.StatRollEntry;
 import com.ziggfreed.common.match.ItemMatch;
 import com.ziggfreed.common.cast.ModelParticleService;
+import com.ziggfreed.common.cast.ParticleLifetimes;
 import com.ziggfreed.common.validation.Finding;
 import com.ziggfreed.common.validation.Severity;
 import com.ziggfreed.common.validation.ValidationReport;

@@ -438,7 +438,8 @@ resolution section for the engine half.
   **`Preview`** (Boolean, default false) toasts, on placement, what the piece will give back: the
   row the recipe would run for it right now (authored, derived, or a fallback route's), or that it
   gives nothing back on its own when only the essence-only route takes it
-  (`station.StationService#previewPlacedReturn`, keys `ui.station.preview.returns` /
+  (`station.StationService#previewPlacedReturn`, addressed to the socket the piece actually went
+  into, held or backpack route, as the pure `placedPiece` settles it; keys `ui.station.preview.returns` /
   `.nothing_back`; `CUSTODY_PREVIEW_WITHOUT_RECIPE` warns on an action with no recipe). A COUNT
   pile (a socket capacity above one) refuses a stack carrying per-instance data, a tool that
   tracks wear or a stack with metadata (`station.StationCustody#carriesInstanceData`), since a
@@ -631,7 +632,8 @@ resolution section for the engine half.
   double, else the BLOCK: a cue's sounds and particles never land on the worker's own body); at an
   entity target the sounds follow the entity, delivered only to the players whose tracker shows
   it, and a particle system RIDES it (or the named `Node` of its model) only when it provably ends
-  on its own, its native asset's positive `LifeSpan` (`station.ParticleLifetimes`): an attached
+  on its own, its native asset's positive `LifeSpan` (ziggfreed-common's `cast.ParticleLifetimes`,
+  with the station's split in `station.MomentBursts`): an attached
   system has no playback cap, so it lives until that lifetime ends or the entity is removed (a
   prop when its piece is consumed or taken back, a double when the session ends), and
   `DurationSeconds` cannot shorten it; any other system plays at the entity's position under its

@@ -474,7 +474,9 @@ in the same change, or the overlay drops it. Overlays apply in `APPLY_ORDER`, so
 (higher-priority) extension wins a same-leaf contest and the fold stays deterministic; a null
 overlay group returns the base object unchanged. Covered by `ExtensionOverlayTest`
 (`src/test/java/com/ziggfreed/rpgstations/station/`, fixture JSON authored by the test and decoded
-through the real shipped codecs). The keyed `Anchors`
+through the real shipped codecs); the two nested-leaf claims, `overlayStates` keeping `Ready` and
+`Overdone` and `overlayEffectRef` keeping `Target`, are pinned in `StationPresentationReachTest`
+(`anExtensionOverlay_keepsTheReadyAndOverdoneNames_andAnEffectsTarget`). The keyed `Anchors`
 map layers in the same place but by the keyed rule, not the leaf rule (`applyToActionAnchors` over
 the pure `mergeAnchors`: base keys first, then each extension's NEW keys in `APPLY_ORDER`, the base
 winning a collision case-insensitively). It is safe at this level precisely because nothing branches
@@ -895,13 +897,15 @@ and the playback cap together, the one engine overload that carries both a colou
 AND the leak guard (this bug was found in-game; do not reintroduce it).
 
 **The presentation `Target` is resolved at PLAY time** (`playMoment` -> `resolveAim`, an
-`Aim(entity, position, node)` over the pure decision `aimSource`), never at emit time, so a
+`Aim(source, entity, position, node)` whose `source` is the pure decision `aimSource`), never at emit time, so a
 delayed cue lands where its target IS when it comes due: `Block` (or none) is the block centre
 `emitMoment` was handed; `Display` is the worked socket's prop (`displaySocketIdFor`: the ritual
 queue's `StationSession.queueSocketId`, else the first Item socket authoring a `Display`) while
 it stands, else where it last stood (`displayRestingPosition`: the look the session last dressed
 that socket's prop in, `StationSession.shownDisplays`, kept past the despawn, else the socket's
-own `Display`, through `StationCustodyDisplay.resolvePosition`), which is where a `Convert`
+own `Display`, through `StationCustodyDisplay.resolvePosition`; the pure `restingDisplay` /
+`restingPosition` pair settles it, and `rememberShownDisplay` is the one write, under the same
+lowercased key), which is where a `Convert`
 beat's cues land after the beat consumed the piece and `onUniqueConsumed` dropped its prop in the
 same tick; `Puppet` is the double while one stands, else the BLOCK: a moment's sounds and
 particles never land on the worker's own body, which a burst could otherwise ride until they log
@@ -909,8 +913,10 @@ out. At an entity aim the sounds go through zc `Sound3D.playOn` (the entity-foll
 delivered to the players whose tracker shows the entity, never the engine's world-wide broadcast)
 and a burst RIDES the entity through `ModelParticleService.spawnOn` (`SpawnModelParticles` on the
 entity's `NetworkId`, riding the entity or the `Node` of its model) ONLY when its system provably
-ends on its own (`ParticleLifetimes`: the native `ParticleSystem` asset's own positive `LifeSpan`,
-read live; zero or less is the engine's unlimited, and an unreadable system is unproven), since
+ends on its own (zc `cast.ParticleLifetimes`: the native `ParticleSystem` asset's own positive
+`LifeSpan`, read live; zero or less is the engine's unlimited, and an unreadable system is unproven;
+the split itself is the pure `MomentBursts.plan` over the aim's `AimSource`, which rides only a
+standing prop or double, so nothing ever rides the worker), since
 that route carries no cap: an attached system lives until its own lifetime ends or the entity is
 removed (a prop when its piece is consumed or taken back, a double when the session ends), and
 `DurationSeconds` cannot shorten it. Every other burst plays at the entity's position through the
@@ -1789,10 +1795,12 @@ per-floor one, and a cue paired with grants rides only once those grants produce
 singleton. [`ProtectListCatalog`](ProtectListCatalog.java) holds every folded
 `asset.ProtectListAsset` file, keyed by lowercased id, and answers `protects(stationId, actionId,
 ...)` by asking every file in scope (the files add up; a same-name file in a later layer replaces
-the earlier one inside the store). [`ParticleLifetimes`](ParticleLifetimes.java) answers whether a
-particle system provably ends on its own (its native asset's positive `LifeSpan`), the rule that
-decides whether a burst may ride an entity target; it is a generic read and a lift candidate for
-ziggfreed-common's particle seam.
+the earlier one inside the store). [`MomentBursts`](MomentBursts.java) is the station policy over
+ziggfreed-common's `cast.ParticleLifetimes` read (whether a particle system provably ends on its
+own, its native asset's positive `LifeSpan`): `plan(AimSource, bursts, endsOnItsOwn)` rides a
+bounded burst on a standing prop or double and plays everything else at the aim's position, and
+`atPosition(attached)` leads that list with the riding half when nobody received the attach. The
+validator asks the same zc read for `PRESENTATION_ENTITY_TARGET_UNBOUNDED`.
 [`StationValidator`](StationValidator.java) keeps its two-pass structure and warn-only
 posture: `validateStructural()`/`runStructuralAndLog()` runs at EVERY asset-load fold (every
 check except cross-layer reference-existence ones); `validate()`/`runAndLog()` (the FULL set)

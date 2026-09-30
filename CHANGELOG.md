@@ -188,8 +188,8 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   the sounds follow the entity (Ziggfreed Common's `Sound3D.playOn`), delivered only to the players
   whose tracker shows it, never the engine's world-wide broadcast. A particle system RIDES the
   entity (`ModelParticleService.spawnOn`) only when it provably ends on its own, its native asset
-  giving it a positive `LifeSpan` (`ParticleLifetimes`): an attached system carries no playback
-  cap, so it lives until that lifetime ends or the entity is removed (a prop when its piece is
+  giving it a positive `LifeSpan` (read through Ziggfreed Common's `ParticleLifetimes`, which sits
+  beside the attached-particle sender): an attached system carries no playback cap, so it lives until that lifetime ends or the entity is removed (a prop when its piece is
   consumed or taken back, a double when the session ends), and `DurationSeconds` cannot shorten it.
   Any other system plays at the entity's position under its `DurationSeconds` cap, so nothing
   endless ever rides a prop or a double. A freshly spawned prop or double has been shown to nobody
@@ -327,7 +327,8 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   variant, so the state's texture, animation, light, ambient loop and particles come with it), the
   display and puppet anchor is the block CENTRE, not the block top, and the engine does have a
   colour call for particles. Its positional sound call and its entity-following packet both take a
-  volume and a pitch modifier too; a cue's loudness and tone still live on its `SoundEvent` asset,
+  volume and a pitch modifier too, which corrects the 1.0.0 notes below, where the positional call
+  is twice said to take neither; a cue's loudness and tone still live on its `SoundEvent` asset,
   and a quieter or pitched cue is a one-line derived sound asset (`{"Parent": "<vanilla id>",
   "Pitch": .., "Volume": ..}`), so no per-cue leaf is added.
 - **Technical.** The api artifact is versioned WITH the mod (`api_version=1.1.0`; 1.0.0 carried
@@ -344,8 +345,11 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   method body at a time (`SourcePins`, a test-only reader that cuts a body at its matching brace).
   `StationService.placementDenyKey`, `unplacedPressRefusal`, `socketAccepts` (placement acceptance
   over the live reads it is handed), `aimSource`, `effectGoesOnDouble`, `workingMove` and
-  `workingStateName`, `StationCustody.carriesInstanceData` over the raw readings, and
-  `ParticleLifetimes` are package-visible pure cores, each pinned by a test, and `SourcePins` gained
+  `workingStateName`, `placedPiece` (the socket the placed-piece preview names), `restingDisplay`
+  and `restingPosition` (where a cue aimed at a consumed piece lands, under its last per-beat
+  look), `StationCustody.carriesInstanceData` over the raw readings, and `MomentBursts` (which
+  bursts ride the aimed entity and which play at its position, over Ziggfreed Common's
+  `ParticleLifetimes`) are package-visible pure cores, each pinned by a test, and `SourcePins` gained
   `loopBodies` for the grant routing pin. `Presentation.of` gained the `Target`-carrying overload
   every rebuild site uses (`StationPacing.scaleInTime`, the offset-sound split,
   `Presentation.overlaid`). The test task declares `docs/` as an input, so a docs-only change

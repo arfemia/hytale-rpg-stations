@@ -1,11 +1,15 @@
 package com.ziggfreed.rpgstations.station;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -15,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
+import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.common.loot.LootGrants;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.Roll;
@@ -33,8 +38,11 @@ import com.ziggfreed.rpgstations.loot.StationRewardKinds;
  * ({@link StationService#aimSource}: a {@code Display} target with no prop standing falls back to
  * the socket's resting position, a {@code Puppet} target with no double to the block, never the
  * worker's own body), the effect's own wearer ({@link StationService#effectGoesOnDouble}: the worker
- * when no double stands), the rule that only a system that provably ends on its own rides an entity
- * ({@link ParticleLifetimes}) with its validator findings, the block-state move a beat makes
+ * when no double stands), the rule that only a system that provably ends on its own rides an entity,
+ * and only an entity that is the standing prop or the double ({@link MomentBursts}), with its
+ * validator findings, where a cue aimed at a consumed piece lands ({@link StationService#restingPosition}:
+ * under the piece's last per-beat look), the socket the placed-piece preview names
+ * ({@link StationService#placedPiece}), the block-state move a beat makes
  * ({@link StationService#workingMove}: the same block under a new name re-flips in place), an
  * effect's {@code Target} read on a presentation's {@code Effect} only ({@code EFFECT_TARGET_IGNORED}
  * elsewhere), extension overlays that keep every leaf ({@code States}' {@code Ready} and
@@ -81,24 +89,181 @@ class StationPresentationReachTest {
     // ==================== what may ride an entity ====================
 
     @Test
-    void onlyAPositiveOwnLifeSpan_provesASystemEnds() {
-        assertTrue(ParticleLifetimes.provablyEnds(2.0f));
-        assertFalse(ParticleLifetimes.provablyEnds(0f), "zero is the engine's unlimited");
-        assertFalse(ParticleLifetimes.provablyEnds(-1f));
-        assertFalse(ParticleLifetimes.provablyEnds(null), "an unreadable system is unproven");
-        assertFalse(ParticleLifetimes.systemProvablyEnds("Fixture_Not_Loaded"),
-                "a system the server cannot read never rides");
-    }
-
-    @Test
     void theBursts_splitIntoTheOnesThatRideAndTheOnesThatPlayAtAPosition() {
         Presentation.ModelParticle bounded = Presentation.ModelParticle.of("Fixture_Bounded");
         Presentation.ModelParticle endless = Presentation.ModelParticle.of("Fixture_Endless");
         Presentation.ModelParticle[] all = {bounded, endless, Presentation.ModelParticle.of(" "), null};
-        List<Presentation.ModelParticle> riding = ParticleLifetimes.bursts(true, all, "Fixture_Bounded"::equals);
-        List<Presentation.ModelParticle> positional = ParticleLifetimes.bursts(false, all, "Fixture_Bounded"::equals);
+        List<Presentation.ModelParticle> riding = MomentBursts.bursts(true, all, "Fixture_Bounded"::equals);
+        List<Presentation.ModelParticle> positional = MomentBursts.bursts(false, all, "Fixture_Bounded"::equals);
         assertEquals(List.of(bounded), riding);
         assertEquals(List.of(endless), positional, "an endless system never rides; a blank entry is in neither");
+    }
+
+    // ==================== the moment player's ride-versus-position split ====================
+
+    private static final Presentation.ModelParticle BOUNDED = Presentation.ModelParticle.of("Fixture_Bounded");
+    private static final Presentation.ModelParticle ENDLESS = Presentation.ModelParticle.of("Fixture_Endless");
+    private static final Presentation.ModelParticle[] BOTH = {ENDLESS, BOUNDED, null};
+
+    @Test
+    void atAnEntityAim_aBoundedSystemRides_andAnEndlessOnePlaysAtTheEntitysPosition() {
+        for (StationService.AimSource entity : List.of(StationService.AimSource.DISPLAY_PROP,
+                StationService.AimSource.DOUBLE)) {
+            MomentBursts split = MomentBursts.plan(entity, BOTH, "Fixture_Bounded"::equals);
+            assertEquals(List.of(BOUNDED), split.riding(), entity + ": the bounded system rides");
+            assertEquals(List.of(ENDLESS), split.positional(), entity + ": the endless one plays capped at a spot");
+            assertEquals(List.of(ENDLESS), split.atPosition(true), "delivered: only the endless one plays at the spot");
+            assertEquals(List.of(BOUNDED, ENDLESS), split.atPosition(false),
+                    "nobody received the attach: the riding burst plays at the spot too, so no cue is lost");
+        }
+    }
+
+    @Test
+    void atAPositionAim_nothingRides_andThePredicateIsNeverAsked() {
+        for (StationService.AimSource position : List.of(StationService.AimSource.BLOCK,
+                StationService.AimSource.DISPLAY_RESTING)) {
+            MomentBursts split = MomentBursts.plan(position, BOTH, id -> {
+                throw new AssertionError("a position aim asked whether " + id + " ends");
+            });
+            assertTrue(split.riding().isEmpty(), position + ": nothing rides");
+            assertEquals(List.of(ENDLESS, BOUNDED), split.positional(), position + ": every burst, in authored order");
+            assertEquals(List.of(ENDLESS, BOUNDED), split.atPosition(false));
+        }
+    }
+
+    @Test
+    void noAimEverRidesTheWorkersOwnBody() {
+        // Every target kind over every standing combination: a burst rides only a standing prop or a
+        // standing double, and a Puppet target with no double rides nothing (it plays at the block),
+        // so the hidden player is never the entity a burst is attached to.
+        for (Presentation.Target.Kind kind : Presentation.Target.Kind.values()) {
+            for (int bits = 0; bits < 8; bits++) {
+                boolean showsProp = (bits & 1) != 0;
+                boolean propStands = (bits & 2) != 0;
+                boolean doubleStands = (bits & 4) != 0;
+                StationService.AimSource source = StationService.aimSource(kind, showsProp, propStands, doubleStands);
+                boolean rides = !MomentBursts.plan(source, BOTH, id -> true).riding().isEmpty();
+                boolean entityStands = source == StationService.AimSource.DISPLAY_PROP && propStands
+                        || source == StationService.AimSource.DOUBLE && doubleStands;
+                assertEquals(entityStands, rides, kind + " " + showsProp + "/" + propStands + "/" + doubleStands);
+            }
+        }
+    }
+
+    @Test
+    void theMomentPlayer_splitsThroughThePlan_andItsAimNeverHoldsThePlayer() throws IOException {
+        String source = SourcePins.read("StationService.java");
+        String play = flat(SourcePins.methodBody(source, "private static void playMoment("));
+        assertEquals(1, SourcePins.count(play,
+                "MomentBursts.plan(aim.source(), p.getParticles(), ParticleLifetimes::systemProvablyEnds);"),
+                "the moment player splits its bursts by where the aim came from, and only a system that "
+                        + "provably ends may ride");
+        assertEquals(1, SourcePins.count(play, "ParticleLifetimes::systemProvablyEnds"),
+                "the one predicate that decides which bursts ride is the engine's own lifetime read");
+        assertEquals(1, SourcePins.count(play,
+                "boolean attached = spawnAttachedParticles(store, aim, bursts.riding());"),
+                "the riding half is attached, and whether anyone received it is kept");
+        assertEquals(1, SourcePins.count(play, "spawnAttachedParticles("),
+                "only the riding half is ever attached");
+        assertEquals(1, SourcePins.count(play, "bursts.atPosition(attached)"),
+                "the positional half, led by an undelivered riding half, plays at the aim's position");
+        String resolve = SourcePins.methodBody(source, "private static Aim resolveAim(");
+        assertTrue(resolve.contains("s.puppetRef"), "the pin reads the real resolver");
+        assertFalse(resolve.matches("(?s).*\\bs\\.ref\\b.*"),
+                "the aim is built from the prop and the double, never the player's own ref");
+    }
+
+    // ==================== where a cue aimed at a consumed piece lands ====================
+
+    private static final Custody.Display SOCKET_OWN = Custody.Display.of(Vec3.of(0.0, 0.55, 0.0), null, null);
+    private static final Custody.Display LIFTED = Custody.Display.overlaid(SOCKET_OWN,
+            Custody.Display.of(Vec3.of(0.0, 1.25, 0.2), null, null));
+
+    @Test
+    void aCueAtAConsumedPiece_landsUnderItsLastPerBeatLook() {
+        Map<String, Custody.Display> shown = new LinkedHashMap<>();
+        StationService.rememberShownDisplay(shown, "Main", LIFTED);
+        assertEquals(LIFTED, StationService.restingDisplay(shown, "MAIN", () -> SOCKET_OWN),
+                "the remembered overlay wins, whatever the socket id's spelling");
+        assertArrayEquals(StationCustodyDisplay.resolvePosition(LIFTED, 4, 64, -7, 1.5),
+                StationService.restingPosition(shown, "main", () -> SOCKET_OWN, 4, 64, -7, () -> 1.5), 1e-9,
+                "where the lifted prop stood, through the spawn's own placement");
+        assertNotEquals(StationCustodyDisplay.resolvePosition(SOCKET_OWN, 4, 64, -7, 1.5)[1],
+                StationService.restingPosition(shown, "main", () -> SOCKET_OWN, 4, 64, -7, () -> 1.5)[1],
+                "not the socket's un-lifted spot");
+    }
+
+    @Test
+    void aSocketWithNoRememberedLook_restsUnderItsOwnDisplay_elseNowhere() {
+        Map<String, Custody.Display> shown = new LinkedHashMap<>();
+        StationService.rememberShownDisplay(shown, "Other", LIFTED);
+        assertEquals(SOCKET_OWN, StationService.restingDisplay(shown, "main", () -> SOCKET_OWN),
+                "another socket's overlay never leaks onto this one");
+        assertArrayEquals(StationCustodyDisplay.resolvePosition(SOCKET_OWN, 0, 0, 0, 0.0),
+                StationService.restingPosition(shown, "main", () -> SOCKET_OWN, 0, 0, 0, () -> 0.0), 1e-9);
+        assertNull(StationService.restingPosition(shown, "main", () -> null, 0, 0, 0, () -> {
+            throw new AssertionError("no look to place: the block's facing is never read");
+        }), "a socket that shows no prop has no resting spot, and the caller plays at the block");
+    }
+
+    @Test
+    void theRememberedLook_isWrittenWhereTheOverlaidPropSpawns_andReadWhereTheCueRests() throws IOException {
+        String source = SourcePins.read("StationService.java");
+        String apply = SourcePins.methodBody(source, "void applyStepDisplay(");
+        assertEquals(1, SourcePins.count(apply, "rememberShownDisplay(s.shownDisplays, socketId, effective)"),
+                "the step's overlaid look is what is remembered");
+        String resting = SourcePins.methodBody(source, "private static Vector3d displayRestingPosition(");
+        assertEquals(1, SourcePins.count(flat(resting),
+                "restingPosition(s.shownDisplays, socketId, () -> socketDisplayFor(s, socketId),"),
+                "the resting position reads the remembered look first, else the socket's own Display");
+        assertFalse(source.contains("shownDisplays.put(") || source.contains("shownDisplays.get("),
+                "the remembered looks are only ever touched through the one keyed pair");
+    }
+
+    // ==================== the socket the placed-piece preview names ====================
+
+    private static Custody.ResolvedSocket socket(String id) {
+        return new Custody.ResolvedSocket(id, true, null, null, null, 4, false, false, null, false, false, false, null);
+    }
+
+    @Test
+    void thePreview_namesTheSocketThePieceActuallyWentInto() {
+        Custody.ResolvedSocket held = socket("held_socket");
+        Custody.ResolvedSocket found = socket("found_socket");
+        StationService.PlacedPiece viaHeld = StationService.placedPiece(2, held, 0, null);
+        assertTrue(viaHeld.placed());
+        assertEquals(held, viaHeld.socket(), "the held route placed it");
+        assertEquals(2, viaHeld.moved());
+
+        StationService.PlacedPiece viaBackpack = StationService.placedPiece(0, held, 3, found);
+        assertTrue(viaBackpack.placed());
+        assertEquals(found, viaBackpack.socket(),
+                "a held route that moved nothing never lends its socket to a piece the backpack scan placed");
+        assertEquals(3, viaBackpack.moved());
+
+        StationService.PlacedPiece nothing = StationService.placedPiece(0, held, 0, found);
+        assertFalse(nothing.placed(), "nothing moved: no preview");
+        assertNull(nothing.socket());
+    }
+
+    @Test
+    void thePressSite_previewsThroughThePlacementItSettled() throws IOException {
+        String toggle = flat(SourcePins.methodBody(SourcePins.read("StationService.java"), "public void toggle("));
+        assertEquals(1, SourcePins.count(toggle, "heldMoved = placeIntoCustody("),
+                "the held count is what the held placement moved");
+        assertEquals(1, SourcePins.count(toggle, "foundMoved = placeIntoCustody("),
+                "the backpack count is what the backpack placement moved");
+        assertEquals(1, SourcePins.count(toggle, "foundSocket = found.socket();"),
+                "the backpack route's socket is the one its scan found");
+        assertEquals(1, SourcePins.count(toggle,
+                "placedPiece(heldMoved, heldRoute.socket(), foundMoved, foundSocket)"));
+        assertEquals(1, SourcePins.count(toggle, "if (placed.placed()) {"));
+        assertEquals(1, SourcePins.count(toggle, "placed.socket());"), "the preview reads the settled socket");
+    }
+
+    /** A method body with every whitespace run folded to one space, so a pin survives a rewrap. */
+    private static String flat(String body) {
+        return body.replaceAll("\\s+", " ");
     }
 
     private static List<Finding> entityTargetFindings(Presentation.ModelParticle burst, Float lifeSpan) {

@@ -18,6 +18,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.DoubleSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -72,6 +73,7 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.server.core.util.NotificationUtil;
 import com.ziggfreed.common.camera.CameraShakeService;
 import com.ziggfreed.common.cast.ModelParticleService;
+import com.ziggfreed.common.cast.ParticleLifetimes;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.cast.WorldKeyedQueues;
 import com.ziggfreed.common.cast.step.CastKernel;
@@ -637,8 +639,9 @@ public final class StationService {
                 InventoryComponent.Hotbar hotbarComp =
                         store.getComponent(ref, InventoryComponent.Hotbar.getComponentType());
                 ItemStack heldForPlacement = hotbarComp != null ? hotbarComp.getActiveItem() : null;
-                int moved = 0;
-                Custody.ResolvedSocket placedSocket = null;
+                int heldMoved = 0;
+                int foundMoved = 0;
+                Custody.ResolvedSocket foundSocket = null;
                 StationCustody.PlacementRoute heldRoute = routeStack(custodySockets, claim, playerUuid,
                         custody, asset, action, heldForPlacement);
                 placeDenial = heldRoute.denial();
@@ -655,12 +658,11 @@ public final class StationService {
                         press.refuse("ui.station.storage_full");
                         return;
                     }
-                    moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
+                    heldMoved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
                             action.getActionId(), hotbarComp.getInventory(), hotbarComp.getActiveSlot(),
                             heldForPlacement, custody, heldRoute.socket(), blockX, blockY, blockZ);
-                    placedSocket = heldRoute.socket();
                 }
-                if (moved <= 0 && hotbarComp != null && !custody.effectiveHeldOnly()) {
+                if (heldMoved <= 0 && hotbarComp != null && !custody.effectiveHeldOnly()) {
                     // R3 fix (directive 5's held-else-inventory ruling): the held slot didn't
                     // match (or nothing is held) - scan the rest of the inventory before denying,
                     // so matching material sitting unheld in the backpack is no longer invisible
@@ -674,13 +676,14 @@ public final class StationService {
                             press.refuse("ui.station.storage_full");
                             return;
                         }
-                        moved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid, asset.getId(),
-                                action.getActionId(), found.container(), found.slot(), found.stack(), custody,
-                                found.socket(), blockX, blockY, blockZ);
-                        placedSocket = found.socket();
+                        foundMoved = placeIntoCustody(store, ref, commandBuffer, world, blockKey, playerUuid,
+                                asset.getId(), action.getActionId(), found.container(), found.slot(), found.stack(),
+                                custody, found.socket(), blockX, blockY, blockZ);
+                        foundSocket = found.socket();
                     }
                 }
-                if (moved > 0) {
+                PlacedPiece placed = placedPiece(heldMoved, heldRoute.socket(), foundMoved, foundSocket);
+                if (placed.placed()) {
                     if (!loadedBefore) {
                         flipCustodyState(world, blockX, blockY, blockZ, custody, true);
                     }
@@ -691,10 +694,10 @@ public final class StationService {
                             ? "ui.station.custody.topped_up" : "ui.station.custody.placed"));
                     // The placed-piece preview (Custody.Preview): what the piece just placed will
                     // give back, named now, before any work starts, addressed to the socket it
-                    // actually went into (held or backpack route alike).
+                    // actually went into (held or backpack route alike, as placedPiece settles it).
                     if (custody.effectivePreview()) {
                         previewPlacedReturn(playerRef, player, asset, action, world, blockX, blockY, blockZ,
-                                placedSocket);
+                                placed.socket());
                     }
                     return;
                 }
@@ -3156,10 +3159,12 @@ public final class StationService {
      * beat despawns its prop the same tick its cues fire) is answered by the socket's resting
      * position. At an entity target the sounds follow the entity, delivered to the players whose
      * tracker shows it, and a burst RIDES the entity only when its system provably ends on its own
-     * ({@link ParticleLifetimes}: an attached system has no playback cap, so it lives until its own
-     * lifetime ends or its entity is removed); every other burst plays at the entity's position
-     * under its {@code DurationSeconds} cap. An entity the tracker has shown nobody yet (spawned
-     * this tick) answers no viewers, and the cue plays at its position instead.
+     * (ziggfreed-common's {@link ParticleLifetimes}: an attached system has no playback cap, so it
+     * lives until its own lifetime ends or its entity is removed); every other burst plays at the
+     * entity's position under its {@code DurationSeconds} cap. {@link MomentBursts#plan} makes that
+     * split, and rides nothing at the block or at a resting spot, so no burst ever rides the worker's
+     * own body. An entity the tracker has shown nobody yet (spawned this tick) answers no viewers,
+     * and the cue plays at its position instead.
      */
     private static void playMoment(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
                                    @Nonnull Presentation p, @Nonnull Vector3d targetPos) {
@@ -3178,19 +3183,12 @@ public final class StationService {
                 }
             }
         }
-        if (aim.entity() == null) {
-            spawnMomentParticles(store, s, p.getParticles(), aim.position());
-        } else {
-            // A system that ends on its own rides the entity; one that might never end plays at the
-            // entity's position, where DurationSeconds caps it, so nothing endless ever rides.
-            List<Presentation.ModelParticle> riding =
-                    ParticleLifetimes.bursts(true, p.getParticles(), ParticleLifetimes::systemProvablyEnds);
-            if (!spawnAttachedParticles(store, aim, riding)) {
-                spawnMomentParticles(store, s, burstArray(riding), aim.position());
-            }
-            spawnMomentParticles(store, s, burstArray(ParticleLifetimes.bursts(false, p.getParticles(),
-                    ParticleLifetimes::systemProvablyEnds)), aim.position());
-        }
+        // A system that ends on its own rides the entity; one that might never end plays at the
+        // entity's position, where DurationSeconds caps it, so nothing endless ever rides.
+        MomentBursts bursts = MomentBursts.plan(aim.source(), p.getParticles(),
+                ParticleLifetimes::systemProvablyEnds);
+        boolean attached = spawnAttachedParticles(store, aim, bursts.riding());
+        spawnMomentParticles(store, s, burstArray(bursts.atPosition(attached)), aim.position());
         Presentation.Shake shake = p.getShake();
         if (shake != null && shake.getEffectId() != null && !shake.getEffectId().isBlank()) {
             float intensity = shake.getIntensity() != null ? shake.getIntensity().floatValue() : 1.0f;
@@ -3273,7 +3271,8 @@ public final class StationService {
      * {@code node} is the named model node an entity-attached burst rides, or null for the entity
      * itself.
      */
-    private record Aim(@Nullable Ref<EntityStore> entity, @Nonnull Vector3d position, @Nullable String node) {
+    private record Aim(@Nonnull AimSource source, @Nullable Ref<EntityStore> entity, @Nonnull Vector3d position,
+            @Nullable String node) {
     }
 
     /**
@@ -3336,14 +3335,15 @@ public final class StationService {
                     && s.puppetRef != null && s.puppetRef.isValid() ? s.puppetRef : null;
             Vector3d performerAt = performer != null ? entityPosition(store, performer) : null;
             return switch (aimSource(kind, socketId != null, propAt != null, performerAt != null)) {
-                case DISPLAY_PROP -> new Aim(prop.ref(), propAt, node);
-                case DISPLAY_RESTING -> new Aim(null, displayRestingPosition(store, s, socketId, blockPos), null);
-                case DOUBLE -> new Aim(performer, performerAt, node);
-                case BLOCK -> new Aim(null, blockPos, null);
+                case DISPLAY_PROP -> new Aim(AimSource.DISPLAY_PROP, prop.ref(), propAt, node);
+                case DISPLAY_RESTING -> new Aim(AimSource.DISPLAY_RESTING, null,
+                        displayRestingPosition(store, s, socketId, blockPos), null);
+                case DOUBLE -> new Aim(AimSource.DOUBLE, performer, performerAt, node);
+                case BLOCK -> new Aim(AimSource.BLOCK, null, blockPos, null);
             };
         } catch (Throwable t) {
             Log.fine("STATION could not resolve a moment target (" + kind + "): " + t.getMessage());
-            return new Aim(null, blockPos, null);
+            return new Aim(AimSource.BLOCK, null, blockPos, null);
         }
     }
 
@@ -3396,14 +3396,47 @@ public final class StationService {
     @Nonnull
     private static Vector3d displayRestingPosition(@Nonnull Store<EntityStore> store, @Nonnull StationSession s,
                                                    @Nonnull String socketId, @Nonnull Vector3d blockPos) {
-        Custody.Display shown = s.shownDisplays.get(socketId.toLowerCase(Locale.ROOT));
-        Custody.Display display = shown != null ? shown : socketDisplayFor(s, socketId);
-        if (display == null) {
-            return blockPos;
-        }
-        double[] at = StationCustodyDisplay.resolvePosition(display, s.blockX, s.blockY, s.blockZ,
-                momentBlockYaw(store, s));
-        return new Vector3d(at[0], at[1], at[2]);
+        double[] at = restingPosition(s.shownDisplays, socketId, () -> socketDisplayFor(s, socketId),
+                s.blockX, s.blockY, s.blockZ, () -> momentBlockYaw(store, s));
+        return at != null ? new Vector3d(at[0], at[1], at[2]) : blockPos;
+    }
+
+    /**
+     * Remembers {@code look} as the display {@code socketId}'s prop was last dressed in, under the
+     * one key {@link #restingDisplay} reads it back by (the socket id lowercased, whatever spelling
+     * either side was handed).
+     */
+    static void rememberShownDisplay(@Nonnull Map<String, Custody.Display> shown, @Nonnull String socketId,
+                                     @Nonnull Custody.Display look) {
+        shown.put(socketId.toLowerCase(Locale.ROOT), look);
+    }
+
+    /**
+     * PURE: the look {@code socketId}'s prop last stood in: the per-beat overlay this session last
+     * dressed it in ({@link #rememberShownDisplay}), else the socket's own authored {@code Display}
+     * (asked only when nothing is remembered), else null when the socket shows no prop.
+     */
+    @Nullable
+    static Custody.Display restingDisplay(@Nonnull Map<String, Custody.Display> shown, @Nonnull String socketId,
+                                          @Nonnull Supplier<Custody.Display> socketOwn) {
+        Custody.Display remembered = shown.get(socketId.toLowerCase(Locale.ROOT));
+        return remembered != null ? remembered : socketOwn.get();
+    }
+
+    /**
+     * PURE: where {@code socketId}'s prop last stood, placed off the block centre facing-relative
+     * through the same pure core the prop's spawn uses ({@link StationCustodyDisplay#resolvePosition})
+     * under the look {@link #restingDisplay} settles; null when the socket shows no prop. The
+     * block's facing yaw is read only when there is a look to place.
+     */
+    @Nullable
+    static double[] restingPosition(@Nonnull Map<String, Custody.Display> shown, @Nonnull String socketId,
+                                    @Nonnull Supplier<Custody.Display> socketOwn, int blockX, int blockY, int blockZ,
+                                    @Nonnull DoubleSupplier blockYaw) {
+        Custody.Display display = restingDisplay(shown, socketId, socketOwn);
+        return display != null
+                ? StationCustodyDisplay.resolvePosition(display, blockX, blockY, blockZ, blockYaw.getAsDouble())
+                : null;
     }
 
     /** An entity's current position as a fresh vector, or null when it cannot be read (gone, no transform). */
@@ -3424,12 +3457,12 @@ public final class StationService {
      * The entity-attached particle route: every burst rides {@code aim.entity()} (or its named
      * node), delivered to the players whose tracker shows that entity through the shared
      * primitive. The caller hands in only bursts whose system ends on its own
-     * ({@link ParticleLifetimes}), since an attached system has no playback cap: it lives until its
-     * own lifetime ends or its entity is removed (a prop when its piece is consumed or taken back,
-     * a double when the session ends), and {@code DurationSeconds} cannot shorten it. Answers false
-     * when nothing was delivered (no bursts, a fresh entity nobody has been shown yet, nobody near,
-     * an entity with no network id), so the caller plays the same bursts at the aim's position
-     * instead and no cue is lost. The authored {@code PositionOffset} rides as the entity-local
+     * (ziggfreed-common's {@link ParticleLifetimes}), since an attached system has no playback cap:
+     * it lives until its own lifetime ends or its entity is removed (a prop when its piece is
+     * consumed or taken back, a double when the session ends), and {@code DurationSeconds} cannot
+     * shorten it. Answers false when nothing was delivered (no bursts, a fresh entity nobody has been
+     * shown yet, nobody near, an entity with no network id), so the caller plays the same bursts at
+     * the aim's position instead and no cue is lost. The authored {@code PositionOffset} rides as the entity-local
      * offset and {@code RotationOffset} as the entity-local rotation, both as the engine's own
      * attached-particle leaf takes them.
      */
@@ -5417,7 +5450,7 @@ public final class StationService {
                     commandBuffer, s.blockX, s.blockY, s.blockZ)) {
                 // Remembered past the prop's despawn, so a cue aimed at the piece after a Convert
                 // beat consumed it lands where it last stood (displayRestingPosition).
-                s.shownDisplays.put(socketId.toLowerCase(Locale.ROOT), effective);
+                rememberShownDisplay(s.shownDisplays, socketId, effective);
             }
         } catch (Throwable t) {
             Log.fine("STATION step display overlay failed at '" + s.stationId + "': " + t.getMessage());
@@ -6506,6 +6539,37 @@ public final class StationService {
         // A piece no row covers still places when a fallback route would take it - the routes are
         // built per piece at the beat, so acceptance asks the same question they will.
         return fallbackTakes.getAsBoolean();
+    }
+
+    /**
+     * What one press's placement did: how many pieces moved into custody, and the socket they
+     * went into (null when nothing moved). The placed-piece preview reads {@link #socket()}, so it
+     * names the return of the socket the piece actually entered.
+     */
+    record PlacedPiece(int moved, @Nullable Custody.ResolvedSocket socket) {
+
+        /** True when the press moved at least one piece into custody. */
+        boolean placed() {
+            return moved > 0;
+        }
+    }
+
+    /**
+     * PURE: which placement a press made once both routes have had their turn: the held route
+     * when it moved anything, else the backpack scan when that moved anything, else nothing. The
+     * socket always belongs to the route that moved, so a held route that was offered a socket
+     * but moved nothing never lends that socket to a piece the scan placed elsewhere.
+     */
+    @Nonnull
+    static PlacedPiece placedPiece(int heldMoved, @Nullable Custody.ResolvedSocket heldSocket, int foundMoved,
+            @Nullable Custody.ResolvedSocket foundSocket) {
+        if (heldMoved > 0) {
+            return new PlacedPiece(heldMoved, heldSocket);
+        }
+        if (foundMoved > 0) {
+            return new PlacedPiece(foundMoved, foundSocket);
+        }
+        return new PlacedPiece(0, null);
     }
 
     /**
