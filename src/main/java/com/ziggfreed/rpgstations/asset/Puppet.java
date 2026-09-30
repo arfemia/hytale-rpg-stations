@@ -16,9 +16,8 @@ import com.ziggfreed.common.codec.Vec3;
  * spawn/display a visual of their character model performing the steps" - the maintainer's
  * verbatim proposal): one of an action's four {@link ActionDef.Worker} groups, sibling to
  * {@code Hold}/{@code Camera}/{@code Animation} (the puppet is ORTHOGONAL to which mount holds the
- * real player, so it is never nested under {@code Hold}). See
- * {@code .claude/research/raw/rpg-stations-puppet-presentation-design-2026-07-22.md} sections 3
- * (this schema) and the round-4 maintainer decisions this leg locks in:
+ * real player, so it is never nested under {@code Hold}). The
+ * maintainer decisions it locks in:
  *
  * <ul>
  *   <li><b>{@link Hide#getRoute()} is CROWNED {@code "Scale"}</b> as the default (in-game spike

@@ -78,8 +78,7 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@code FlairUnlockRegistry}/{@code SummaryEnricherRegistry} unions from
  * {@code StationService}/{@code StationFlairs}, seeding the flair union with its own
  * {@link ZigFlairUnlockProvider} (the shared per-player flair component read) so unlocks work with
- * no other mod installed - see
- * {@code .claude/research/raw/rpg-stations-unified-design-2026-07-21.md} section 3. It also
+ * no other mod installed. It also
  * subscribes this engine's own two progression producers ({@link StationProgressProducers}: the
  * {@code WORK_STATION} and {@code STATION_OUTPUT} objective kinds, fired into ziggfreed-common's
  * shared runtime off the api events) so authored content advances from station play alone.

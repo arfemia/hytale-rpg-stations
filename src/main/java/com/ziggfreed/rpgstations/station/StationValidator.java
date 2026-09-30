@@ -4098,8 +4098,8 @@ public final class StationValidator {
                             stepLabel + ".Puppet.Clip '" + clip + "' is not a known Emote id - check for a typo", id));
                 }
             }
-            // Seam wave (decision 51b/51d): a step's own Presentation fires at iteration entry
-            // (station/CLAUDE.md's per-step Presentation rule) - gets the SAME native-composition
+            // Seam wave (decision 51b/51d): a step's own Presentation fires at iteration entry and
+            // gets the SAME native-composition
             // advisory coverage every other Presentation site does.
             checkNativeRefs(step.getPresentation(), stepLabel + ".Presentation", id, out);
             checkStepPresentationDelay(step, stepLabel, id, out);

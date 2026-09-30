@@ -1344,7 +1344,7 @@ public final class StationAsset
         /**
          * The mount knob family (design section 9.2, phase 2 leg D). REPLACES the phase-1
          * {@code Hold.Seat.Enabled} flag (unreleased rename, no back-compat alias - the pack's
-         * own copy of the sawmill moves in lockstep, see {@code station/CLAUDE.md}).
+         * own copy of the sawmill moves in lockstep).
          *
          * <p><b>{@link #surface} is a UNION DISCRIMINATOR, not a mode</b> (critique m3's bless,
          * recorded here per the binding fix's "write the one-line rationale into the codec
@@ -1681,7 +1681,7 @@ public final class StationAsset
     /**
      * Camera pull while working - three independent knobs, no mode: {@link #enabled} (is there a pull
      * at all), {@link #locked} (may the player still rotate it), and {@link #recipe} (which
-     * fixed-look preset, if any). See {@code station/CLAUDE.md} for the fixed-look hunt history.
+     * fixed-look preset, if any).
      */
     public static final class Camera {
         @Nullable protected Boolean enabled;

@@ -54,13 +54,8 @@ import com.ziggfreed.rpgstations.util.Log;
  * puppet's CLIP technique ({@code ActiveAnimationComponent} + {@code AnimationUtils.playAnimation})
  * fire a one-shot animation on the NPC without fighting the Role brain's own walk gait?
  *
- * <p>The design authority is
- * {@code .claude/research/raw/rpg-stations-npc-performer-feasibility-2026-07-24.md} (the MINIMAL
- * SPIKE, section 5) + {@code .claude/research/raw/rpg-stations-look-source-performer-seam-2026-07-24.md}
- * (section 2's performer contract - {@code setProp}/{@code playClip} listed UNPROVEN, Q5's spike
- * extension) + the recon digest
- * {@code .claude/research/raw/npc-behavior-mods-recon-2026-07-24.md}. The mechanism, source-verified
- * against the official shared source:
+ * <p>The spike probes the performer contract ({@code setProp}/{@code playClip} were unproven).
+ * The mechanism, source-verified against the official shared source:
  * <ul>
  *   <li><b>spawn</b> - read the caller's live {@link PlayerSkinComponent}, clone the
  *       {@link PlayerSkin}, build a {@link Model} via {@link CosmeticsModule} (the
