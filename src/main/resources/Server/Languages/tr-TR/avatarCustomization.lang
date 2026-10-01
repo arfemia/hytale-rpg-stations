@@ -6,3 +6,9 @@
 # (Server/Emote/*.json) and never overrides a client-owned one.
 
 emotes.RPG_Emote_Knife.name = Balık Ölçekleme
+emotes.RPG_Emote_Disenchant_Read.name = Büyü Kitabını Okuma
+emotes.RPG_Emote_Disenchant_Open.name = Büyü Kitabını Açma
+emotes.RPG_Emote_Disenchant_Channel.name = Gücü Akıtma
+emotes.RPG_Emote_Disenchant_Surge.name = Gücü Biriktirme
+emotes.RPG_Emote_Disenchant_Release.name = Serbest Bırakma
+emotes.RPG_Emote_Disenchant_Bow.name = Elini Kalbine Koyma

@@ -1,0 +1,5 @@
+# RPG Stations - client-namespace additions, tr-TR. Translated from en-US/client.lang, which states
+# the rule: this file adds only brand-new keys to Hytale's own "client" namespace and never overrides
+# a client-owned one; {value} is a named placeholder the client itself fills. No em-dashes.
+
+itemTooltip.stats.RPG_Disenchanting_Proficiency = Büyü Bozma Ustalığı: {value}
