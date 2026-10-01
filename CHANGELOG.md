@@ -328,16 +328,18 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   double's stance. The
   recipe is `FromCrafting` over the `Salvagebench` (every vanilla salvage recipe, full outputs at
   native quantities) with a `Fallback` for the gear no salvage recipe names (a 0.3 share of the
-  piece's own crafting recipe, then essence only), scoped to weapons, armor and tools by `Type`
-  tag. Custody holds ONE real stack (`MaxQuantity 1`, so wear and stamps survive an interrupted
-  ritual), `HeldOnly`, with a `Preview`, and its `Input.Except` refuses the table's own trophy by
+  piece's own crafting recipe, then essence only), scoped to weapons, armor, tools and utility
+  gear (backpacks, the quiver, the helipack) by `Type` tag. Custody holds ONE real stack
+  (`MaxQuantity 1`, so wear and stamps survive an interrupted ritual), `HeldOnly`, with a `Preview`, and its `Input.Except` refuses the table's own trophy by
   id and its kit by the `Disenchanter` family tag; the greater action's own `Custody` (merged per
   leaf under `Parent`, so the held-only, preview and state leaves are inherited) adds three
   single-item sockets side by side on the two-block table top, each socket's `Match.Except`
   carrying the same two holes (an authored socket reads only its own `Match`), which the queue
   works in authored order. The non-gear the Salvage bench knows recipes for (rocks and plants by
   `Type`; arrows, bombs, bait and the deployable totems and turret by `Family`; the tagless repair
-  kits, fertilizers and capture crate by id) is refused at both tables by the jar's one protect-list
+  kits, fertilizers and capture crate by id) and the vanilla items that carry a gear type without
+  being gear (the Trork spawner egg, the frag grenade and the developer seed bag by id, every
+  `Developer`-family item by `Family`) are refused at both tables by the jar's one protect-list
   file, `ProtectLists/Disenchanting_Tables.json`, scoped to them. The three elastic beats are `Paced` over
   `hytale:stat RPG_Disenchanting_Proficiency` with the clamp at `{Min 0.21, Max 1.0}`, so the
   fastest ritual is 15 seconds; `Convert` runs on the Unmake beat and `RollBonus` on the Payout

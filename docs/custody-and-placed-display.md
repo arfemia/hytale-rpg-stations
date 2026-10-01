@@ -203,7 +203,8 @@ take an entry back, override its file BY ID: a later layer that ships the same f
 the earlier file whole, so the owner copies it, drops the entries to lift, and keeps the rest. The
 jar ships one file, `Disenchanting_Tables.json`, scoped to its two Disenchanting Tables: the rocks,
 plants, ammunition, bait, deployables and tagless odds and ends the Salvage bench knows recipes
-for, so neither table takes them; a station that must refuse one of its OWN pieces says so in its
+for, and the few items that carry a gear type without being gear (a spawner egg, a grenade, the
+developer items), so neither table takes them; a station that must refuse one of its OWN pieces says so in its
 own `Custody.Input.Except` (or a socket's `Match.Except`) instead. `/rpgstations validate`
 warns about a file that protects nothing, an entry with no route, and a `Stations` or `Actions` id
 that names nothing in scope.

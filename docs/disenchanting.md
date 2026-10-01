@@ -54,10 +54,15 @@ one transform in two tiers is one action and a parent chain.
 - `Input` authors only `Except`: acceptance stays whatever the recipe and the fallback routes
   derive (every piece the Salvage bench knows, and whatever the fallback's own `Input` scopes),
   minus the holes: the table's own trophy and its kit (the `Disenchanter` family tag the four
-  pieces carry). What has a salvage recipe but is not gear (rocks, plants) and what is gear-shaped
-  but not gear (ammunition, bait, deployables, the tagless repair kits, fertilizers and capture
-  crate) is refused by the jar's protect-list file, `ProtectLists/Disenchanting_Tables.json`, one
-  file scoped to both tables, so those holes are written once rather than on every matcher.
+  pieces carry). The fallback's `Input` takes every gear class by `Type`: weapons, armor, tools and
+  utility gear (backpacks, the quiver, the helipack). What has a salvage recipe but is not gear
+  (rocks, plants), what is gear-shaped but not gear (ammunition, bait, deployables, the tagless
+  repair kits, fertilizers and capture crate) and what carries a gear type without being gear (the
+  Trork spawner egg, the frag grenade, the developer seed bag and every `Developer`-family item) is
+  refused by the jar's protect-list file, `ProtectLists/Disenchanting_Tables.json`, one file scoped
+  to both tables, so those holes are written once rather than on every matcher. A piece whose stack
+  carries data no mod declared disposable, such as a bag with something in it, is refused by the
+  metadata guard before any fallback route is tried.
   Placement is the one gate, so the fallback's own `Input` needs only its routes. A pack's
   extension overlay adds its own holes beside these.
 - `Display.Animated` shows the placed piece turning and bobbing the way a dropped item does.

@@ -31,8 +31,8 @@ import com.ziggfreed.common.entity.ItemReadings;
  *       {@code max(0, value)} through {@code Item#getQualityIndex()}, never the stack's copied
  *       index): {@code theHeldToolPathsAreByteIdenticalTo21x} walks every index, and
  *       {@code theToolReadingFollowsTheItemAndTheItemReadingFollowsTheStack} pins the item-side
- *       read against a re-qualified stack (the C11 rule {@link StationToolReadings#quality}
- *       follows by asking {@code ItemReadings.quality(Item)}).</li>
+ *       read against a re-qualified stack (the held item's current quality, which
+ *       {@link StationToolReadings#quality} follows by asking {@code ItemReadings.quality(Item)}).</li>
  *   <li><b>Quality, a lookup that throws</b> (1.0.0: {@code 0}): the reader's try-guard answers
  *       null, the fold reads {@code NONE} (pinned here through the fold).</li>
  *   <li><b>Item level, nothing held</b> (1.0.0: {@code 0}): null, folded to {@code NONE} (pinned

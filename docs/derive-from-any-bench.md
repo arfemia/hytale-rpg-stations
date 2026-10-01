@@ -84,7 +84,7 @@ row, authored or derived, covers it:
 "Recipe": {
   "FromCrafting": { "Benches": ["Salvagebench"], "Types": ["Processing"] },
   "Fallback": {
-    "Input": { "Tags": { "Type": ["Weapon", "Armor", "Tool"] } },
+    "Input": { "Tags": { "Type": ["Weapon", "Armor", "Tool", "Utility"] } },
     "CraftingShare": { "Share": 0.3 },
     "EssenceOnly": {}
   }
@@ -92,12 +92,15 @@ row, authored or derived, covers it:
 ```
 
 - `Input` scopes the routes: only a piece it matches is offered one (the same `ItemId` /
-  `ResourceTypeId` / `Tags` / `Function` routes an action's other matchers use). Its `Except` can
-  carve holes out of that scope; the Disenchanting Table leaves it out, because it refuses the
-  same things one gate earlier, at placement, through its protect-list file (below), which also
-  covers the salvage-derived rows for rocks and plants that this scope never reaches. A route never
-  sees a piece that could not be placed, so the arrows, bombs and bait a wide family would
-  otherwise sweep in are refused before any route is tried.
+  `ResourceTypeId` / `Tags` / `Function` routes an action's other matchers use). The Disenchanting
+  Table scopes them to every gear class by `Type`: weapons (shields included), armor, tools and
+  utility gear such as backpacks, the quiver and the helipack. Its `Except` can carve holes out of
+  that scope; the Disenchanting Table leaves it out, because it refuses the same things one gate
+  earlier, at placement, through its protect-list file (below), which also covers the
+  salvage-derived rows for rocks and plants that this scope never reaches. A route never sees a
+  piece that could not be placed, so the arrows, bombs and bait a wide family would otherwise
+  sweep in, and the few items that carry a gear type without being gear, are refused before any
+  route is tried.
 - `CraftingShare` gives back a share of the piece's OWN crafting recipe. Each exact-item line
   becomes `floor(Quantity x Share / OutputQuantity)`, `OutputQuantity` being how many pieces that
   recipe makes per craft, so a batch recipe pays per piece; a line that rounds to nothing is
@@ -126,8 +129,10 @@ weapon" is a wide door ([Custody & Placed Display](custody-and-placed-display.md
 - The protect-list (`Server/RpgStations/ProtectLists/`): every file in it counts, whichever layer
   ships it, each optionally scoped to certain stations or actions, and no station in scope may take
   what it protects. The jar ships one, `Disenchanting_Tables.json`, scoped to the two tables, for
-  the non-gear the Salvage bench knows recipes for: rocks and plants by `Type`, ammunition, bait
-  and deployables by `Family`, and the tagless repair kits, fertilizers and capture crate by id.
+  the non-gear the Salvage bench knows recipes for (rocks and plants by `Type`, ammunition, bait
+  and deployables by `Family`, and the tagless repair kits, fertilizers and capture crate by id)
+  and the few vanilla items the gear filter would take for their type alone (the Trork spawner
+  egg, the frag grenade and the developer seed bag by id, and every `Developer`-family item).
   One file serves both tables and every socket, which is why those holes live there and not on
   the matchers.
 - A count pile (`MaxQuantity` above one) refuses a stack that tracks wear or carries metadata,

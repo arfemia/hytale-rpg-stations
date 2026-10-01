@@ -1,14 +1,18 @@
 {
-  "$Comment": "What neither Disenchanting Table will take, in one file for both: the Salvage bench knows salvage recipes for rocks and plants, which are not gear, and for ammunition, bait, a repair kit and the deployable totems, which are gear-shaped but not gear, so the derived rows would otherwise accept them at placement. Protects lists them as the shared input matcher, one entry per route: rocks and plants by their Type tag, arrows (the tribal dart shares the tag), bombs, bait and the deployable totems and turret (Family Stick) by their Family tag, and the repair kits, fertilizers and capture crate, which carry no family tag, by id. Stations scopes the file to the two tables (ids matched without regard to case), so no other consuming station is touched. A protected piece is refused with its own reason, Refused:Protected, before any socket is offered it, at both tables alike, which is why the list lives here once rather than on each table's input matcher (the greater table has three sockets, each with its own matcher). The tables' own trophy and kit are refused on those matchers instead, since that is a rule about the tables' own pieces. Every file in this folder adds to one server-wide list, so a server owner protects more by shipping another file, and takes an entry back by shipping a same-name file without it.",
+  "$Comment": "What neither Disenchanting Table will take, in one file for both. Two doors would otherwise let non-gear in. The Salvage bench knows salvage recipes for rocks and plants, which are not gear, and for ammunition, bait, a repair kit and the deployable totems, which are gear-shaped but not gear, so the derived rows would accept them at placement. And the fallback's gear filter (Type Weapon, Armor, Tool or Utility) admits a few vanilla items that carry a gear type without being gear: the Trork spawner egg and the frag grenade (both Type Weapon), the developer seed bag (Type Utility) and anything in the Developer family, such as the growth potion (Type Tool). Protects lists them as the shared input matcher, one entry per route: rocks and plants by their Type tag, arrows (the tribal dart shares the tag), bombs, bait and the deployable totems and turret (Family Stick) by their Family tag, every Developer-family item by its own entry, and the repair kits, fertilizers, capture crate, spawner egg, grenade and seed bag, which carry no family tag that says so, by id. Stations scopes the file to the two tables (ids matched without regard to case), so no other consuming station is touched. A protected piece is refused with its own reason, Refused:Protected, before any socket is offered it, at both tables alike, which is why the list lives here once rather than on each table's input matcher (the greater table has three sockets, each with its own matcher). The tables' own trophy and kit are refused on those matchers instead, since that is a rule about the tables' own pieces. Every file in this folder adds to one server-wide list, so a server owner protects more by shipping another file, and takes an entry back by shipping a same-name file without it.",
   "Stations": ["Disenchanting_Table", "Disenchanting_Table_Greater"],
   "Protects": [
     { "Tags": { "Type": ["Rock", "Plant"] } },
     { "Tags": { "Family": ["Arrow", "Bomb", "Bait", "Stick"] } },
+    { "Tags": { "Family": ["Developer"] } },
     { "ItemId": "Tool_Repair_Kit_Crude" },
     { "ItemId": "Tool_Repair_Kit_Iron" },
     { "ItemId": "Tool_Repair_Kit_Rare" },
     { "ItemId": "Tool_Fertilizer" },
     { "ItemId": "Tool_Fertilizer_Crystal" },
-    { "ItemId": "Tool_Capture_Crate" }
+    { "ItemId": "Tool_Capture_Crate" },
+    { "ItemId": "Egg_Spawner_Trork" },
+    { "ItemId": "Weapon_Grenade_Frag" },
+    { "ItemId": "Utility_Bag_Seed" }
   ]
 }
