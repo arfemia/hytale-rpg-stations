@@ -4,17 +4,22 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
+import com.ziggfreed.common.loot.FactorLookup;
+import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootGrants;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.LootableAsset;
 import com.ziggfreed.common.loot.LootableConfig;
 import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.common.loot.stamp.RollPoolAsset;
 import com.ziggfreed.common.loot.stamp.RollPoolConfig;
 import com.ziggfreed.common.loot.stamp.StampCapEngine;
@@ -23,6 +28,7 @@ import com.ziggfreed.common.loot.stamp.StampPlan;
 import com.ziggfreed.common.loot.stamp.StampSpec;
 import com.ziggfreed.common.loot.stamp.StatRoll;
 import com.ziggfreed.common.loot.stamp.StatRollEntry;
+import com.ziggfreed.common.subject.Subject;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
@@ -30,6 +36,7 @@ import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
+import com.ziggfreed.rpgstations.loot.StationRewardKinds;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -57,6 +64,11 @@ public class ExtensionCatalogTest {
             ids.add(s.getId());
         }
         return ids;
+    }
+
+    /** A Cycle-trigger roll granting one drop list, so a resolved order reads off its drop-list ids. */
+    private static Roll dropRoll(String dropListId) {
+        return Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootGrants.ofDropList(dropListId), null);
     }
 
     /** Every resolved roll's first granted droplist id, in resolution order. */
@@ -261,10 +273,24 @@ public class ExtensionCatalogTest {
         ExtensionCatalog.getInstance().fold(layer, true);
     }
 
+    /**
+     * The plugin registers the catalog's Lootable rolls and RollPool entries as sources of the
+     * shared table and roll pool compositions at setup, and the station kinds into the shared
+     * vocabulary; all three registries are process-wide, so each case does the same before it runs.
+     */
+    @BeforeEach
+    void registerTheWiringSetupDoes() {
+        ExtensionCatalog.getInstance().registerLootableRollSource();
+        ExtensionCatalog.getInstance().registerRollPoolEntrySource();
+        StationRewardKinds.registerInto(RewardKinds.shared());
+    }
+
     @AfterEach
     void clearFoldedExtensions() {
         ExtensionCatalog.getInstance().fold(Map.of(), true);
         StationCatalog.getInstance().fold(Map.of(), true);
+        ExtensionCatalog.getInstance().unregisterLootableRollSource();
+        ExtensionCatalog.getInstance().unregisterRollPoolEntrySource();
         // The shared loot stores are keyed by id and every fixture here uses its own,
         // so a later merge of the same id replaces it outright and nothing leaks.
     }
@@ -374,8 +400,72 @@ public class ExtensionCatalogTest {
     }
 
     @Test
+    void live_tableRollOrder_ownThenContributorsThenExtensionsThenInline() throws Exception {
+        // The one order every reader sees: the table's own rolls, each ContributesTo file's, every
+        // Target:{Lootable} extension's, and only then the ref's inline rolls.
+        LootableConfig.getInstance().mergePackLayer(Map.of(
+                "fixtureordered", LootableAsset.of("fixtureordered", new Roll[] {dropRoll("Fixture_Own_Drops")}),
+                "fixtureorderedadd", LootableAsset.of("fixtureorderedadd",
+                        new Roll[] {dropRoll("Fixture_Contributed_Drops")}, null, "fixtureordered")));
+        fold(ext("ordered-ext", "{ \"Target\":{\"Lootable\":\"FixtureOrdered\"}, \"Rolls\":[ {"
+                + " \"Trigger\":\"Cycle\", \"Grants\":{\"DropLists\":[\"Fixture_Extension_Drops\"]} } ] }"));
+        LootRef ref = LootRef.of(new String[] {"FixtureOrdered"}, new Roll[] {dropRoll("Fixture_Inline_Drops")});
+        List<String> expected = List.of("Fixture_Own_Drops", "Fixture_Contributed_Drops",
+                "Fixture_Extension_Drops", "Fixture_Inline_Drops");
+
+        assertEquals(expected, dropListIds(StationLootEngine.resolve(ref).rolls()), "a station's read");
+        assertEquals(expected, dropListIds(LootEngine.resolve(ref, null).rolls()),
+                "the shared read every other site makes answers the very same rolls");
+        assertEquals(expected, dropListIds(LootEngine.resolveRolls(ref, null)),
+                "and so does the rolls-only read a nested Lootable reward makes");
+    }
+
+    @Test
+    void live_extensionRollsReachADirectTableRead_andLeaveWhenTheExtensionDoes() throws Exception {
+        // A reader holding the table itself (a run-exit payout, a drop-table existence check) gets
+        // the extended table too, and an unfolded extension takes its rolls with it.
+        LootableConfig.getInstance().mergePackLayer(Map.of("fixturedirect",
+                LootableAsset.of("fixturedirect", new Roll[] {dropRoll("Fixture_Base_Drops")})));
+        fold(ext("direct-ext", "{ \"Target\":{\"Lootable\":\"FixtureDirect\"}, \"Rolls\":[ {"
+                + " \"Trigger\":\"Cycle\", \"Grants\":{\"DropLists\":[\"Fixture_Extra_Drops\"]} } ] }"));
+
+        assertEquals(List.of("Fixture_Base_Drops", "Fixture_Extra_Drops"),
+                dropListIds(LootableConfig.getInstance().resolve("fixturedirect").rollsOrEmpty()));
+        assertEquals(List.of("Fixture_Base_Drops"),
+                dropListIds(LootableConfig.getInstance().resolveAuthored("fixturedirect").rollsOrEmpty()),
+                "the file as written stays what its author is shown");
+
+        fold();
+        assertEquals(List.of("Fixture_Base_Drops"),
+                dropListIds(LootableConfig.getInstance().resolve("fixturedirect").rollsOrEmpty()));
+    }
+
+    @Test
+    void live_aStationKindAnExtensionAppendsCountsLostWhereNoPassCollectsIt() throws Exception {
+        // The cost of one composition: a site that is not a station pass rolls the extended table
+        // too, and a station-only kind there has no pass to collect onto, so it counts lost rather
+        // than paying anything.
+        LootableConfig.getInstance().mergePackLayer(Map.of("fixtureelsewhere",
+                LootableAsset.of("fixtureelsewhere", new Roll[] {dropRoll("Fixture_Base_Drops")})));
+        fold(ext("elsewhere-ext", "{ \"Target\":{\"Lootable\":\"FixtureElsewhere\"}, \"Rolls\":[ {"
+                + " \"Trigger\":\"Cycle\", \"Grants\":{\"Rewards\":[ {\"Kind\":\"rpgstations:contribution\","
+                + " \"Params\":{\"Channel\":\"yourmod:test\",\"Amount\":\"2\"} } ]} } ] }"));
+
+        LootEngine.Resolved resolved = LootEngine.resolve(LootRef.of(new String[] {"fixtureelsewhere"}, null), null);
+        LootEngine.Result result = LootEngine.rollAndGrant(resolved.rolls(), resolved.pools(), null,
+                FactorLookup.none(), () -> 0.0, LootEngine.Sinks.builder()
+                        .rewards(RewardKinds.shared(),
+                                Subject.of(UUID.fromString("77777777-7777-7777-7777-777777777777"), "Fixture"))
+                        .build());
+
+        assertEquals(1, result.getRewardsLost(), "no pass carries a collector here");
+        assertEquals(0, result.getRewardsPaid());
+    }
+
+    @Test
     void live_rollPoolEntriesReachAStampStepsCandidateSet() throws Exception {
-        // The RollPool payload applies where a Stamp step reads its Pool, so an appended entry is a
+        // The RollPool payload reaches the pool read a Stamp step resolves its plan through (the
+        // step hands its Stats group straight to StampCapEngine.resolve), so an appended entry is a
         // genuine candidate. Both entries are Always, so the roll is deterministic without an RNG.
         RollPoolConfig.getInstance().mergePackLayer(Map.of("fixturepool",
                 RollPoolAsset.of("fixturepool", new StatRollEntry[] {
@@ -383,9 +473,7 @@ public class ExtensionCatalogTest {
         fold(ext("pool-ext", "{ \"Target\":{\"RollPool\":\"FixturePool\"}, \"Entries\":[ {"
                 + " \"Stat\":\"Fixture_Added_Stat\", \"Points\":{\"Min\":3,\"Max\":3}, \"Always\":true } ] }"));
 
-        StampPlan plan = StampCapEngine.resolve(
-                StationStepHandlers.StampHandler.withExtendedEntries(
-                        StampSpec.of("FixturePool", null, null, false, null)),
+        StampPlan plan = StampCapEngine.resolve(StampSpec.of("FixturePool", null, null, false, null),
                 StampInspection.empty(), (id, param) -> null, () -> 0.0);
         List<String> stats = new ArrayList<>();
         for (StatRoll r : plan.entries()) {
@@ -393,6 +481,40 @@ public class ExtensionCatalogTest {
         }
         assertEquals(List.of("Fixture_Base_Stat", "Fixture_Added_Stat"), stats,
                 "the extension's entry is a candidate beside the pool's own");
+    }
+
+    @Test
+    void live_rollPoolEntriesReachEveryStampReadOfThePool() throws Exception {
+        // One composition: the extension's entry joins the pool itself, so a stamp read that is not
+        // a station's (the shared candidate gather a stamped-item reward rolls through, the pool's
+        // own resolve) sees it too, after the pool's own entry and before a spec's inline one. It
+        // leaves with the extension.
+        RollPoolConfig.getInstance().mergePackLayer(Map.of("fixtureshared",
+                RollPoolAsset.of("fixtureshared", new StatRollEntry[] {
+                        StatRollEntry.of("Fixture_Base_Stat", StatRollEntry.Points.of(2.0, 2.0, null), null, true)})));
+        fold(ext("shared-pool-ext", "{ \"Target\":{\"RollPool\":\"FixtureShared\"}, \"Entries\":[ {"
+                + " \"Stat\":\"Fixture_Added_Stat\", \"Points\":{\"Min\":3,\"Max\":3}, \"Always\":true } ] }"));
+        StampSpec spec = StampSpec.of("FixtureShared", new StatRollEntry[] {
+                StatRollEntry.of("Fixture_Inline_Stat", StatRollEntry.Points.of(1.0, 1.0, null), null, true)},
+                null, false, null);
+
+        assertEquals(List.of("Fixture_Base_Stat", "Fixture_Added_Stat", "Fixture_Inline_Stat"),
+                statsOf(StampCapEngine.candidates(spec)));
+        assertEquals(List.of("Fixture_Base_Stat"),
+                statsOf(List.of(RollPoolConfig.getInstance().resolveAuthored("fixtureshared").getEntries())),
+                "the pool file as written stays what its author is shown");
+
+        fold();
+        assertEquals(List.of("Fixture_Base_Stat", "Fixture_Inline_Stat"), statsOf(StampCapEngine.candidates(spec)),
+                "the entry leaves with the extension");
+    }
+
+    private static List<String> statsOf(List<StatRollEntry> entries) {
+        List<String> out = new ArrayList<>();
+        for (StatRollEntry entry : entries) {
+            out.add(entry.getStat());
+        }
+        return out;
     }
 
     // ==================== The station-SCOPED Action target ====================

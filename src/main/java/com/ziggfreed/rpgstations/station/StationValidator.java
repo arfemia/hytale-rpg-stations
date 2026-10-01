@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Predicate;
 
 import javax.annotation.Nonnull;
@@ -42,6 +43,7 @@ import com.ziggfreed.common.loot.LootableAsset;
 import com.ziggfreed.common.loot.LootableConfig;
 import com.ziggfreed.common.loot.LootableValidator;
 import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.common.loot.reward.RewardSpec;
 import com.ziggfreed.common.loot.stamp.RollPoolConfig;
 import com.ziggfreed.common.loot.stamp.StampSpec;
@@ -218,6 +220,11 @@ public final class StationValidator {
             Collection<ExtensionAsset> extensions = ExtensionCatalog.getInstance().all().values();
             Predicate<String> factorKnown = FactorRegistryImpl.getInstance()::isKnown;
             Predicate<String> lootableKnown = id -> LootableConfig.getInstance().resolve(id) != null;
+            // The same collector trick for loot tables: every table a station, an action asset or an
+            // extension's Bonus names is a table a station pass rolls, which is the set the table
+            // audit below covers.
+            Set<String> referencedLootables = new LinkedHashSet<>();
+            Predicate<String> lootableReferenced = recording(lootableKnown, referencedLootables);
             Predicate<String> rollPoolKnown = id -> RollPoolConfig.getInstance().resolve(id) != null;
             Predicate<String> stationKnown = id -> StationCatalog.getInstance().getStation(id) != null;
             Predicate<String> actionAssetKnown = id -> ActionCatalog.getInstance().get(id) != null;
@@ -239,13 +246,11 @@ public final class StationValidator {
                     StationValidator::langKeyKnownLive,
                     dropListKnown,
                     factorKnown,
-                    lootableKnown,
+                    lootableReferenced,
                     rollPoolKnown,
                     StationValidator::modelKnownLive,
                     stationKnown,
                     actionAssetKnown));
-            out.addAll(validateLootables(LootableConfig.getInstance().all().values(),
-                    dropListKnown, factorKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), stationKnown));
             out.addAll(validateSettings(SettingsCatalog.getInstance().current()));
             out.addAll(validateProtectLists(ProtectListCatalog.getInstance().all().values(), stations,
@@ -257,10 +262,16 @@ public final class StationValidator {
             // check, and a Target:{Station} extension validated before its target station's layer
             // folds would false-flag EXTENSION_TARGET_UNKNOWN.
             out.addAll(validateActionAssets(actionAssets,
-                    dropListKnown, factorKnown, lootableKnown, rollPoolKnown,
+                    dropListKnown, factorKnown, lootableReferenced, rollPoolKnown,
                     StationValidator::modelKnownLive, stationKnown));
+            // The plain predicate here: an extension's Target:{Lootable} existence check reads it
+            // too, and a table an extension appends to is not thereby one a station rolls.
             out.addAll(validateExtensions(extensions, stations, actionAssets,
                     dropListKnown, factorKnown, lootableKnown, rollPoolKnown));
+            noteExtensionBonusTables(extensions, lootableKnown, referencedLootables);
+            // AFTER every walk that names a table, and BEFORE the drop-list probe, since a table's
+            // own drop-list references join that probe through the same collector.
+            out.addAll(validateLootables(stationLootables(referencedLootables), dropListKnown, factorKnown));
             out.addAll(validatePatterns(PatternCatalog.getInstance().all().values(),
                     StationValidator::itemKnownLive, StationValidator::stationBlockResolvesLive));
             out.addAll(checkCustodyInputsResolveLive(stations, actionAssets));
@@ -294,16 +305,22 @@ public final class StationValidator {
     @Nonnull
     public static List<Finding> validateStructural() {
         try {
+            Set<String> referencedLootables = new LinkedHashSet<>();
             List<Finding> out = new ArrayList<>(validate(StationCatalog.getInstance().all().values(),
-                    ALWAYS_KNOWN, ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown, ALWAYS_KNOWN, ALWAYS_KNOWN,
+                    ALWAYS_KNOWN, ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown,
+                    recording(ALWAYS_KNOWN, referencedLootables), ALWAYS_KNOWN,
                     ALWAYS_KNOWN, ALWAYS_KNOWN, ALWAYS_KNOWN));
-            out.addAll(validateLootables(LootableConfig.getInstance().all().values(),
+            out.addAll(validateLootables(stationLootables(referencedLootables),
                     ALWAYS_KNOWN, FactorRegistryImpl.getInstance()::isKnown));
             out.addAll(validateFlairAssets(FlairCatalog.getInstance().all().values(), ALWAYS_KNOWN));
             out.addAll(validateSettings(SettingsCatalog.getInstance().current()));
             out.addAll(validateProtectLists(ProtectListCatalog.getInstance().all().values(), null, ALWAYS_KNOWN));
             out.addAll(validatePatterns(PatternCatalog.getInstance().all().values(),
                     ALWAYS_KNOWN, ALWAYS_KNOWN));
+            // Which reward kinds exist is a cross-layer fact too: a kind a file authors registers
+            // only when the reward-kind store folds, which may not have happened at this fold. Like
+            // every other reference check, it belongs to the full pass.
+            out.removeIf(f -> LootableValidator.UNKNOWN_REWARD_KIND.equals(f.code()));
             return out;
         } catch (Throwable t) {
             Log.warn("Station validation (structural) aborted: " + t.getMessage());
@@ -313,6 +330,62 @@ public final class StationValidator {
 
     /** A cross-layer reference check deferred out of the per-fold structural pass - always passes. */
     private static final Predicate<String> ALWAYS_KNOWN = id -> true;
+
+    /** {@code known}, also recording into {@code into} every id it answers true for, lower-cased. */
+    @Nonnull
+    private static Predicate<String> recording(@Nonnull Predicate<String> known, @Nonnull Set<String> into) {
+        return id -> {
+            boolean answer = known.test(id);
+            if (answer) {
+                into.add(id.toLowerCase(Locale.ROOT));
+            }
+            return answer;
+        };
+    }
+
+    /** Record every loaded table an extension's {@code Bonus.Lootables} names. */
+    private static void noteExtensionBonusTables(@Nonnull Collection<ExtensionAsset> extensions,
+            @Nonnull Predicate<String> lootableKnown, @Nonnull Set<String> into) {
+        for (ExtensionAsset ext : extensions) {
+            String[] tables = ext == null || ext.getBonus() == null ? null : ext.getBonus().getLootables();
+            if (tables == null) {
+                continue;
+            }
+            for (String table : tables) {
+                if (table != null && !table.isBlank() && lootableKnown.test(table.toLowerCase(Locale.ROOT))) {
+                    into.add(table.toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+    }
+
+    /**
+     * The table FILES a station pass rolls, given the table ids station content references: each
+     * referenced table's winning file plus every file contributing to it ({@code ContributesTo}),
+     * in id order, each once. A table no station references is not this validator's to audit: the
+     * site that rolls it audits it, and the shared roll rules are the shared library's
+     * ({@code LootableValidator}), so auditing every table here reported the same file twice and
+     * judged tables a station never rolls by station-only rules (an unknown station factor on a
+     * table another mod rolls with factors of its own).
+     */
+    @Nonnull
+    static Collection<LootableAsset> stationLootables(@Nonnull Set<String> referencedIds) {
+        LootableConfig config = LootableConfig.getInstance();
+        Map<String, LootableAsset> files = new TreeMap<>();
+        for (String id : referencedIds) {
+            LootableAsset table = config.resolveAuthored(id);
+            if (table != null) {
+                files.put(id.toLowerCase(Locale.ROOT), table);
+            }
+            for (String contributorId : config.contributorsOf(id)) {
+                LootableAsset contributor = config.resolveAuthored(contributorId);
+                if (contributor != null) {
+                    files.put(contributorId.toLowerCase(Locale.ROOT), contributor);
+                }
+            }
+        }
+        return files.values();
+    }
 
     /**
      * Runs every registered {@code api.ValidationHook} over ONE shared {@code api.ValidationScope}
@@ -2413,7 +2486,12 @@ public final class StationValidator {
         }
     }
 
-    /** Validates every standalone {@link LootableAsset}'s {@code Rolls} (the same {@link #checkRoll} core). */
+    /**
+     * Validates each standalone {@link LootableAsset}'s {@code Rolls} (the same {@link #checkRoll}
+     * core every inline roll goes through). The live passes hand it only the tables a station rolls
+     * ({@link #stationLootables}). A table is empty only when it has neither rolls nor a pool: a
+     * pool-only table is a bag, and a station draws it on the cycle pass.
+     */
     @Nonnull
     public static List<Finding> validateLootables(@Nonnull Collection<LootableAsset> lootables,
                                                    @Nonnull Predicate<String> dropListKnown,
@@ -2427,11 +2505,14 @@ public final class StationValidator {
             String label = "Lootable '" + id + "'";
             Roll[] rolls = l.getRolls();
             if (rolls == null || rolls.length == 0) {
-                out.add(Finding.warning(DOMAIN, "LOOT_EMPTY_TABLE", label + " has no Rolls", id));
+                if (l.getPool() == null) {
+                    out.add(Finding.warning(DOMAIN, "LOOT_EMPTY_TABLE", label + " has no Rolls and no Pool", id));
+                }
                 continue;
             }
             for (int i = 0; i < rolls.length; i++) {
                 checkRoll(rolls[i], label + ".Rolls[" + i + "]", id, dropListKnown, factorKnown, out);
+                checkStationTrigger(rolls[i], label + ".Rolls[" + i + "]", id, out);
             }
         }
         return out;
@@ -2576,6 +2657,7 @@ public final class StationValidator {
         if (rolls != null) {
             for (int i = 0; i < rolls.length; i++) {
                 checkRoll(rolls[i], label + " Rolls[" + i + "]", id, noCycleOutput, dropListKnown, factorKnown, out);
+                checkStationTrigger(rolls[i], label + " Rolls[" + i + "]", id, out);
             }
         }
     }
@@ -2615,7 +2697,10 @@ public final class StationValidator {
         // JSON gets identical findings at a station, in a chest, and at a quest turn-in. Do not
         // re-derive any of it here; a second copy is how two engines end up disagreeing about the
         // same file.
-        for (Finding shared : atBlock(LootableValidator.auditRoll(roll, id, null), label)) {
+        // Kinds are checked against the ONE shared vocabulary every site pays through, the three
+        // station kinds included, so a misspelt kind in an inline station roll is warned exactly as
+        // it is in any table.
+        for (Finding shared : atBlock(LootableValidator.auditRoll(roll, id, RewardKinds.shared()), label)) {
             out.add(shared);
         }
         // What stays here is what only a STATION knows: which factor ids this engine can answer,
@@ -2854,6 +2939,33 @@ public final class StationValidator {
                 checkContributionReward(spec, label, id, trigger, cycleTrigger, out);
             }
         }
+    }
+
+    /**
+     * {@code LOOT_TRIGGER_NEVER_ASKED} (WARNING), the roll-level sibling of the two
+     * {@code *_WRONG_TRIGGER} reward checks below: a roll a station rolls (an inline roll at a
+     * station, action, step or extension {@code Bonus}, or a roll in a table a station rolls) whose
+     * effective trigger no station pass ever asks for. A station asks only {@code Cycle} (each
+     * completed cycle, a step's {@code Roll} phase included) and {@code Completion} (session stop),
+     * and a roll that names no {@code Trigger} reads the shared engine's {@code Default}, so such a
+     * roll never fires at a station. Advisory only: nothing about how a roll is asked changes, and a
+     * table a station rolls may also be rolled elsewhere, where another trigger can be the point.
+     */
+    private static void checkStationTrigger(@Nullable Roll roll, @Nonnull String label, @Nonnull String id,
+            @Nonnull List<Finding> out) {
+        if (roll == null) {
+            return;
+        }
+        String trigger = roll.effectiveTrigger();
+        if (StationLootEngine.TRIGGER_CYCLE.equalsIgnoreCase(trigger)
+                || StationLootEngine.TRIGGER_COMPLETION.equalsIgnoreCase(trigger)) {
+            return;
+        }
+        out.add(Finding.warning(DOMAIN, "LOOT_TRIGGER_NEVER_ASKED",
+                label + " answers Trigger '" + trigger + "', which no station pass asks for (a station"
+                        + " rolls Cycle on each completed cycle and Completion at session stop, and a roll"
+                        + " naming no Trigger reads '" + Roll.DEFAULT_TRIGGER + "'), so it never fires at a"
+                        + " station; author Trigger Cycle or Completion", id));
     }
 
     /**

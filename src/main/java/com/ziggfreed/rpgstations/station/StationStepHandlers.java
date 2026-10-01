@@ -29,7 +29,6 @@ import com.ziggfreed.common.entity.performer.WalkHandle;
 import com.ziggfreed.common.inventory.InventoryGrant;
 import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootRef;
-import com.ziggfreed.common.loot.stamp.RollPoolAsset;
 import com.ziggfreed.common.loot.stamp.RollPoolConfig;
 import com.ziggfreed.common.loot.stamp.StampCapEngine;
 import com.ziggfreed.common.loot.stamp.StampInspection;
@@ -39,7 +38,6 @@ import com.ziggfreed.common.loot.stamp.StampIdentity;
 import com.ziggfreed.common.loot.stamp.Stamper;
 import com.ziggfreed.common.loot.stamp.StamperRegistry;
 import com.ziggfreed.common.loot.stamp.StatRoll;
-import com.ziggfreed.common.loot.stamp.StatRollEntry;
 import com.ziggfreed.rpgstations.api.EnhanceLine;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Custody;
@@ -49,7 +47,6 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.CommandRewardExecutor;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
-import com.ziggfreed.rpgstations.station.ExtensionCatalog;
 import com.ziggfreed.common.inventory.PlayerAccess;
 import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
@@ -1011,7 +1008,9 @@ final class StationStepHandlers {
                             + "- the Stats leaf no-ops this attempt (Durability still lands)");
                 } else {
                     inspection = safeInspect(stamper, weaponStack);
-                    plan = StampCapEngine.resolve(withExtendedEntries(statsGroup), inspection,
+                    // The pool's entries are the shared roll pool read's: its own, then every
+                    // Target:{RollPool} extension's, which reach it as a registered entry source.
+                    plan = StampCapEngine.resolve(statsGroup, inspection,
                             ctx.snapshot, () -> ThreadLocalRandom.current().nextDouble());
                     if (plan.denied()) {
                         return StationStepResult.fail(StationService.StopReason.ENHANCE_CAPPED,
@@ -1075,7 +1074,8 @@ final class StationStepHandlers {
             Mutation mutation;
             try {
                 mutation = applyStampMutation(weaponStack, stamp.getDurability(), plan, stamper,
-                        StampIdentity.resolve(stamp.getStats(), poolOf(stamp.getStats())));
+                        StampIdentity.resolve(stamp.getStats(),
+                                RollPoolConfig.getInstance().poolOf(stamp.getStats())));
             } catch (Throwable t) {
                 restoreReagents(ctx, consumedForRestore);
                 Log.warn("STAMP step '" + step.getId() + "' mutation failed, restored reagents: " + t.getMessage(), t);
@@ -1108,49 +1108,6 @@ final class StationStepHandlers {
                         ctx.session.sessionId, ctx.session.stationId, ctx.action.getActionId(), outcome);
             }
             return null;
-        }
-
-        /**
-         * The same spec with its candidate entries already FLATTENED: the named pool's own entries
-         * plus every {@code Target:{RollPool}} extension's appended ones, then the spec's own inline
-         * entries.
-         *
-         * <p>The shared engine reads a pool straight off the shared store, which is right for every
-         * other consumer and one layer short here - this engine's extension mechanism is its own, and
-         * an extension that adds a stat to a shared pool has to reach a stamp step for the same
-         * reason an extension that adds a roll to a shared table has to reach a loot pass.
-         */
-        @Nonnull
-        static StampSpec withExtendedEntries(@Nonnull StampSpec spec) {
-            String poolId = spec.getPool();
-            if (poolId == null || poolId.isBlank()) {
-                return spec;
-            }
-            RollPoolAsset pool = RollPoolConfig.getInstance().resolve(poolId);
-            StatRollEntry[] poolEntries = ExtensionCatalog.getInstance()
-                    .applyToRollPoolEntries(poolId, pool != null ? pool.getEntries() : null);
-            List<StatRollEntry> merged = new ArrayList<>();
-            if (poolEntries != null) {
-                merged.addAll(Arrays.asList(poolEntries));
-            }
-            if (spec.getEntries() != null) {
-                merged.addAll(Arrays.asList(spec.getEntries()));
-            }
-            return StampSpec.of(null, merged.toArray(StatRollEntry[]::new), spec.getPicks(),
-                    spec.isUnique(), spec.getCaps());
-        }
-
-        /**
-         * The roll pool a stamp draws from, or null when it names none - the fallback layer for a
-         * rename or a rarity the stamp itself did not state.
-         */
-        @Nullable
-        private static RollPoolAsset poolOf(@Nullable StampSpec spec) {
-            String poolId = spec == null ? null : spec.getPool();
-            if (poolId == null || poolId.isBlank()) {
-                return null;
-            }
-            return RollPoolConfig.getInstance().resolve(poolId);
         }
 
         /**

@@ -6,6 +6,7 @@ import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
@@ -15,8 +16,12 @@ import com.ziggfreed.common.codec.Vec3i;
 import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.common.factor.FactorFormula;
 import com.ziggfreed.common.loot.LootGrants;
+import com.ziggfreed.common.loot.LootPool;
 import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.LootableAsset;
+import com.ziggfreed.common.loot.LootableConfig;
 import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.rpgstations.api.PatternView;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.api.impl.ValidationHookRegistryImpl;
@@ -36,6 +41,7 @@ import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
 import com.ziggfreed.rpgstations.loot.LootFixtures;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
+import com.ziggfreed.rpgstations.loot.StationRewardKinds;
 import com.ziggfreed.common.validation.Finding;
 import com.ziggfreed.common.validation.Severity;
 
@@ -72,6 +78,16 @@ public class StationValidatorTest {
     private static final Predicate<String> NO_STATION = id -> false;
     private static final Predicate<String> ANY_ACTION_ASSET = id -> true;
     private static final Predicate<String> NO_ACTION_ASSET = id -> false;
+
+    /**
+     * A roll's reward kinds are checked against the shared vocabulary, which is process-wide and
+     * emptied by a reset anywhere; the fixtures below author the three station kinds, so they are
+     * registered before each case the way plugin setup registers them.
+     */
+    @BeforeEach
+    void registerTheStationKinds() {
+        StationRewardKinds.registerInto(RewardKinds.shared());
+    }
 
     private static Set<String> codes(List<Finding> findings) {
         return findings.stream().map(Finding::code).collect(Collectors.toSet());
@@ -687,6 +703,148 @@ public class StationValidatorTest {
         StationAsset a = station("badpost", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
         assertTrue(codes(validate(a)).contains("LOOT_CONTRIBUTION_WRONG_TRIGGER"));
+    }
+
+    @Test
+    void anInlineRollNamingAnUnknownRewardKind_isWarned() {
+        Roll roll = Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootGrants.of(null, null, null,
+                new LootGrants.Reward[] {LootGrants.Reward.of("yourmod:no_such_kind", Map.of())}), null);
+        StationAsset a = station("unknownkind", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withBonus(LootRef.of(null, new Roll[] {roll})));
+        assertTrue(codes(validate(a)).contains("LOOT_UNKNOWN_REWARD_KIND"),
+                "an inline station roll is checked against the one shared vocabulary like every other site");
+    }
+
+    @Test
+    void anInlineRollNamingARegisteredStationKind_isNotAnUnknownKind() {
+        Roll roll = Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null,
+                LootFixtures.contribution("yourmod:test", 5.0), null);
+        StationAsset a = station("knownkind", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withBonus(LootRef.of(null, new Roll[] {roll})));
+        assertFalse(codes(validate(a)).contains("LOOT_UNKNOWN_REWARD_KIND"));
+    }
+
+    @Test
+    void anUnknownRewardKind_isTheFullPassesToReport_notTheStructuralPasses() {
+        // Which kinds exist is a cross-layer fact (a kind a file authors registers only when the
+        // reward-kind store folds), so the per-fold structural pass drops the finding and the full
+        // pass, run once every layer has folded, reports it.
+        Roll roll = Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootGrants.of(null, null, null,
+                new LootGrants.Reward[] {LootGrants.Reward.of("yourmod:no_such_kind", Map.of())}), null);
+        StationAsset station = station("fixtureunknownkind", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withBonus(LootRef.of(null, new Roll[] {roll})));
+        StationCatalog.getInstance().fold(Map.of("fixtureunknownkind", station), true);
+        try {
+            assertTrue(codes(StationValidator.validate()).contains("LOOT_UNKNOWN_REWARD_KIND"),
+                    "the full pass reports the unknown kind");
+            assertFalse(codes(StationValidator.validateStructural()).contains("LOOT_UNKNOWN_REWARD_KIND"),
+                    "the structural pass leaves it to the full pass");
+        } finally {
+            StationCatalog.getInstance().fold(Map.of(), true);
+        }
+    }
+
+    // ==================== A trigger no station pass asks for ====================
+
+    @Test
+    void anInlineRollNamingNoTrigger_isWarnedThatItNeverFiresAtAStation() {
+        Roll roll = Roll.of(null, null, null, null, LootGrants.ofItem("Fixture_Find", 1), null);
+        StationAsset a = station("untriggered", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withBonus(LootRef.of(null, new Roll[] {roll})));
+        assertTrue(codes(validate(a)).contains("LOOT_TRIGGER_NEVER_ASKED"),
+                "an omitted Trigger reads Default, which a station never asks for");
+    }
+
+    @Test
+    void aStepRollPhaseNamingATriggerNoStationAsks_isWarned() {
+        Roll roll = Roll.of("Fixture_Moment", null, null, null, LootGrants.ofItem("Fixture_Find", 1), null);
+        StationAsset a = station("strangetrigger", ActionDef.of("Enhance")
+                .withSteps(new StationStep[] {
+                        StationStep.of("Beat").withRoll(LootRef.of(null, new Roll[] {roll}))}));
+        assertTrue(codes(validate(a)).contains("LOOT_TRIGGER_NEVER_ASKED"));
+    }
+
+    @Test
+    void cycleAndCompletionRolls_areAskedByAStation() {
+        Roll cycle = Roll.of("cycle", null, null, null, LootGrants.ofItem("Fixture_Find", 1), null);
+        Roll completion = Roll.of(StationLootEngine.TRIGGER_COMPLETION, null, null, null,
+                LootGrants.ofItem("Fixture_Find", 1), null);
+        StationAsset a = station("askedtriggers", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withBonus(LootRef.of(null, new Roll[] {cycle, completion})));
+        assertFalse(codes(validate(a)).contains("LOOT_TRIGGER_NEVER_ASKED"),
+                "the two triggers a station asks, matched without regard to case");
+    }
+
+    @Test
+    void aStationRolledTablesUntriggeredRoll_isWarned_andItsTriggeredRollIsNot() {
+        List<Finding> findings = StationValidator.validateLootables(List.of(LootableAsset.of("fixturemixed",
+                new Roll[] {
+                        Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootGrants.ofItem("Fixture_Find", 1), null),
+                        Roll.of(null, null, null, null, LootGrants.ofItem("Fixture_Find", 1), null)})),
+                ANY_DROP, ANY_FACTOR);
+        List<String> flagged = findings.stream()
+                .filter(f -> "LOOT_TRIGGER_NEVER_ASKED".equals(f.code()))
+                .map(Finding::message)
+                .toList();
+        assertTrue(flagged.size() == 1 && flagged.get(0).contains("Rolls[1]"),
+                "only the roll naming no Trigger is flagged: " + flagged);
+    }
+
+    @Test
+    void aLootableExtensionsUntriggeredRoll_isNotAStationTriggerFinding() throws Exception {
+        // A Target:{Lootable} extension's rolls join the table wherever it is rolled, not only at a
+        // station, so a trigger only another site asks for may be the whole point there.
+        ExtensionAsset e = extensionAsset("tableext", "{ \"Target\": { \"Lootable\": \"FixtureFinds\" },"
+                + " \"Rolls\": [ { \"Grants\": { \"Items\": [ { \"Item\": \"Fixture_Find\" } ] } } ] }");
+        assertFalse(codes(validateExtensions(e, null, null)).contains("LOOT_TRIGGER_NEVER_ASKED"));
+    }
+
+    // ==================== Lootable tables ====================
+
+    @Test
+    void aPoolOnlyTable_isNotAnEmptyTable() {
+        LootPool bag = LootPool.of(null, new LootPool.Entry[] {
+                LootPool.Entry.of(1.0, null, LootGrants.ofItem("Fixture_Pick", 1))});
+        List<Finding> findings = StationValidator.validateLootables(
+                List.of(LootableAsset.of("fixturebag", null, bag, null)), ANY_DROP, ANY_FACTOR);
+        assertFalse(codes(findings).contains("LOOT_EMPTY_TABLE"), "a bag is content; a station draws it");
+    }
+
+    @Test
+    void aTableWithNeitherRollsNorAPool_isAnEmptyTable() {
+        List<Finding> findings = StationValidator.validateLootables(
+                List.of(LootableAsset.of("fixturehollow", null, null, null)), ANY_DROP, ANY_FACTOR);
+        assertTrue(codes(findings).contains("LOOT_EMPTY_TABLE"));
+    }
+
+    @Test
+    void theFullPass_auditsTheTablesAStationRolls_andNoOthers() {
+        // Each table reads a factor this engine does not know: a station rolling it would read
+        // nothing there, which is worth saying for the table a station rolls (and the file
+        // contributing to it), and not this engine's business for a table only another site rolls.
+        Roll unknownAxis = Roll.of(StationLootEngine.TRIGGER_CYCLE,
+                new FactorCondition[] {FactorCondition.of("yourmod:unknown_axis", null, 1.0, null)}, null, null,
+                LootGrants.ofItem("Fixture_Find", 1), null);
+        LootableConfig.getInstance().mergePackLayer(Map.of(
+                "fixturerolled", LootableAsset.of("fixturerolled", new Roll[] {unknownAxis}),
+                "fixturerolledadd", LootableAsset.of("fixturerolledadd", new Roll[] {unknownAxis}, null,
+                        "fixturerolled"),
+                "fixtureelsewhere", LootableAsset.of("fixtureelsewhere", new Roll[] {unknownAxis})));
+        StationAsset station = station("fixturetables", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withBonus(LootRef.of(new String[] {"FixtureRolled"}, null)));
+        StationCatalog.getInstance().fold(Map.of("fixturetables", station), true);
+        try {
+            Set<String> flagged = StationValidator.validate().stream()
+                    .filter(f -> "UNKNOWN_FACTOR".equals(f.code()))
+                    .map(Finding::sourceId)
+                    .collect(Collectors.toSet());
+            assertTrue(flagged.contains("fixturerolled"), "the table a station rolls is audited: " + flagged);
+            assertTrue(flagged.contains("fixturerolledadd"), "and so is the file contributing to it");
+            assertFalse(flagged.contains("fixtureelsewhere"), "a table no station rolls is not");
+        } finally {
+            StationCatalog.getInstance().fold(Map.of(), true);
+            LootableConfig.getInstance().mergePackLayer(Map.of());
+        }
     }
 
     // ==================== Custody ====================

@@ -453,6 +453,57 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   failed there). Every test class that drives a pass registers the kinds in `@BeforeEach`, since the
   shared vocabulary is process-wide; the nested case needs a live player, so Ziggfreed Common's
   `CollectingRewardKindTest` pins the forwarded subject instead.
+- **A `{Lootable}` extension's rolls reach every site that rolls the table, and a `{RollPool}`
+  extension's entries every stamp that draws from the pool, each through one read.**
+  `ExtensionCatalog.registerLootableRollSource` registers the catalog's `Target:{Lootable}` rolls as a
+  roll source of Ziggfreed Common's table composition (`LootableConfig.registerRollSource`, owner
+  `rpgstations`) at plugin setup, and `StationLootEngine.resolve` is now the shared
+  `LootEngine.resolve` with its site label, no longer a copy of it. A station's order is unchanged:
+  the table's own rolls, its `ContributesTo` files', the extensions', then the ref's inline rolls, and
+  the pool draws on the cycle pass after the rolls, one bag per table. What changes is the reach, as
+  the 1.0.0 notes promised: a quest reward, a nested `Lootable` reward or another mod reading the same
+  table now sees the appended rolls too, and a station-only kind in one of them pays nothing there
+  (counted lost, or dropped from a deferred payout, and logged where that site reports lost
+  rewards), since no station pass carries it. `ExtensionCatalog.registerRollPoolEntrySource` does the
+  same for `Target:{RollPool}` `Entries` through the library's roll pool composition
+  (`RollPoolConfig.registerEntrySource`, same owner, registered and unregistered beside the table
+  source), so a stamped-item reward or another mod's stamp drawing from an extended pool gets the
+  appended entries too. A Stamp step now hands its `Stats` group straight to the shared
+  `StampCapEngine.resolve` and reads the pool's rename and rarity through `RollPoolConfig.poolOf`;
+  the station-only merge (`StampHandler.withExtendedEntries`) is gone, and a station stamps from the
+  same entries in the same order as before (the pool's own, the extensions', then the step's inline
+  ones); an extension aimed at a pool no file ships adds nothing, as for a table, and the validator
+  flags that target. No shipped extension targets a `Lootable` or a `RollPool`. Tests: `ExtensionCatalogTest` (the
+  order at a station and through the shared reads, a direct table read gaining and losing the rolls
+  with the extension, a station kind appended to a table counting lost outside a pass, an extended
+  pool's entry reaching a stamp's candidates outside a station and leaving with the extension).
+- **The station validator checks reward kinds, and audits only the tables a station rolls.** An
+  inline roll's reward kinds are checked against the one shared vocabulary (before, the shared roll
+  audit ran with none), so a misspelt kind at a station is warned like anywhere else
+  (`LOOT_UNKNOWN_REWARD_KIND`); the per-fold structural pass leaves that check to the full pass, since
+  a file-authored kind may fold later. The table audit covers the tables station content references
+  (a station's or an action asset's `Bonus` and `Roll` steps, an extension's `Bonus`) plus the files
+  contributing to them, instead of every loaded table: a table another site rolls was judged by
+  station-only rules (an unknown station factor on a table read with factors of its own) and its
+  shared findings were reported a second time beside a content audit running the library's table
+  validator over every table. A pool-only table is no longer `LOOT_EMPTY_TABLE`; a table with
+  neither rolls nor a pool still is. Tests:
+  `StationValidatorTest` (an unknown kind warned and a station kind not, the full pass reporting an
+  unknown kind the structural pass leaves to it, the pool-only and empty tables, the full pass
+  auditing a referenced table and its contributor but not an unreferenced one).
+- **A roll that names no `Trigger` never fires at a station, and the validator now says so.** It
+  reads as `Default`, and a station asks only for `Cycle` or `Completion`; `docs/loot-and-factors.md`
+  called `Cycle` the default, and the api's `RollView.trigger()` javadoc said the same. Both now say
+  what the engine does, and that a roll a station rolls should author its `Trigger`. Nothing about
+  triggers changes at runtime. `StationValidator` warns `LOOT_TRIGGER_NEVER_ASKED` on an inline
+  station roll (a station's, action's, step's or extension's `Bonus`, a step's `Roll` phase) or a roll
+  in a table a station rolls whose effective trigger is neither `Cycle` nor `Completion`, so an
+  author learns at load time that it will never fire there; a `{Lootable}` extension's own rolls are
+  exempt, since they join the table wherever it is rolled. `docs/extending-other-packs.md` says where
+  a `{Lootable}` extension's rolls and a `{RollPool}` extension's entries reach. Tests:
+  `StationValidatorTest` (an untriggered inline roll and an unknown step trigger warned, `Cycle` and
+  `Completion` not, only the untriggered roll of a station-rolled table, an extension's table rolls
+  exempt).
 - **Docs.** `SCHEMA.md` regenerated for every leaf above. New guides:
   `docs/derive-from-any-bench.md` (the Sawmill and the Disenchanting Table as the two worked
   examples) and `docs/disenchanting.md` (the staged ritual, end to end). `docs/loot-and-factors.md`

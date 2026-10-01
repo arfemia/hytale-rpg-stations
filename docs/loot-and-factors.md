@@ -16,7 +16,11 @@ weighted **factor** vocabulary that also drives step iteration counts and enhanc
 `Lootables` references one or more standalone `Server/ZiggfreedCommon/Lootables/<Name>.json` files (a
 reusable table of rolls, shareable across stations); `Rolls` authors rolls directly at this site. Both
 resolve together when both are present - an action's own inline rolls run alongside every referenced
-table's rolls. `Yield` (on the action's `Recipe`) decides how much of the thing you made, deterministic
+table's rolls. A referenced table's rolls run in one order: the table's own, then those of every file
+that adds to it through `ContributesTo`, then those of every `{Lootable}` extension
+([Extending Other Packs](extending-other-packs.md)), and the site's inline rolls last. That is the one
+table read every site makes, so a chest, a quest reward or another mod rolling the same table sees the
+same rolls a station does. `Yield` (on the action's `Recipe`) decides how much of the thing you made, deterministic
 and readable at a glance; `Bonus` decides what ELSE you got, conditional and probabilistic - keeping
 those two numbers in separate groups is deliberate, so neither can silently multiply the other.
 
@@ -39,8 +43,15 @@ those two numbers in separate groups is deliberate, so neither can silently mult
 
 the `rpgstations:output_items` reward is fractional: `1.5` hands over one item every time plus a second half the time.
 
-- `Trigger` - `Cycle` (default, once per completed work cycle) or `Completion` (once, at session
-  stop). `Cycle` means THE action's cycle-completed moment whatever program shape it runs: an
+- `Trigger` - `Cycle` (once per completed work cycle) or `Completion` (once, at session stop).
+  **Author it on every roll a station rolls**, in a table as much as inline: a roll that names no
+  `Trigger` reads as `Default`, the shared loot engine's plain moment, and a station never asks for
+  `Default`. It asks for `Cycle` on each completed cycle (a step's `Roll` phase included) and for
+  `Completion` at session stop, so an untriggered roll never fires at a station, and the station
+  validator warns about one (`LOOT_TRIGGER_NEVER_ASKED`) inline or in a table a station rolls. A table's `Pool`
+  names no trigger at all and is drawn on the cycle pass. A site that asks for no particular moment
+  (a `Lootable` reward that names no `Trigger`, for one) runs every roll whatever it authors. `Cycle`
+  means THE action's cycle-completed moment whatever program shape it runs: an
   action driving the classic convert loop and one running an authored `Steps` program both fire it
   once per completed pass. (The `rpgstations:output_items` reward is the one payload an authored
   program honours only through a `Convert` beat, which is what gives such a program a cycle output
@@ -139,7 +150,7 @@ The three station kinds are registered once, when the mod starts, into Ziggfreed
 reward vocabulary, beside every other kind. So the Asset Editor offers them wherever it offers a reward
 kind, and the content audit knows them. They still pay only inside a station's own pass: authored
 anywhere else (a quest, a shop, a table a chest rolls) there is no work cycle for them to add to, so
-the reward pays nothing and the server log says so. The quest, achievement, shop and board validators
+the reward counts as lost, and it is logged where that site reports lost rewards. The quest, achievement, shop and board validators
 warn about one authored at their sites.
 
 Two shared kinds behave at a station the way they do everywhere else, which is worth spelling out:

@@ -126,6 +126,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         RpgStationsApi.set(RpgStationsApiImpl.getInstance());
         FactorRegistryImpl.getInstance().registerBuiltins();
         registerRewardKinds();
+        registerExtensionSources();
         registerStationAssetStore();
         registerActionAssetStore();
         registerExtensionAssetStore();
@@ -159,6 +160,21 @@ public class RpgStationsPlugin extends JavaPlugin {
      */
     private void registerRewardKinds() {
         StationRewardKinds.registerInto(RewardKinds.shared());
+    }
+
+    /**
+     * Every {@code Target:{Lootable}} extension's rolls join the shared table composition as one
+     * roll source ({@link ExtensionCatalog#registerLootableRollSource}), and every
+     * {@code Target:{RollPool}} extension's entries join the shared roll pool composition as one
+     * entry source ({@link ExtensionCatalog#registerRollPoolEntrySource}), so a table or pool an
+     * extension targets gains them at every site that rolls or stamps from it, a station or anywhere
+     * else, through the one read. Each source reads the catalog per call, so registering it before
+     * the Extensions store folds is right: it answers nothing until a fold gives it something to
+     * answer.
+     */
+    private void registerExtensionSources() {
+        ExtensionCatalog.getInstance().registerLootableRollSource();
+        ExtensionCatalog.getInstance().registerRollPoolEntrySource();
     }
 
     /**
@@ -737,6 +753,8 @@ public class RpgStationsPlugin extends JavaPlugin {
     @Override
     protected void shutdown() {
         StationService.getInstance().stopAll(StationService.StopReason.SERVER_STOP);
+        ExtensionCatalog.getInstance().unregisterLootableRollSource();
+        ExtensionCatalog.getInstance().unregisterRollPoolEntrySource();
         Log.info("RpgStations shutdown complete.");
     }
 }

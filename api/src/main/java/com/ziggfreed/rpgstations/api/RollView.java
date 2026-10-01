@@ -33,7 +33,15 @@ public interface RollView {
     @Nonnull
     String site();
 
-    /** The effective trigger, {@code "Cycle"} or {@code "Completion"} (reader-default applied). */
+    /**
+     * The effective trigger: the roll's authored {@code Trigger} as written (normally
+     * {@code "Cycle"} or {@code "Completion"}), or {@code "Default"} when it authors none, which is
+     * the shared loot engine's reader default and NOT {@code "Cycle"}. A station pass asks only for
+     * {@code "Cycle"} (each completed cycle, a step's {@code Roll} phase included) or
+     * {@code "Completion"} (session stop), so a roll answering {@code "Default"} never fires at a
+     * station; a roll a station rolls should author its {@code Trigger} explicitly. A table's pool
+     * names no trigger and is drawn on the cycle pass.
+     */
     @Nonnull
     String trigger();
 

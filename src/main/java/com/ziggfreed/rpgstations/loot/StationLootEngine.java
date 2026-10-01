@@ -1,7 +1,6 @@
 package com.ziggfreed.rpgstations.loot;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,11 +20,7 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.common.loot.LootEngine;
-import com.ziggfreed.common.loot.LootPool;
 import com.ziggfreed.common.loot.LootRef;
-import com.ziggfreed.common.loot.LootableAsset;
-import com.ziggfreed.common.loot.LootableConfig;
-import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.common.subject.Subject;
 import com.ziggfreed.rpgstations.asset.Contribution;
@@ -36,9 +31,9 @@ import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
- * The STATION-shaped half of the loot pass: it resolves what a site evaluates (this engine's own
- * extension composition), wires the shared loot engine's seams to a work session's world, and
- * reports back the three station-only outcomes a cycle needs in its hands.
+ * The STATION-shaped half of the loot pass: it resolves what a site evaluates through the shared
+ * table composition, wires the shared loot engine's seams to a work session's world, and reports
+ * back the three station-only outcomes a cycle needs in its hands.
  *
  * <p>The rolling itself - conditions, chance, ladder, grants, and the smart-cue rule - is
  * {@code com.ziggfreed.common.loot}'s, so identical JSON behaves identically at a station, in a
@@ -46,12 +41,15 @@ import com.ziggfreed.rpgstations.util.Log;
  *
  * <p><b>What this class adds, and why each piece cannot live in the shared engine:</b>
  * <ul>
- *   <li><b>Extension-aware table resolution.</b> A referenced table's rolls are its EFFECTIVE ones:
- *       whatever it authors, plus every {@code Target:{Lootable}} extension's appended rolls. The
- *       merge belongs at THIS read rather than at each caller, so a table gains its extended rolls
- *       everywhere it is referenced and no site can be left seeing the unextended table. The table's
- *       {@code Pool} rides along with them, so a station referencing a pooled table draws that bag
- *       exactly as a chest would.</li>
+ *   <li><b>A per-site diagnostic on the one table read.</b> A referenced table's rolls are its
+ *       EFFECTIVE ones: whatever it authors, every {@code ContributesTo} contributor's, then every
+ *       {@code Target:{Lootable}} extension's appended rolls. The extension rolls are not merged
+ *       here: {@link ExtensionCatalog#registerLootableRollSource} hands them to the shared table
+ *       composition, so a table gains them everywhere it is rolled, at a station or anywhere else,
+ *       and no site can be left seeing the unextended table. {@link #resolve} is that shared read
+ *       plus the site label its unknown-table line names. The table's {@code Pool} rides along with
+ *       the rolls, so a station referencing a pooled table draws that bag exactly as a chest
+ *       would.</li>
  *   <li><b>The station sinks.</b> Item grants go hotbar-first, then backpack storage, then a ground
  *       drop at the station block; native drop lists roll through {@code ItemModule} and grant the
  *       same way. A stack that fits nowhere still lands as a ground item rather than being
@@ -212,7 +210,7 @@ public final class StationLootEngine {
 
     // ==================== resolution ====================
 
-    /** Everything a {@link LootRef} evaluates, with this engine's extension composition applied. */
+    /** Everything a {@link LootRef} evaluates, through the shared table composition. */
     @Nonnull
     public static LootEngine.Resolved resolve(@Nullable LootRef loot) {
         return resolve(loot, "Bonus.Lootables");
@@ -223,11 +221,12 @@ public final class StationLootEngine {
      * {@code "Roll step 'Strike'"}), so one resolution serves every reference site without any of
      * them losing its own diagnostic.
      *
-     * <p>A referenced table contributes BOTH halves of what it holds: its rolls (its own, plus every
-     * {@code Target:{Lootable}} extension's appended ones) and its {@code Pool}. Each table keeps its
-     * own pool rather than the pools being poured together, because a pool is a bag whose entries
-     * compete for the same picks - merging two would change the odds inside both. Two referenced
-     * tables draw twice, once each.
+     * <p>This is the shared {@link LootEngine#resolve}, nothing more: each referenced table
+     * contributes its rolls (its own, its {@code ContributesTo} contributors', then every
+     * {@code Target:{Lootable}} extension's, which reach it as a registered roll source) and its
+     * {@code Pool}, then the ref's own inline rolls follow. Each table keeps its own pool rather
+     * than the pools being poured together, because a pool is a bag whose entries compete for the
+     * same picks; two referenced tables draw twice, once each.
      *
      * <p>An id no table answers to is SKIPPED rather than failing the pass - one bad reference must
      * not cost a player the rest of the loot, and the validator catches the same mistake at
@@ -235,34 +234,8 @@ public final class StationLootEngine {
      */
     @Nonnull
     public static LootEngine.Resolved resolve(@Nullable LootRef loot, @Nonnull String siteLabel) {
-        List<Roll> rolls = new ArrayList<>();
-        List<LootPool> pools = new ArrayList<>();
-        if (loot == null) {
-            return new LootEngine.Resolved(rolls, pools);
-        }
-        String[] lootables = loot.getLootables();
-        if (lootables != null) {
-            for (String tableId : lootables) {
-                if (tableId == null || tableId.isBlank()) {
-                    continue;
-                }
-                LootableAsset table = LootableConfig.getInstance().resolve(tableId);
-                if (table == null) {
-                    Log.fine("STATION " + siteLabel + " references unknown lootable '" + tableId + "'");
-                    continue;
-                }
-                Roll[] extended = ExtensionCatalog.getInstance().applyToLootableRolls(tableId, table.getRolls());
-                if (extended != null) {
-                    rolls.addAll(Arrays.asList(extended));
-                }
-                pools.addAll(table.poolOrEmpty());
-            }
-        }
-        Roll[] inline = loot.getRolls();
-        if (inline != null) {
-            rolls.addAll(Arrays.asList(inline));
-        }
-        return new LootEngine.Resolved(rolls, pools);
+        return LootEngine.resolve(loot,
+                tableId -> Log.fine("STATION " + siteLabel + " references unknown lootable '" + tableId + "'"));
     }
 
     // ==================== the pass ====================

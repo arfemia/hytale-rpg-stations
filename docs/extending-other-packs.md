@@ -33,6 +33,17 @@ directly - every mechanical payload key targets an ACTION instead:
 | `{Lootable: "<id>"}` | `Rolls` (appended) |
 | `{RollPool: "<id>"}` | `Entries` (appended) |
 
+A `{Lootable}` extension's `Rolls` join the table itself, not just a station's view of it: they run
+after the table's own rolls and after every file that adds to it through `ContributesTo`, at every
+site that rolls the table, a chest, a quest reward or another mod's drop as much as a station. So
+author them for wherever the table is rolled: a station-only reward kind (`rpgstations:output_items`,
+`rpgstations:contribution`, `rpgstations:effect`) in an appended roll pays nothing at a site that is
+not a station. It counts as lost there, and it is logged where that site reports lost rewards.
+
+A `{RollPool}` extension's `Entries` join the pool the same way: they come after the pool's own
+entries for every stamp that draws from it, a station's `Stamp` step or a stamped item handed out as
+a reward anywhere else, and the pool keeps the name and rarity it gives what it stamps.
+
 Authoring a payload key the target type does not accept is a content-audit finding, never a silent
 no-op left undocumented.
 

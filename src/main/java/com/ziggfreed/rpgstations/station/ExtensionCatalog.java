@@ -1,6 +1,7 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -22,9 +23,11 @@ import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.LootableConfig;
 import com.ziggfreed.rpgstations.asset.Puppet;
 import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.common.codec.Rotation;
+import com.ziggfreed.common.loot.stamp.RollPoolConfig;
 import com.ziggfreed.common.loot.stamp.StatRollEntry;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
@@ -53,8 +56,11 @@ import com.ziggfreed.rpgstations.util.Log;
  * per-cycle read sites; {@code Steps} applies where a session's authored program is read for
  * dispatch; {@code Conversions} applies inside {@code StationCatalog.resolvedConversions} before
  * that derivation is cached; {@code Actions} applies in {@code ActionResolver.effectiveActions};
- * {@code Rolls} applies where {@code loot.StationLootEngine.resolve} reads a referenced lootable
- * table, and {@code Entries} where {@code StampCapEngine} gathers a Stamp step's candidate pool
+ * {@code Rolls} joins the shared library's ONE table composition as a roll source
+ * ({@link #registerLootableRollSource}), so every site that resolves a targeted table, a station's
+ * or not, reads the appended rolls; {@code Entries} joins the shared library's roll pool composition
+ * the same way, as an entry source ({@link #registerRollPoolEntrySource}), so every stamp drawing
+ * from a targeted pool, a station's Stamp step or a stamped reward anywhere, reads the appended
  * entries. Those last two read their catalog per call and derive nothing, so unlike
  * {@code Conversions} they need no cache-invalidation companion.
  *
@@ -311,6 +317,62 @@ public final class ExtensionCatalog {
     public Roll[] applyToLootableRolls(@Nonnull String lootableId, @Nullable Roll[] base) {
         List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.LOOTABLE, lootableId);
         return exts.isEmpty() ? base : mergeRolls(base, exts);
+    }
+
+    /**
+     * The owner id this catalog's {@code Lootable} rolls and {@code RollPool} entries are registered
+     * under in the shared compositions.
+     */
+    public static final String LOOTABLE_ROLL_SOURCE_OWNER = "rpgstations";
+
+    /**
+     * Register {@link #applyToLootableRolls} as a roll source of the shared table composition
+     * ({@code LootableConfig.registerRollSource}), under {@link #LOOTABLE_ROLL_SOURCE_OWNER}. From
+     * then on a table's resolve appends every {@code Target:{Lootable}} extension's rolls AFTER the
+     * table's own and its {@code ContributesTo} contributors', for every site that rolls it: a
+     * station pass, a quest claim, a nested {@code Lootable} reward, another mod's drop. The source
+     * reads this catalog per call, so a later fold needs no re-registration. Idempotent: registering
+     * again replaces the same owner's source.
+     */
+    public void registerLootableRollSource() {
+        LootableConfig.getInstance().registerRollSource(LOOTABLE_ROLL_SOURCE_OWNER, this::lootableRollsFor);
+    }
+
+    /** Remove the source {@link #registerLootableRollSource} registered. */
+    public void unregisterLootableRollSource() {
+        LootableConfig.getInstance().unregisterRollSource(LOOTABLE_ROLL_SOURCE_OWNER);
+    }
+
+    /** Every {@code Lootable}-targeted extension's rolls for {@code lootableId}, in apply order. */
+    @Nonnull
+    List<Roll> lootableRollsFor(@Nonnull String lootableId) {
+        Roll[] appended = applyToLootableRolls(lootableId, null);
+        return appended == null ? List.of() : Arrays.asList(appended);
+    }
+
+    /**
+     * Register {@link #applyToRollPoolEntries} as an entry source of the shared roll pool
+     * composition ({@code RollPoolConfig.registerEntrySource}), under
+     * {@link #LOOTABLE_ROLL_SOURCE_OWNER}. From then on a pool's resolve appends every
+     * {@code Target:{RollPool}} extension's entries AFTER the pool's own, for every stamp that draws
+     * from it: a station's Stamp step, a stamped-item reward, another mod's stamp. The source reads
+     * this catalog per call, so a later fold needs no re-registration. Idempotent: registering again
+     * replaces the same owner's source.
+     */
+    public void registerRollPoolEntrySource() {
+        RollPoolConfig.getInstance().registerEntrySource(LOOTABLE_ROLL_SOURCE_OWNER, this::rollPoolEntriesFor);
+    }
+
+    /** Remove the source {@link #registerRollPoolEntrySource} registered. */
+    public void unregisterRollPoolEntrySource() {
+        RollPoolConfig.getInstance().unregisterEntrySource(LOOTABLE_ROLL_SOURCE_OWNER);
+    }
+
+    /** Every {@code RollPool}-targeted extension's entries for {@code rollPoolId}, in apply order. */
+    @Nonnull
+    List<StatRollEntry> rollPoolEntriesFor(@Nonnull String rollPoolId) {
+        StatRollEntry[] appended = applyToRollPoolEntries(rollPoolId, null);
+        return appended == null ? List.of() : Arrays.asList(appended);
     }
 
     /** A roll pool's effective entries: {@code base} plus every {@code RollPool}-targeted extension's {@code Entries}. */
