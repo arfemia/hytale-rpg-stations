@@ -5,11 +5,9 @@ import java.util.List;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.ziggfreed.common.loot.reward.RewardHandler;
+import com.ziggfreed.common.loot.reward.CollectingRewardKind;
 import com.ziggfreed.common.loot.reward.RewardKindRegistry;
-import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.common.loot.reward.RewardSpec;
-import com.ziggfreed.common.subject.Subject;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 
@@ -29,21 +27,25 @@ import com.ziggfreed.rpgstations.asset.EffectRef;
  *       <td>adds fractional extra units of the cycle's OWN primary output</td></tr>
  * </table>
  *
- * <h2>Why these three are a per-pass registry rather than process-wide registrations</h2>
+ * <h2>Registered once, collected by the pass</h2>
  *
  * <p>All three COLLECT rather than act. An effect has to be tracked on the session that earned it, a
  * contribution has to ride the cycle event that is about to dispatch, and an output-item amount is a
  * fractional tally the whole cycle sums before it resolves to whole items exactly once. None of that
  * is reachable from a handler holding only a reward spec and a player.
  *
- * <p>So one pass builds one registry: {@link #forPass} seeds it from the process-wide vocabulary
- * (so an authored {@code item} or {@code lootable} reward still pays out normally, with the player
- * on the subject handle where those kinds expect it) and then binds these three to THAT pass's
- * {@link Sink}. A pass happens once per work cycle, so a small registry per pass costs nothing worth
- * measuring, and the alternative - a hidden per-thread current-pass handle - would be far harder to
- * reason about at the one place it matters.
+ * <p>So each is a Ziggfreed Common {@link CollectingRewardKind} whose collector is this class's
+ * {@link Sink}. {@link #registerInto} puts all three into the ONE shared vocabulary at plugin setup,
+ * and a station pass layers its own {@code Sink} onto the subject it pays
+ * ({@code Subject.withFacets}); each grant then finds that pass's sink by its type. A table rolled
+ * by a {@code Lootable} reward is paid through the very same subject, so a station kind authored in
+ * a nested table reaches the same pass, and the content audit and the Asset Editor's reward-kind
+ * list both know the three like any other kind.
  *
- * <p>Outside a station pass these three collect nowhere, which is the honest outcome: an authored
+ * <p>Inside a pass, a grant the pass cannot carry (a cycle-scoped kind in a completion pass, a blank
+ * {@code Id} or {@code Channel}, a non-positive amount) returns quietly: it counts as paid, so a
+ * {@code Cue} authored beside it still earns. Outside a station pass there is no sink to find, so
+ * the grant fails, counts as lost and is reported, which is the honest outcome: an authored
  * {@code rpgstations:contribution} in a table rolled by something that is not a station has no cycle
  * event to ride on.
  */
@@ -64,7 +66,10 @@ public final class StationRewardKinds {
     private StationRewardKinds() {
     }
 
-    /** Where a pass's collected grants go; one instance per {@code rollAndGrant} pass. */
+    /**
+     * Where a pass's collected grants go; one instance per {@code rollAndGrant} pass, layered onto
+     * the subject that pass pays so the three kinds find it by this type.
+     */
     public interface Sink {
 
         /** A native effect to apply and track; {@code durationMs} null defers to the asset's own TTL. */
@@ -85,6 +90,43 @@ public final class StationRewardKinds {
         boolean acceptsCycleGrants();
     }
 
+    /** {@code rpgstations:effect}. One instance, so registering it again changes nothing. */
+    private static final CollectingRewardKind<Sink> EFFECT =
+            CollectingRewardKind.of(KIND_EFFECT, Sink.class, (sink, spec) -> {
+                String id = trimmedParam(spec, "id");
+                if (id == null) {
+                    return;
+                }
+                long duration = spec.longParam("durationms", 0L);
+                sink.effect(EffectRef.of(id, duration > 0 ? duration : null));
+            });
+
+    /** {@code rpgstations:contribution}. */
+    private static final CollectingRewardKind<Sink> CONTRIBUTION =
+            CollectingRewardKind.of(KIND_CONTRIBUTION, Sink.class, (sink, spec) -> {
+                String channel = trimmedParam(spec, "channel");
+                if (channel == null || !sink.acceptsCycleGrants()) {
+                    return;
+                }
+                double amount = spec.doubleParam("amount", 0.0);
+                if (amount <= 0.0) {
+                    return;
+                }
+                sink.contribution(Contribution.of(channel, spec.param("param"), amount));
+            });
+
+    /** {@code rpgstations:output_items}. */
+    private static final CollectingRewardKind<Sink> OUTPUT_ITEMS =
+            CollectingRewardKind.of(KIND_OUTPUT_ITEMS, Sink.class, (sink, spec) -> {
+                if (!sink.acceptsCycleGrants()) {
+                    return;
+                }
+                double count = spec.doubleParam("count", 0.0);
+                if (count > 0.0 && Double.isFinite(count)) {
+                    sink.outputItems(count);
+                }
+            });
+
     /** Every kind id this class registers, for a validator or an editor pick list. */
     @Nonnull
     public static List<String> kindIds() {
@@ -92,61 +134,15 @@ public final class StationRewardKinds {
     }
 
     /**
-     * The vocabulary ONE pass pays out through: every process-wide kind, plus these three bound to
-     * {@code sink}. A station kind the shared vocabulary happens to have claimed is overridden here,
-     * because at a station the collecting form is the correct one.
+     * Register the three station kinds into {@code kinds} under {@link #OWNER}. The plugin hands it
+     * the shared vocabulary once at setup; a test hands it the same before it drives a pass, since
+     * that vocabulary is process-wide and a reset empties it. Registering again is a no-op, because
+     * each kind is one instance.
      */
-    @Nonnull
-    public static RewardKindRegistry forPass(@Nonnull Sink sink) {
-        RewardKindRegistry kinds = new RewardKindRegistry("rpgstations:rewards");
-        RewardKindRegistry shared = RewardKinds.shared();
-        for (String id : shared.ids()) {
-            kinds.register(id, shared.handler(id));
-        }
-        kinds.register(KIND_EFFECT, OWNER, effectHandler(sink));
-        kinds.register(KIND_CONTRIBUTION, OWNER, contributionHandler(sink));
-        kinds.register(KIND_OUTPUT_ITEMS, OWNER, outputItemsHandler(sink));
-        return kinds;
-    }
-
-    @Nonnull
-    private static RewardHandler effectHandler(@Nonnull Sink sink) {
-        return (spec, subject) -> {
-            String id = trimmedParam(spec, "id");
-            if (id == null) {
-                return;
-            }
-            long duration = spec.longParam("durationms", 0L);
-            sink.effect(EffectRef.of(id, duration > 0 ? duration : null));
-        };
-    }
-
-    @Nonnull
-    private static RewardHandler contributionHandler(@Nonnull Sink sink) {
-        return (spec, subject) -> {
-            String channel = trimmedParam(spec, "channel");
-            if (channel == null || !sink.acceptsCycleGrants()) {
-                return;
-            }
-            double amount = spec.doubleParam("amount", 0.0);
-            if (amount <= 0.0) {
-                return;
-            }
-            sink.contribution(Contribution.of(channel, spec.param("param"), amount));
-        };
-    }
-
-    @Nonnull
-    private static RewardHandler outputItemsHandler(@Nonnull Sink sink) {
-        return (spec, subject) -> {
-            if (!sink.acceptsCycleGrants()) {
-                return;
-            }
-            double count = spec.doubleParam("count", 0.0);
-            if (count > 0.0 && Double.isFinite(count)) {
-                sink.outputItems(count);
-            }
-        };
+    public static void registerInto(@Nonnull RewardKindRegistry kinds) {
+        kinds.register(KIND_EFFECT, OWNER, EFFECT);
+        kinds.register(KIND_CONTRIBUTION, OWNER, CONTRIBUTION);
+        kinds.register(KIND_OUTPUT_ITEMS, OWNER, OUTPUT_ITEMS);
     }
 
     @Nullable

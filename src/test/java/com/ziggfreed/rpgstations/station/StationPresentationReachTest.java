@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
@@ -23,6 +24,7 @@ import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.common.loot.LootGrants;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.common.validation.Finding;
 import com.ziggfreed.common.validation.Severity;
 import com.ziggfreed.rpgstations.asset.ActionDef;
@@ -51,6 +53,16 @@ import com.ziggfreed.rpgstations.loot.StationRewardKinds;
  * fixture is authored here.
  */
 class StationPresentationReachTest {
+
+    /**
+     * A fixture below authors a station reward kind. Those live in the shared vocabulary, which is
+     * process-wide and emptied by a reset anywhere, so like every class authoring one this registers
+     * them before each case rather than trusting whichever class ran first.
+     */
+    @BeforeEach
+    void registerTheStationKinds() {
+        StationRewardKinds.registerInto(RewardKinds.shared());
+    }
 
     // ==================== the target decision ====================
 

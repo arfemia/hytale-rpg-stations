@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
@@ -22,6 +23,7 @@ import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootGrants;
 import com.ziggfreed.common.loot.LootableAsset;
 import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.common.subject.Subject;
 
 /**
@@ -39,6 +41,16 @@ class StationLootOriginTest {
 
     private static final Path SHIPPED_LOOTABLES =
             Path.of("src", "main", "resources", "Server", "ZiggfreedCommon", "Lootables");
+
+    /**
+     * A pass pays its rewards through the shared vocabulary, which is process-wide and emptied by a
+     * reset anywhere, so the station kinds are registered before each case like every other pass
+     * test does.
+     */
+    @BeforeEach
+    void registerTheStationKinds() {
+        StationRewardKinds.registerInto(RewardKinds.shared());
+    }
 
     private static StationLootEngine.GrantResult pass(List<Roll> rolls) {
         return StationLootEngine.rollAndGrant(new LootEngine.Resolved(rolls, List.of()),

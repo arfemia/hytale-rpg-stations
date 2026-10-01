@@ -435,6 +435,24 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   ship in en-US `items.lang` and `rpgstations.lang` (the station, action, socket and gear-set
   lines); the other locales follow. `ShippedAssetDecodeTest` gains a `GearSets` decoder over the
   library's `GearSetAsset` codec, so the set file is decoded the way the server decodes it.
+- **The three station reward kinds register once, in the one shared reward vocabulary.**
+  `rpgstations:effect`, `rpgstations:contribution` and `rpgstations:output_items` are registered into
+  Ziggfreed Common's `RewardKinds.shared()` at plugin setup (`StationRewardKinds.registerInto`, owner
+  `rpgstations`) as `CollectingRewardKind`s collecting onto `StationRewardKinds.Sink`, and the
+  per-pass registry copy (`StationRewardKinds.forPass`) is deleted: a pass pays through the shared
+  vocabulary with its `GrantResult` layered onto the subject (`Subject.withFacets`). The ids, the
+  params and what each kind pays inside a pass are unchanged, and a grant the pass drops still returns
+  quietly (it counts paid, so a `Cue` beside it still earns); outside a station pass one counts lost
+  and is reported. So the Asset Editor's reward-kind list offers the three, the content audit knows
+  them (a pack table authoring `rpgstations:output_items` no longer reads as an unknown kind), and the
+  quest, achievement, shop and board validators warn when one is authored at their sites. A
+  `Lootable` reward rolled at a station pays its table's station kinds into the same pass; that nested
+  table's rolls answer to no station trigger (unless the reward names one), so its `Completion` rolls
+  fire on the cycle that rolled it. The station subject carries the worker's `PlayerRef` beside the
+  `Player`, so a `Command` reward authored `RunAs: Player` runs at a station (before, it always
+  failed there). Every test class that drives a pass registers the kinds in `@BeforeEach`, since the
+  shared vocabulary is process-wide; the nested case needs a live player, so Ziggfreed Common's
+  `CollectingRewardKindTest` pins the forwarded subject instead.
 - **Docs.** `SCHEMA.md` regenerated for every leaf above. New guides:
   `docs/derive-from-any-bench.md` (the Sawmill and the Disenchanting Table as the two worked
   examples) and `docs/disenchanting.md` (the staged ritual, end to end). `docs/loot-and-factors.md`

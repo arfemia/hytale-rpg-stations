@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
@@ -17,12 +18,14 @@ import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootGrants;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.LootFixtures;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
+import com.ziggfreed.rpgstations.loot.StationRewardKinds;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -72,6 +75,15 @@ class StationCycleBonusTest {
      */
     private static FactorLookup lookup() {
         return FactorLookup.none();
+    }
+
+    /**
+     * The passes below author station kinds, which pay only once registered in the shared
+     * vocabulary; it is process-wide and a reset anywhere empties it, so register before each case.
+     */
+    @BeforeEach
+    void registerTheStationKinds() {
+        StationRewardKinds.registerInto(RewardKinds.shared());
     }
 
     @AfterEach

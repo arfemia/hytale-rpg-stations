@@ -26,7 +26,7 @@ import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.LootableAsset;
 import com.ziggfreed.common.loot.LootableConfig;
 import com.ziggfreed.common.loot.Roll;
-import com.ziggfreed.common.loot.reward.RewardKindRegistry;
+import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.common.subject.Subject;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.EffectRef;
@@ -59,7 +59,9 @@ import com.ziggfreed.rpgstations.util.Log;
  *   <li><b>The three station reward kinds</b> ({@link StationRewardKinds}), which COLLECT onto this
  *       pass rather than acting: an effect the session must track and tear down, a one-shot
  *       contribution the cycle event is about to carry, and a fractional output-item tally the whole
- *       cycle sums before resolving it to whole items exactly once.</li>
+ *       cycle sums before resolving it to whole items exactly once. They live in the one shared
+ *       vocabulary like every other kind; what is this pass's own is the {@link GrantResult} it
+ *       layers onto the subject it pays, which is where they collect.</li>
  * </ul>
  *
  * <p>Like the shared engine, this class stays presentation-agnostic: it reports which CUE ids were
@@ -297,6 +299,21 @@ public final class StationLootEngine {
      * own default moment: drawing it again on the completion pass would hand one session the same
      * bag twice, so the completion pass evaluates that table's Completion-trigger rolls and nothing
      * else. Rolls apply before pool picks, matching the shared engine's own order.
+     *
+     * <p>Rewards pay through the ONE shared vocabulary ({@link RewardKinds#shared()}), the same
+     * table every other site pays through, with this pass's {@link GrantResult} layered onto the
+     * subject as a facet: the three station kinds find it there by its {@link StationRewardKinds.Sink}
+     * type, and every other kind reads the subject exactly as it would anywhere else.
+     *
+     * <p><b>A {@code Lootable} reward rolled here pays into this pass too.</b> The table it rolls is
+     * paid through the same subject, so its station kinds collect onto this result like the outer
+     * table's do. Its rolls answer to no trigger of the station's (the shared {@code Lootable} kind
+     * hands its nested pass none unless the reward authors one), so a {@code Completion} roll in a
+     * table nested under a {@code Cycle} roll fires on that cycle. What a completion pass can carry
+     * is still this result's call: a cycle-scoped kind nested under a completion pass drops quietly
+     * there, exactly as it would at the top. (Ziggfreed Common's own tests pin that the nested pass
+     * forwards this very subject; a station-side test cannot, since a {@code Lootable} reward needs a
+     * live player.)
      */
     @Nonnull
     static GrantResult rollAndGrant(@Nonnull LootEngine.Resolved resolved, @Nonnull String trigger,
@@ -305,11 +322,10 @@ public final class StationLootEngine {
             @Nonnull Subject subject, @Nullable Map<String, String> placeholders,
             @Nonnull String sourceId) {
         GrantResult result = new GrantResult(TRIGGER_CYCLE.equalsIgnoreCase(trigger));
-        RewardKindRegistry kinds = StationRewardKinds.forPass(result);
         LootEngine.Sinks.Builder builder = LootEngine.Sinks.builder()
                 .items(items)
                 .dropLists(dropLists)
-                .rewards(kinds, subject)
+                .rewards(RewardKinds.shared(), subject.withFacets(result))
                 .sourceId("station:" + sourceId)
                 .warn(message -> Log.fine("STATION loot " + message));
         if (placeholders != null) {
@@ -347,23 +363,25 @@ public final class StationLootEngine {
 
     /**
      * The subject a registered reward kind is paid to: the PLAYER on the handle, which is where the
-     * shared {@code item}/{@code lootable}/{@code stamped_item} kinds look for one. The three
-     * station kinds carry their collection through the per-pass registry instead, so both reach what
-     * they need without either having to know about the other.
+     * shared {@code Item}/{@code Lootable}/{@code Stamped_Item} kinds look for one, with the
+     * {@link PlayerRef} layered beside it, which is what a {@code Command} reward authored
+     * {@code RunAs: Player} asks for (without it that reward always failed at a station; now it runs
+     * with the player's own authority). The seam core layers the pass's own collector on top, so the
+     * three station kinds find theirs the same way, without any kind having to know about another.
      *
      * <p>It is never null, even when the session has no resolvable {@code PlayerRef}. A null subject
      * would switch the WHOLE reward leaf off, and the three station kinds collect onto the pass
      * rather than paying anything to anybody - so an unidentifiable worker would silently lose their
      * contributions and their extra output alongside the item rewards that genuinely cannot land.
-     * An anonymous subject lets the collecting kinds run and leaves the paying ones to fail on their
-     * own terms, which is the outcome each of them is written for.
+     * An anonymous subject (the 0-0 id, an empty name) lets the collecting kinds run and leaves the
+     * paying ones to fail on their own terms, which is the outcome each of them is written for.
      */
     @Nonnull
-    private static Subject subjectOf(@Nullable Player player, @Nullable PlayerRef playerRef) {
+    static Subject subjectOf(@Nullable Player player, @Nullable PlayerRef playerRef) {
         UUID uuid = playerRef != null ? playerRef.getUuid() : null;
         String username = playerRef != null ? playerRef.getUsername() : null;
         return new Subject(uuid != null ? uuid : ANONYMOUS_WORKER,
-                username != null ? username : "", player);
+                username != null ? username : "", player).withFacets(playerRef);
     }
 
     /**

@@ -6,6 +6,7 @@ import java.util.UUID;
 import java.util.function.DoubleSupplier;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.ziggfreed.common.factor.FactorFormula;
@@ -17,6 +18,7 @@ import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.LootableAsset;
 import com.ziggfreed.common.loot.LootableConfig;
 import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.common.subject.Subject;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,6 +39,16 @@ class StationLootPoolTest {
 
     /** The pool always draws its first entry: one pick, and a sample pinned at the bottom. */
     private static final DoubleSupplier FIRST_ENTRY = () -> 0.0;
+
+    /**
+     * A pass pays its rewards through the shared vocabulary, which is process-wide and emptied by a
+     * reset anywhere, so the station kinds are registered before each case like every other pass
+     * test does.
+     */
+    @BeforeEach
+    void registerTheStationKinds() {
+        StationRewardKinds.registerInto(RewardKinds.shared());
+    }
 
     @AfterEach
     void clearTables() {

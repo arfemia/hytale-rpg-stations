@@ -26,6 +26,7 @@ import com.hypixel.hytale.server.core.universe.world.events.RemoveWorldEvent;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.asset.AssetStoreRegistrar;
 import com.ziggfreed.common.cast.WorldEvictors;
+import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.FlairUnlockRegistryImpl;
@@ -41,6 +42,7 @@ import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
 import com.ziggfreed.rpgstations.command.RpgStationsCommand;
 import com.ziggfreed.rpgstations.interaction.StationRetrieveInteraction;
 import com.ziggfreed.rpgstations.interaction.StationUseInteraction;
+import com.ziggfreed.rpgstations.loot.StationRewardKinds;
 import com.ziggfreed.rpgstations.progression.StationProgressProducers;
 import com.ziggfreed.rpgstations.station.ActionCatalog;
 import com.ziggfreed.rpgstations.station.ExtensionCatalog;
@@ -123,6 +125,7 @@ public class RpgStationsPlugin extends JavaPlugin {
     protected void setup() {
         RpgStationsApi.set(RpgStationsApiImpl.getInstance());
         FactorRegistryImpl.getInstance().registerBuiltins();
+        registerRewardKinds();
         registerStationAssetStore();
         registerActionAssetStore();
         registerExtensionAssetStore();
@@ -145,6 +148,17 @@ public class RpgStationsPlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(new RpgStationsCommand());
         Log.info("RpgStations setup complete (leg 4 - the api artifact is live: events fire, "
                 + "the factor/flair-unlock/summary-enricher registries are wired into the engine).");
+    }
+
+    /**
+     * The three station reward kinds ({@link StationRewardKinds}), registered ONCE into the shared
+     * vocabulary every payout site reads. Early in setup on purpose: before any asset decodes, so
+     * the reward-kind file fold, the Asset Editor's reward-kind list and every content audit already
+     * know them. A station pass finds its own collector on the subject it pays, so nothing here is
+     * per pass.
+     */
+    private void registerRewardKinds() {
+        StationRewardKinds.registerInto(RewardKinds.shared());
     }
 
     /**

@@ -133,6 +133,25 @@ defaults to `0` and is therefore always reached, making it the ladder's baseline
 `Grants` itself carries four keys: `Items`, `DropLists`, `Commands` and `Rewards`. The three
 station-only payouts above are registered reward KINDS inside `Rewards`, never keys of their own.
 
+### One reward vocabulary, three kinds that pay only at a station
+
+The three station kinds are registered once, when the mod starts, into Ziggfreed Common's one shared
+reward vocabulary, beside every other kind. So the Asset Editor offers them wherever it offers a reward
+kind, and the content audit knows them. They still pay only inside a station's own pass: authored
+anywhere else (a quest, a shop, a table a chest rolls) there is no work cycle for them to add to, so
+the reward pays nothing and the server log says so. The quest, achievement, shop and board validators
+warn about one authored at their sites.
+
+Two shared kinds behave at a station the way they do everywhere else, which is worth spelling out:
+
+- **A `Lootable` reward** (`{"Kind": "Lootable", "Params": {"Lootable": "<table id>"}}`) rolled at a
+  station pays the station kinds inside the table it rolls into the SAME pass, so a nested table can
+  add output items, a contribution or an effect. The nested table's rolls answer to no station
+  trigger (unless the reward names one in its own `Trigger` param), so a `Completion` roll inside it
+  fires on the cycle that rolled it. What the pass can carry still decides: nested under a
+  `Completion` roll, output items and contributions drop exactly as they would at the top level.
+- **A `Command` reward authored `RunAs: Player`** runs with the worker's own permissions.
+
 ## Composing drop tables
 
 A referenced `ItemDropList` is a native asset, so it composes with Hytale's own container vocabulary
