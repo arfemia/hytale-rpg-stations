@@ -733,6 +733,7 @@ public final class ExtensionCatalog {
                 firstNonNull(overlay.getResourceTypeId(), base.getResourceTypeId()),
                 firstNonNull(overlay.getTags(), base.getTags()),
                 firstNonNull(overlay.getFunction(), base.getFunction()),
+                firstNonNull(overlay.getQuality(), base.getQuality()),
                 concatExcepts(base.getExcepts(), overlay.getExcepts()));
     }
 

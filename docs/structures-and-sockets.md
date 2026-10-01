@@ -41,7 +41,9 @@ subtracted out internally) plus exactly ONE of:
 
 - `Block` - what block must stand there: an exact `ItemId`, a `ResourceTypeId` family (`"Rock"` =
   any rock-family block), or `Tags`. A state variant (a lit campfire, a loaded bench) matches
-  through its base block, so the shape holds whichever state its parts are in.
+  through its base block, so the shape holds whichever state its parts are in. A placed block
+  carries no item quality, so a `Quality` route never matches a cell (or a `Block` socket's
+  `Match`), and the validator warns `QUALITY_ON_BLOCK`.
 - `Empty: true` - the cell must hold AIR. Author this for headroom a build genuinely needs; do not
   author it for a cell a `Block` socket will later fill (see the socket interplay below).
 

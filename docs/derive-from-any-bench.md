@@ -92,7 +92,7 @@ row, authored or derived, covers it:
 ```
 
 - `Input` scopes the routes: only a piece it matches is offered one (the same `ItemId` /
-  `ResourceTypeId` / `Tags` / `Function` routes an action's other matchers use). The Disenchanting
+  `ResourceTypeId` / `Tags` / `Function` / `Quality` routes an action's other matchers use). The Disenchanting
   Table scopes them to every gear class by `Type`: weapons (shields included), armor, tools and
   utility gear such as backpacks, the quiver and the helipack. Its `Except` can carve holes out of
   that scope; the Disenchanting Table leaves it out, because it refuses the same things one gate
@@ -110,9 +110,10 @@ row, authored or derived, covers it:
   are its whole payout. It is the one row shape allowed an empty output.
 
 A piece is offered ONE route, the first that applies, in a fixed order: authored row, derived row,
-crafting share, essence only. A stack carrying metadata no mod declared disposable is refused
-before any route is tried, so a bench stand-in never destroys another mod's data by accident. The
-routes are custody-only: the piece has to be placed.
+crafting share, essence only. A real stack carrying metadata no mod declared disposable is refused
+by every one of them, a derived salvage row as much as a fallback route, so a bench stand-in never
+destroys another mod's data by accident, even for a third-party piece that ships its own salvage
+recipe. The fallback routes are custody-only: the piece has to be placed.
 
 ## What the station will not take
 
@@ -132,12 +133,17 @@ weapon" is a wide door ([Custody & Placed Display](custody-and-placed-display.md
   the non-gear the Salvage bench knows recipes for (rocks and plants by `Type`, ammunition, bait
   and deployables by `Family`, and the tagless repair kits, fertilizers and capture crate by id)
   and the few vanilla items the gear filter would take for their type alone (the Trork spawner
-  egg, the frag grenade and the developer seed bag by id, and every `Developer`-family item).
+  egg, the frag grenade and the developer seed bag by id, every `Developer`-family item, and every
+  item of a creative or test quality, `Developer`, `Debug`, `Technical`, `Template` or `Tool`,
+  which covers the creative, debug and test gear no family tag names).
   One file serves both tables and every socket, which is why those holes live there and not on
   the matchers.
-- A count pile (`MaxQuantity` above one) refuses a stack that tracks wear or carries metadata,
-  because it could only hand it back as a bare fresh stack. A single-item socket keeps the real
-  stack and takes it.
+- A count pile (`MaxQuantity` above one) refuses a stack that tracks wear, carries metadata or
+  carries a quality other than its item's, because it could only hand it back as a bare fresh
+  stack. A single-item socket keeps the real stack and takes it, unless that stack carries
+  metadata no mod declared disposable and every action reading the socket would consume it: the
+  data would go with the piece, so the socket refuses it at placement, whether its `Match` authors
+  routes or derives them.
 
 A hole or the protect-list answers `Refused:Protected`, its own reason with its own line, so the
 player learns the station would have taken the piece but for the rule. At a station already

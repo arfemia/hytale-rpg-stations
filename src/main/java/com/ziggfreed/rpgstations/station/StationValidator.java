@@ -24,6 +24,7 @@ import com.hypixel.hytale.server.core.asset.type.entityeffect.config.EntityEffec
 import com.hypixel.hytale.server.core.asset.type.item.config.CraftingRecipe;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.asset.type.item.config.ItemDropList;
+import com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality;
 import com.hypixel.hytale.server.core.asset.type.particle.config.ParticleSystem;
 import com.hypixel.hytale.server.core.asset.type.soundevent.config.SoundEvent;
 import com.hypixel.hytale.server.core.cosmetics.EmoteAsset;
@@ -184,6 +185,10 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@code PACE_UNCLAMPED}, {@code PACE_CLAMP_INVERTED}, {@code PACE_FLOOR_NONPOSITIVE},
  * {@code PACE_EXTENSION_NO_LADDER}, {@code PACED_STEP_WITHOUT_PACE} (INFO). Finds on a beat
  * ({@code RollBonus}): {@code BONUS_AT_BEAT_NO_BONUS}, {@code BONUS_AT_BEAT_REPEATED} (INFO).
+ * The shared matcher's {@code Quality} route ({@link #checkMatcherQualities}, every matcher site
+ * and its {@code Except} entries): {@code QUALITY_UNKNOWN} (an id no loaded {@code ItemQuality}
+ * answers to) and {@code QUALITY_ON_BLOCK} (a block socket's {@code Match} or a structure cell's
+ * {@code Block}: a placed block carries no stack quality, so the route never matches there).
  *
  * <p>Pure and side-effect-free (apart from {@link #runAndLog} and {@link #runHooks}); never throws.
  */
@@ -259,6 +264,9 @@ public final class StationValidator {
             out.addAll(validatePatterns(PatternCatalog.getInstance().all().values(),
                     StationValidator::itemKnownLive, StationValidator::stationBlockResolvesLive));
             out.addAll(checkCustodyInputsResolveLive(stations, actionAssets));
+            out.addAll(checkMatcherQualities(stations, actionAssets, extensions,
+                    ProtectListCatalog.getInstance().all().values(), PatternCatalog.getInstance().all().values(),
+                    StationValidator.qualityKnownLive()));
             // AFTER the walk above, which is what filled referencedDropLists.
             out.addAll(checkDropListsResolveLive(referencedDropLists));
             // Third-party checks run LAST, over the same folded content the engine just walked, so
@@ -1757,7 +1765,9 @@ public final class StationValidator {
      * resolution check carried PER SOCKET ({@code SOCKET_MATCH_UNMATCHED}, decision 67b's family
      * check at the socket altitude). A socket {@code Match} is an ANY-OF matcher, so it is flagged
      * only when EVERY authored route resolves nothing ({@code itemKnown} answering the exact-id
-     * route, {@code liveFamilies} the family route, {@code anyItemCarriesTags} the tags route).
+     * route, {@code liveFamilies} the family route, {@code anyItemCarriesTags} the tags route). A
+     * {@code Quality} or {@code Function} route is read off the live stack or item shape, which
+     * nothing here can check, so a Match authoring either one is never flagged.
      */
     @Nonnull
     static List<Finding> checkCustodyInputsResolve(@Nonnull Collection<StationAsset> stations,
@@ -1793,6 +1803,179 @@ public final class StationValidator {
         return out;
     }
 
+    /**
+     * The live {@code ItemQuality} ids, matched without regard to case, for
+     * {@link #checkMatcherQualities}. Fail-open (every id known) when the quality map cannot be read
+     * or holds nothing, so a cold read never reports a real tier as unknown.
+     */
+    @Nonnull
+    private static Predicate<String> qualityKnownLive() {
+        Set<String> known = new HashSet<>();
+        try {
+            for (String id : ItemQuality.getAssetMap().getAssetMap().keySet()) {
+                if (id != null) {
+                    known.add(id.toLowerCase(Locale.ROOT));
+                }
+            }
+        } catch (Throwable t) {
+            return ALWAYS_KNOWN;
+        }
+        return known.isEmpty() ? ALWAYS_KNOWN : id -> known.contains(id.trim().toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * The shared matcher's {@code Quality} route at EVERY site it can be authored: an action's
+     * {@code Select}, its {@code Custody.Input} and each socket's {@code Match}, its
+     * {@code Recipe.Fallback.Input} (inline station actions, standalone action assets and the
+     * actions and custody an extension adds), each protect-list entry, and each structure cell's
+     * {@code Block}, every matcher's {@code Except} entries included. {@code QUALITY_UNKNOWN} warns
+     * on an id {@code qualityKnown} does not answer to (a typo, or a tier no loaded pack ships), and
+     * {@code QUALITY_ON_BLOCK} on a {@code Quality} route a block socket's {@code Match} or a
+     * structure cell authors: a placed block carries no stack quality, so the route never matches
+     * there.
+     */
+    @Nonnull
+    static List<Finding> checkMatcherQualities(@Nonnull Collection<StationAsset> stations,
+            @Nonnull Collection<ActionAsset> actionAssets, @Nonnull Collection<ExtensionAsset> extensions,
+            @Nonnull Collection<ProtectListAsset> protectLists, @Nonnull Collection<StructurePatternAsset> patterns,
+            @Nonnull Predicate<String> qualityKnown) {
+        List<Finding> out = new ArrayList<>();
+        for (StationAsset asset : stations) {
+            if (asset == null) {
+                continue;
+            }
+            String id = asset.getId() != null ? asset.getId() : "?";
+            ActionDef[] actions = asset.getActions();
+            if (actions != null) {
+                for (int i = 0; i < actions.length; i++) {
+                    if (actions[i] != null) {
+                        checkActionQualities(actions[i], "Station '" + id + "' action '"
+                                + ActionResolver.effectiveActionId(actions[i], i) + "'", id, qualityKnown, out);
+                    }
+                }
+            }
+        }
+        for (ActionAsset a : actionAssets) {
+            if (a != null && a.getBody() != null) {
+                String id = a.getId() != null ? a.getId() : "?";
+                checkActionQualities(a.getBody(), "Action '" + id + "'", id, qualityKnown, out);
+            }
+        }
+        for (ExtensionAsset ext : extensions) {
+            if (ext == null) {
+                continue;
+            }
+            String id = ext.getId() != null ? ext.getId() : "?";
+            String label = "Extension '" + id + "'";
+            checkCustodyQualities(ext.getCustody(), label + " Custody", id, qualityKnown, out);
+            ActionDef[] added = ext.getActions();
+            if (added != null) {
+                for (int i = 0; i < added.length; i++) {
+                    if (added[i] != null) {
+                        checkActionQualities(added[i], label + " Actions[" + i + "]", id, qualityKnown, out);
+                    }
+                }
+            }
+        }
+        for (ProtectListAsset list : protectLists) {
+            if (list == null || list.getProtects() == null) {
+                continue;
+            }
+            String id = list.getId() != null ? list.getId() : "?";
+            ActionInput[] entries = list.getProtects();
+            for (int i = 0; i < entries.length; i++) {
+                checkMatcherQuality(entries[i], "ProtectList '" + id + "' Protects[" + i + "]", false, id,
+                        qualityKnown, out);
+            }
+        }
+        for (StructurePatternAsset pattern : patterns) {
+            if (pattern == null || pattern.getCells() == null) {
+                continue;
+            }
+            String id = pattern.getId() != null ? pattern.getId() : "?";
+            StructurePatternAsset.Cell[] cells = pattern.getCells();
+            for (int i = 0; i < cells.length; i++) {
+                if (cells[i] != null) {
+                    checkMatcherQuality(cells[i].getBlock(), "Pattern '" + id + "' Cells[" + i + "].Block", true, id,
+                            qualityKnown, out);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** One action body's matcher sites for {@link #checkMatcherQualities}. */
+    private static void checkActionQualities(@Nonnull ActionDef def, @Nonnull String label, @Nonnull String id,
+            @Nonnull Predicate<String> qualityKnown, @Nonnull List<Finding> out) {
+        checkMatcherQuality(def.getSelect(), label + " Select", false, id, qualityKnown, out);
+        checkCustodyQualities(def.getCustody(), label + " Custody", id, qualityKnown, out);
+        StationAsset.Recipe recipe = def.getRecipe();
+        if (recipe != null && recipe.getFallback() != null) {
+            checkMatcherQuality(recipe.getFallback().getInput(), label + " Recipe.Fallback.Input", false, id,
+                    qualityKnown, out);
+        }
+    }
+
+    /** One custody group's {@code Input} and authored sockets' {@code Match} for {@link #checkMatcherQualities}. */
+    private static void checkCustodyQualities(@Nullable Custody custody, @Nonnull String label, @Nonnull String id,
+            @Nonnull Predicate<String> qualityKnown, @Nonnull List<Finding> out) {
+        if (custody == null) {
+            return;
+        }
+        checkMatcherQuality(custody.getInput(), label + ".Input", false, id, qualityKnown, out);
+        if (!custody.hasAuthoredSockets()) {
+            return;
+        }
+        for (Custody.ResolvedSocket socket : custody.effectiveSockets()) {
+            checkMatcherQuality(socket.match(), label + ".Sockets['" + socket.id() + "'].Match", !socket.itemRoute(),
+                    id, qualityKnown, out);
+        }
+    }
+
+    /**
+     * One matcher and its {@code Except} entries: each {@code Quality} id {@code qualityKnown} does
+     * not answer to warns {@code QUALITY_UNKNOWN}, and on a block matcher ({@code onBlock}) any
+     * {@code Quality} route at all warns {@code QUALITY_ON_BLOCK} once per matcher entry.
+     */
+    private static void checkMatcherQuality(@Nullable ActionInput matcher, @Nonnull String label, boolean onBlock,
+            @Nonnull String id, @Nonnull Predicate<String> qualityKnown, @Nonnull List<Finding> out) {
+        if (matcher == null) {
+            return;
+        }
+        checkQualityIds(matcher, label, onBlock, id, qualityKnown, out);
+        ActionInput[] excepts = matcher.getExcepts();
+        if (excepts != null) {
+            for (int i = 0; i < excepts.length; i++) {
+                if (excepts[i] != null) {
+                    checkQualityIds(excepts[i], excepts.length == 1 ? label + ".Except" : label + ".Except[" + i + "]",
+                            onBlock, id, qualityKnown, out);
+                }
+            }
+        }
+    }
+
+    /** One matcher entry's own {@code Quality} ids (see {@link #checkMatcherQuality}). */
+    private static void checkQualityIds(@Nonnull ActionInput entry, @Nonnull String label, boolean onBlock,
+            @Nonnull String id, @Nonnull Predicate<String> qualityKnown, @Nonnull List<Finding> out) {
+        if (!entry.hasQualityRoute()) {
+            return;
+        }
+        if (onBlock) {
+            out.add(Finding.warning(DOMAIN, "QUALITY_ON_BLOCK",
+                    label + ".Quality never matches: a placed block carries no stack quality, so a block"
+                            + " is never accepted or refused by its quality; match the block by ItemId,"
+                            + " ResourceTypeId or Tags instead", id));
+        }
+        for (String quality : entry.getQuality()) {
+            if (quality != null && !quality.isBlank() && !qualityKnown.test(quality)) {
+                out.add(Finding.warning(DOMAIN, "QUALITY_UNKNOWN",
+                        label + ".Quality '" + quality + "' is not a loaded ItemQuality id, so that id"
+                                + " matches nothing; check the spelling against the Server/Item/Qualities"
+                                + " files", id));
+            }
+        }
+    }
+
     private static void warnUnmatchedCustodyInput(@Nullable Custody custody, @Nonnull Set<String> live,
             @Nonnull Predicate<Map<String, String[]>> anyItemCarriesTags, @Nonnull Predicate<String> itemKnown,
             @Nonnull String label, @Nonnull String id, @Nonnull List<Finding> out) {
@@ -1821,11 +2004,14 @@ public final class StationValidator {
             if (match == null) {
                 continue;
             }
-            // ANY-OF: unmatched only when every authored route resolves nothing.
+            // ANY-OF: unmatched only when every authored route resolves nothing. A Quality or a
+            // Function route is judged on the stack or the item's live shape, which no item id here
+            // can stand for, so either one counts as a route that may resolve.
             boolean anyRouteAuthored = false;
-            boolean anyRouteResolves = false;
+            boolean anyRouteResolves = match.hasQualityRoute()
+                    || (match.getFunction() != null && !match.getFunction().isBlank());
             String matchItemId = match.getItemId();
-            if (matchItemId != null && !matchItemId.isBlank()) {
+            if (!anyRouteResolves && matchItemId != null && !matchItemId.isBlank()) {
                 anyRouteAuthored = true;
                 anyRouteResolves = itemKnown.test(matchItemId);
             }
@@ -2857,7 +3043,7 @@ public final class StationValidator {
                 out.add(Finding.warning(DOMAIN, "EXCEPT_CATCH_ALL",
                         entry + " authors no route at all, so it excludes nothing and does nothing - the"
                                 + " matcher accepts exactly what it would without it; author the ItemId, ResourceTypeId,"
-                                + " Tags or Function the hole should refuse", id));
+                                + " Tags, Function or Quality the hole should refuse", id));
             }
             String function = except.getFunction();
             if (function != null && !function.isBlank() && !isKnownFunction(function)) {
@@ -4028,7 +4214,7 @@ public final class StationValidator {
         if (!protectsSomething) {
             out.add(Finding.warning(DOMAIN, "PROTECT_LIST_EMPTY",
                     label + " protects nothing: author at least one Protects entry naming an ItemId,"
-                            + " ResourceTypeId, Tags or Function (an entry with no route protects nothing)", id));
+                            + " ResourceTypeId, Tags, Function or Quality (an entry with no route protects nothing)", id));
             return;
         }
         for (int i = 0; i < entries.length; i++) {
@@ -4040,7 +4226,7 @@ public final class StationValidator {
             if (entry.isCatchAll()) {
                 out.add(Finding.warning(DOMAIN, "PROTECT_LIST_CATCH_ALL",
                         entryLabel + " authors no route, so it protects nothing - author the ItemId,"
-                                + " ResourceTypeId, Tags or Function it should protect", id));
+                                + " ResourceTypeId, Tags, Function or Quality it should protect", id));
                 continue;
             }
             String function = entry.getFunction();

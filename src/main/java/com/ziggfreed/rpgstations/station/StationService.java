@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.DoubleSupplier;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -83,6 +84,7 @@ import com.ziggfreed.common.codec.Vec3i;
 import com.ziggfreed.common.effect.AppliedEffectTracker;
 import com.ziggfreed.common.effect.NativeEffectUtil;
 import com.ziggfreed.common.entity.HeldItemUtil;
+import com.ziggfreed.common.entity.ItemReadings;
 import com.ziggfreed.common.entity.PuppetNav;
 import com.ziggfreed.common.entity.performer.PerformerReconciler;
 import com.ziggfreed.common.factor.FactorCondition;
@@ -1431,7 +1433,7 @@ public final class StationService {
         List<Custody.ResolvedSocket> sockets = custody != null ? custody.effectiveSockets() : List.of();
         boolean queue = action.getWork() != null && action.getWork().effectiveQueue();
         s.queueSocketId = queue && claim != null
-                ? StationCustody.nextFilledSocket(sockets, id -> claim.totalQuantity(id) > 0) : null;
+                ? StationCustody.nextFilledSocket(sockets, queueWorkable(claim)) : null;
         s.factorItem = pieceInCustody(claim, sockets, s.queueSocketId, null);
         return dispatchProgram(s, store, commandBuffer, asset, action, player, steps, attemptCycleIndex, 0, false);
     }
@@ -1663,7 +1665,18 @@ public final class StationService {
         }
         StationCustodyClaim claim = custodyClaimAt(sessionWorld(s), s.blockX, s.blockY, s.blockZ);
         return claim != null && StationCustody.nextFilledSocket(custody.effectiveSockets(),
-                id -> claim.totalQuantity(id) > 0) != null;
+                queueWorkable(claim)) != null;
+    }
+
+    /**
+     * The ritual queue's filled test over a live claim: a socket that still counts something and
+     * holds no piece the metadata guard refuses ({@link StationMetadataGuard#workable}), so the
+     * queue works past a guarded piece rather than stopping on it.
+     */
+    @Nonnull
+    private static Predicate<String> queueWorkable(@Nonnull StationCustodyClaim claim) {
+        return StationMetadataGuard.workable(id -> claim.totalQuantity(id) > 0,
+                StationMetadataGuard.refusedPieces(claim));
     }
 
     /**
@@ -4378,7 +4391,8 @@ public final class StationService {
      * ONE row, the first route that applies to the OLDEST item still counted in that pile that
      * passes the gear filter, and none when the metadata guard refuses the pile's real unique stack
      * (a count pile with no unique stack passes it, since it carries no metadata at all). Empty
-     * when nothing there falls back.
+     * when nothing there falls back. The filter's {@code Quality} route reads the real stack's own
+     * quality for the piece it is, and its item's for a counted entry ({@link #pileEntryQualityOf}).
      */
     @Nonnull
     private static StationAsset.Conversion[] fallbackRowsFor(@Nonnull StationAsset.Fallback fallback,
@@ -4391,7 +4405,7 @@ public final class StationService {
         }
         return StationFallbackRoutes.offeredRows(fallback, claim.items(socketId),
                 itemId -> StationFallbackRoutes.inFilter(fallback, itemId, liveResourceTypeIdsOf(itemId),
-                        liveRawTagsOf(itemId), liveFunctionOf(itemId)),
+                        liveRawTagsOf(itemId), liveFunctionOf(itemId), pileEntryQualityOf(unique, itemId)),
                 itemId -> RecipeIndex.live().catalog().craftingRecipeOf(itemId));
     }
 
@@ -4404,11 +4418,12 @@ public final class StationService {
      */
     static boolean fallbackAccepts(@Nullable StationAsset.Fallback fallback, @Nullable ItemStack held,
             @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds,
-            @Nullable Map<String, String[]> heldTags, @Nullable String heldFunction) {
+            @Nullable Map<String, String[]> heldTags, @Nullable String heldFunction, @Nullable String heldQuality) {
         if (fallback == null || heldItemId == null || heldItemId.isBlank()) {
             return false;
         }
-        if (!StationFallbackRoutes.inFilter(fallback, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+        if (!StationFallbackRoutes.inFilter(fallback, heldItemId, heldResourceTypeIds, heldTags, heldFunction,
+                heldQuality)) {
             return false;
         }
         if (!StationMetadataGuard.accepts(held)) {
@@ -5106,8 +5121,16 @@ public final class StationService {
         }
         boolean sawInputWithoutRoom = false;
         try {
+            Function<String, String> refusedPieceOf = StationMetadataGuard.refusedPieces(claim);
             for (StationAsset.Conversion c : conversions) {
                 if (!runnableShape(c)) {
+                    continue;
+                }
+                // The metadata guard, whatever route the row came by: a row that would consume a
+                // single-item socket's real stack carrying data nobody declared disposable is not
+                // runnable, so the piece answers as no input, exactly as the fallback routes answer it.
+                if (StationMetadataGuard.consumesRefusedPiece(c, sockets, socketOverride, refusedPieceOf,
+                        StationService::liveResourceTypeIdsOf, StationService::liveRawTagsOf)) {
                     continue;
                 }
                 boolean hasEveryInput = true;
@@ -6443,22 +6466,24 @@ public final class StationService {
         String[] heldResourceTypeIds = liveResourceTypeIdsOf(heldItemId);
         Map<String, String[]> heldTags = liveRawTagsOf(heldItemId);
         String heldFunction = liveFunctionOf(heldItemId);
+        String heldQuality = liveQualityOf(held);
         // The server-wide protect-list is the first word on any placement: a piece any file in
         // scope here protects is refused before any socket is offered it, with its own reason.
         if (ProtectListCatalog.getInstance().protects(asset.getId(), action.getActionId(), heldItemId,
-                heldResourceTypeIds, heldTags, heldFunction)) {
+                heldResourceTypeIds, heldTags, heldFunction, heldQuality)) {
             return new StationCustody.PlacementRoute(null, 0, StationCustody.PlacementDenial.PROTECTED);
         }
         StationCustody.PlacementRoute route = StationCustody.routePlacement(sockets, claim, playerUuid, heldItemId,
                 held.getQuantity(), heldResourceTypeIds, custody.effectiveMaxQuantity(),
                 socket -> socketAcceptsInput(socket, asset, action, held, heldItemId, heldResourceTypeIds,
-                        heldTags, heldFunction),
+                        heldTags, heldFunction, heldQuality),
                 StationService::liveResourceTypeIdsOf);
         // A material no socket took because a socket's Except hole refused it is PROTECTED, not
         // merely the wrong input: the station would have taken it but for the hole, and the player
         // is told so.
         if (!route.placed() && route.denial() == StationCustody.PlacementDenial.WRONG_INPUT
-                && anySocketExceptRefuses(sockets, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+                && anySocketExceptRefuses(sockets, heldItemId, heldResourceTypeIds, heldTags, heldFunction,
+                        heldQuality)) {
             return new StationCustody.PlacementRoute(null, 0, StationCustody.PlacementDenial.PROTECTED);
         }
         return route;
@@ -6467,10 +6492,10 @@ public final class StationService {
     /** Whether any Item socket's matcher carves a hole the material falls into ({@link StationCustody#exceptRefuses}). */
     private static boolean anySocketExceptRefuses(@Nonnull List<Custody.ResolvedSocket> sockets,
             @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds,
-            @Nullable Map<String, String[]> heldTags, @Nullable String heldFunction) {
+            @Nullable Map<String, String[]> heldTags, @Nullable String heldFunction, @Nullable String heldQuality) {
         for (Custody.ResolvedSocket socket : sockets) {
             if (socket.itemRoute() && StationCustody.exceptRefuses(socket.match(), heldItemId, heldResourceTypeIds,
-                    heldTags, heldFunction)) {
+                    heldTags, heldFunction, heldQuality)) {
                 return true;
             }
         }
@@ -6487,18 +6512,22 @@ public final class StationService {
      * turns it into everything but the hole). A COUNT pile (capacity above one) additionally
      * refuses a stack carrying per-instance data ({@link StationCustody#carriesInstanceData}: a
      * tool that tracks wear, a stack with metadata), since a pile keeps ids and counts only and
-     * would hand it back as a bare fresh stack.
+     * would hand it back as a bare fresh stack; a SINGLE-item socket keeps the real stack, so it
+     * asks the metadata guard instead ({@link StationMetadataGuard#accepts}) wherever every action
+     * at the station that reads it would consume the piece ({@link #consumedByEveryReader}).
      */
     private static boolean socketAcceptsInput(@Nonnull Custody.ResolvedSocket socket, @Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action, @Nullable ItemStack held, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
-            @Nullable String heldFunction) {
+            @Nullable String heldFunction, @Nullable String heldQuality) {
         StationAsset.Recipe recipe = action.getRecipe();
         return socketAccepts(socket, () -> StationCustody.carriesInstanceData(held),
+                () -> StationMetadataGuard.accepts(held),
+                () -> consumedByEveryReader(asset, socket.id()),
                 () -> allConversionsFor(asset, action),
                 () -> recipe != null && fallbackAccepts(recipe.getFallback(), held, heldItemId,
-                        heldResourceTypeIds, heldTags, heldFunction),
-                heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+                        heldResourceTypeIds, heldTags, heldFunction, heldQuality),
+                heldItemId, heldResourceTypeIds, heldTags, heldFunction, heldQuality);
     }
 
     /**
@@ -6509,22 +6538,39 @@ public final class StationService {
      * authors ROUTES takes what {@link StationCustody#accepts} says; a route-less matcher's holes
      * are carved out of the DERIVED acceptance (the rows, then the fallback routes), so an Input
      * that authors only {@code Except} narrows what the station derives; a bare catch-all takes
-     * everything; and a count pile refuses a stack carrying per-instance data first.
+     * everything; and a count pile refuses a stack carrying per-instance data first. A SINGLE-item
+     * socket first asks {@code metadataGuardAccepts} (the held stack under
+     * {@link StationMetadataGuard#accepts}) whenever {@code consumedByEveryReader} says every action
+     * at the station that reads the socket would consume the piece: a piece the guard refuses is
+     * then refused at placement, whatever the matcher (explicit routes, a bare catch-all, or the
+     * derived rows), since no path could ever spend it
+     * ({@link StationMetadataGuard#consumesRefusedPiece}). Where some action reads the socket and
+     * keeps the piece (a {@code Stamp}), the socket takes it and the consuming paths refuse it on
+     * their own. A count pile already refuses any stack carrying metadata, so the guard never
+     * reaches one.
      */
     static boolean socketAccepts(@Nonnull Custody.ResolvedSocket socket,
             @Nonnull BooleanSupplier carriesInstanceData,
+            @Nonnull BooleanSupplier metadataGuardAccepts,
+            @Nonnull BooleanSupplier consumedByEveryReader,
             @Nonnull Supplier<StationAsset.Conversion[]> derivedRows,
             @Nonnull BooleanSupplier fallbackTakes, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
-            @Nullable String heldFunction) {
+            @Nullable String heldFunction, @Nullable String heldQuality) {
         if (socket.maxQuantity() > 1 && carriesInstanceData.getAsBoolean()) {
+            return false;
+        }
+        if (socket.maxQuantity() <= 1 && !metadataGuardAccepts.getAsBoolean()
+                && consumedByEveryReader.getAsBoolean()) {
             return false;
         }
         var matcher = socket.match();
         if (matcher != null && !matcher.isCatchAll()) {
-            return StationCustody.accepts(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+            return StationCustody.accepts(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction,
+                    heldQuality);
         }
-        if (StationCustody.exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+        if (StationCustody.exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction,
+                heldQuality)) {
             return false;
         }
         if (matcher != null && !matcher.hasExcept()) {
@@ -6539,6 +6585,61 @@ public final class StationService {
         // A piece no row covers still places when a fallback route would take it - the routes are
         // built per piece at the beat, so acceptance asks the same question they will.
         return fallbackTakes.getAsBoolean();
+    }
+
+    /**
+     * {@link #socketAccepts(Custody.ResolvedSocket, BooleanSupplier, BooleanSupplier, BooleanSupplier,
+     * Supplier, BooleanSupplier, String, String[], Map, String, String)} at a station where every
+     * action that reads the socket consumes the piece, the common shape.
+     */
+    static boolean socketAccepts(@Nonnull Custody.ResolvedSocket socket,
+            @Nonnull BooleanSupplier carriesInstanceData,
+            @Nonnull BooleanSupplier metadataGuardAccepts,
+            @Nonnull Supplier<StationAsset.Conversion[]> derivedRows,
+            @Nonnull BooleanSupplier fallbackTakes, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction, @Nullable String heldQuality) {
+        return socketAccepts(socket, carriesInstanceData, metadataGuardAccepts, () -> true, derivedRows,
+                fallbackTakes, heldItemId, heldResourceTypeIds, heldTags, heldFunction, heldQuality);
+    }
+
+    /**
+     * {@link #socketAccepts(Custody.ResolvedSocket, BooleanSupplier, BooleanSupplier, BooleanSupplier,
+     * Supplier, BooleanSupplier, String, String[], Map, String, String)} for a bare held stack: the
+     * metadata guard accepts it and it carries no quality reading.
+     */
+    static boolean socketAccepts(@Nonnull Custody.ResolvedSocket socket,
+            @Nonnull BooleanSupplier carriesInstanceData,
+            @Nonnull Supplier<StationAsset.Conversion[]> derivedRows,
+            @Nonnull BooleanSupplier fallbackTakes, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        return socketAccepts(socket, carriesInstanceData, () -> true, derivedRows, fallbackTakes, heldItemId,
+                heldResourceTypeIds, heldTags, heldFunction, null);
+    }
+
+    /**
+     * Does every action at {@code asset} that reads Item socket {@code socketId} consume its piece
+     * ({@link StationMetadataGuard#consumedByEveryReader} over one
+     * {@link StationMetadataGuard#socketUse} per action, each read off the RESOLVED action: its
+     * custody's sockets, its queue knob, its rows, its fallback and the program it runs)? Asked
+     * only when the metadata guard has refused the held piece at a single-item socket.
+     */
+    private static boolean consumedByEveryReader(@Nonnull StationAsset asset, @Nonnull String socketId) {
+        List<StationMetadataGuard.SocketUse> uses = new ArrayList<>();
+        for (String actionId : ActionResolver.actionIds(asset)) {
+            ActionResolver.ResolvedAction reader = ActionResolver.resolve(asset, actionId);
+            Custody custody = reader.getCustody();
+            if (custody == null) {
+                continue;
+            }
+            StationAsset.Recipe recipe = reader.getRecipe();
+            StationAsset.Work work = reader.getWork();
+            uses.add(StationMetadataGuard.socketUse(socketId, custody.effectiveSockets(),
+                    work != null && work.effectiveQueue(), allConversionsFor(asset, reader),
+                    recipe != null && recipe.getFallback() != null, effectiveProgramSteps(asset, reader)));
+        }
+        return StationMetadataGuard.consumedByEveryReader(uses);
     }
 
     /**
@@ -8176,7 +8277,8 @@ public final class StationService {
             StationUnattended.Settle settle = StationUnattended.settle(claim,
                     custody.effectiveSockets(), conversions, recipe != null ? recipe.getYield() : null,
                     custody.effectiveMaxQuantity(), unattended, workCycleMs, nowGame,
-                    StationService::liveResourceTypeIdsOf, StationService::liveRawTagsOf);
+                    StationService::liveResourceTypeIdsOf, StationService::liveRawTagsOf,
+                    StationMetadataGuard.refusedPieces(claim));
             if (settle.transformed()) {
                 // The settled row's own doneness fold (conversion over recipe) opens/re-stamps
                 // the ready window - one batch per settled cycle, exactly what an attended
@@ -8622,8 +8724,9 @@ public final class StationService {
     /**
      * The action-selection choke point: walks {@code asset}'s ORDERED {@code Actions} list and
      * returns the first action whose {@code Select} is absent or matches the player's CURRENTLY HELD
-     * active-hotbar stack (item id, EVERY resolved resource-type family, native raw tags, and the
-     * functional route - {@link #liveFunctionOf}) AND whose own {@code Requires} gate passes -
+     * active-hotbar stack (item id, EVERY resolved resource-type family, native raw tags, the
+     * functional route - {@link #liveFunctionOf} - and the stack's quality - {@link #liveQualityOf})
+     * AND whose own {@code Requires} gate passes -
      * {@code Requires} is a "when it applies" concern beside {@code Select}, so a matching action
      * whose gate is shut yields to the next matching one (the cooking pit's Grill yields to Stew
      * while the pot covers the flame). When EVERY matching action's gate is shut, the FIRST match
@@ -8638,7 +8741,8 @@ public final class StationService {
         ItemStack held = PlayerAccess.activeHotbarItem(player);
         String heldItemId = held != null ? held.getItemId() : null;
         List<String> candidates = ActionResolver.selectActionsByFamily(asset, heldItemId,
-                liveResourceTypeIdsOf(heldItemId), liveRawTagsOf(heldItemId), liveFunctionOf(heldItemId));
+                liveResourceTypeIdsOf(heldItemId), liveRawTagsOf(heldItemId), liveFunctionOf(heldItemId),
+                liveQualityOf(held));
         for (String actionId : candidates) {
             ActionResolver.ResolvedAction candidate = ActionResolver.resolve(asset, actionId);
             if (checkRequires(candidate.getRequires(), playerRef, asset, candidate, socketsFilled,
@@ -8739,6 +8843,47 @@ public final class StationService {
             return "Armor";
         }
         return item.getTool() != null ? "Tool" : null;
+    }
+
+    /**
+     * The held or placed STACK's quality, the native {@code ItemQuality} id its own quality index
+     * resolves to ({@link ItemStack#getQualityIndex}: the index the stack was made or re-qualified
+     * with, its item's own when it carries none), which an {@code ActionInput.Quality} route reads,
+     * through the library's one item reader ({@link ItemReadings#qualityId(ItemStack)}). Null for no
+     * stack, or an index that resolves to no quality.
+     */
+    @Nullable
+    static String liveQualityOf(@Nullable ItemStack stack) {
+        return ItemReadings.qualityId(stack);
+    }
+
+    /**
+     * An item's own quality id, for a material with no stack behind it (a counted pile entry,
+     * which a pile keeps as an id and a count), read by {@link ItemReadings#qualityId(Item)}. Null
+     * when unresolvable.
+     */
+    @Nullable
+    private static String liveQualityOf(@Nullable String itemId) {
+        if (itemId == null || itemId.isBlank()) {
+            return null;
+        }
+        try {
+            return ItemReadings.qualityId(Item.getAssetMap().getAsset(itemId));
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * The quality a pile entry carries: the socket's real stack's own when the entry IS that piece
+     * ({@code unique} of the same item), else the entry item's.
+     */
+    @Nullable
+    private static String pileEntryQualityOf(@Nullable ItemStack unique, @Nullable String itemId) {
+        if (unique != null && itemId != null && itemId.equalsIgnoreCase(unique.getItemId())) {
+            return liveQualityOf(unique);
+        }
+        return liveQualityOf(itemId);
     }
 
     // ==================== Requires gate (design section 4.4.2) ====================

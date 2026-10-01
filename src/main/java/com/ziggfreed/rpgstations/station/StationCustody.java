@@ -374,23 +374,32 @@ final class StationCustody {
      * lets a station refuse a short list of ids without listing everything it takes.
      *
      * <p>{@code heldResourceTypeIds} is the material's WHOLE resolved family set; a caller holding
-     * one family passes a one-element array.
+     * one family passes a one-element array. {@code heldQuality} is the native {@code ItemQuality}
+     * id the material carries (the stack's own, else its item's; null for a block or an unreadable
+     * one, which no {@code Quality} route matches).
      */
     static boolean accepts(@Nullable ActionInput matcher, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
-            @Nullable String heldFunction) {
+            @Nullable String heldFunction, @Nullable String heldQuality) {
         if (matcher == null) {
             return true;
         }
         if (!matcher.isCatchAll()
-                && !routesMatch(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+                && !routesMatch(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction, heldQuality)) {
             return false;
         }
         // The Except holes: a material the routes (or the catch-all) accept is refused when any
         // nested exclusion's ROUTES match it too. An absent Except excludes nothing, and so does a
         // route-less entry: it matches no route, so it carves no hole (the validator warns
         // EXCEPT_CATCH_ALL, since such an entry does nothing).
-        return !exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+        return !exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction, heldQuality);
+    }
+
+    /** {@link #accepts(ActionInput, String, String[], Map, String, String)} for a material with no quality reading. */
+    static boolean accepts(@Nullable ActionInput matcher, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        return accepts(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction, null);
     }
 
     /**
@@ -402,17 +411,25 @@ final class StationCustody {
      */
     static boolean exceptRefuses(@Nullable ActionInput matcher, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
-            @Nullable String heldFunction) {
+            @Nullable String heldFunction, @Nullable String heldQuality) {
         ActionInput[] excepts = matcher != null ? matcher.getExcepts() : null;
         if (excepts == null) {
             return false;
         }
         for (ActionInput except : excepts) {
-            if (except != null && routesMatch(except, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+            if (except != null
+                    && routesMatch(except, heldItemId, heldResourceTypeIds, heldTags, heldFunction, heldQuality)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** {@link #exceptRefuses(ActionInput, String, String[], Map, String, String)} for a material with no quality reading. */
+    static boolean exceptRefuses(@Nullable ActionInput matcher, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        return exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction, null);
     }
 
     /**
@@ -426,18 +443,26 @@ final class StationCustody {
      */
     static boolean isProtected(@Nonnull Iterable<ProtectListAsset> lists, @Nullable String stationId,
             @Nullable String actionId, @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds,
-            @Nullable Map<String, String[]> heldTags, @Nullable String heldFunction) {
+            @Nullable Map<String, String[]> heldTags, @Nullable String heldFunction, @Nullable String heldQuality) {
         for (ProtectListAsset list : lists) {
             if (list == null || list.getProtects() == null || !list.appliesTo(stationId, actionId)) {
                 continue;
             }
             for (ActionInput entry : list.getProtects()) {
-                if (entry != null && matchesInput(entry, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+                if (entry != null && matchesInput(entry, heldItemId, heldResourceTypeIds, heldTags, heldFunction,
+                        heldQuality)) {
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    /** {@link #isProtected(Iterable, String, String, String, String[], Map, String, String)} with no quality reading. */
+    static boolean isProtected(@Nonnull Iterable<ProtectListAsset> lists, @Nullable String stationId,
+            @Nullable String actionId, @Nullable String heldItemId, @Nullable String[] heldResourceTypeIds,
+            @Nullable Map<String, String[]> heldTags, @Nullable String heldFunction) {
+        return isProtected(lists, stationId, actionId, heldItemId, heldResourceTypeIds, heldTags, heldFunction, null);
     }
 
     /**
@@ -478,7 +503,7 @@ final class StationCustody {
 
     /**
      * The ROUTES half of {@link #accepts}: a matcher that authors at least one route, its
-     * {@code Except} hole applied ({@code ActionInput}'s ItemId/ResourceTypeId/Tags/Function
+     * {@code Except} hole applied ({@code ActionInput}'s ItemId/ResourceTypeId/Tags/Function/Quality
      * routes, match = ANY route satisfied, the {@code Tool}/{@code ActionInput} convention). A
      * catch-all answers false here, because no route matched; a SITE never asks this directly, it
      * asks {@link #accepts}, which is where a catch-all means "everything". Kept as its own seam
@@ -489,23 +514,51 @@ final class StationCustody {
      */
     static boolean matchesInput(@Nonnull ActionInput matcher, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
-            @Nullable String heldFunction) {
-        if (!routesMatch(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+            @Nullable String heldFunction, @Nullable String heldQuality) {
+        if (!routesMatch(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction, heldQuality)) {
             return false;
         }
-        return !exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction);
+        return !exceptRefuses(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction, heldQuality);
     }
 
-    /** One matcher's four routes alone (match = ANY), the {@code Except} hole not yet applied. */
-    private static boolean routesMatch(@Nonnull ActionInput matcher, @Nullable String heldItemId,
+    /** {@link #matchesInput(ActionInput, String, String[], Map, String, String)} for a material with no quality reading. */
+    static boolean matchesInput(@Nonnull ActionInput matcher, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
             @Nullable String heldFunction) {
+        return matchesInput(matcher, heldItemId, heldResourceTypeIds, heldTags, heldFunction, null);
+    }
+
+    /** One matcher's five routes alone (match = ANY), the {@code Except} hole not yet applied. */
+    private static boolean routesMatch(@Nonnull ActionInput matcher, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction, @Nullable String heldQuality) {
         if (ItemMatch.any(matcher.getItemId(), matcher.getTags(), matcher.getResourceTypeId(),
                 heldItemId, heldTags, heldResourceTypeIds)) {
             return true;
         }
         String wantFunction = matcher.getFunction();
-        return wantFunction != null && !wantFunction.isBlank() && wantFunction.equalsIgnoreCase(heldFunction);
+        if (wantFunction != null && !wantFunction.isBlank() && wantFunction.equalsIgnoreCase(heldFunction)) {
+            return true;
+        }
+        return qualityMatches(matcher.getQuality(), heldQuality);
+    }
+
+    /**
+     * PURE, the {@code Quality} route: is {@code heldQuality} one of the authored quality ids,
+     * without regard to case? No authored id, or no quality to read (a block, an unreadable
+     * stack), matches nothing.
+     */
+    static boolean qualityMatches(@Nullable String[] wantQuality, @Nullable String heldQuality) {
+        if (wantQuality == null || heldQuality == null || heldQuality.isBlank()) {
+            return false;
+        }
+        String held = heldQuality.trim();
+        for (String want : wantQuality) {
+            if (want != null && !want.isBlank() && want.trim().equalsIgnoreCase(held)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -750,8 +803,8 @@ final class StationCustody {
      * identity resolvers are injected ({@code resourceTypesOf}/{@code tagsOf} answer for the base
      * id) so this stays testable without a live asset map; the match itself is the ONE
      * {@link #accepts} rule every other {@code ActionInput} site uses, so a catch-all
-     * {@code Match} with an {@code Except} takes any block but the hole (the Function route reads
-     * null - a block has no held-item function).
+     * {@code Match} with an {@code Except} takes any block but the hole (the Function and Quality
+     * routes read null - a block has no held-item function and carries no stack quality).
      */
     static boolean blockSocketMatches(@Nullable String baseItemId, @Nullable ActionInput match,
             @Nonnull Function<String, String[]> resourceTypesOf,

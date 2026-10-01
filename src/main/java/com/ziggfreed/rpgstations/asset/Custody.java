@@ -815,7 +815,7 @@ public final class Custody {
             public static final BuilderCodec<ItemRoute> CODEC = BuilderCodec.builder(ItemRoute.class, ItemRoute::new)
                     .appendInherited(new KeyedCodec<>("Match", ActionInput.CODEC, false),
                             (o, v) -> o.match = v, o -> o.match, (o, p) -> o.match = p.match)
-                    .documentation("What this socket accepts (the ItemId/ResourceTypeId/Tags/Function routes). Absent derives acceptance from the action's Recipe.Conversions inputs, exactly like the custody-level Input.").add()
+                    .documentation("What this socket accepts (the ItemId/ResourceTypeId/Tags/Function/Quality routes). Absent derives acceptance from the action's Recipe.Conversions inputs, exactly like the custody-level Input.").add()
                     .appendInherited(new KeyedCodec<>("PlacePerPress", Codec.INTEGER, false),
                             (o, v) -> o.placePerPress = v, o -> o.placePerPress,
                             (o, p) -> o.placePerPress = p.placePerPress)
@@ -860,7 +860,7 @@ public final class Custody {
                     .documentation("The whole-block offset from the station block, in its own facing frame (+Z = its front, +X = its right, Y vertical); rotates with the placed block. Absent means the station block's own cell.").add()
                     .appendInherited(new KeyedCodec<>("Match", ActionInput.CODEC, false),
                             (o, v) -> o.match = v, o -> o.match, (o, p) -> o.match = p.match)
-                    .documentation("What block satisfies this socket, matched against the block's base ITEM identity (id, resource families, tags). Absent accepts any non-air block.").add()
+                    .documentation("What block satisfies this socket, matched against the block's base ITEM identity (id, resource families, tags). A placed block carries no stack quality, so a Quality route never matches here. Absent accepts any non-air block.").add()
                     .build();
 
             /** Java-side factory; sets the same fields the codec fills. */

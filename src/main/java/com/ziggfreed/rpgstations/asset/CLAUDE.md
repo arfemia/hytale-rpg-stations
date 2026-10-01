@@ -15,15 +15,16 @@ Router for the asset codecs. The codec `.documentation` strings, the generated `
 ## Input matching and protection
 
 - `ActionInput` is the ONE input matcher (an action's `Select`, `Custody.Input`, a socket's `Match`, a fallback's `Input`); its `Except` is the same matcher one level down, authored as one object or an array (`ObjectOrArrayCodec`). Every site asks `station.StationCustody#accepts`; a route-less `Except` entry is inert and the validator warns `EXCEPT_CATCH_ALL`.
+- A new route is threaded through every site's material reading (`heldQuality` beside `heldFunction`) and the extension overlay (`ExtensionCatalog#overlayInput`) in the same change. `Quality` reads the STACK's quality id (`StationService#liveQualityOf`), a counted pile entry its item's, a block none (`QUALITY_ON_BLOCK`).
 - An extension's `Custody.Input` overlay ADDS its `Except` entries beside the base's, never in their place.
 - `ProtectListAsset` (`Server/RpgStations/ProtectLists/<Name>.json`, `{Protects, Stations?, Actions?}`) is the server-wide protect-list: every loaded file ADDS to one list, and an entry with no route protects nothing, never everything. Refused placement answers `Refused:Protected`.
-- `Custody.HeldOnly` places only the held stack; `Custody.Preview` toasts what a placed piece will give back; a count pile (capacity above one) refuses a stack carrying per-instance data.
+- `Custody.HeldOnly` places only the held stack; `Custody.Preview` toasts what a placed piece will give back; a count pile (capacity above one) refuses a stack carrying per-instance data (wear, metadata, a quality other than its item's).
 
 ## Recipes, steps and pacing
 
 - `Recipe.FromCrafting` derives from zc's recipe index and carries each recipe's FULL outputs at native quantities; `Benches` scopes by bench id beside `Categories`.
 - `Recipe.Yield`: `Base` replaces the PRIMARY (first) output only; `Scale`, `Min` and `Max` apply to every output.
-- `Recipe.Fallback` (`CraftingShare`, `EssenceOnly`) routes a piece no row covers; a piece gets ONE route (`station.StationFallbackRoutes#routeFor`), both are gated by `StationMetadataGuard`, and both need custody (`FALLBACK_WITHOUT_CUSTODY`).
+- `Recipe.Fallback` (`CraftingShare`, `EssenceOnly`) routes a piece no row covers; a piece gets ONE route (`station.StationFallbackRoutes#routeFor`), and both need custody (`FALLBACK_WITHOUT_CUSTODY`). `StationMetadataGuard` gates every path that consumes a single-item socket's real stack (authored and derived rows, both routes, a custody `Consume` phase, the ritual queue) and refuses the piece at placement where every action reading the socket consumes it.
 - `Work.Queue` runs the `Steps` program once per filled custody socket in authored order (meant for single-item sockets, `QUEUE_SOCKET_NOT_SINGLE`).
 - A step's `Convert` phase runs the action's `Recipe` at that beat; `Paced` scales the beat by `ActionDef.Pace`; `RollBonus` rolls `Bonus` at the beat instead of at completion; `State` and `Display` are per-beat overlays on the block look and the piece's prop.
 - An extension's `Pace` is `{Ladder}` only (`Pace.LADDER_ONLY_CODEC`) and MULTIPLIES in; only the action's `Clamp` bounds the product (`PACE_UNCLAMPED`).

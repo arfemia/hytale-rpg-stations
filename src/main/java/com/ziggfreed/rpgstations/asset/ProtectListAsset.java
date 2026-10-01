@@ -63,7 +63,7 @@ public final class ProtectListAsset implements JsonAssetWithMap<String, DefaultA
             .appendInherited(new KeyedCodec<>("Protects",
                             new ObjectOrArrayCodec<>(ActionInput.CODEC, ActionInput[]::new), false),
                     (a, v) -> a.protects = v, a -> a.protects, (a, p) -> a.protects = p.protects)
-            .documentation("What this file protects: one input matcher or an array of them (ItemId | ResourceTypeId | Tags | Function, match = ANY route, minus the entry's own Except holes). A protected piece is refused by every consuming station this file applies to, with its own reason (Refused:Protected). An entry authoring no route protects nothing.").add()
+            .documentation("What this file protects: one input matcher or an array of them (ItemId | ResourceTypeId | Tags | Function | Quality, match = ANY route, minus the entry's own Except holes). A protected piece is refused by every consuming station this file applies to, with its own reason (Refused:Protected). An entry authoring no route protects nothing.").add()
             .appendInherited(new KeyedCodec<>("Stations", new ArrayCodec<>(Codec.STRING, String[]::new), false),
                     (a, v) -> a.stations = v, a -> a.stations, (a, p) -> a.stations = p.stations)
             .documentation("Station ids this file applies to, matched without regard to case; absent or empty = every consuming station. Authored beside Actions, both must match.").add()

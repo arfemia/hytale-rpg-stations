@@ -691,8 +691,10 @@ final class StationStepHandlers {
      * merging piles). Availability is PEEKED across every entry first (a short claim fails before
      * any drain runs), so a multi-item custody consume is all-or-nothing too; a short drain fails
      * {@code OUT_OF_INPUTS}/{@code INPUTS_EXHAUSTED}, the same reasons an empty custody station
-     * denies at engage. The batch's REAL stacks, each with the socket it left, go into the hook half
-     * of the ledger against the {@code At} anchor's block, reported at the commit.
+     * denies at engage. An entry that would take a single-item socket's real stack the metadata
+     * guard refuses ({@link StationMetadataGuard#consumesRefusedPiece}) fails the phase the same way
+     * before anything drains. The batch's REAL stacks, each with the socket it left, go into the hook
+     * half of the ledger against the {@code At} anchor's block, reported at the commit.
      */
     @Nullable
     private static StationStepResult consumeFromCustody(@Nonnull StationStepContext ctx, @Nonnull StationStep step,
@@ -702,6 +704,17 @@ final class StationStepHandlers {
         StationCustodyClaim claim = StationService.getInstance().custodyClaimForAnchor(ctx.session, step.getAt());
         String groupSocket = consume.getSocket();
         List<Custody.ResolvedSocket> sockets = actionSockets(ctx);
+        // The metadata guard: an entry that would take a single-item socket's real stack carrying
+        // data nobody declared disposable consumes nothing, and the phase answers as a row the
+        // custody scan finds no input for (a Convert beat's own answer).
+        if (claim != null && StationMetadataGuard.consumesRefusedPiece(items, groupSocket, sockets,
+                StationMetadataGuard.refusedPieces(claim), StationService::liveResourceTypeIdsOf,
+                StationService::liveRawTagsOf)) {
+            boolean repeating = ctx.action.getWork() != null && ctx.action.getWork().effectiveLooping();
+            return StationStepResult.fail(StationService.shortInputStopReason(repeating),
+                    "Consume step '" + step.getId() + "' would take a placed piece carrying data no mod"
+                            + " declared disposable");
+        }
         for (Ingredient item : items) {
             String socketId = StationCustody.socketIdFor(item.getSocket(), groupSocket, sockets);
             int have = StationCustody.availableInPile(claim != null ? claim.items(socketId) : null,

@@ -98,7 +98,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
-| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+| `Quality` | array of `string` | `null` | Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function \| Quality routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-actionasset-tool"></a>
 ### ActionAsset.Tool
@@ -214,7 +215,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Input` | [ActionInput](#field-actionasset-recipe-fallback-input) | `null` | The gear filter both fallback routes are scoped to (ItemId \| ResourceTypeId \| Tags \| Function, match = ANY, minus its Except hole). Absent = any placed piece the metadata guard accepts. |
+| `Input` | [ActionInput](#field-actionasset-recipe-fallback-input) | `null` | The gear filter both fallback routes are scoped to (ItemId \| ResourceTypeId \| Tags \| Function \| Quality, match = ANY, minus its Except hole). Absent = any placed piece the metadata guard accepts. |
 | `CraftingShare` | [CraftingShare](#field-actionasset-recipe-fallback-craftingshare) | `null` | Give back a share of the piece's OWN crafting recipe inputs (tier 2, tried before EssenceOnly). Absent = this route is off. |
 | `EssenceOnly` | [EssenceOnly](#field-actionasset-recipe-fallback-essenceonly) | `null` | Consume the piece with NO conversion output (tier 3, the last resort); the action's Bonus rolls are its whole payout. Authoring the group turns it on. Absent = this route is off. |
 
@@ -340,7 +341,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
-| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+| `Quality` | array of `string` | `null` | Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function \| Quality routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-actionasset-recipe-fallback-craftingshare"></a>
 ##### ActionAsset.Recipe.Fallback.CraftingShare
@@ -428,7 +430,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
-| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+| `Quality` | array of `string` | `null` | Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function \| Quality routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-actiondef-tool"></a>
 ### ActionDef.Tool
@@ -544,7 +547,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Input` | [ActionInput](#field-actiondef-recipe-fallback-input) | `null` | The gear filter both fallback routes are scoped to (ItemId \| ResourceTypeId \| Tags \| Function, match = ANY, minus its Except hole). Absent = any placed piece the metadata guard accepts. |
+| `Input` | [ActionInput](#field-actiondef-recipe-fallback-input) | `null` | The gear filter both fallback routes are scoped to (ItemId \| ResourceTypeId \| Tags \| Function \| Quality, match = ANY, minus its Except hole). Absent = any placed piece the metadata guard accepts. |
 | `CraftingShare` | [CraftingShare](#field-actiondef-recipe-fallback-craftingshare) | `null` | Give back a share of the piece's OWN crafting recipe inputs (tier 2, tried before EssenceOnly). Absent = this route is off. |
 | `EssenceOnly` | [EssenceOnly](#field-actiondef-recipe-fallback-essenceonly) | `null` | Consume the piece with NO conversion output (tier 3, the last resort); the action's Bonus rolls are its whole payout. Authoring the group turns it on. Absent = this route is off. |
 
@@ -670,7 +673,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
-| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+| `Quality` | array of `string` | `null` | Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function \| Quality routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-actiondef-recipe-fallback-craftingshare"></a>
 ##### ActionDef.Recipe.Fallback.CraftingShare
@@ -1016,7 +1020,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
-| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+| `Quality` | array of `string` | `null` | Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function \| Quality routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-custody-states"></a>
 ### Custody.States
@@ -1085,7 +1090,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Match` | [ActionInput](#field-custody-sockets-item-item-match) | `null` | What this socket accepts (the ItemId/ResourceTypeId/Tags/Function routes). Absent derives acceptance from the action's Recipe.Conversions inputs, exactly like the custody-level Input. |
+| `Match` | [ActionInput](#field-custody-sockets-item-item-match) | `null` | What this socket accepts (the ItemId/ResourceTypeId/Tags/Function/Quality routes). Absent derives acceptance from the action's Recipe.Conversions inputs, exactly like the custody-level Input. |
 | `PlacePerPress` | `integer` | `null` | How many items one press moves in; absent = the whole held stack (the classic press). Author 1 for one-at-a-time loading. |
 
 <a id="field-custody-sockets-item-block"></a>
@@ -1094,7 +1099,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `At` | [Vec3i](#field-custody-sockets-item-block-at) | `null` | The whole-block offset from the station block, in its own facing frame (+Z = its front, +X = its right, Y vertical); rotates with the placed block. Absent means the station block's own cell. |
-| `Match` | [ActionInput](#field-custody-sockets-item-block-match) | `null` | What block satisfies this socket, matched against the block's base ITEM identity (id, resource families, tags). Absent accepts any non-air block. |
+| `Match` | [ActionInput](#field-custody-sockets-item-block-match) | `null` | What block satisfies this socket, matched against the block's base ITEM identity (id, resource families, tags). A placed block carries no stack quality, so a Quality route never matches here. Absent accepts any non-air block. |
 
 <a id="field-custody-sockets-item-display"></a>
 #### Custody.Sockets[].Display
@@ -1124,7 +1129,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
-| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+| `Quality` | array of `string` | `null` | Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function \| Quality routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-custody-sockets-item-block-at"></a>
 ##### Custody.Sockets[].Block.At
@@ -1144,7 +1150,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
-| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+| `Quality` | array of `string` | `null` | Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function \| Quality routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="field-custody-sockets-item-display-offset"></a>
 ##### Custody.Sockets[].Display.Offset
@@ -1478,7 +1485,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Offset` | [Vec3i](#field-structurepatternasset-cells-item-offset) | `null` | This cell's position in whole blocks, relative to the authored frame (the anchor cell's offset is subtracted out, so any consistent frame works); unauthored axes read 0. |
-| `Block` | [ActionInput](#field-structurepatternasset-cells-item-block) | `null` | What block must stand in this cell: an exact ItemId, a ResourceTypeId family (any rock), or Tags. A state variant (lit/unlit) matches through its base block. Exactly one of Block \| Empty. |
+| `Block` | [ActionInput](#field-structurepatternasset-cells-item-block) | `null` | What block must stand in this cell: an exact ItemId, a ResourceTypeId family (any rock), or Tags (a placed block carries no stack quality, so Quality never matches a cell). A state variant (lit/unlit) matches through its base block. Exactly one of Block \| Empty. |
 | `Empty` | `boolean` | `null` | True = this cell must hold AIR for the shape to count as built. Exactly one of Block \| Empty. |
 | `IsAnchor` | `boolean` | `null` | True on exactly ONE cell: the block that becomes the station on completion. The anchor cell must author an exact Block.ItemId (detection seeds from it). Default false; with no anchor authored, the cell at offset (0,0,0) stands in. |
 
@@ -1500,7 +1507,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
-| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+| `Quality` | array of `string` | `null` | Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function \| Quality routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 
 <a id="type-flairasset"></a>
 ## FlairAsset
@@ -1691,7 +1699,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Tags` | map of array of `string` | `null` | Tags are a general way to describe an asset that can be interpreted by other systems in a way they see fit.<br><br>For example you could tag something with a **Material** tag with the values **Solid** and **Stone**, And another single tag **Ore**.<br><br>Tags will be expanded into a single list of tags automatically. Using the above example with **Material** and **Ore** the end result would be the following list of tags: **Ore**, **Material**, **Solid**, **Stone**, **Material=Solid** and **Material=Stone**. |
 | `Name` | `string` | `null` | Ignored - the protect-list id comes from the asset filename, not this key. Kept as a schema field for editor display only. |
-| `Protects` | array of [ActionInput](#field-protectlistasset-protects-item) | `null` | What this file protects: one input matcher or an array of them (ItemId \| ResourceTypeId \| Tags \| Function, match = ANY route, minus the entry's own Except holes). A protected piece is refused by every consuming station this file applies to, with its own reason (Refused:Protected). An entry authoring no route protects nothing. |
+| `Protects` | array of [ActionInput](#field-protectlistasset-protects-item) | `null` | What this file protects: one input matcher or an array of them (ItemId \| ResourceTypeId \| Tags \| Function \| Quality, match = ANY route, minus the entry's own Except holes). A protected piece is refused by every consuming station this file applies to, with its own reason (Refused:Protected). An entry authoring no route protects nothing. |
 | `Stations` | array of `string` | `null` | Station ids this file applies to, matched without regard to case; absent or empty = every consuming station. Authored beside Actions, both must match. |
 | `Actions` | array of `string` | `null` | Action ids this file applies to, at any station in scope, matched without regard to case; absent or empty = every action. Authored beside Stations, both must match. |
 
@@ -1704,5 +1712,6 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
 | `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
 | `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
-| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+| `Quality` | array of `string` | `null` | Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function \| Quality routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
 

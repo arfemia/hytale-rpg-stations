@@ -41,7 +41,9 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
  *
  * <p>Both are scoped by the gear filter ({@link #inFilter}: the shared matcher under its ONE
  * {@link StationCustody#accepts} rule, {@code Except} hole included) and by the metadata guard,
- * which the live caller applies to the real stack ({@link StationMetadataGuard#accepts}).
+ * which the live caller applies to the real stack ({@link StationMetadataGuard#accepts}), the same
+ * guard every authored and derived row consuming a single-item socket's real stack meets
+ * ({@link StationMetadataGuard#consumesRefusedPiece}).
  */
 public final class StationFallbackRoutes {
 
@@ -52,12 +54,20 @@ public final class StationFallbackRoutes {
      * Does the fallback's gear filter accept this material? An absent filter accepts everything;
      * an authored one answers under the shared matcher's one rule, so a catch-all filter with an
      * {@code Except} accepts everything but the hole. No {@code Fallback} group at all accepts
-     * nothing, since there is no route to fall back to.
+     * nothing, since there is no route to fall back to. {@code quality} is the native quality id
+     * the piece carries, which a {@code Quality} route reads.
      */
     static boolean inFilter(@Nullable StationAsset.Fallback fallback, @Nullable String itemId,
-            @Nullable String[] resourceTypeIds, @Nullable Map<String, String[]> tags, @Nullable String function) {
+            @Nullable String[] resourceTypeIds, @Nullable Map<String, String[]> tags, @Nullable String function,
+            @Nullable String quality) {
         return fallback != null
-                && StationCustody.accepts(fallback.getInput(), itemId, resourceTypeIds, tags, function);
+                && StationCustody.accepts(fallback.getInput(), itemId, resourceTypeIds, tags, function, quality);
+    }
+
+    /** {@link #inFilter(StationAsset.Fallback, String, String[], Map, String, String)} for a piece with no quality reading. */
+    static boolean inFilter(@Nullable StationAsset.Fallback fallback, @Nullable String itemId,
+            @Nullable String[] resourceTypeIds, @Nullable Map<String, String[]> tags, @Nullable String function) {
+        return inFilter(fallback, itemId, resourceTypeIds, tags, function, null);
     }
 
     /**

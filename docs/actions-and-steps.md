@@ -45,8 +45,10 @@ station-level group to fall back to.
 
 Which action a session runs is picked by **what the player is holding** (or by a loaded custody claim,
 which always commits to its own action rather than being re-selected), IN AUTHORED ORDER. Each action's
-`Select` is an `ActionInput` matcher: `ItemId`, `ResourceTypeId`, native item `Tags`, or a
-**functional** route - `Function: "Weapon"|"Armor"|"Tool"`, tested against the held item's live shape. A
+`Select` is an `ActionInput` matcher: `ItemId`, `ResourceTypeId`, native item `Tags`, a
+**functional** route - `Function: "Weapon"|"Armor"|"Tool"`, tested against the held item's live shape -
+or a **quality** route - `Quality: ["Rare", "Epic"]`, any of the native item quality ids, read off the
+held stack and matched without regard to case (a pack's own quality tier works the same). A
 match is ANY route satisfied; an ABSENT `Select` matches any context (its custody acceptance derives
 from its own `Recipe` inputs instead) - the validator flags an unreachable catch-all authored before a
 more specific action.
@@ -188,7 +190,7 @@ every step regardless of which phases it authors.
 | `Puppet` | A per-step `{Clip?, Prop?}` override for the moment-to-moment animation/held item, played once at iteration entry. |
 | `Presentation` | A sound/particle/etc. cue played once at iteration entry. |
 | `Walk` | Move the puppet to a named anchor. See [Multi-Station Programs](multi-station-programs.md). |
-| `Consume` | `{Items: [Ingredient...], From: Inventory\|Custody, Socket?}` - drain from the player's backpack or the block's placed-input claim; all-or-nothing across the whole `Items` list. On a Custody route, `Socket` (and a per-entry `Socket` on any `Items` entry, which wins) names the [custody socket](custody-and-placed-display.md) to draw from; absent = the first Item socket. |
+| `Consume` | `{Items: [Ingredient...], From: Inventory\|Custody, Socket?}` - drain from the player's backpack or the block's placed-input claim; all-or-nothing across the whole `Items` list. On a Custody route, `Socket` (and a per-entry `Socket` on any `Items` entry, which wins) names the [custody socket](custody-and-placed-display.md) to draw from; absent = the first Item socket. A Custody route never takes a single-item socket's piece carrying metadata no mod declared disposable: the step stops as if the piece were missing. |
 | `Stamp` | The enhance-commit phase (reagents, durability, stat rolls). See [Enhancement & Stamp](enhancement-and-stamp.md). |
 | `Convert` | `{Enabled?}` - run the action's `Recipe` at this beat: the matched row is selected exactly as the classic loop selects one (authored rows, derived rows, then the fallback routes), its inputs are consumed (from custody when the action authors `Custody`, else the inventory), `Recipe.Yield` is applied and its outputs are produced to the inventory as ordinary rows. Authoring the group turns it on. A program with a `Convert` beat has a cycle output for an `rpgstations:output_items` grant to add to. |
 | `Produce` | `{Items: [Ingredient...], To: Inventory\|Custody, Socket?}` - grant to the backpack, or deposit into a custody claim (the primary station's or a claimed anchor's). On a Custody route, `Socket`/per-entry `Socket` names the receiving [custody socket](custody-and-placed-display.md); absent = the first Item socket, and the receiving pile belongs to whoever did the work. |

@@ -384,7 +384,7 @@ public final class StructurePatternAsset
                 .documentation("This cell's position in whole blocks, relative to the authored frame (the anchor cell's offset is subtracted out, so any consistent frame works); unauthored axes read 0.").add()
                 .appendInherited(new KeyedCodec<>("Block", ActionInput.CODEC, false),
                         (o, v) -> o.block = v, o -> o.block, (o, p) -> o.block = p.block)
-                .documentation("What block must stand in this cell: an exact ItemId, a ResourceTypeId family (any rock), or Tags. A state variant (lit/unlit) matches through its base block. Exactly one of Block | Empty.").add()
+                .documentation("What block must stand in this cell: an exact ItemId, a ResourceTypeId family (any rock), or Tags (a placed block carries no stack quality, so Quality never matches a cell). A state variant (lit/unlit) matches through its base block. Exactly one of Block | Empty.").add()
                 .appendInherited(new KeyedCodec<>("Empty", Codec.BOOLEAN, false),
                         (o, v) -> o.empty = v, o -> o.empty, (o, p) -> o.empty = p.empty)
                 .documentation("True = this cell must hold AIR for the shape to count as built. Exactly one of Block | Empty.").add()

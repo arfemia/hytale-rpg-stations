@@ -356,6 +356,17 @@ public final class ActionResolver {
     public static List<String> selectActionsByFamily(@Nonnull StationAsset asset, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
             @Nullable String heldFunction) {
+        return selectActionsByFamily(asset, heldItemId, heldResourceTypeIds, heldTags, heldFunction, null);
+    }
+
+    /**
+     * {@link #selectActionsByFamily(StationAsset, String, String[], Map, String)} with the held
+     * stack's native quality id, which a {@code Select.Quality} route reads.
+     */
+    @Nonnull
+    public static List<String> selectActionsByFamily(@Nonnull StationAsset asset, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction, @Nullable String heldQuality) {
         ActionDef[] actions = effectiveActions(asset);
         if (actions == null) {
             return List.of();
@@ -366,7 +377,8 @@ public final class ActionResolver {
             if (def == null) {
                 continue;
             }
-            if (StationCustody.accepts(effectiveSelectOf(def), heldItemId, heldResourceTypeIds, heldTags, heldFunction)) {
+            if (StationCustody.accepts(effectiveSelectOf(def), heldItemId, heldResourceTypeIds, heldTags, heldFunction,
+                    heldQuality)) {
                 matches.add(effectiveActionId(def, i));
             }
         }

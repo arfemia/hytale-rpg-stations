@@ -58,11 +58,14 @@ one transform in two tiers is one action and a parent chain.
   utility gear (backpacks, the quiver, the helipack). What has a salvage recipe but is not gear
   (rocks, plants), what is gear-shaped but not gear (ammunition, bait, deployables, the tagless
   repair kits, fertilizers and capture crate) and what carries a gear type without being gear (the
-  Trork spawner egg, the frag grenade, the developer seed bag and every `Developer`-family item) is
-  refused by the jar's protect-list file, `ProtectLists/Disenchanting_Tables.json`, one file scoped
-  to both tables, so those holes are written once rather than on every matcher. A piece whose stack
-  carries data no mod declared disposable, such as a bag with something in it, is refused by the
-  metadata guard before any fallback route is tried.
+  Trork spawner egg, the frag grenade, the developer seed bag, every `Developer`-family item and
+  every item of a creative or test quality (`Developer`, `Debug`, `Technical`, `Template` or
+  `Tool`), such as the trooper armor, the debug sticks, the mana prototype tools and the test guns) is refused by the jar's protect-list file, `ProtectLists/Disenchanting_Tables.json`,
+  one file scoped to both tables, so those holes are written once rather than on every matcher. A
+  piece whose stack carries data no mod declared disposable, such as a bag with something in it, is
+  refused by the metadata guard at placement, at either table and in any of the greater table's
+  sockets, since the ritual consumes every piece it takes; no salvage row or fallback route will
+  consume one either, and the greater table's queue works around one already sitting in a socket.
   Placement is the one gate, so the fallback's own `Input` needs only its routes. A pack's
   extension overlay adds its own holes beside these.
 - `Display.Animated` shows the placed piece turning and bobbing the way a dropped item does.

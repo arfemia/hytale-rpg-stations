@@ -29,7 +29,7 @@ placement's full metadata (durability, enhancement rolls) survives a restart wit
 | Field | What it does |
 |---|---|
 | `MaxQuantity` | The cap on the claim (default 100). The Anvil's weapon-placement custody uses `1` - a single, metadata-preserving item, not a stack. |
-| `Input` | The placement-acceptance matcher, reusing the same `ItemId`/`ResourceTypeId`/`Tags`/`Function` routes an action's diegetic `Select` uses. When absent, acceptance derives from the resolved action's own `Recipe.Conversions` inputs - zero extra authoring for a plain convert station (the "logs by ResourceTypeId family" fallback). |
+| `Input` | The placement-acceptance matcher, reusing the same `ItemId`/`ResourceTypeId`/`Tags`/`Function`/`Quality` routes an action's diegetic `Select` uses. When absent, acceptance derives from the resolved action's own `Recipe.Conversions` inputs - zero extra authoring for a plain convert station (the "logs by ResourceTypeId family" fallback). |
 | `States` | `{Empty?, Loaded?, Working?, Ready?, Overdone?}` - the block's OWN interaction-state names custody flips between. A flip swaps the block to that state's own variant, so everything the state authors comes on with it and the previous state's stops: its texture, its model animation, its light, its looping ambient sound and its particles, as well as its interaction hint. `Working` is nullable and shows ONLY while a work step is actively executing at this block (see `IsWork` in [Actions & Step Programs](actions-and-steps.md)), reverting to the resting look on step exit and every session stop; a step's own `State` names a deeper look for one beat of a ritual in its place. `Ready` shows while a produced batch waits in a custody pile under an open [doneness window](actions-and-steps.md#doneness-the-ready-window-on-produced-output) (the `Working` look wins while work actually runs); `Overdone` shows after a window expired and the pile collapsed, until it is gathered or reloaded. Omit any of them and custody still works mechanically, just with no state flip on that leaf. The state SET is closed by the engine - a pack or extension may re-point each leaf at its own block-state NAME, never add a sixth state. |
 | `Display` | Opts the placed input into a rendered prop entity at the block. See below. |
 | `HeldOnly` | `true` places only what the player HOLDS: the hotbar and backpack are never searched for a match, so a press at a station that takes one valuable piece can never pull gear out of the bag unasked. Default `false`, the classic held-else-inventory placement. |
@@ -164,6 +164,15 @@ Three rules sit in front of every placement, whatever the station's own matcher 
   stack that tracks wear or carries metadata (a worn tool, an enhanced piece): a pile could only
   hand it back as a bare fresh stack, which would repair it for free or lose what was on it. A
   single-item socket (`MaxQuantity: 1`) keeps the real stack and takes it.
+- **A real stack is consumed only with its owner's leave.** A stack carrying metadata no mod
+  declared disposable (another mod's data, such as a bag with something in it) is never destroyed
+  with the piece; wear and keys a mod declared (stamped stats, a custom name) do not count. A
+  single-item socket refuses such a piece at placement whenever every action at the station that
+  reads the socket would consume it, whatever its `Match` authors. Where some action reads the
+  socket and keeps the piece (a `Stamp`, or custody no phase draws from), the socket takes it, and
+  every path that would consume it still refuses: a recipe row (authored, derived or a fallback
+  route) skips it, a `Consume` phase from custody stops as if the piece were missing, and the
+  ritual queue works the other sockets and leaves it where it is.
 
 A `Refused:Protected` answer, like every other placement refusal, comes only from a station that
 was empty before the press. At a station that already holds material, the held item is judged as
@@ -188,7 +197,7 @@ where.
 
 | Field | What it does |
 |---|---|
-| `Protects` | What the file protects: one input matcher or an array of them, the same `ItemId` / `ResourceTypeId` / `Tags` / `Function` routes (match = ANY route) and `Except` holes a `Custody.Input` uses. An entry protects what its routes match, minus its own holes; an entry authoring no route protects nothing (it is never read as "everything"). |
+| `Protects` | What the file protects: one input matcher or an array of them, the same `ItemId` / `ResourceTypeId` / `Tags` / `Function` / `Quality` routes (match = ANY route) and `Except` holes a `Custody.Input` uses. `{ "Quality": ["Developer"] }` protects every item of that quality, whatever its id or tags. An entry protects what its routes match, minus its own holes; an entry authoring no route protects nothing (it is never read as "everything"). |
 | `Stations` | The station ids the file applies to. Absent or empty: every consuming station. |
 | `Actions` | The action ids the file applies to, at any station in scope. Absent or empty: every action. |
 

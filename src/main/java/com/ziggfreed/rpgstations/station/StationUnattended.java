@@ -206,6 +206,29 @@ final class StationUnattended {
             long nowGameMs,
             @Nonnull Function<String, String[]> resourceTypesOf,
             @Nonnull Function<String, Map<String, String[]>> tagsOf) {
+        return settle(claim, sockets, conversions, yield, custodyMaxQuantity, unattended, workCycleMs, nowGameMs,
+                resourceTypesOf, tagsOf, socketId -> null);
+    }
+
+    /**
+     * As above, with the metadata guard's reading per socket ({@code refusedPieceOf}: the item id
+     * of a single-item socket's real stack the guard refuses, else null;
+     * {@link StationMetadataGuard#refusedPieces}): a row that would consume such a stack is skipped
+     * like a row with no input ({@link StationMetadataGuard#consumesRefusedPiece}), the attended
+     * scan's own rule, so nobody being there never destroys what a present worker could not.
+     */
+    @Nonnull
+    static Settle settle(@Nonnull StationCustodyClaim claim,
+            @Nonnull List<Custody.ResolvedSocket> sockets,
+            @Nullable StationAsset.Conversion[] conversions,
+            @Nullable StationAsset.Yield yield,
+            int custodyMaxQuantity,
+            @Nonnull StationAsset.Work.Unattended unattended,
+            long workCycleMs,
+            long nowGameMs,
+            @Nonnull Function<String, String[]> resourceTypesOf,
+            @Nonnull Function<String, Map<String, String[]>> tagsOf,
+            @Nonnull Function<String, String> refusedPieceOf) {
         Long last = claim.unattendedLastGameTime();
         if (last == null || nowGameMs < last) {
             // First visit (or a clock that moved backwards): anchor the catch-up clock and let
@@ -224,7 +247,9 @@ final class StationUnattended {
         // cycles of it actually run.
         for (int index : tierOrderedIndices(conversions)) {
             StationAsset.Conversion c = conversions[index];
-            if (!runnableShape(c)) {
+            if (!runnableShape(c)
+                    || StationMetadataGuard.consumesRefusedPiece(c, sockets, null, refusedPieceOf, resourceTypesOf,
+                            tagsOf)) {
                 continue;
             }
             long cycleMs = c.getDurationMs() != null && c.getDurationMs() > 0 ? c.getDurationMs() : workCycleMs;

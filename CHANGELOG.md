@@ -168,6 +168,30 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   `PROTECT_LIST_CATCH_ALL`, `PROTECT_LIST_UNKNOWN_STATION`, `PROTECT_LIST_UNKNOWN_ACTION`,
   `PROTECT_LIST_UNKNOWN_ITEM` (INFO), plus the shared `EXCEPT_CATCH_ALL` and
   `UNKNOWN_ACTION_FUNCTION` on each entry.
+- **A `Quality` route on the shared input matcher.** Adds `ActionInput.Quality`, a list of native
+  item quality ids (`["Developer"]`, `["Rare", "Epic"]`, or a pack's own tier: the list is open,
+  never a fixed set), matched without regard to case. It sits beside `ItemId`, `ResourceTypeId`,
+  `Tags` and `Function` under the same rule (match = ANY route, the `Except` holes carved out
+  after), so it works at every site the matcher is authored: an action's `Select`, a
+  `Custody.Input` and a socket's `Match`, a fallback's `Input`, a protect-list entry, and any
+  `Except` entry. The quality read is the STACK's own (`ItemStack.getQualityIndex`, the quality the
+  stack was made or re-qualified with, its item's when it carries none), resolved to its quality
+  id; a counted pile entry, which keeps no stack, reads its item's. A placed block carries no stack
+  quality, so a `Quality` route never matches a Block socket's `Match` or a structure cell.
+  Validator: `QUALITY_UNKNOWN` (an id no loaded quality answers to) and `QUALITY_ON_BLOCK`; a
+  socket `Match` authoring a `Quality` or `Function` route is never warned
+  `SOCKET_MATCH_UNMATCHED`, since those routes are read off the live stack.
+- **The metadata guard on every path that consumes a placed piece.** A single-item socket's real
+  stack carrying a metadata key no mod declared disposable is never consumed, so a third-party item
+  with its own salvage recipe and data of its own keeps its data. A single-item socket refuses such
+  a piece at placement whenever every action at the station that reads the socket would consume
+  it, whether its `Match` authors routes or derives them; where an action reads the socket and
+  keeps the piece (a `Stamp`), the socket takes it. Every consuming path refuses it as well: the
+  attended custody scan and the unattended settle skip any row that would take it (an authored row
+  or a row derived from a native salvage recipe as much as a fallback route), an authored `Consume`
+  phase from custody stops as if the piece were missing, and the ritual queue passes over a socket
+  holding one and works the others. A count pile keeps its own refusal of per-instance data;
+  the Sawmill's logs carry none, and its rows are unchanged.
 - **Expected versus found loot rows.** A roll authored `Expected: true` (Ziggfreed Common's new
   `Roll` leaf) pays the moment's EXPECTED payout, a wage or a return, and its items read as
   ORDINARY produced output: the plain item row on the HUD and the produced ledger row on the
@@ -339,7 +363,11 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   `Type`; arrows, bombs, bait and the deployable totems and turret by `Family`; the tagless repair
   kits, fertilizers and capture crate by id) and the vanilla items that carry a gear type without
   being gear (the Trork spawner egg, the frag grenade and the developer seed bag by id, every
-  `Developer`-family item by `Family`) are refused at both tables by the jar's one protect-list
+  `Developer`-family item by `Family`, and every item of a creative or test quality, `Developer`,
+  `Debug`, `Technical`, `Template` or `Tool`, by `Quality`, which covers the creative, debug and
+  test gear no family tag names: the trooper armor, the mana prototype tools, the sap shunt, the
+  debug sticks, the test backpack and camera, the praetorian NPC longsword, the QA and debug
+  armor, the test guns, the item templates) are refused at both tables by the jar's one protect-list
   file, `ProtectLists/Disenchanting_Tables.json`, scoped to them. The three elastic beats are `Paced` over
   `hytale:stat RPG_Disenchanting_Proficiency` with the clamp at `{Min 0.21, Max 1.0}`, so the
   fastest ritual is 15 seconds; `Convert` runs on the Unmake beat and `RollBonus` on the Payout

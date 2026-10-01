@@ -22,6 +22,13 @@ import com.ziggfreed.common.codec.TagMatch;
  * <p>{@link #function} is the FUNCTIONAL route: {@code "Weapon"}/{@code "Armor"}/{@code "Tool"},
  * tested against the held item's native shape ({@code item.getWeapon() != null} and so on).
  *
+ * <p>{@link #quality} is the QUALITY route: one or more native {@code ItemQuality} asset ids (an
+ * open list, since a pack can ship its own tier), matched without regard to case against the
+ * quality the STACK carries ({@code ItemStack#getQualityIndex}: the index the stack was made or
+ * re-qualified with, which is its item's own when it carries none). A material with no stack
+ * behind it (a counted pile entry) reads its item's quality, and a placed BLOCK reads none, so a
+ * {@code Quality} route never matches a block socket or a structure cell (the validator warns).
+ *
  * <p><b>{@link #excepts} carve holes in the match.</b> Each is this same matcher one level down,
  * without an {@code Except} of its own: a material the outer routes accept is REFUSED when any
  * {@code Except} matcher accepts it too. So {@code {"Tags": {"Type": ["Weapon", "Tool"]}, "Except":
@@ -40,16 +47,17 @@ public final class ActionInput {
     @Nullable protected String resourceTypeId;
     @Nullable protected Map<String, String[]> tags;
     @Nullable protected String function;
+    @Nullable protected String[] quality;
     @Nullable protected ActionInput[] excepts;
 
-    /** The nested {@code Except} matcher's codec: the same four routes, no further nesting. */
+    /** The nested {@code Except} matcher's codec: the same five routes, no further nesting. */
     public static final BuilderCodec<ActionInput> EXCEPT_CODEC = codec(false);
 
     /** The {@code Except} leaf's codec: one matcher, or an array of them, decoded to the same array. */
     public static final ObjectOrArrayCodec<ActionInput> EXCEPTS_CODEC =
             new ObjectOrArrayCodec<>(EXCEPT_CODEC, ActionInput[]::new);
 
-    /** The full matcher: the four routes plus the {@code Except} hole. */
+    /** The full matcher: the five routes plus the {@code Except} hole. */
     public static final BuilderCodec<ActionInput> CODEC = codec(true);
 
     /**
@@ -73,11 +81,14 @@ public final class ActionInput {
                 .appendInherited(new KeyedCodec<>("Function", Codec.STRING, false),
                         (o, v) -> o.function = v, o -> o.function, (o, p) -> o.function = p.function)
                 .documentation("Match the held item's live function: 'Weapon' | 'Armor' | 'Tool'.")
-                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:action-function"))).add();
+                .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:action-function"))).add()
+                .appendInherited(new KeyedCodec<>("Quality", Codec.STRING_ARRAY, false),
+                        (o, v) -> o.quality = v, o -> o.quality, (o, p) -> o.quality = p.quality)
+                .documentation("Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block.").add();
         if (withExcept) {
             builder = builder.appendInherited(new KeyedCodec<>("Except", EXCEPTS_CODEC, false),
                             (o, v) -> o.excepts = v, o -> o.excepts, (o, p) -> o.excepts = p.excepts)
-                    .documentation("A material the routes above accept is REFUSED when a nested matcher here (the same ItemId | ResourceTypeId | Tags | Function routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes.").add();
+                    .documentation("A material the routes above accept is REFUSED when a nested matcher here (the same ItemId | ResourceTypeId | Tags | Function | Quality routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes.").add();
         }
         return builder.build();
     }
@@ -103,13 +114,28 @@ public final class ActionInput {
     @Nonnull
     public static ActionInput of(@Nullable String itemId, @Nullable String resourceTypeId,
             @Nullable Map<String, String[]> tags, @Nullable String function, @Nullable ActionInput[] excepts) {
+        return of(itemId, resourceTypeId, tags, function, null, excepts);
+    }
+
+    /** Every route, the {@link #quality} ids included, plus the {@link #excepts} holes. */
+    @Nonnull
+    public static ActionInput of(@Nullable String itemId, @Nullable String resourceTypeId,
+            @Nullable Map<String, String[]> tags, @Nullable String function, @Nullable String[] quality,
+            @Nullable ActionInput[] excepts) {
         ActionInput i = new ActionInput();
         i.itemId = itemId;
         i.resourceTypeId = resourceTypeId;
         i.tags = tags;
         i.function = function;
+        i.quality = quality;
         i.excepts = excepts;
         return i;
+    }
+
+    /** A matcher authoring the {@link #quality} route alone: any of these quality ids. */
+    @Nonnull
+    public static ActionInput ofQuality(@Nonnull String... quality) {
+        return of(null, null, null, null, quality, null);
     }
 
     @Nullable
@@ -133,6 +159,25 @@ public final class ActionInput {
         return function;
     }
 
+    /** The accepted native {@code ItemQuality} ids, in authored order; null or empty = no quality route. */
+    @Nullable
+    public String[] getQuality() {
+        return quality;
+    }
+
+    /** True when at least one non-blank quality id is authored. */
+    public boolean hasQualityRoute() {
+        if (quality == null) {
+            return false;
+        }
+        for (String id : quality) {
+            if (id != null && !id.isBlank()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** The nested exclusion matchers, in authored order; null or empty = nothing is excluded. */
     @Nullable
     public ActionInput[] getExcepts() {
@@ -150,6 +195,6 @@ public final class ActionInput {
         boolean hasResourceTypeId = resourceTypeId != null && !resourceTypeId.isBlank();
         boolean hasTags = tags != null && !tags.isEmpty();
         boolean hasFunction = function != null && !function.isBlank();
-        return !hasItemId && !hasResourceTypeId && !hasTags && !hasFunction;
+        return !hasItemId && !hasResourceTypeId && !hasTags && !hasFunction && !hasQualityRoute();
     }
 }

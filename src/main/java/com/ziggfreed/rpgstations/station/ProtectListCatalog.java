@@ -55,12 +55,20 @@ public final class ProtectListCatalog {
 
     /**
      * Whether any folded file that applies at {@code stationId}'s action {@code actionId} protects
-     * the material ({@link StationCustody#isProtected}, the pure core).
+     * the material ({@link StationCustody#isProtected}, the pure core). {@code heldQuality} is the
+     * native quality id the held stack carries, which a {@code Quality} entry reads.
      */
     public boolean protects(@Nullable String stationId, @Nullable String actionId, @Nullable String heldItemId,
             @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
-            @Nullable String heldFunction) {
+            @Nullable String heldFunction, @Nullable String heldQuality) {
         return !lists.isEmpty() && StationCustody.isProtected(lists.values(), stationId, actionId, heldItemId,
-                heldResourceTypeIds, heldTags, heldFunction);
+                heldResourceTypeIds, heldTags, heldFunction, heldQuality);
+    }
+
+    /** {@link #protects(String, String, String, String[], Map, String, String)} for a material with no quality reading. */
+    public boolean protects(@Nullable String stationId, @Nullable String actionId, @Nullable String heldItemId,
+            @Nullable String[] heldResourceTypeIds, @Nullable Map<String, String[]> heldTags,
+            @Nullable String heldFunction) {
+        return protects(stationId, actionId, heldItemId, heldResourceTypeIds, heldTags, heldFunction, null);
     }
 }

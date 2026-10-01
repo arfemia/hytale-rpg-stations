@@ -769,7 +769,7 @@ public final class StationAsset
         public static final BuilderCodec<Fallback> CODEC = BuilderCodec.builder(Fallback.class, Fallback::new)
                 .appendInherited(new KeyedCodec<>("Input", ActionInput.CODEC, false),
                         (o, v) -> o.input = v, o -> o.input, (o, p) -> o.input = p.input)
-                .documentation("The gear filter both fallback routes are scoped to (ItemId | ResourceTypeId | Tags | Function, match = ANY, minus its Except hole). Absent = any placed piece the metadata guard accepts.").add()
+                .documentation("The gear filter both fallback routes are scoped to (ItemId | ResourceTypeId | Tags | Function | Quality, match = ANY, minus its Except hole). Absent = any placed piece the metadata guard accepts.").add()
                 .appendInherited(new KeyedCodec<>("CraftingShare", CraftingShare.CODEC, false),
                         (o, v) -> o.craftingShare = v, o -> o.craftingShare, (o, p) -> o.craftingShare = p.craftingShare)
                 .documentation("Give back a share of the piece's OWN crafting recipe inputs (tier 2, tried before EssenceOnly). Absent = this route is off.").add()
