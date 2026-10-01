@@ -447,6 +447,13 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   every rebuild site uses (`StationPacing.scaleInTime`, the offset-sound split,
   `Presentation.overlaid`). The test task declares `docs/` as an input, so a docs-only change
   re-runs `MmoAgnosticismTest`.
+- **Technical.** A deprecation gate in the build: `gradle/deprecation-gate.gradle`, applied by the
+  mod's build and the api module's, compiles each source set a second time with
+  `-Xlint:deprecation` and fails `check` on any deprecation warning whose line, or the line above
+  it, carries no `// DEPRECATION-KEPT: <why>` comment. `compileJava` keeps `-Xlint:removal
+  -Werror` as it was, and the station calls no deprecated API, so nothing here is kept. The gate
+  file is shared byte for byte across the mod family, so `.gitattributes` keeps it LF on every
+  checkout.
 
 ## 1.0.0 - 2026-09-12 (first public release)
 
