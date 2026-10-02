@@ -12,12 +12,15 @@ import com.ziggfreed.common.inventory.InventoryGrant;
 
 /**
  * THE ONE shared item-GRANT seam this mod's grant call sites route through (round-5 maintainer
- * directive, 2026-07-22): every item GRANT this mod hands a player - placed-input custody
- * retrieval/return ({@code station.StationService#giveClaimToOwner}), a per-cycle produced output
- * ({@code station.StationStepHandlers.ProduceHandler}), a luck bonus-output-copy grant, and a
- * rare-find/tier {@code ItemDropList} grant (both {@code loot.LootEngine}) - routes through
- * {@link #grant} instead of re-deriving the container cascade + drop-at-block fallback at each
- * call site.
+ * directive, 2026-07-22): every single-stack item GRANT this mod hands a player - placed-input
+ * custody retrieval/return ({@code station.StationService#giveClaimToOwner}), a per-cycle produced
+ * output ({@code station.StationStepHandlers.ProduceHandler}), the bonus output items a cycle's
+ * tally resolves to ({@code station.StationService#grantBonusOutputItems}), and a ritual's reagent
+ * restore - routes through {@link #grant} or {@link #grantOrDrop} instead of re-deriving the
+ * container cascade + drop-at-block fallback at each call site. The loot pass is not one of them:
+ * {@code loot.StationLootEngine} hands its items and drop lists over through ziggfreed-common's
+ * {@code loot.GroundSpillSinks}, which tries the inventory itself and drops the rest through
+ * {@link ItemDropUtil} as ONE pile.
  *
  * <p><b>AMENDED same day (maintainer common-lift directive)</b>: the GENERIC hotbar-first-then-
  * backpack ORDERING primitive itself lives in {@code ziggfreed-common}'s {@code

@@ -21,11 +21,14 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
  * routes through - the native mob-death drop mechanism ({@link ItemComponent#generateItemDrops}
  * + a tick-safe spawn). A grant that cannot fit in the target
  * inventory MUST land as a ground item at the block instead of being skipped - this applies to
- * placed-input custody returns ({@code station.StationService#returnCustody}), luck bonus-copy
- * grants, and rare-find/tier loot grants ({@code loot.LootEngine}) alike, superseding the older
- * "room-checked, skipped silently when full" convention. Lifted out of {@code StationService}'s
- * original private {@code dropCustodyAtBlock} so {@code loot.LootEngine} (a different package)
- * can reuse the SAME sink rather than re-deriving it - one drop mechanism, several callers.
+ * placed-input custody returns ({@code station.StationService#returnCustody}), every single-stack
+ * grant's fallback ({@link ItemGrantUtil}), and the station loot pass alike, superseding the older
+ * "room-checked, skipped silently when full" convention. The loot pass ({@code
+ * loot.StationLootEngine}) hands its items and drop lists over through ziggfreed-common's {@code
+ * loot.GroundSpillSinks}, with this sink as its ground, so whatever a pass cannot fit lands here as
+ * ONE pile. Lifted out of {@code StationService}'s original private {@code dropCustodyAtBlock} so
+ * callers in other packages reuse the SAME sink rather than re-deriving it - one drop mechanism,
+ * several callers.
  *
  * <p><b>Pass the live {@code commandBuffer} from anything running inside a tick.</b> Spawning an
  * item entity through a live {@code Store} is rejected while that store is processing, so an

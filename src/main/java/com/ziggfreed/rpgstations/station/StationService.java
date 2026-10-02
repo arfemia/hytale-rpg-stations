@@ -151,7 +151,7 @@ import com.ziggfreed.rpgstations.util.Log;
  * scheduling, idle mode, the {@link #emitMoment} presentation choke point, durability drain,
  * mount calls) plus the standalone reward layer (the conditional-lootable engine and the
  * self-sufficient summary panel - {@link #rollCompletionLoot}, {@link #showSessionSummary} over
- * {@code loot.LootEngine} / {@code ui.StationSummaryHud}, with the per-cycle Roll pass living in
+ * {@code loot.StationLootEngine} / {@code ui.StationSummaryHud}, with the per-cycle Roll pass living in
  * {@code StationStepHandlers}' Roll phase). It owns NO progression: {@link #onCycleCompleted}
  * fires {@code StationCycleCompletedEvent} carrying the running action's authored contributions,
  * already pre-scaled, plus the multiplier that was applied for display; whichever mod declared a
@@ -7513,11 +7513,11 @@ public final class StationService {
     }
 
     /**
-     * Drops {@code stacks} at the block's center via the shared {@link ItemDropUtil} sink
-     * (SMOKE-FIX S3 (b) lifted this out to a mod-wide utility so {@code loot.LootEngine}'s luck/
-     * tier grants reuse the SAME world-drop mechanism instead of re-deriving it). Pass the live
-     * {@code commandBuffer} from any in-tick caller - see {@link #handBackToOwner} for why a
-     * {@code null} there loses the drop.
+     * Drops {@code stacks} at the block's center via the shared {@link ItemDropUtil} sink, the
+     * station's one world-drop mechanism: the loot pass ({@code loot.StationLootEngine}) reaches the
+     * same sink as the ground of ziggfreed-common's {@code loot.GroundSpillSinks} rather than
+     * re-deriving it. Pass the live {@code commandBuffer} from any in-tick caller - see
+     * {@link #handBackToOwner} for why a {@code null} there loses the drop.
      */
     private static void dropCustodyAtBlock(@Nullable CommandBuffer<EntityStore> commandBuffer,
             @Nullable Store<EntityStore> store, int x, int y, int z,
