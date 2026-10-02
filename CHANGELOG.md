@@ -551,6 +551,17 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   -Werror` as it was, and the station calls no deprecated API, so nothing here is kept. The gate
   file is shared byte for byte across the mod family, so `.gitattributes` keeps it LF on every
   checkout.
+- **Technical.** A station pass hands its loot over through Ziggfreed Common's ground-spill preset
+  (`GroundSpillSinks`) instead of its own pair of sinks: an item grant and every stack a drop list
+  rolls go hotbar-first, then backpack storage, and the rest lands as ONE pile at the station block
+  through `ItemDropUtil`, as before; a drop list rolls through the library's native roll
+  (`NativeLootService.rollNative`) rather than `ItemModule` directly, and the landed count still
+  reports only what reached the player. `OutputItemResolver.resolve` is the library's
+  `StochasticCount.resolve` (same numbers for the same draws), and the validator's drop-list probe
+  rolls through `NativeLootService.tryRollNative`, staying silent when no roll could be made.
+  `ItemGrantUtil.grantToInventory`, whose only callers were the old sinks, is gone. Nothing a player
+  sees changes; `OutputItemResolverTest`, `StationLootOriginTest` and the Sawmill parity suites
+  pass unchanged.
 
 ## 1.0.0 - 2026-09-12 (first public release)
 

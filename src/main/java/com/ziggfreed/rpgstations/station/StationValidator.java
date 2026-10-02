@@ -31,12 +31,12 @@ import com.hypixel.hytale.server.core.asset.type.soundevent.config.SoundEvent;
 import com.hypixel.hytale.server.core.cosmetics.EmoteAsset;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.interaction.interaction.config.RootInteraction;
-import com.hypixel.hytale.server.core.modules.item.ItemModule;
 import com.hypixel.hytale.server.npc.NPCPlugin;
 import com.ziggfreed.common.codec.Rotation;
 import com.ziggfreed.common.entity.PlayerModelService;
 import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.common.factor.FactorFormula;
+import com.ziggfreed.common.instance.reward.NativeLootService;
 import com.ziggfreed.common.loot.LootGrants;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.LootableAsset;
@@ -2123,10 +2123,10 @@ public final class StationValidator {
      * resolution-failure signal; an occasional empty roll is normal weighting and never reaches the
      * threshold.
      *
-     * <p>Pure compute and world-thread-safe ({@code ItemModule.getRandomItemDrops} is the same
-     * native roll boundary the loot engine itself uses). Fail-open on a cold or throwing item module
-     * - the same stance {@link #dropListKnownLive} takes, since a lookup failure is not evidence the
-     * table is wrong. Warn-only, never blocks.
+     * <p>Pure compute and world-thread-safe ({@code NativeLootService.tryRollNative} is the same
+     * native roll the loot passes use). Fail-open on a cold or throwing item module, or any roll
+     * that could not be made - the same stance {@link #dropListKnownLive} takes, since a lookup
+     * failure is not evidence the table is wrong. Warn-only, never blocks.
      *
      * <p>A validate run made before the drop tables have finished resolving can report a table that
      * is in fact fine, which is why this lives in the FULL pass only (the post-load audit and
@@ -2165,8 +2165,13 @@ public final class StationValidator {
     private static Boolean dropListEverPaysOutLive(@Nonnull String dropListId) {
         try {
             for (int i = 0; i < DROPLIST_PROBE_ROLLS; i++) {
-                List<ItemStack> drops = ItemModule.get().getRandomItemDrops(dropListId);
-                if (drops != null && !drops.isEmpty()) {
+                // The library's native roll, in the form that tells a roll that came up empty from
+                // one that could not be made: only the first is evidence about the table.
+                List<ItemStack> drops = NativeLootService.tryRollNative(dropListId);
+                if (drops == null) {
+                    return null;
+                }
+                if (!drops.isEmpty()) {
                     return true;
                 }
             }

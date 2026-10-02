@@ -14,11 +14,10 @@ import javax.annotation.Nullable;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.entity.entities.Player;
-import com.hypixel.hytale.server.core.inventory.ItemStack;
-import com.hypixel.hytale.server.core.modules.item.ItemModule;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.loot.FactorLookup;
+import com.ziggfreed.common.loot.GroundSpillSinks;
 import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.reward.RewardKinds;
@@ -27,7 +26,6 @@ import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.station.ExtensionCatalog;
 import com.ziggfreed.rpgstations.util.ItemDropUtil;
-import com.ziggfreed.rpgstations.util.ItemGrantUtil;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -50,10 +48,12 @@ import com.ziggfreed.rpgstations.util.Log;
  *       plus the site label its unknown-table line names. The table's {@code Pool} rides along with
  *       the rolls, so a station referencing a pooled table draws that bag exactly as a chest
  *       would.</li>
- *   <li><b>The station sinks.</b> Item grants go hotbar-first, then backpack storage, then a ground
- *       drop at the station block; native drop lists roll through {@code ItemModule} and grant the
- *       same way. A stack that fits nowhere still lands as a ground item rather than being
- *       discarded.</li>
+ *   <li><b>Where the station sinks drop.</b> The sinks themselves are the shared ground-spill
+ *       preset ({@link GroundSpillSinks}): item grants go hotbar-first, then backpack storage, then
+ *       ONE ground pile at the station block; native drop lists roll through the engine and grant
+ *       the same way. What is the station's own is the drop target, its one ground sink
+ *       ({@link ItemDropUtil}). A stack that fits nowhere still lands as a ground item rather than
+ *       being discarded.</li>
  *   <li><b>The three station reward kinds</b> ({@link StationRewardKinds}), which COLLECT onto this
  *       pass rather than acting: an effect the session must track and tear down, a one-shot
  *       contribution the cycle event is about to carry, and a fractional output-item tally the whole
@@ -251,12 +251,9 @@ public final class StationLootEngine {
             @Nonnull String stationId, @Nonnull String actionId, int cycleIndex,
             @Nullable CommandBuffer<EntityStore> commandBuffer,
             @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
-        LootEngine.DropListSink dropLists =
-                id -> rollAndGrantDropList(id, player, commandBuffer, store, blockX, blockY, blockZ);
-        LootEngine.ItemSink items = (itemId, count) ->
-                grantItem(itemId, count, player, commandBuffer, store, blockX, blockY, blockZ);
+        GroundSpillSinks spill = stationSinks(player, commandBuffer, store, blockX, blockY, blockZ);
         return rollAndGrant(resolved, trigger, lookup, () -> ThreadLocalRandom.current().nextDouble(),
-                items, dropLists, subjectOf(player, playerRef),
+                spill.items(), spill.dropLists(), subjectOf(player, playerRef),
                 playerRef != null
                         ? CommandRewardExecutor.placeholders(playerRef, stationId, actionId, cycleIndex)
                         : null,
@@ -358,79 +355,26 @@ public final class StationLootEngine {
     }
 
     /**
-     * The station {@code Items} sink: hand over one exact stack hotbar-first, then backpack storage,
-     * then the ground at the station block, answering how many actually landed.
-     */
-    private static int grantItem(@Nonnull String itemId, int count, @Nonnull Player player,
-            @Nullable CommandBuffer<EntityStore> commandBuffer, @Nullable Store<EntityStore> store,
-            int blockX, int blockY, int blockZ) {
-        ItemStack stack;
-        try {
-            stack = new ItemStack(itemId, count);
-        } catch (Throwable t) {
-            Log.fine("STATION loot item grant failed for '" + itemId + "': " + t.getMessage());
-            return 0;
-        }
-        if (ItemGrantUtil.grantToInventory(player, stack)) {
-            return count;
-        }
-        return ItemDropUtil.dropAtBlock(commandBuffer, store, blockX, blockY, blockZ, List.of(stack))
-                ? count : 0;
-    }
-
-    /**
-     * The station {@code DropLists} sink: roll {@code dropListId} once via the native
-     * {@code ItemModule.getRandomItemDrops} (pure, world-thread-safe; frequency control lives
-     * entirely in the drop list's own weighted container) and grant every resulting stack.
+     * The station {@code Items} and {@code DropLists} sinks, both the shared ground-spill preset: a
+     * stack goes hotbar-first, then backpack storage, and whatever fits nowhere lands as ONE pile at
+     * the station block through {@link ItemDropUtil}, the station's one ground drop. A drop list is
+     * rolled once through the engine's native roll and handed over the same way, so a roll that
+     * overflows leaves one pile that equals the remainder rather than a find scattered across
+     * several ground entities.
      *
-     * <p>Answers what actually LANDED. An empty answer covers all three ways a table can pay
-     * nothing - it rolled its own empty branch, the roll itself failed, or every stack failed to
-     * grant - and the shared engine reads that as "produced nothing", which is what keeps a
-     * celebration cue silent over an empty hand.
+     * <p>Both answer what actually LANDED (the inventory, or a pile the drop answered as landed): a
+     * stack that went nowhere no longer exists, so it is never reported as found. An empty answer
+     * covers every way a table can pay nothing - it rolled its own empty branch, the roll itself
+     * failed, or nothing could be handed over - and the shared engine reads that as "produced
+     * nothing", which is what keeps a celebration cue silent over an empty hand.
      */
     @Nonnull
-    private static Map<String, Integer> rollAndGrantDropList(@Nonnull String dropListId, @Nonnull Player player,
-            @Nullable CommandBuffer<EntityStore> commandBuffer,
-            @Nullable Store<EntityStore> store, int blockX, int blockY, int blockZ) {
-        List<ItemStack> drops;
-        try {
-            drops = ItemModule.get().getRandomItemDrops(dropListId);
-        } catch (Throwable t) {
-            Log.fine("STATION loot droplist roll failed for '" + dropListId + "': " + t.getMessage());
-            return Map.of();
-        }
-        if (drops == null || drops.isEmpty()) {
-            return Map.of();
-        }
-        Map<String, Integer> landed = new LinkedHashMap<>();
-        // Overflow is collected and dropped ONCE at the end rather than per stack. A single roll can
-        // hand back several stacks of the same item, and dropping each leftover on its own scattered
-        // a find across several ground entities - so the pile a player walked up to showed only part
-        // of what the notification told them they got. One drop call per roll means the pile equals
-        // the remainder.
-        List<ItemStack> overflow = new ArrayList<>();
-        for (ItemStack stack : drops) {
-            try {
-                // Read the quantity BEFORE granting, and record it only when the stack actually
-                // reached the player - inventory, or the ground when it was full. A stack that went
-                // nowhere no longer exists, so counting it here would tell the player they found
-                // something they never received.
-                int quantity = stack.getQuantity();
-                if (ItemGrantUtil.grantToInventory(player, stack)) {
-                    landed.merge(stack.getItemId(), quantity, Integer::sum);
-                } else {
-                    overflow.add(stack);
-                }
-            } catch (Throwable t) {
-                Log.fine("STATION loot droplist item grant failed: " + t.getMessage());
-            }
-        }
-        if (!overflow.isEmpty()
-                && ItemDropUtil.dropAtBlock(commandBuffer, store, blockX, blockY, blockZ, overflow)) {
-            for (ItemStack dropped : overflow) {
-                landed.merge(dropped.getItemId(), dropped.getQuantity(), Integer::sum);
-            }
-        }
-        return landed;
+    private static GroundSpillSinks stationSinks(@Nonnull Player player,
+            @Nullable CommandBuffer<EntityStore> commandBuffer, @Nullable Store<EntityStore> store,
+            int blockX, int blockY, int blockZ) {
+        return GroundSpillSinks.at(stacks -> ItemDropUtil.dropAtBlock(commandBuffer, store, blockX, blockY, blockZ, stacks))
+                .inventoryFirst(player)
+                .warn(message -> Log.fine("STATION loot " + message))
+                .build();
     }
 }

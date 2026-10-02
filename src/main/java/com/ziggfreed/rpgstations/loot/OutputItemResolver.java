@@ -4,6 +4,8 @@ import java.util.function.DoubleSupplier;
 
 import javax.annotation.Nonnull;
 
+import com.ziggfreed.common.loot.StochasticCount;
+
 /**
  * The PURE resolution of a FRACTIONAL {@code Roll.Grants.OutputItems} tally into whole items: the
  * whole part is granted every time, and the fraction left over is the probability of exactly ONE
@@ -33,20 +35,15 @@ public final class OutputItemResolver {
      * A non-positive or non-finite tally resolves to {@code 0}, and a whole-number tally never draws
      * at all (so a deterministic ladder floor stays deterministic).
      *
+     * <p>The rule itself is ziggfreed-common's one fractional-count rule
+     * ({@link StochasticCount#resolve}), which saturates at {@code Integer.MAX_VALUE}; this is the
+     * station's name for it over the cycle's tally.
+     *
      * @param tally the SUMMED fractional item count this cycle granted
      * @param roll  a uniform {@code [0,1)} sample source, consulted at most once
      */
     public static int resolve(double tally, @Nonnull DoubleSupplier roll) {
-        if (!Double.isFinite(tally) || tally <= 0.0) {
-            return 0;
-        }
-        double whole = Math.floor(tally);
-        double fraction = tally - whole;
-        int granted = (int) Math.min(Integer.MAX_VALUE, whole);
-        if (fraction > 0.0 && roll.getAsDouble() < fraction && granted < Integer.MAX_VALUE) {
-            granted++;
-        }
-        return granted;
+        return StochasticCount.resolve(tally, roll);
     }
 
     /**

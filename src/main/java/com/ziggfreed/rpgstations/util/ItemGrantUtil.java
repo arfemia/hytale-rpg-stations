@@ -64,23 +64,12 @@ public final class ItemGrantUtil {
      * summary. The plain {@link #grant} overload cannot express that: its {@code FALLBACK} result
      * only says the drop was ATTEMPTED, which is how a failed drop came to be reported to players
      * as a successful find.
-     */
-    /**
-     * Hotbar-then-backpack ONLY, with NO ground fallback: returns {@code false} when the stack did
-     * not fit anywhere, leaving it to the caller.
      *
-     * <p>For a caller granting SEVERAL stacks at once. Dropping each leftover the moment it fails
-     * scatters one payout across several ground entities, so a player walking up to the pile sees
-     * only part of what they were told they received. Collect the failures and make ONE
-     * {@link ItemDropUtil#dropAtBlock} call with all of them instead, and the pile equals the
-     * remainder. A single-stack caller wants {@link #grantOrDrop}.
+     * <p>A caller granting SEVERAL stacks at once (a loot pass) does not loop this: dropping each
+     * leftover the moment it fails scatters one payout across several ground entities. It takes
+     * ziggfreed-common's {@code loot.GroundSpillSinks} with {@link ItemDropUtil} as its ground, which
+     * collects the leftovers into ONE drop call, so the pile equals the remainder.
      */
-    public static boolean grantToInventory(@Nonnull Player player, @Nonnull ItemStack stack) {
-        boolean[] overflowed = {false};
-        InventoryGrant.grant(player, stack, dropped -> overflowed[0] = true);
-        return !overflowed[0];
-    }
-
     public static boolean grantOrDrop(@Nonnull Player player, @Nonnull ItemStack stack,
             @Nullable CommandBuffer<EntityStore> commandBuffer, @Nullable Store<EntityStore> store,
             int blockX, int blockY, int blockZ) {
