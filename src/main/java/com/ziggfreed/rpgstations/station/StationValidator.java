@@ -198,6 +198,14 @@ public final class StationValidator {
 
     static final String DOMAIN = "station";
 
+    /**
+     * The collector types a station pass carries: the seam core layers the pass's own
+     * {@link StationRewardKinds.Sink} onto the subject it pays, and the three station kinds name it
+     * as their collector. Handed to the shared audit of an inline station roll; a whole-table audit
+     * passes none, since a table cannot know where it is rolled.
+     */
+    private static final Set<Class<?>> STATION_PASS_CARRIES = Set.<Class<?>>of(StationRewardKinds.Sink.class);
+
     private StationValidator() {
     }
 
@@ -2661,7 +2669,8 @@ public final class StationValidator {
         Roll[] rolls = loot.getRolls();
         if (rolls != null) {
             for (int i = 0; i < rolls.length; i++) {
-                checkRoll(rolls[i], label + " Rolls[" + i + "]", id, noCycleOutput, dropListKnown, factorKnown, out);
+                checkRoll(rolls[i], label + " Rolls[" + i + "]", id, noCycleOutput, STATION_PASS_CARRIES,
+                        dropListKnown, factorKnown, out);
                 checkStationTrigger(rolls[i], label + " Rolls[" + i + "]", id, out);
             }
         }
@@ -2682,15 +2691,19 @@ public final class StationValidator {
     static void checkRoll(@Nullable Roll roll, @Nonnull String label, @Nonnull String id,
                           @Nonnull Predicate<String> dropListKnown, @Nonnull Predicate<String> factorKnown,
                           @Nonnull List<Finding> out) {
-        checkRoll(roll, label, id, false, dropListKnown, factorKnown, out);
+        checkRoll(roll, label, id, false, null, dropListKnown, factorKnown, out);
     }
 
     /**
      * As above, for a roll reached through an action that runs an authored {@code Steps} program
-     * ({@code noCycleOutput} - see {@link #checkGrants}).
+     * ({@code noCycleOutput} - see {@link #checkGrants}). {@code carried} is the collector types the
+     * roll's pass carries ({@link #STATION_PASS_CARRIES} for an inline station roll), so a reward
+     * only another kind of pass can collect is flagged; null for a roll that belongs to a table,
+     * which cannot know where it is rolled.
      */
     static void checkRoll(@Nullable Roll roll, @Nonnull String label, @Nonnull String id,
-                          boolean noCycleOutput, @Nonnull Predicate<String> dropListKnown,
+                          boolean noCycleOutput, @Nullable Set<Class<?>> carried,
+                          @Nonnull Predicate<String> dropListKnown,
                           @Nonnull Predicate<String> factorKnown, @Nonnull List<Finding> out) {
         if (roll == null) {
             return;
@@ -2704,8 +2717,11 @@ public final class StationValidator {
         // same file.
         // Kinds are checked against the ONE shared vocabulary every site pays through, the three
         // station kinds included, so a misspelt kind in an inline station roll is warned exactly as
-        // it is in any table.
-        for (Finding shared : atBlock(LootableValidator.auditRoll(roll, id, RewardKinds.shared()), label)) {
+        // it is in any table. An inline roll also names its site: the one collector type a station
+        // pass carries, so a reward only another kind of pass can collect warns here, where it would
+        // always count lost.
+        for (Finding shared : atBlock(
+                LootableValidator.auditRoll(roll, id, RewardKinds.shared(), carried), label)) {
             out.add(shared);
         }
         // What stays here is what only a STATION knows: which factor ids this engine can answer,

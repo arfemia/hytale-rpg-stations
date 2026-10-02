@@ -20,7 +20,9 @@ import com.ziggfreed.common.loot.LootPool;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.LootableAsset;
 import com.ziggfreed.common.loot.LootableConfig;
+import com.ziggfreed.common.loot.LootableValidator;
 import com.ziggfreed.common.loot.Roll;
+import com.ziggfreed.common.loot.reward.MomentItems;
 import com.ziggfreed.common.loot.reward.RewardKinds;
 import com.ziggfreed.rpgstations.api.PatternView;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
@@ -87,6 +89,7 @@ public class StationValidatorTest {
     @BeforeEach
     void registerTheStationKinds() {
         StationRewardKinds.registerInto(RewardKinds.shared());
+        MomentItems.registerInto(RewardKinds.shared());
     }
 
     private static Set<String> codes(List<Finding> findings) {
@@ -722,6 +725,41 @@ public class StationValidatorTest {
         StationAsset a = station("knownkind", ActionDef.of("Mill").withRecipe(trunkRecipe())
                 .withBonus(LootRef.of(null, new Roll[] {roll})));
         assertFalse(codes(validate(a)).contains("LOOT_UNKNOWN_REWARD_KIND"));
+    }
+
+    @Test
+    void anInlineRollAuthoringAMomentItem_isWarnedThatAStationPassCannotCollectIt() {
+        Roll roll = Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootGrants.of(null, null, null,
+                new LootGrants.Reward[] {LootGrants.Reward.of(MomentItems.KIND, Map.of())}), null);
+        StationAsset a = station("momentitem", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                .withBonus(LootRef.of(null, new Roll[] {roll})));
+        List<Finding> findings = validate(a);
+        assertTrue(codes(findings).contains(LootableValidator.PASS_ONLY_REWARD_KIND),
+                "only the pickup pass carries the collector a Moment_Item reward needs");
+        assertFalse(codes(findings).contains(LootableValidator.UNKNOWN_REWARD_KIND),
+                "the kind is registered, so it is a wrong site, not an unknown kind");
+    }
+
+    @Test
+    void anInlineRollAuthoringAStationKind_isNotAPassOnlyFinding() {
+        for (LootGrants grants : List.of(LootFixtures.outputItems(1.0),
+                LootFixtures.effect("Fixture_Effect"), LootFixtures.contribution("yourmod:test", 5.0))) {
+            Roll roll = Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, grants, null);
+            StationAsset a = station("stationkind", ActionDef.of("Mill").withRecipe(trunkRecipe())
+                    .withBonus(LootRef.of(null, new Roll[] {roll})));
+            assertFalse(codes(validate(a)).contains(LootableValidator.PASS_ONLY_REWARD_KIND),
+                    "a station pass carries the collector of its own three kinds");
+        }
+    }
+
+    @Test
+    void aStationRolledTableAuthoringAMomentItem_staysSilent() {
+        List<Finding> findings = StationValidator.validateLootables(List.of(LootableAsset.of("fixturemoment",
+                new Roll[] {Roll.of(StationLootEngine.TRIGGER_CYCLE, null, null, null, LootGrants.of(null, null,
+                        null, new LootGrants.Reward[] {LootGrants.Reward.of(MomentItems.KIND, Map.of())}), null)})),
+                ANY_DROP, ANY_FACTOR);
+        assertFalse(codes(findings).contains(LootableValidator.PASS_ONLY_REWARD_KIND),
+                "a table cannot know where it is rolled, so only an inline roll judges its site");
     }
 
     @Test

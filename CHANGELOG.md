@@ -562,6 +562,11 @@ readings and its HUD and summary rows are byte-identical to 1.0.0, each pinned b
   `ItemGrantUtil.grantToInventory`, whose only callers were the old sinks, is gone. Nothing a player
   sees changes; `OutputItemResolverTest`, `StationLootOriginTest` and the Sawmill parity suites
   pass unchanged.
+- **Technical.** An inline station roll that authors a reward only another kind of pass can collect
+  (Ziggfreed Common's `Moment_Item`, say) now warns at validation as `PASS_ONLY_REWARD_KIND`, since
+  a station pass would count it lost: `StationValidator` hands the shared roll audit the one collector
+  type a station pass carries (`StationRewardKinds.Sink`). The three station kinds stay silent, and a
+  whole table audits as before, since a table cannot know where it is rolled.
 
 ## 1.0.0 - 2026-09-12 (first public release)
 
