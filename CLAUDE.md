@@ -11,13 +11,13 @@ Diegetic interactive work-station engine (a Hytale mod). Router only: the author
 
 ## MMO-agnostic engine
 
-- The engine carries no progression vocabulary (XP, skills, levels, MMO, any consumer's ids) in schema keys, api types, engine or validator ids, lang, shipped JSON or `docs/`, not even as a forwarded value. Examples use the fictitious `yourmod:` namespace. `MmoAgnosticismTest` fails the build (routers, `CHANGELOG.md` and `CURSEFORGE.md` are exempt).
+- The engine carries no progression vocabulary (XP, skills, levels, MMO, any consumer's ids) in schema keys, api types, engine or validator ids, lang, shipped JSON or `docs/`, not even as a forwarded value. Examples use the fictitious `yourmod:` namespace. `MmoAgnosticismTest` fails the build (routers, `CURSEFORGE.md` and `patch-notes/` are exempt).
 - A pack naming its own mod's ids in its own content is fine; the rule governs the engine's vocabulary only.
 - Progression flows through generic namespaced `Contribution` channels a consumer interprets (see the `api/` router).
 
 ## Release scope
 
-- The current version (1.1.0) is HELD and unreleased: the disenchanting wave (two Disenchanting Tables, the ritual queue and paced beats, the protect-list store, `STATION_INPUT`, api 1.1.0 at contract 10, `ziggfreed-common` floor `>=2.2.0`). The last public release is 1.0.0, which shipped the Sawmill only. Finished held content (cooking pit, fire, cutting board, mount spike, the unwired `NpcPerformerSpike` harness) sits in `unreleased/`, a mirror of `src/main/resources` outside the resource roots. Restore it with `unreleased/restore.ps1`, never re-create it (inventory: `unreleased/README.md`), and restore the `skill-stations-pack`'s `unreleased/` in lockstep.
+- The current version (1.1.0) is HELD and unreleased (its note, `patch-notes/1.1.0.md`, reads `status: held`): the disenchanting wave (two Disenchanting Tables, the ritual queue and paced beats, the protect-list store, `STATION_INPUT`, api 1.1.0 at contract 10, `ziggfreed-common` floor `>=2.2.0`). The last public release is 1.0.0, which shipped the Sawmill only. Finished held content (cooking pit, fire, cutting board, mount spike, the unwired `NpcPerformerSpike` harness) sits in `unreleased/`, a mirror of `src/main/resources` outside the resource roots. Restore it with `unreleased/restore.ps1`, never re-create it (inventory: `unreleased/README.md`), and restore the `skill-stations-pack`'s `unreleased/` in lockstep.
 - The api is not frozen; declaring it frozen is the maintainer's decision, never implied by a version number.
 
 ## Gotchas
