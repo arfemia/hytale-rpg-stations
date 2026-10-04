@@ -66,4 +66,4 @@ for the developer guide.
 - [SCHEMA.md](SCHEMA.md) - the codec-generated field reference for every content type, regenerated
   via `gradlew generateSchemaDocs`.
 
-See also [CHANGELOG.md](CHANGELOG.md) for the developer changelog.
+See also [patch-notes/](patch-notes/) for the developer changelog.

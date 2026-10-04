@@ -209,8 +209,9 @@ consumer needs.
 
 ## Changelog
 
-See `CHANGELOG.md` in this mod's repository for the full version history. The next version, 1.1.0,
-is held and unreleased; its entries live under that heading there until it ships. The Disenchanting
+See `patch-notes/` in this mod's repository for the full version history. The next version, 1.1.0,
+is held and unreleased; its note is `patch-notes/1.1.0.md` and its full change list is
+`patch-notes/dev/1.1.0.md` until it ships. The Disenchanting
 Table is in it. Place a piece of gear on the table and it comes apart over a staged ritual, giving
 back what the Salvage bench would plus Life Essence and the occasional find. A four-piece
 disenchanter's kit, a grimoire and a draught each speed the ritual up. The Greater Disenchanting
