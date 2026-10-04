@@ -10,6 +10,7 @@ Router for the asset codecs. The codec `.documentation` strings, the generated `
 - Field-local warn checks use `CodecWarnValidators`, never the engine's `Validators` factory: a failing engine validator makes the store drop the whole asset, and this mod's posture is that an asset always loads and findings are advisory.
 - A `$`-key (`$Comment` and friends) is legal inside `InheritMapCodec` maps (`Moments`, `Flairs`, `FlairAsset.Moments`) and fatal inside engine `MapCodec` maps (`Anchors`, `Stamp.Stats.Caps.PerStat`, every `Tags` leaf). Put the note on the enclosing object. `ShippedAssetDecodeTest` decodes every shipped file to hold this.
 - A new editor `Dropdown` needs its dataset id as a constant on `AssetEditorDataSets` with a handler; nothing cross-checks the two, and a missing handler yields a silently empty pick list.
+- A leaf naming an engine asset id takes Ziggfreed Common's `EditorSchema.assetRef(<AssetClass>.class)`, the engine's own picker over the loaded ids (`ActionInput.Quality` names `ItemQuality`), never the engine's `<Asset>.VALIDATOR_CACHE`: its failed check drops the whole file, so a typo or a tier a later pack ships would take a protect list's protections with it. `StationValidator`'s own `QUALITY_UNKNOWN` stays the warning.
 - Lang keys stay lowercase (`rpgstations.station.<lowercased id>.name`) although asset ids are authored PascalCase. Never "fix" them.
 
 ## Input matching and protection

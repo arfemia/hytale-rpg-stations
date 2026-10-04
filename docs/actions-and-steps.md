@@ -48,7 +48,10 @@ which always commits to its own action rather than being re-selected), IN AUTHOR
 `Select` is an `ActionInput` matcher: `ItemId`, `ResourceTypeId`, native item `Tags`, a
 **functional** route - `Function: "Weapon"|"Armor"|"Tool"`, tested against the held item's live shape -
 or a **quality** route - `Quality: ["Rare", "Epic"]`, any of the native item quality ids, read off the
-held stack and matched without regard to case (a pack's own quality tier works the same). A
+held stack and matched without regard to case (a pack's own quality tier works the same). In the
+in-game Asset Editor each `Quality` entry offers a pick list of the qualities the server has loaded;
+a file written by hand still loads whatever it names, and the validator's `QUALITY_UNKNOWN` points
+out an id no loaded quality answers to. A
 match is ANY route satisfied; an ABSENT `Select` matches any context (its custody acceptance derives
 from its own `Recipe` inputs instead) - the validator flags an unreachable catch-all authored before a
 more specific action.

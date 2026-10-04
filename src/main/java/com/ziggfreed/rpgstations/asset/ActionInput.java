@@ -9,6 +9,8 @@ import com.hypixel.hytale.codec.Codec;
 import com.hypixel.hytale.codec.KeyedCodec;
 import com.hypixel.hytale.codec.builder.BuilderCodec;
 import com.hypixel.hytale.codec.schema.metadata.ui.UIEditor;
+import com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality;
+import com.ziggfreed.common.asset.EditorSchema;
 import com.ziggfreed.common.codec.TagMatch;
 
 /**
@@ -28,6 +30,9 @@ import com.ziggfreed.common.codec.TagMatch;
  * re-qualified with, which is its item's own when it carries none). A material with no stack
  * behind it (a counted pile entry) reads its item's quality, and a placed BLOCK reads none, so a
  * {@code Quality} route never matches a block socket or a structure cell (the validator warns).
+ * In the Asset Editor each entry offers the engine's own quality picker
+ * ({@code EditorSchema.assetRef}); nothing is refused at decode, so a typo or a tier a later pack
+ * ships still loads and {@code QUALITY_UNKNOWN} names it.
  *
  * <p><b>{@link #excepts} carve holes in the match.</b> Each is this same matcher one level down,
  * without an {@code Except} of its own: a material the outer routes accept is REFUSED when any
@@ -84,7 +89,8 @@ public final class ActionInput {
                 .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:action-function"))).add()
                 .appendInherited(new KeyedCodec<>("Quality", Codec.STRING_ARRAY, false),
                         (o, v) -> o.quality = v, o -> o.quality, (o, p) -> o.quality = p.quality)
-                .documentation("Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block.").add();
+                .documentation("Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block.")
+                .metadata(EditorSchema.assetRef(ItemQuality.class)).add();
         if (withExcept) {
             builder = builder.appendInherited(new KeyedCodec<>("Except", EXCEPTS_CODEC, false),
                             (o, v) -> o.excepts = v, o -> o.excepts, (o, p) -> o.excepts = p.excepts)
