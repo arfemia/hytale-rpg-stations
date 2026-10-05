@@ -26,8 +26,9 @@ import com.ziggfreed.common.codec.TagMatch;
  *
  * <p>{@link #quality} is the QUALITY route: one or more native {@code ItemQuality} asset ids (an
  * open list, since a pack can ship its own tier), matched without regard to case against the
- * quality the STACK carries ({@code ItemStack#getQualityIndex}: the index the stack was made or
- * re-qualified with, which is its item's own when it carries none). A material with no stack
+ * quality the STACK reads ({@code ItemStack#getQualityIndex}: the quality given to that stack, by a
+ * stamp for example, else its item's current quality; a stack carries no quality of its own until
+ * one is set on it). A material with no stack
  * behind it (a counted pile entry) reads its item's quality, and a placed BLOCK reads none, so a
  * {@code Quality} route never matches a block socket or a structure cell (the validator warns).
  * In the Asset Editor each entry offers the engine's own quality picker
@@ -89,7 +90,7 @@ public final class ActionInput {
                 .metadata(new UIEditor(new UIEditor.Dropdown("rpgstations:action-function"))).add()
                 .appendInherited(new KeyedCodec<>("Quality", Codec.STRING_ARRAY, false),
                         (o, v) -> o.quality = v, o -> o.quality, (o, p) -> o.quality = p.quality)
-                .documentation("Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality it was made or re-qualified with; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block.")
+                .documentation("Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality given to it (a stamp can give one), else its item's current quality; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block.")
                 .metadata(EditorSchema.assetRef(ItemQuality.class)).add();
         if (withExcept) {
             builder = builder.appendInherited(new KeyedCodec<>("Except", EXCEPTS_CODEC, false),
