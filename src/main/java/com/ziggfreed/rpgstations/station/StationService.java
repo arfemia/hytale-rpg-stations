@@ -8856,9 +8856,9 @@ public final class StationService {
     }
 
     /**
-     * The held or placed STACK's quality, the native {@code ItemQuality} id its own quality index
-     * resolves to ({@link ItemStack#getQualityIndex}: the index the stack was made or re-qualified
-     * with, its item's own when it carries none), which an {@code ActionInput.Quality} route reads,
+     * The held or placed STACK's quality, the native {@code ItemQuality} id its quality index
+     * resolves to ({@link ItemStack#getQualityIndex}: the quality given to that stack, else its
+     * item's current quality), which an {@code ActionInput.Quality} route reads,
      * through the library's one item reader ({@link ItemReadings#qualityId(ItemStack)}). Null for no
      * stack, or an index that resolves to no quality.
      */

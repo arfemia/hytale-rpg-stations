@@ -14,12 +14,11 @@ import com.ziggfreed.common.entity.ItemReadings;
  * empty hand or an item that tracks no durability. The numbers are the ones the api
  * {@code FactorContext} has always carried; only where they are read from moved.
  *
- * <p><b>Quality reads the held ITEM, never the stack's own index.</b> The engine copies an item's
- * quality index into every stack it makes and saves it with the stack, so a stack read would drift
- * from the item's current quality after that item's quality reloads or the index order moves
- * between boots; the tool reading has always been the item's, and stays so through
+ * <p><b>Quality reads the held ITEM, never the stack.</b> A stack reads the quality given to it (a
+ * stamp can give one), else its item's current quality; the tool reading has always been the
+ * item's, so a re-qualified tool still reads as its item, through
  * {@link ItemReadings#quality(com.hypixel.hytale.server.core.asset.type.item.config.Item)}. The
- * placed piece's own stack index is {@code hytale:item_quality}'s reading, a different question.
+ * placed piece's own stack quality is {@code hytale:item_quality}'s reading, a different question.
  *
  * <p>Pure over the stack (no player, no store), so the defaults pin in a unit JVM even though the
  * stack itself cannot be built there.
