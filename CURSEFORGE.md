@@ -6,9 +6,9 @@ RPG Stations adds interactive work stations to your Hytale server. No menus, no 
 conversions - materials go in, your character (or a stand-in performer) visibly does the work over
 real time, and results come out.
 
-**1.0.0 ships one station: the Sawmill.**
+**Two stations ship with it: the Sawmill and the Disenchanting Table.**
 
-Craft the bench at a tier 2 Workbench, load logs onto it,
+Craft the Sawmill at a tier 2 Workbench, load logs onto it,
 press `F`, and your character saws them into that wood family's planks one cycle at a time, with a
 held-tool gate, a tool-scaling yield curve, and a session summary when you stop.
 
@@ -22,13 +22,20 @@ cycles into any session worked with mithril-grade steel, every cycle carries a 1
 **Sawmiller's Hatchet**. It drops nowhere else, no bench can forge it, and it is the only tool that
 reaches the top rung of the sawmill's own curve.
 
+New in 1.1.0: the Disenchanting Table. Place a piece of gear on it, press `F`, and the piece comes
+apart over a staged ritual, giving back what the Salvager's Workbench would plus Essence of Life and the
+occasional find. Gear of item level 20 and up has a 1-in-200 shot at the Disenchanter's Grimoire on
+every ritual, and each of the four disenchanter's kit pieces has its own 1.5 percent chance. An
+untrained ritual takes 38 seconds. The kit, the grimoire and a Disenchanter's Draught from the Alchemist's Workbench
+each speed it up, down to 15 seconds. The Greater Disenchanting Table works three pieces in a row
+and pays more.
+
 Every number in all of that is plain JSON, so a server can retune what better tools are worth,
 change what the finds hand over, or key the whole thing off something else entirely.
 
-The engine underneath is the full thing, not a Sawmill special case: it also supports multiblock
-builds (arrange ordinary blocks in the world and the shape becomes a station), named placement
-sockets, timed cooking windows, and unattended processing that keeps working while nobody stands
-there, all ready for content packs and future stations to use. Multi-action stations, step
+Both stations run on one engine, which also supports multiblock builds (arrange ordinary blocks in
+the world and the shape becomes a station), named placement sockets, timed cooking windows, and
+unattended processing that keeps working while nobody stands there, all ready for content packs and future stations to use. Multi-action stations, step
 programs, multi-station walks, placed-input custody and props, the puppet performer, conditional
 loot, and enhancement stamping are live and authorable the same way. Every one of them is driven
 from ordinary content assets, so a pack (or your own server-side assets) can add stations this
@@ -65,17 +72,18 @@ default content ships through.
 
 One station block can offer several distinct jobs, picked by what you're holding and what stands at
 the block. No dropdown. Each job carries its own requirements, and the press picks the first job
-whose requirements actually hold. The Sawmill uses the lighter form: sneak and press `F` to pick
+whose requirements hold. The Sawmill uses the lighter form: sneak and press `F` to pick
 which cut you want from the log you're holding (planks, decorative, or ornate) if you do not want
 the default.
 
 ### Step programs and multi-station walks
 
-A station's work can be authored as a step-by-step program, not only a simple convert loop - a
+A station's work can be authored as a simple convert loop or as a step-by-step program - a
 sequence of beats (a hold, a swing, a sound) composed with consume/produce/loot/command phases in
 one fixed order. A program can even reach out to a SECOND, separately-placed station nearby: your
 character (or performer) walks over, works at the remote station, and walks back, all from one `F`
-press on the primary block.
+press on the primary block. The Disenchanting Table's ritual is a seven-beat program, and the
+greater table runs it once for each piece it holds, left to right.
 
 ### Placed-input custody and displays
 
@@ -84,6 +92,10 @@ in, a repeat press tops it up. Loaded materials can render as a real placed prop
 stacked on the sawmill bench), retrievable with a press of `F` straight off the display. What you
 place stays placed like a chest's contents: it survives logging off and server restarts, waiting
 in the station until you work it, take it back, or the block is broken.
+
+A station that uses up what you place turns away an item carrying data no mod has said may go with
+it, such as a bag with something in it. The Disenchanting Tables also refuse anything that is not
+gear.
 
 ### The puppet
 
@@ -99,7 +111,7 @@ session length, whatever another installed mod writes) - all built from the same
 weighted rolls every loot site in the mod uses. Extra copies of the result can be fractional, so a
 mid-ladder tier can be worth "two and often a third" without rounding onto a neighbouring rung.
 Every find can carry its own sound-and-particle celebration, and a cue only plays once its reward
-actually handed something over, so a drop table that rolled nothing stays silent.
+handed something over, so a drop table that rolled nothing stays silent.
 
 Drop tables compose too, using Hytale's own drop-list format. The sawmill's four find tiers each
 combine a shared offcut list (referenced by id, so retuning what milling yields is one edit that
@@ -112,8 +124,8 @@ replace exactly the one it wants to retune without inheriting the rest.
 An authorable ritual for gear: place a weapon at a station, strike it, and roll stats onto it from a
 configurable pool, capped by a composable budget model (a flat ceiling, a stat-scaled ceiling, or
 both at once - the tighter one wins). Durability upgrades land with no other mod installed at all.
-The engine ships this capability; 1.0.0 ships no default station that uses it, so it is here for
-pack authors to build on.
+The engine ships this capability, but neither shipped station stamps gear, so it is here for pack
+authors to build on.
 
 ### Flairs
 
@@ -140,8 +152,9 @@ category, previewing whatever material is currently placed in the block.
 ## For Server Owners
 
 Everything here is a Hytale content asset: every station, action, lootable table, roll pool, flair,
-extension, and the engine's own settings is a file a pack (or a server owner's own override layer)
-ships, folded `defaults < pack < owner` exactly like every other asset the engine loads.
+extension, protect list, and the engine's own settings is a file a pack (or a server owner's own
+override layer) ships, folded `defaults < pack < owner` exactly like every other asset the engine
+loads.
 
 | Folder | What it holds |
 |---|---|
@@ -150,6 +163,7 @@ ships, folded `defaults < pack < owner` exactly like every other asset the engin
 | `Server/RpgStations/Actions/` | Standalone, reusable actions a station attaches by reference |
 | `Server/RpgStations/Flairs/` | Cosmetic unlock overlays |
 | `Server/RpgStations/Extensions/` | Additive extensions onto another pack's content |
+| `Server/RpgStations/ProtectLists/` | Items a station that uses up what you place must never take; every file adds to one server-wide list |
 | `Server/RpgStations/Settings/` | The one server-wide `Settings.json` - engine on/off, session-summary HUD |
 | `Server/ZiggfreedCommon/Lootables/` | Reusable conditional-loot tables |
 | `Server/ZiggfreedCommon/RollPools/` | Reusable enhancement stat-roll pools |
@@ -169,8 +183,8 @@ session-summary HUD tuning, layered like any other asset - there is no separate 
   session (transient, never persisted).
 - `/rpgstations camera list` - list every known camera preset and your current one.
 - `/rpgstations validate` - run the full content audit over every loaded station, action, lootable,
-  and extension, and report every finding in chat (the same audit that runs once automatically at
-  server boot).
+  extension and protect list, and report every finding in chat (the same audit that runs once
+  automatically at server boot).
 
 ## Installation
 
@@ -187,6 +201,12 @@ base earns. Admins can `/give` the block directly
 (`RPG_Station_Sawmill`). A content pack that ships its own block under the same id replaces the
 jar's, so a pack that authors no recipe on its copy removes that craftability and owns acquisition
 its own way - a shop, a quest, whatever that pack's economy wants.
+
+The Disenchanting Table comes from the same tier 2 Workbench, where the game crafts its own Salvager's
+Workbench: six Iron Ingots, four logs, four rocks and twelve Essence of Life. The Greater
+Disenchanting Table is made at the Arcanist's Workbench from a Disenchanting Table, eight Thorium
+Ingots, six Bolts of Silk and twenty Essence of the Void. Admins can `/give` either (`RPG_Station_Disenchanting_Table`,
+`RPG_Station_Disenchanting_Table_Greater`).
 
 ## Integrations
 
@@ -209,13 +229,13 @@ consumer needs.
 
 ## Changelog
 
-See `patch-notes/` in this mod's repository for the full version history. The next version, 1.1.0,
-is held and unreleased; its note is `patch-notes/1.1.0.md` and its full change list is
-`patch-notes/dev/1.1.0.md` until it ships. The Disenchanting
-Table is in it. Place a piece of gear on the table and it comes apart over a staged ritual, giving
-back what the Salvage bench would plus Life Essence and the occasional find. A four-piece
-disenchanter's kit, a grimoire and a draught each speed the ritual up. The Greater Disenchanting
-Table works three pieces in a row and pays more.
+1.1.0 adds the second station, the Disenchanting Table, with its greater tier, its kit, the
+grimoire and the draught. For pack authors it adds stations that take their recipes from any of the
+game's benches (the Salvager's Workbench included), a queue that works several placed pieces in turn,
+server-wide protect lists, and loot rolls marked as a station's expected output so a real find
+still reads as one. It requires ZiggfreedCommon 2.2.0.
+
+See `patch-notes/` in this mod's repository for the full version history.
 
 ## Links & Support
 
