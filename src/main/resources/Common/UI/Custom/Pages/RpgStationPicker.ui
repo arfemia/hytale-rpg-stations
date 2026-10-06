@@ -20,9 +20,10 @@
 
 $C = "../Common.ui";
 $F = "../Common/ZigFrames.ui";
+$ZT = "../Common/ZigType.ui";
 
-@RpgStationPickerTitleStyle = (FontSize: 22, RenderBold: true, TextColor: #eef3fa, HorizontalAlignment: Center, VerticalAlignment: Center);
-@RpgStationPickerHintStyle = (FontSize: 14, TextColor: #9fb0c4, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
+@RpgStationPickerTitleStyle = (FontSize: $ZT.@ZigFontDisplay, RenderBold: true, TextColor: #eef3fa, HorizontalAlignment: Center, VerticalAlignment: Center);
+@RpgStationPickerHintStyle = (FontSize: $ZT.@ZigFontBody, TextColor: #9fb0c4, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
 
 $C.@PageOverlay {
   LayoutMode: Middle;

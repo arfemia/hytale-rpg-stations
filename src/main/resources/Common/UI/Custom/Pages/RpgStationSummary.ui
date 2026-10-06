@@ -31,10 +31,11 @@
 // so a co-installed mod's HUD document cannot clobber this one on the client's flat namespace.
 
 $F = "../Common/ZigFrames.ui";
+$ZT = "../Common/ZigType.ui";
 
-@SummaryTitleStyle = (FontSize: 20, RenderBold: true, RenderUppercase: true, TextColor: #ffd24a, LetterSpacing: 1, HorizontalAlignment: Center, VerticalAlignment: Center);
+@SummaryTitleStyle = (FontSize: $ZT.@ZigFontTitle, RenderBold: true, RenderUppercase: true, TextColor: #ffd24a, LetterSpacing: 1, HorizontalAlignment: Center, VerticalAlignment: Center);
 
-@SummaryBodyStyle = (FontSize: 15, TextColor: #eef3fa, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
+@SummaryBodyStyle = (FontSize: $ZT.@ZigFontEmphasis, TextColor: #eef3fa, HorizontalAlignment: Center, VerticalAlignment: Center, Wrap: true);
 
 @LedgerIconGridStyle = ItemGridStyle(
   SlotSize: 24,
@@ -72,14 +73,14 @@ $F = "../Common/ZigFrames.ui";
   CursedIconAnchor: (Bottom: 0, Left: 0, Width: 0, Height: 0)
 );
 
-@LedgerRowStyle = (FontSize: 15, TextColor: #eef3fa, VerticalAlignment: Center, Wrap: true);
+@LedgerRowStyle = (FontSize: $ZT.@ZigFontEmphasis, TextColor: #eef3fa, VerticalAlignment: Center, Wrap: true);
 
 // The subordinate SECOND line of a ledger row (a factor breakdown behind a number, a caption).
 // Deliberately its own smaller-font style rather than a "\n" inside the row's own line: the native
 // rich-text markup set has no font-size tag, so a second line only renders smaller as its own Label.
-@LedgerSubStyle = (FontSize: 13, TextColor: #9fb0c4, VerticalAlignment: Center, Wrap: true);
+@LedgerSubStyle = (FontSize: $ZT.@ZigFontCaption, TextColor: #9fb0c4, VerticalAlignment: Center, Wrap: true);
 
-@LedgerMoreStyle = (FontSize: 12, TextColor: #9fb0c4, HorizontalAlignment: Center, VerticalAlignment: Center);
+@LedgerMoreStyle = (FontSize: $ZT.@ZigFontCaption, TextColor: #9fb0c4, HorizontalAlignment: Center, VerticalAlignment: Center);
 
 Group #RpgStationSummaryHudCanvas {
   // Transparent full-viewport coordinate space only - no Anchor, no Background.

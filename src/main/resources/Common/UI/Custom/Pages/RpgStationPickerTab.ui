@@ -36,6 +36,7 @@
 //      caption under the name rather than a centred orphan.
 
 $C = "../Common.ui";
+$ZT = "../Common/ZigType.ui";
 
 @RpgStationPickerTabBtnStyle = ButtonStyle(
   Default: (Background: PatchStyle(TexturePath: "../Common/Buttons/Primary_Square.png", Border: 12, Color: #ffffff)),
@@ -45,9 +46,9 @@ $C = "../Common.ui";
   Sounds: $C.@ButtonSounds
 );
 
-@RpgStationPickerTabLabelStyle = (FontSize: 16, TextColor: #f4f8fc, RenderBold: true, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
-@RpgStationPickerTabCostStyle = (FontSize: 13, TextColor: #b9c9db, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
-@RpgStationPickerTabLockStyle = (FontSize: 13, TextColor: #d98f8f, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
+@RpgStationPickerTabLabelStyle = (FontSize: $ZT.@ZigFontHeading, TextColor: #f4f8fc, RenderBold: true, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
+@RpgStationPickerTabCostStyle = (FontSize: $ZT.@ZigFontCaption, TextColor: #b9c9db, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
+@RpgStationPickerTabLockStyle = (FontSize: $ZT.@ZigFontCaption, TextColor: #d98f8f, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
 
 @RpgStationPickerIconGridStyle = ItemGridStyle(
   SlotSize: 64,
