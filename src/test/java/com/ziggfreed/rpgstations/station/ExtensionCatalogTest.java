@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.codec.util.RawJsonReader;
+import com.ziggfreed.common.factor.FactorFormula;
 import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootGrants;
@@ -31,8 +32,10 @@ import com.ziggfreed.common.loot.stamp.StatRollEntry;
 import com.ziggfreed.common.subject.Subject;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Contribution;
+import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
 import com.ziggfreed.rpgstations.asset.Ingredient;
+import com.ziggfreed.rpgstations.asset.Pace;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
@@ -307,6 +310,34 @@ public class ExtensionCatalogTest {
         assertNotNull(anchors);
         assertTrue(anchors.containsKey("Fire"), "the base anchor survives");
         assertNotNull(anchors.get("Well"), "the extension's NEW anchor reaches the resolved action");
+    }
+
+    @Test
+    void live_anExtensionsPaceStretch_reachesTheComposedPace_evenWithNoLadderOfItsOwn() throws Exception {
+        StationAsset station = stationWith("fixturestretch", ActionDef.of("Rite")
+                .withSteps(new StationStep[] {StationStep.of("Beat")})
+                .withPace(Pace.of(null, FactorFormula.Clamp.of(0.5, 1.0))));
+        fold(ext("stretch-a", "{ \"Target\":{\"Action\":\"Rite\"}, \"Pace\":{ \"Stretch\": 3.0 } }"),
+                ext("stretch-b", "{ \"Target\":{\"Action\":\"Rite\"}, \"Pace\":{ \"Stretch\": 0.5 } }"));
+
+        StationPacing.Composed composed = StationService.effectivePace(station, ActionResolver.resolve(station, "Rite"));
+        assertEquals(1.5, StationPacing.multiplier(composed, (factor, param) -> null), 1e-9,
+                "two extensions' stretches multiply, outside the action's clamp");
+    }
+
+    @Test
+    void live_anExtensionsPaceClamp_reachesTheComposedPace_andNarrowsTheActionsFloor() throws Exception {
+        ContributionScale fast = ContributionScale.of(
+                new FactorFormula.Term[] {FactorFormula.Term.of("fixture:proficiency", null, 1.0)},
+                new ContributionScale.Floor[] {ContributionScale.Floor.of(10.0, 0.2)});
+        StationAsset station = stationWith("fixturefloor", ActionDef.of("Rite")
+                .withSteps(new StationStep[] {StationStep.of("Beat")})
+                .withPace(Pace.of(fast, FactorFormula.Clamp.of(0.1, 1.0))));
+        fold(ext("floor-ext", "{ \"Target\":{\"Action\":\"Rite\"}, \"Pace\":{ \"Clamp\": { \"Min\": 0.5 } } }"));
+
+        StationPacing.Composed composed = StationService.effectivePace(station, ActionResolver.resolve(station, "Rite"));
+        assertEquals(0.5, StationPacing.multiplier(composed, (factor, param) -> 50.0), 1e-9,
+                "the ladder's 0.2 is held at the extension's floor, not the action's looser 0.1");
     }
 
     @Test

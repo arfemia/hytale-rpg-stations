@@ -1,5 +1,5 @@
 {
-  "$Comment": "The Disenchanting Table's ritual, a standalone action both tables Ref (Stations/Disenchanting_Table.json as is, Stations/Disenchanting_Table_Greater.json through its child action Disenchant_Greater). One piece of gear goes on the table and comes apart over seven beats; what it gives back is whatever the vanilla Salvage bench would give for it, and the table's own payout is layered on top through Bonus. Recipe.FromCrafting derives one conversion per vanilla salvage recipe, full outputs at native quantities, so a third-party piece that ships its own salvage recipe is covered with nothing written here. Fallback takes the gear no salvage recipe names: a share of the piece's own crafting recipe when it has one, otherwise the piece is consumed for the Bonus rolls alone (the essence-only route). Fallback.Input scopes both routes to weapons, armor, tools and utility gear (backpacks, the quiver, the helipack) by Type tag (shields are Type Weapon in vanilla). A piece meets three checks as it is placed, before any salvage row or route sees it. First the things that must never go on the table: the non-gear by the protect-list file ProtectLists/Disenchanting_Tables.json, scoped to both tables (what the Salvage bench knows that is not gear: rocks, plants, ammunition, bait, deployables, repair kits, fertilizers, the capture crate; and the few vanilla items that carry a gear type without being gear: a spawner egg, a grenade, the developer items and every item of a creative or test quality), and the table's own trophy and kit by Custody.Input.Except here; both answer Refused:Protected. Then the station's metadata guard turns away any piece whose stack carries data no mod declared disposable (a bag with something in it), since this ritual consumes every piece it takes. Custody keeps ONE real stack (MaxQuantity 1) so wear and stamped stats travel into custody and back out intact if the ritual is interrupted; HeldOnly places only what the hand holds, never a match dug out of the backpack; Preview names the return as the piece lands. Every beat authors IsWork so the table stays lit between beats; the three long beats (Kindle, Draw, Surge) are Paced and stretch or shrink with Pace, the other four hold their length so the gather, the shatter and the linger stay crisp at any speed. Pace reads the native stat RPG_Disenchanting_Proficiency: 0 is the full 38-second ritual, and the clamp's 0.21 floor brings the three paced beats from 29 seconds down to about 6, so the fastest ritual is 15 seconds. The kit pieces, the set tiers, the grimoire trophy and the draught all raise that stat, so a worker gets faster by wearing and drinking, never by anything this file needs to know about. Bonus rolls at the Payout beat (RollBonus), one pass per ritual, from four tables that each hold one concern: Disenchant_Essence (the ordinary Life essence, marked Expected so it lands on the plain output row), Disenchant_Void (the Void essence and Voidheart finds), DisenchantTrophy (the grimoire chase) and Disenchant_Kit (the four kit pieces). Retune any one by overriding that one small file. Every number here is balance data: beat lengths, pace floors, offsets and delays are all leaves.",
+  "$Comment": "The Disenchanting Table's ritual, a standalone action both tables Ref (Stations/Disenchanting_Table.json as is, Stations/Disenchanting_Table_Greater.json through its child action Disenchant_Greater). One piece of gear goes on the table and comes apart over six beats; what it gives back is whatever the vanilla Salvage bench would give for it, and the table's own payout is layered on top through Bonus. Recipe.FromCrafting derives one conversion per vanilla salvage recipe, full outputs at native quantities, so a third-party piece that ships its own salvage recipe is covered with nothing written here. Fallback takes the gear no salvage recipe names: a share of the piece's own crafting recipe when it has one, otherwise the piece is consumed for the Bonus rolls alone (the essence-only route). Fallback.Input scopes both routes to weapons, armor, tools and utility gear (backpacks, the quiver, the helipack) by Type tag (shields are Type Weapon in vanilla). A piece meets three checks as it is placed, before any salvage row or route sees it. First the things that must never go on the table: the non-gear by the protect-list file ProtectLists/Disenchanting_Tables.json, scoped to both tables (what the Salvage bench knows that is not gear: rocks, plants, ammunition, bait, deployables, repair kits, fertilizers, the capture crate; and the few vanilla items that carry a gear type without being gear: a spawner egg, a grenade, the developer items and every item of a creative or test quality), and the table's own trophy and kit by Custody.Input.Except here; both answer Refused:Protected. Then the station's metadata guard turns away any piece whose stack carries data no mod declared disposable (a bag with something in it), since this ritual consumes every piece it takes. Custody keeps ONE real stack (MaxQuantity 1) so wear and stamped stats travel into custody and back out intact if the ritual is interrupted; HeldOnly places only what the hand holds, never a match dug out of the backpack; Preview names the return as the piece lands. Every beat authors IsWork so the table stays lit between beats; every beat but the last is Paced and shrinks with Pace, and the ritual ends on the Payout's bloom, which holds its 1.5 seconds at any speed. Pace reads the native stat RPG_Disenchanting_Proficiency: untrained the ritual takes about 15 seconds (14.5), and the most the shipped gear reaches (the full kit, the grimoire in hand and the draught, 98 points) brings it to about 3, in even steps between. The kit pieces, the set tiers, the grimoire trophy and the draught all raise that stat, so a worker gets faster by wearing and drinking, never by anything this file needs to know about. A pack that wants a longer, slower ritual says so from its own extension instead of restating these beats: a Pace.Stretch lengthens every paced beat, a Pace.Clamp of its own raises the floor, and a ladder of its own can soften this one. Bonus rolls at the Payout beat (RollBonus), one pass per ritual, from four tables that each hold one concern: Disenchant_Essence (the ordinary Life essence, marked Expected so it lands on the plain output row), Disenchant_Void (the Void essence and Voidheart finds), DisenchantTrophy (the grimoire chase) and Disenchant_Kit (the four kit pieces). Retune any one by overriding that one small file. Every number here is balance data: beat lengths, pace floors, offsets, delays and clip lengths are all leaves.",
   "Label": "rpgstations.action.disenchant.label",
   "Recipe": {
     "$Comment": "Benches names the vanilla Salvage bench by its native bench id, and Types keeps the derivation to Processing recipes, which is the kind every salvage file is. No Yield: vanilla's own return is the point, and everything the table adds is a Bonus roll. Fallback.CraftingShare.Share 0.3 hands back a bit under a third of each exact-item line of the piece's own crafting recipe, per piece for a batch recipe, which stays under vanilla's own quarter-to-a-third salvage return; EssenceOnly then takes any gear piece with neither recipe, so a drop-only sword is unmade for its essence rather than refused. Input's Type list is the gear filter: add a Type here to put another class of item on the table, and protect any one item of it the table must not take in ProtectLists/Disenchanting_Tables.json.",
@@ -39,29 +39,30 @@
     }
   },
   "Pace": {
-    "$Comment": "The one factor is the native stat RPG_Disenchanting_Proficiency, read through hytale:stat. The highest reached floor's Scale multiplies every Paced beat: untrained 1.0 (the full 38 seconds), 45 points about 25 seconds, 90 points the 15-second floor the Clamp holds. The four kit pieces carry 36 points between them, the kit's three set tiers add 28, the grimoire trophy 14 in hand, the draught 20 for five minutes. An extension's own Pace ladder multiplies into this one; only this Clamp bounds the product, so author both sides here.",
+    "$Comment": "The one factor is the native stat RPG_Disenchanting_Proficiency, read through hytale:stat. The highest reached floor's Scale multiplies every Paced beat (13 of the ritual's 14.5 seconds; the 1.5-second bloom holds), and the floors are spaced so each takes about 1.6 seconds off the whole ritual: 14.5, 12.8, 11.3, 9.6, 7.9, 6.3, 4.6 and 3.0 seconds. The four kit pieces carry 36 points between them, the kit's three set tiers add 28 (the last one only with the grimoire in hand), the grimoire trophy 14 in hand, the draught 20 for five minutes: the draught alone is about 11 seconds, the full kit about 8, the kit with the grimoire about 4.6, and all of it, 98 points, about 3. An extension's own Pace ladder multiplies into this one; this Clamp bounds the product, so author both sides here, and an extension's Clamp can only narrow it.",
     "Ladder": {
       "Factors": [ { "Factor": "hytale:stat", "Param": "RPG_Disenchanting_Proficiency" } ],
       "Floors": [
         { "Min": 0, "Scale": 1.0 },
-        { "Min": 10, "Scale": 0.9 },
-        { "Min": 20, "Scale": 0.8 },
-        { "Min": 30, "Scale": 0.7 },
-        { "Min": 45, "Scale": 0.55 },
-        { "Min": 60, "Scale": 0.42 },
-        { "Min": 75, "Scale": 0.3 },
-        { "Min": 90, "Scale": 0.21 }
+        { "Min": 10, "Scale": 0.87 },
+        { "Min": 20, "Scale": 0.75 },
+        { "Min": 30, "Scale": 0.62 },
+        { "Min": 45, "Scale": 0.49 },
+        { "Min": 60, "Scale": 0.37 },
+        { "Min": 75, "Scale": 0.24 },
+        { "Min": 90, "Scale": 0.115 }
       ]
     },
-    "Clamp": { "Min": 0.21, "Max": 1.0 }
+    "Clamp": { "Min": 0.1, "Max": 1.0 }
   },
   "Steps": [
     {
-      "$Comment": "Open, 2 seconds fixed: the double opens the grimoire while the table wakes into its Working look. The sigil rises from the placed piece itself (Target Display; RPG_Disenchant_Sigil authors a LifeSpan so it rides the prop) under the spellbook's page-turn charge.",
+      "$Comment": "Open, 0.8 seconds untrained and Paced: the double opens the grimoire while the table wakes into its Working look, then goes back to channelling once the gesture has played (ClipMs, which an animation's own speed sets, so it is not paced). The sigil rises from the placed piece itself (Target Display; RPG_Disenchant_Sigil authors a LifeSpan so it rides the prop) under the spellbook's page-turn charge.",
       "Id": "Open",
+      "Paced": true,
       "IsWork": true,
-      "Duration": { "Ms": 2000 },
-      "Puppet": { "Clip": "RPG_Emote_Disenchant_Open" },
+      "Duration": { "Ms": 800 },
+      "Puppet": { "Clip": "RPG_Emote_Disenchant_Open", "ClipMs": 500 },
       "Presentation": {
         "Target": "Display",
         "Sounds": ["SFX_Skeleton_Mage_Spellbook_Charge"],
@@ -69,49 +70,48 @@
       }
     },
     {
-      "$Comment": "Kindle, 8 seconds untrained and Paced: the book is raised and held open while the power swells; two mote chimes land on delays that stretch with the beat. The sparks and motes (RPG_Disenchant_Kindle, the gem sparks in a green-gold copy with the eternal-seed motes) ride the placed piece itself (Target Display), so on either table they play on the piece being worked, not at the block; the system's own 7.5-second LifeSpan ends it, and the Draw beat's lift respawns the prop and takes anything still riding it with it, so a fast ritual never carries the sparks past this beat.",
+      "$Comment": "Kindle, 3.2 seconds untrained and Paced: the double channels (no clip of its own: the Open gesture already handed it back to the channelling loop) while the power swells; two mote chimes land on delays that stretch with the beat. The sparks and motes (RPG_Disenchant_Kindle, the gem sparks in a green-gold copy with the eternal-seed motes) ride the placed piece itself (Target Display), so on either table they play on the piece being worked, not at the block; the system's own 7.5-second LifeSpan ends it on a long ritual, and on a shorter one the Draw beat's lift respawns the prop and takes anything still riding it with it, so the sparks never outlast this beat.",
       "Id": "Kindle",
       "Paced": true,
       "IsWork": true,
-      "Duration": { "Ms": 8000 },
-      "Puppet": { "Clip": "RPG_Emote_Disenchant_Channel" },
+      "Duration": { "Ms": 3200 },
       "Presentation": {
         "Target": "Display",
         "Sounds": [
           "SFX_Avatar_Powers_Enable",
-          { "EventId": "SFX_MemoryMote", "DelayMs": 2500 },
-          { "EventId": "SFX_MemoryMote", "DelayMs": 5500 }
+          { "EventId": "SFX_MemoryMote", "DelayMs": 1000 },
+          { "EventId": "SFX_MemoryMote", "DelayMs": 2200 }
         ],
         "Particles": [ { "SystemId": "RPG_Disenchant_Kindle" } ]
       }
     },
     {
-      "$Comment": "Draw, 12 seconds untrained and Paced: the channel pose holds, the block deepens into its Drawing look, and the piece lifts and turns (the Display overlay). The overlay respawns the prop at the beat's entry, and a prop spawned this tick has been shown to nobody yet, so a cue aimed at it in the same tick would play at its position instead of riding it: the whole group holds 400 ms (Paced, so 84 ms at the fastest pace, still past the next tick) and then the gather (RPG_Disenchant_Draw, its own LifeSpan) rides the lifted piece and the chime follows it. The channel aura goes on the worker's double at the same moment, for the rest of the session (no DurationMs: the double's effects come off at the session's end; on a worker with no double the effect's own Duration bounds it).",
+      "$Comment": "Draw, 4.8 seconds untrained and Paced: the double keeps channelling, the block deepens into its Drawing look, and the piece lifts and turns (the Display overlay). The overlay respawns the prop at the beat's entry, and a prop spawned this tick has been shown to nobody yet, so a cue aimed at it in the same tick would play at its position instead of riding it: the whole group holds 160 ms (Paced, so it shrinks with the beat, but any held cue waits for the next tick at least) and then the gather (RPG_Disenchant_Draw, its own LifeSpan) rides the lifted piece and the chime follows it. The channel aura goes on the worker's double at the same moment, for the rest of the session (no DurationMs: the double's effects come off at the session's end; on a worker with no double the effect's own Duration bounds it).",
       "Id": "Draw",
       "Paced": true,
       "IsWork": true,
       "State": "Drawing",
-      "Duration": { "Ms": 12000 },
+      "Duration": { "Ms": 4800 },
       "Display": { "Offset": { "Y": 1.4 }, "Rotation": { "Yaw": 45 }, "Animated": true },
       "Presentation": {
         "Target": "Display",
-        "DelayMs": 400,
+        "DelayMs": 160,
         "Sounds": ["SFX_MemoryRestored"],
         "Particles": [ { "SystemId": "RPG_Disenchant_Draw" } ],
         "Effect": { "Id": "RPG_Disenchant_Channel_Aura", "Target": "Puppet" }
       }
     },
     {
-      "$Comment": "Surge, 9 seconds untrained and Paced: the double winds up. The beam shell (RPG_Disenchant_Surge) and the signature sparks (a vanilla system with its own 0.6-second LifeSpan) ride the lifted piece; the layered charge builds under them, and the whole group holds 300 ms so the light shake lands after the pose change rather than on it.",
+      "$Comment": "Surge, 3.6 seconds untrained and Paced: the double winds up, then goes back to channelling once the wind-up has played (ClipMs). The beam shell (RPG_Disenchant_Surge) and the signature sparks (a vanilla system with its own 0.6-second LifeSpan) ride the lifted piece; the layered charge builds under them, and the whole group holds 120 ms so the light shake lands after the pose change rather than on it.",
       "Id": "Surge",
       "Paced": true,
       "IsWork": true,
       "State": "Drawing",
-      "Duration": { "Ms": 9000 },
-      "Puppet": { "Clip": "RPG_Emote_Disenchant_Surge" },
+      "Duration": { "Ms": 3600 },
+      "Puppet": { "Clip": "RPG_Emote_Disenchant_Surge", "ClipMs": 1100 },
       "Presentation": {
         "Target": "Display",
-        "DelayMs": 300,
+        "DelayMs": 120,
         "Sounds": ["RPG_SFX_Disenchant_Charge"],
         "Particles": [
           { "SystemId": "RPG_Disenchant_Surge" },
@@ -121,12 +121,13 @@
       }
     },
     {
-      "$Comment": "Unmake, 1.5 seconds fixed: the release. Convert runs the matched row at entry, so the piece is consumed and its prop despawns in the same tick, and the block falls back from Drawing to Working. Target Display then resolves to where the lifted piece last stood, which is where the shatter plays: RPG_Disenchant_Flash folds the magic hit, the glass break and the crystal break into one bounded system so all of it lands there. The crystal break plays through RPG_SFX_Disenchant_Crystal_Break, a copy that bypasses the greater table's ducking, so the hum never swallows it.",
+      "$Comment": "Unmake, 0.6 seconds untrained and Paced: the release, after which the double goes back to channelling (ClipMs). Convert runs the matched row at entry, so the piece is consumed and its prop despawns in the same tick, and the block falls back from Drawing to Working. Target Display then resolves to where the lifted piece last stood, which is where the shatter plays: RPG_Disenchant_Flash folds the magic hit, the glass break and the crystal break into one bounded system so all of it lands there. The crystal break plays through RPG_SFX_Disenchant_Crystal_Break, a copy that bypasses the greater table's ducking, so the hum never swallows it.",
       "Id": "Unmake",
+      "Paced": true,
       "IsWork": true,
       "State": "Working",
-      "Duration": { "Ms": 1500 },
-      "Puppet": { "Clip": "RPG_Emote_Disenchant_Release" },
+      "Duration": { "Ms": 600 },
+      "Puppet": { "Clip": "RPG_Emote_Disenchant_Release", "ClipMs": 500 },
       "Convert": {},
       "Presentation": {
         "Target": "Display",
@@ -136,27 +137,15 @@
       }
     },
     {
-      "$Comment": "Payout, 2.5 seconds fixed: RollBonus rolls the action's Bonus here, once per ritual, so the finds land while the bloom is up; each find's Cue moment holds about 450 ms (see Moments) so it arrives after the shatter has cleared. The bloom (RPG_Disenchant_Bloom, its own LifeSpan) plays where the piece stood.",
+      "$Comment": "Payout, 1.5 seconds fixed, the last beat and the only one no pace or stretch touches: RollBonus rolls the action's Bonus here, once per ritual, so the finds land while the bloom is up; each find's Cue moment holds about 450 ms (see Moments) so it arrives after the shatter has cleared. The bloom (RPG_Disenchant_Bloom, its own 2-second LifeSpan) plays where the piece stood and finishes on its own as the ritual ends; on the greater table the next piece's Open follows straight on.",
       "Id": "Payout",
       "IsWork": true,
       "RollBonus": true,
-      "Duration": { "Ms": 2500 },
+      "Duration": { "Ms": 1500 },
       "Presentation": {
         "Target": "Display",
         "Sounds": [ { "EventId": "SFX_Arcane_Workbench_Craft", "DelayMs": 100 } ],
         "Particles": [ { "SystemId": "RPG_Disenchant_Bloom" } ]
-      }
-    },
-    {
-      "$Comment": "Settle, 3 seconds fixed: a hand on the heart while the last motes (RPG_Disenchant_Settle, the eternal-seed motes under a 2.5-second LifeSpan) drift up from where the piece stood and one mote chime closes the ritual. The piece is gone by now, so Target Display resolves to its resting spot, which on the greater table is the socket just worked.",
-      "Id": "Settle",
-      "IsWork": true,
-      "Duration": { "Ms": 3000 },
-      "Puppet": { "Clip": "RPG_Emote_Disenchant_Bow" },
-      "Presentation": {
-        "Target": "Display",
-        "Sounds": [ { "EventId": "SFX_MemoryMote", "DelayMs": 500 } ],
-        "Particles": [ { "SystemId": "RPG_Disenchant_Settle" } ]
       }
     }
   ],
@@ -170,14 +159,14 @@
     ]
   },
   "Worker": {
-    "$Comment": "The movement-lock hold (no seat: the double stands at the table) with the fixed LookRot camera. Animation.EmoteId is the reading loop a worker with no double plays; the double itself follows the per-beat clips above. The double holds the vanilla purple grimoire the whole ritual, so the spellbook clips animate a real book.",
+    "$Comment": "Seated the way the Sawmill seats its worker: Hold.Mount Surface Block mounts the hidden player on the table block's own seat (BlockType.Seats on the table's block item), which keeps them in place while the mouse turns the camera freely, and no Camera group is authored, so the camera stays the player's own. Getting up off the seat ends the ritual and hands the piece back. Animation.EmoteId is the channelling loop (RPG_Emote_Disenchant_Channel, a looping cast): the double starts in it, plays it through every beat with no clip of its own, and goes back to it after each beat gesture that names a Puppet.ClipMs, so it is always working. The double holds the vanilla purple grimoire the whole ritual, so the spellbook clips animate a real book.",
     "Hold": {
       "MovementLock": true,
       "EffectId": "RPG_Station_Hold",
-      "InterruptOnDamage": true
+      "InterruptOnDamage": true,
+      "Mount": { "Surface": "Block" }
     },
-    "Camera": { "Recipe": "LookRot" },
-    "Animation": { "EmoteId": "RPG_Emote_Disenchant_Read" },
+    "Animation": { "EmoteId": "RPG_Emote_Disenchant_Channel" },
     "Puppet": {
       "Enabled": true,
       "Hide": { "Route": "Scale" },

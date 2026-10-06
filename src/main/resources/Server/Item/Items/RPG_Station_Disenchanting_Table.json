@@ -1,5 +1,5 @@
 {
-  "$Comment": "The Disenchanting Table block. It wears the vanilla Salvage bench's own model, textures and processing animation; the vanilla Bench and BlockEntity groups are left out because this block is a station, not a processing bench, and its Use runs RPG_Station_Disenchanting_Table_Use instead of the bench screen. The station engine flips the block between the states below: Default and Loaded are the resting looks (the Loaded look is the same model with a different hint), Working is the vanilla bench's processing look (the lit texture, the arms and door animation and the processing loop) with a green-gold light and the ember effect vanilla drew for this bench on its Fire part, and Drawing, which the ritual's Draw and Surge beats hold, is the same with a brighter light and denser tinted sparks. Every state name a station or a step names must exist here, or that flip silently does nothing. The Recipe makes the bare jar's table craftable at a tier 2 Workbench, where vanilla crafts its own Salvage bench: iron, wood, stone and a measure of Life essence. A pack that ships a same-id copy without a Recipe makes the table uncraftable and hands it out its own way.",
+  "$Comment": "The Disenchanting Table block. It wears the vanilla Salvage bench's own model, textures and processing animation; the vanilla Bench and BlockEntity groups are left out because this block is a station, not a processing bench, and its Use runs RPG_Station_Disenchanting_Table_Use instead of the bench screen. The station engine flips the block between the states below: Default and Loaded are the resting looks (the Loaded look is the same model with a different hint), Working is the vanilla bench's processing look (the lit texture, the arms and door animation and the processing loop) with a green-gold light and the ember effect vanilla drew for this bench on its Fire part, and Drawing, which the ritual's Draw and Surge beats hold, is the same with a brighter light and denser tinted sparks. Every state name a station or a step names must exist here, or that flip silently does nothing. Seats is where the ritual seats its worker (the action's Hold.Mount, Surface Block), the same seat the Sawmill authors: Offset stands the hidden player back at working distance and Yaw 180 faces them at the table, since the engine adds 180 degrees to a seat's yaw; every state inherits it. The Recipe makes the bare jar's table craftable at a tier 2 Workbench, where vanilla crafts its own Salvage bench: iron, wood, stone and a measure of Life essence. A pack that ships a same-id copy without a Recipe makes the table uncraftable and hands it out its own way.",
   "TranslationProperties": {
     "Name": "items.RPG_Station_Disenchanting_Table.name",
     "Description": "items.RPG_Station_Disenchanting_Table.description"
@@ -58,6 +58,9 @@
     "Interactions": {
       "Use": "RPG_Station_Disenchanting_Table_Use"
     },
+    "Seats": [
+      { "Offset": { "X": 0, "Y": 0, "Z": 0.6 }, "Yaw": 180 }
+    ],
     "State": {
       "Definitions": {
         "Default": {

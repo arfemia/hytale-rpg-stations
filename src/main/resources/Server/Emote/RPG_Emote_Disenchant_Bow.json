@@ -1,7 +1,0 @@
-{
-  "Name": "avatarCustomization.emotes.RPG_Emote_Disenchant_Bow.name",
-  "Animation": "Characters/Animations/Emote/Salute_Chest.blockyanim",
-  "Icon": "Icons/Emotes/Salute@2x.png",
-  "IsLooping": false,
-  "HideItemInHand": false
-}

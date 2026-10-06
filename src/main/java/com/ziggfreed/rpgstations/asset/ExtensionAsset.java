@@ -172,9 +172,9 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
                     (a, v) -> a.contributionScale = v, a -> a.contributionScale,
                     (a, p) -> a.contributionScale = p.contributionScale)
             .documentation("ContributionScale overlay (Action target), merged PER LEAF: an overlay authoring only Floors keeps the base action's own Factors.").add()
-            .appendInherited(new KeyedCodec<>("Pace", Pace.LADDER_ONLY_CODEC, false),
+            .appendInherited(new KeyedCodec<>("Pace", Pace.CODEC, false),
                     (a, v) -> a.pace = v, a -> a.pace, (a, p) -> a.pace = p.pace)
-            .documentation("This extension's OWN complete Pace ladder (Action target), {Ladder} only and never an overlay: it resolves from its own Factors and Floors, and its scale MULTIPLIES the action's and every other extension's; the action's own Clamp bounds the product, so there is no Clamp to author here.").add()
+            .documentation("This extension's OWN Pace (Action target), never an overlay: its Ladder resolves from its own Factors and Floors and its scale MULTIPLIES the action's and every other extension's; the action's Clamp bounds the product and this Clamp can only narrow it further (one side is enough); its Stretch multiplies the length of every Paced beat after the clamps.").add()
             .appendInherited(new KeyedCodec<>("Actions", new ArrayCodec<>(ActionDef.CODEC, ActionDef[]::new), false),
                     (a, v) -> a.actions = v, a -> a.actions, (a, p) -> a.actions = p.actions)
             .documentation("NEW actions appended to a station's ordered Actions list (Station target); the base wins an Id collision, and an appended action is selected only after every base action.").add()
@@ -256,10 +256,11 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     }
 
     /**
-     * This extension's own {@code Pace} ladder (Action target); null = none. NOT an overlay: the
-     * ladder resolves on its own and its scale multiplies the action's, so a pack scales the pace
-     * by a factor of its own without restating the base ladder. Typed {@code {Ladder}} only
-     * ({@link Pace#LADDER_ONLY_CODEC}), so its {@code getClamp()} is always null.
+     * This extension's own {@code Pace} (Action target); null = none. NOT an overlay: its ladder
+     * resolves on its own and its scale multiplies the action's, so a pack scales the pace by a
+     * factor of its own without restating the base ladder; its {@code Clamp} narrows the action's
+     * range (the tighter bound wins at each end) and its {@code Stretch} multiplies the length of
+     * every paced beat after the clamps ({@code station.StationPacing}).
      */
     @Nullable
     public Pace getPace() {

@@ -7,9 +7,7 @@
 # une clé appartenant au client.
 
 emotes.RPG_Emote_Knife.name = Écaillage de Poisson
-emotes.RPG_Emote_Disenchant_Read.name = Lecture du Grimoire
 emotes.RPG_Emote_Disenchant_Open.name = Ouverture du Grimoire
 emotes.RPG_Emote_Disenchant_Channel.name = Canalisation
 emotes.RPG_Emote_Disenchant_Surge.name = Montée en Puissance
 emotes.RPG_Emote_Disenchant_Release.name = Libération
-emotes.RPG_Emote_Disenchant_Bow.name = Main sur le Cœur

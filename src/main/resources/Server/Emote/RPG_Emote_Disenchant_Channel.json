@@ -1,7 +1,7 @@
 {
   "Name": "avatarCustomization.emotes.RPG_Emote_Disenchant_Channel.name",
-  "Animation": "Characters/Animations/Items/Dual_Handed/Spellbook/Attacks/Cast_Push_Charged/Cast_Push_Charging.blockyanim",
+  "Animation": "Characters/Animations/Items/Dual_Handed/Staff/Attacks/Cast_Summon_Charged/Cast_Summon_Charging.blockyanim",
   "Icon": "Icons/Emotes/Ponder@2x.png",
-  "IsLooping": false,
+  "IsLooping": true,
   "HideItemInHand": false
 }

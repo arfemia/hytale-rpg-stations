@@ -181,6 +181,25 @@ final class StationStepDecisions {
     }
 
     /**
+     * When the double goes back to the action's own loop clip ({@code loopClip}, the action's
+     * {@code Animation.EmoteId}) after a step's clip that authors {@code Puppet.ClipMs}: {@code
+     * clipMs} after the clip's entry at {@code nowMs}. {@code 0} (nothing pending) when the step
+     * names no positive {@code ClipMs}, so its clip stays until the next one, or when the action has
+     * no loop to go back to.
+     */
+    static long loopReturnAt(long nowMs, @Nullable Long clipMs, @Nullable String loopClip) {
+        if (clipMs == null || clipMs <= 0L || loopClip == null || loopClip.isBlank()) {
+            return 0L;
+        }
+        return nowMs + clipMs;
+    }
+
+    /** Is a pending return to the loop clip ({@link #loopReturnAt}; {@code 0} = none pending) due at {@code nowMs}? */
+    static boolean loopReturnDue(long nowMs, long returnAtMs) {
+        return returnAtMs > 0L && nowMs >= returnAtMs;
+    }
+
+    /**
      * Does any step of {@code steps} author {@code RollBonus} (the beat-level Bonus knob)? When one
      * does, the dispatch skips its completion-time Bonus pass: the action's Bonus rolls at those
      * beats instead, so a program never rolls it twice. Null-safe.

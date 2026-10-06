@@ -6,9 +6,7 @@
 # (Server/Emote/*.json) and never overrides a client-owned one.
 
 emotes.RPG_Emote_Knife.name = Hal tisztítása
-emotes.RPG_Emote_Disenchant_Read.name = A grimoár olvasása
 emotes.RPG_Emote_Disenchant_Open.name = A grimoár kinyitása
 emotes.RPG_Emote_Disenchant_Channel.name = Összpontosítás
 emotes.RPG_Emote_Disenchant_Surge.name = Az erőhullám gyűjtése
 emotes.RPG_Emote_Disenchant_Release.name = Elengedés
-emotes.RPG_Emote_Disenchant_Bow.name = Kéz a szíven

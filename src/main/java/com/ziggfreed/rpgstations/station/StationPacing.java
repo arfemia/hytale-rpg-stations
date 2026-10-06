@@ -17,12 +17,15 @@ import com.ziggfreed.rpgstations.asset.Presentation;
  * the ONE ladder rule ({@link ContributionScaling#multiplier}), the scales multiply, and the
  * action's clamp bounds the product. Store-free, so it unit-tests with a plain injected lookup.
  *
- * <p><b>Ladders multiply, and only the action clamps.</b> The action's own {@code Pace.Ladder}
- * and each matching extension's {@code Pace.Ladder} are independent ladders with their own
- * thresholds: a jar's ladder over one factor and a pack's over another compose without either
- * restating the other. A ladder that reaches no floor contributes the neutral {@code 1.0}. The
- * product is then held inside the action's {@code Pace.Clamp} (an extension's clamp is ignored);
- * with no clamp authored the product stands as it is.
+ * <p><b>Ladders multiply, the action clamps, an extension narrows.</b> The action's own
+ * {@code Pace.Ladder} and each matching extension's {@code Pace.Ladder} are independent ladders
+ * with their own thresholds: a jar's ladder over one factor and a pack's over another compose
+ * without either restating the other. A ladder that reaches no floor contributes the neutral
+ * {@code 1.0}. The product is then held inside the action's {@code Pace.Clamp} and then inside each
+ * extension's in apply order, so an extension can only narrow the range (the tighter bound wins
+ * at each end); with no clamp authored the product stands as it is. Every {@code Pace.Stretch} in
+ * play (the action's and each extension's) then multiplies it, outside the clamps, since a stretch
+ * says how long the beats are rather than how fast a worker runs them.
  *
  * <p><b>What the scale touches.</b> A step marked {@code Paced} has its {@code Duration.Ms}
  * multiplied ({@link #scaleMs}), and its own presentation's timing stretched with it
@@ -39,28 +42,54 @@ public final class StationPacing {
     }
 
     /**
-     * The pace ladders in play for one action: its own {@link Pace} (ladder plus clamp) and every
-     * matching extension's ladder, gathered once per dispatch and resolved once per step entry.
+     * The pace in play for one action: its own {@link Pace} (ladder, clamp and stretch), every
+     * matching extension's ladder, the product of every matching extension's stretch, and every
+     * matching extension's clamp in apply order, gathered once per dispatch and resolved once per
+     * step entry.
      */
-    public record Composed(@Nullable Pace base, @Nonnull List<ContributionScale> extensionLadders) {
+    public record Composed(@Nullable Pace base, @Nonnull List<ContributionScale> extensionLadders,
+            double extensionStretch, @Nonnull List<FactorFormula.Clamp> extensionClamps) {
 
         /** The composition of an action nothing paces: the neutral scale at every step. */
         public static final Composed NONE = new Composed(null, List.of());
 
         public Composed {
             extensionLadders = extensionLadders == null ? List.of() : List.copyOf(extensionLadders);
+            extensionStretch = Double.isFinite(extensionStretch) && extensionStretch > 0.0 ? extensionStretch : NEUTRAL;
+            extensionClamps = extensionClamps == null ? List.of() : List.copyOf(extensionClamps);
         }
 
-        /** True when no ladder is in play at all, so every step resolves to {@link #NEUTRAL} without a lookup. */
+        /** The action's pace and the extensions' ladders and stretch, with no extension narrowing the range. */
+        public Composed(@Nullable Pace base, @Nonnull List<ContributionScale> extensionLadders, double extensionStretch) {
+            this(base, extensionLadders, extensionStretch, List.of());
+        }
+
+        /** The action's pace and the extensions' ladders, with no extension stretching or narrowing anything. */
+        public Composed(@Nullable Pace base, @Nonnull List<ContributionScale> extensionLadders) {
+            this(base, extensionLadders, NEUTRAL, List.of());
+        }
+
+        /** The product of every stretch in play: the action's own and the extensions'. */
+        public double stretch() {
+            return (base != null ? base.effectiveStretch() : NEUTRAL) * extensionStretch;
+        }
+
+        /**
+         * True when no ladder, no extension clamp and no stretch is in play, so every step resolves to
+         * {@link #NEUTRAL} without a lookup.
+         */
         public boolean isNeutral() {
-            return (base == null || base.getLadder() == null) && extensionLadders.isEmpty();
+            return (base == null || base.getLadder() == null) && extensionLadders.isEmpty()
+                    && extensionClamps.isEmpty() && stretch() == NEUTRAL;
         }
     }
 
     /**
      * The pace scale for {@code composed} at the factor values {@code lookup} resolves: the product
      * of every ladder's reached-floor scale (the action's own first, then each extension's in apply
-     * order), held inside the action's clamp. {@link #NEUTRAL} when nothing is in play, and never a
+     * order), held inside the action's clamp, then multiplied by every stretch in play
+     * ({@link Composed#stretch()}), which sets how long the beats are rather than how fast a worker
+     * runs them and so is never clamped. {@link #NEUTRAL} when nothing is in play, and never a
      * non-finite or negative number (a ladder floor authoring a negative scale reads as neutral
      * through the shared floor rule, and a NaN product falls back to neutral).
      */
@@ -80,6 +109,14 @@ public final class StationPacing {
         if (clamp != null) {
             product = clamp.apply(product);
         }
+        // An extension's clamp only narrows: applied after the action's, a tighter bound moves the
+        // product and a looser one finds it already inside, so the tighter bound wins at each end.
+        for (FactorFormula.Clamp narrower : composed.extensionClamps()) {
+            if (narrower != null) {
+                product = narrower.apply(product);
+            }
+        }
+        product *= composed.stretch();
         return Double.isFinite(product) && product >= 0.0 ? product : NEUTRAL;
     }
 

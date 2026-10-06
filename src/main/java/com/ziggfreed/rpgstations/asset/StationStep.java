@@ -1029,9 +1029,15 @@ public final class StationStep {
      * The per-step puppet override (design 2.1): a SMALL group tweaking only the moment-to-moment
      * {@link #clip} + {@link #prop} for THIS step. {@link #prop} reuses {@link Puppet.Prop}'s EXACT
      * codec (DRY - one prop shape, whether at the action level or per step).
+     *
+     * <p>{@link #clipMs} is how long {@link #clip} plays before the double goes back to the action's
+     * own loop ({@code Worker.Animation.EmoteId}): a short gesture between long holds hands the double
+     * back to its loop instead of leaving it frozen on the gesture's last frame until the next beat.
+     * Unpaced, since an animation runs at its own speed whatever the pace.
      */
     public static final class PuppetOverride {
         @Nullable protected String clip;
+        @Nullable protected Long clipMs;
         @Nullable protected Puppet.Prop prop;
 
         public static final BuilderCodec<PuppetOverride> CODEC =
@@ -1039,6 +1045,10 @@ public final class StationStep {
                         .appendInherited(new KeyedCodec<>("Clip", Codec.STRING, false),
                                 (o, v) -> o.clip = v, o -> o.clip, (o, p) -> o.clip = p.clip)
                         .documentation("The puppet clip id played once at this step's iteration entry; null = inherit the action's default clip.").add()
+                        .appendInherited(new KeyedCodec<>("ClipMs", Codec.LONG, false),
+                                (o, v) -> o.clipMs = v, o -> o.clipMs, (o, p) -> o.clipMs = p.clipMs)
+                        .documentation("How long this step's Clip plays, in milliseconds, before the double goes back to the action's own loop clip (Worker.Animation.EmoteId). Absent, the clip stays until the next step's clip replaces it. Not paced: an animation runs at its own speed.")
+                        .addValidator(CodecWarnValidators.positive("StationStep.Puppet.ClipMs should be positive (leave it out to keep the clip until the next step's).")).add()
                         .appendInherited(new KeyedCodec<>("Prop", Puppet.Prop.CODEC, false),
                                 (o, v) -> o.prop = v, o -> o.prop, (o, p) -> o.prop = p.prop)
                         .documentation("The puppet's held prop for this beat; null = inherit the action's default Prop.").add()
@@ -1046,8 +1056,14 @@ public final class StationStep {
 
         @Nonnull
         public static PuppetOverride of(@Nullable String clip, @Nullable Puppet.Prop prop) {
+            return of(clip, null, prop);
+        }
+
+        @Nonnull
+        public static PuppetOverride of(@Nullable String clip, @Nullable Long clipMs, @Nullable Puppet.Prop prop) {
             PuppetOverride o = new PuppetOverride();
             o.clip = clip;
+            o.clipMs = clipMs;
             o.prop = prop;
             return o;
         }
@@ -1055,6 +1071,12 @@ public final class StationStep {
         @Nullable
         public String getClip() {
             return clip;
+        }
+
+        /** How long {@link #getClip()} plays before the double returns to the action's loop; null = until the next clip. */
+        @Nullable
+        public Long getClipMs() {
+            return clipMs;
         }
 
         @Nullable

@@ -357,22 +357,25 @@ public class StationValidatorConvertPaceTest {
     }
 
     @Test
-    void anExtensionsPace_isLegalOnAnActionTarget_carriesNoClampLeaf_andAnEmptyGroupWarns() throws Exception {
+    void anExtensionsPace_isLegalOnAnActionTarget_mayNarrowWithAOneSidedClamp_andAnEmptyGroupWarns() throws Exception {
         StationAsset target = station("fixturetable", ActionDef.of("Unmake").withRecipe(recipe()));
-        // The extension payload is typed {Ladder} only: a stray Clamp key is not a leaf of it, so
-        // it decodes to nothing (the engine records it as an unknown key and logs one "Unused
-        // key(s)" WARNING at load; the asset still loads) and the ladder still lands. There is no
-        // Clamp on an extension's pace to note or to ignore.
-        ExtensionAsset strayClamp = extension("pack-pace",
+        // An extension's Clamp only narrows the action's range, so one side is a complete
+        // statement: the both-sides rule (PACE_UNCLAMPED) is the action's alone.
+        ExtensionAsset floored = extension("pack-pace",
                 "{ \"Target\": { \"Action\": \"Unmake\" }, \"Pace\": { \"Ladder\": { \"Factors\": ["
                         + " { \"Factor\": \"fixture:level\" } ], \"Floors\": [ { \"Min\": 20, \"Scale\": 0.75 } ] },"
                         + " \"Clamp\": { \"Min\": 0.1 } } }");
-        assertTrue(strayClamp.getPace().getClamp() == null, "an extension's pace never decodes a Clamp");
-        assertTrue(strayClamp.getPace().getLadder() != null, "its ladder decodes as authored");
-        Set<String> codes = codes(StationValidator.validateExtensions(List.of(strayClamp), List.of(target), List.of(),
+        assertTrue(floored.getPace().getClamp() != null, "an extension's pace decodes its Clamp");
+        assertTrue(floored.getPace().getLadder() != null, "its ladder decodes as authored");
+        Set<String> codes = codes(StationValidator.validateExtensions(List.of(floored), List.of(target), List.of(),
                 ANY, ANY, ANY, ANY));
         assertFalse(codes.contains("EXTENSION_PAYLOAD_MISMATCH"), codes.toString());
-        assertFalse(codes.contains("PACE_UNCLAMPED"), "the clamp rule is the ACTION's, never asked of an extension");
+        assertFalse(codes.contains("PACE_UNCLAMPED"), "the both-sides rule is the ACTION's, never asked of an extension");
+        ExtensionAsset inverted = extension("inverted-pace",
+                "{ \"Target\": { \"Action\": \"Unmake\" }, \"Pace\": { \"Clamp\": { \"Min\": 0.9, \"Max\": 0.2 } } }");
+        codes = codes(StationValidator.validateExtensions(List.of(inverted), List.of(target), List.of(),
+                ANY, ANY, ANY, ANY));
+        assertTrue(codes.contains("PACE_CLAMP_INVERTED"), codes.toString());
         ExtensionAsset onStation = extension("station-pace",
                 "{ \"Target\": { \"Station\": \"fixturetable\" }, \"Pace\": { \"Ladder\": { \"Factors\": [] } } }");
         codes = codes(StationValidator.validateExtensions(List.of(onStation), List.of(target), List.of(),
@@ -383,6 +386,16 @@ public class StationValidatorConvertPaceTest {
         codes = codes(StationValidator.validateExtensions(List.of(noLadder), List.of(target), List.of(),
                 ANY, ANY, ANY, ANY));
         assertTrue(codes.contains("PACE_EXTENSION_NO_LADDER"), codes.toString());
+    }
+
+    @Test
+    void anExtensionsPace_authoringOnlyAStretch_isNotAnEmptyGroup() throws Exception {
+        StationAsset target = station("fixturetable", ActionDef.of("Unmake").withRecipe(recipe()));
+        ExtensionAsset stretchOnly = extension("stretch-pace",
+                "{ \"Target\": { \"Action\": \"Unmake\" }, \"Pace\": { \"Stretch\": 3.0 } }");
+        Set<String> codes = codes(StationValidator.validateExtensions(List.of(stretchOnly), List.of(target), List.of(),
+                ANY, ANY, ANY, ANY));
+        assertFalse(codes.contains("PACE_EXTENSION_NO_LADDER"), codes.toString());
     }
 
     @Test

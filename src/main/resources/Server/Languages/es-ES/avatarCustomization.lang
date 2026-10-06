@@ -6,9 +6,7 @@
 # (Server/Emote/*.json) and never overrides a client-owned one.
 
 emotes.RPG_Emote_Knife.name = Limpiando Peces
-emotes.RPG_Emote_Disenchant_Read.name = Leyendo el Grimorio
 emotes.RPG_Emote_Disenchant_Open.name = Abriendo el Grimorio
 emotes.RPG_Emote_Disenchant_Channel.name = Canalizando
 emotes.RPG_Emote_Disenchant_Surge.name = Acumulando la Oleada
 emotes.RPG_Emote_Disenchant_Release.name = Liberando
-emotes.RPG_Emote_Disenchant_Bow.name = Mano en el Pecho

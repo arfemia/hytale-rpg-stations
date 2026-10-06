@@ -374,6 +374,11 @@ final class StationStepHandlers {
     private static void emitEntryCues(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
         if (StationStepDecisions.shouldPlayClipOnEntry(step, null)) {
             StationPuppetController.playStepClip(ctx.session, ctx.store, step.getPuppet().getClip());
+            // A clip naming a ClipMs is a gesture: once it has played, the frame tick hands the
+            // double back to the action's own loop clip. Every clip entry re-arms (or clears) the
+            // return, so a pending one never cuts a newer beat's clip short.
+            ctx.session.puppetLoopReturnAtMs = StationStepDecisions.loopReturnAt(System.currentTimeMillis(),
+                    step.getPuppet().getClipMs(), ctx.session.emoteId);
         }
         if (StationStepDecisions.shouldSyncPropOnEntry(step, null)) {
             StationPuppetController.syncStepProp(ctx.session, ctx.commandBuffer, ctx.player, step);

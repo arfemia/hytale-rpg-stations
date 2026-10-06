@@ -1,5 +1,5 @@
 {
-  "$Comment": "The Greater Disenchanting Table block, on the vanilla Arcane table's model: two blocks wide (the Bench_Alchemy hitbox), centred half a block to the left of the block itself. The vanilla Bench and BlockEntity groups are left out because this is a station, and Use runs RPG_Station_Disenchanting_Table_Greater_Use. Its Working state is the Arcane table's own lit texture and idle animation (the book, its gem and the candle bob together) under a soft violet light, teal sparks on the Gem part (the gem's own colour), a flame on the Flame part, the block's top glow on each flip into the state, and a hum that ducks the music and quiets the room (RPG_SFX_Disenchant_Hum); Drawing, held by the ritual's Draw and Surge beats, adds violet motes over the Plate and turns the sparks violet under a stronger violet light. Every state a station or a step names must be defined here or the flip silently does nothing. The Recipe is a vanilla-style upgrade at the Arcane bench: the lesser table plus thorium, silk and Void essence. A pack that ships a same-id copy without a Recipe makes it uncraftable and hands it out its own way.",
+  "$Comment": "The Greater Disenchanting Table block, on the vanilla Arcane table's model: two blocks wide (the Bench_Alchemy hitbox), centred half a block to the left of the block itself. The vanilla Bench and BlockEntity groups are left out because this is a station, and Use runs RPG_Station_Disenchanting_Table_Greater_Use. Its Working state is the Arcane table's own lit texture and idle animation (the book, its gem and the candle bob together) under a soft violet light, teal sparks on the Gem part (the gem's own colour), a flame on the Flame part, the block's top glow on each flip into the state, and a hum that ducks the music and quiets the room (RPG_SFX_Disenchant_Hum); Drawing, held by the ritual's Draw and Surge beats, adds violet motes over the Plate and turns the sparks violet under a stronger violet light. Every state a station or a step names must be defined here or the flip silently does nothing. Seats is where the ritual seats its worker (the action's Hold.Mount, Surface Block): the lesser table's seat moved half a block to the left (X -0.5, rotated with the block), so the hidden player sits at the centre of the wide table where the double works; every state inherits it. The Recipe is a vanilla-style upgrade at the Arcane bench: the lesser table plus thorium, silk and Void essence. A pack that ships a same-id copy without a Recipe makes it uncraftable and hands it out its own way.",
   "TranslationProperties": {
     "Name": "items.RPG_Station_Disenchanting_Table_Greater.name",
     "Description": "items.RPG_Station_Disenchanting_Table_Greater.description"
@@ -58,6 +58,9 @@
     "Interactions": {
       "Use": "RPG_Station_Disenchanting_Table_Greater_Use"
     },
+    "Seats": [
+      { "Offset": { "X": -0.5, "Y": 0, "Z": 0.6 }, "Yaw": 180 }
+    ],
     "State": {
       "Definitions": {
         "Default": {

@@ -94,7 +94,7 @@ public final class ActionAsset implements JsonAssetWithMap<String, DefaultAssetM
             .documentation("A factor ladder multiplying every Work.PerCycleContributions amount before it is forwarded; the engine pre-scales, so a listener grants the amount verbatim.").add()
             .appendInherited(new KeyedCodec<>("Pace", Pace.CODEC, false),
                     (a, v) -> a.body.pace = v, a -> a.body.pace, (a, p) -> a.body.pace = p.body.pace)
-            .documentation("The pace of this action's Steps program: a factor Ladder (the ContributionScale shape) whose scale multiplies the Duration of every step marked Paced, bounded by Clamp; an extension's own Pace ladder multiplies in. Null = every beat runs at its authored length.").add()
+            .documentation("The pace of this action's Steps program: a factor Ladder (the ContributionScale shape) whose scale multiplies the Duration of every step marked Paced, bounded by Clamp, then lengthened or shortened by Stretch; an extension's own Pace ladder and Stretch multiply in and its Clamp narrows the range. Null = every beat runs at its authored length (an extension may still pace it).").add()
             .appendInherited(new KeyedCodec<>("Worker", ActionDef.Worker.CODEC, false),
                     (a, v) -> a.body.worker = v, a -> a.body.worker, (a, p) -> a.body.worker = p.body.worker)
             .documentation("How the person looks doing this: Hold, Camera, Animation, Puppet.").add()

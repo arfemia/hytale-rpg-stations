@@ -1,9 +1,0 @@
-{
-  "$Comment": "The Settle beat's last motes where the piece stood: the vanilla eternal-seed motes (Seeds_Eternal, listed by id) under a LifeSpan of their own. The piece is gone by the Settle, so the burst plays at its resting spot; LifeSpan 2.5 seconds ends it inside the 3-second beat with no cap needed. A child system listing Spawners replaces this list whole.",
-  "Spawners": [
-    { "SpawnerId": "Seeds_Eternal" }
-  ],
-  "CullDistance": 30.0,
-  "IsImportant": false,
-  "LifeSpan": 2.5
-}

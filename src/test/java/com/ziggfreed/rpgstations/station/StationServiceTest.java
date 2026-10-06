@@ -6,6 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,6 +19,8 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.server.core.Message;
+import com.ziggfreed.common.ui.hud.panel.HudRowDisplay;
+import com.ziggfreed.common.ui.hud.panel.HudRowLook;
 import com.ziggfreed.rpgstations.api.StationContribution;
 import com.ziggfreed.rpgstations.asset.Contribution;
 import com.ziggfreed.rpgstations.asset.Ingredient;
@@ -789,5 +795,66 @@ public class StationServiceTest {
                 "one step past the radius is away");
         assertFalse(StationService.withinHoldRadius(10.0, 66.0, -3.0, 10.0, 64.0, -3.0, 2.25),
                 "height counts too: the radius is a sphere, the same one the session walked off through");
+    }
+
+    // ==================== The run's own HUD rows: held while live, faded once stopped ====================
+
+    @Test
+    void sessionRowLinger_whileTheRunIsLive_holdsTheRow() {
+        assertEquals(HudRowLook.LINGER_HELD,
+                StationService.sessionRowLinger(HudRowDisplay.NONE, false).lingerMs(),
+                "a live run's rows are its ledger and never fade on a clock mid-session");
+    }
+
+    @Test
+    void sessionRowLinger_afterTheRunStopped_fadesWithTheRestInsteadOfComingBackHeld() {
+        HudRowDisplay late = StationService.sessionRowLinger(HudRowDisplay.NONE, true);
+        assertEquals(StationService.SESSION_ROW_FADE_MS, late.lingerMs(),
+                "a report landing after stop() sent the run's rows away (a ritual's last pass moves the "
+                        + "cycle row once its own dispatch, which stopped the session, returns) must fade on "
+                        + "the same clock as the rest, never come back held with no expiry");
+    }
+
+    @Test
+    void sessionRowLinger_keepsEveryOtherPartTheReporterSaid() {
+        HudRowDisplay said = HudRowDisplay.of(null, null, "#abcdef", 0).counting("some.key");
+        HudRowDisplay late = StationService.sessionRowLinger(said, true);
+        assertEquals("#abcdef", late.color());
+        assertEquals(0, late.order());
+        assertEquals("some.key", late.countKey());
+    }
+
+    @Test
+    void everyRowARunReportsAsksSessionRowLingerWithTheRunsStoppedFlag() throws IOException {
+        String src = Files.readString(Path.of("src", "main", "java", "com", "ziggfreed", "rpgstations", "station",
+                "StationService.java"), StandardCharsets.UTF_8);
+        String declaration = "static HudRowDisplay sessionRowLinger(";
+        int helper = src.indexOf(declaration);
+        assertTrue(helper > 0, "the helper is still in StationService");
+        int held = src.indexOf(".held()");
+        assertTrue(held > helper && src.indexOf(".held()", held + 1) < 0,
+                "the helper holds a live run's row; a report that calls .held() itself brings the row back "
+                        + "with no expiry after stop() faded it");
+        int calls = 0;
+        for (int at = src.indexOf("sessionRowLinger("); at >= 0; at = src.indexOf("sessionRowLinger(", at + 1)) {
+            if (at == helper + declaration.length() - "sessionRowLinger(".length()) {
+                continue;
+            }
+            int open = at + "sessionRowLinger".length();
+            int depth = 0;
+            int close = open;
+            for (; close < src.length(); close++) {
+                char c = src.charAt(close);
+                if (c == '(') {
+                    depth++;
+                } else if (c == ')' && --depth == 0) {
+                    break;
+                }
+            }
+            assertTrue(src.substring(open, close).contains("stopped.get()"),
+                    "a run's row report hands the helper the run's own stopped flag");
+            calls++;
+        }
+        assertEquals(3, calls, "the item-gain, session-cycle and in-session lucky-find rows all ask the helper");
     }
 }

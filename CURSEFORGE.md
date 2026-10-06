@@ -26,9 +26,10 @@ New in 1.1.0: the Disenchanting Table. Place a piece of gear on it, press `F`, a
 apart over a staged ritual, giving back what the Salvager's Workbench would plus Essence of Life and the
 occasional find. Gear of item level 20 and up has a 1-in-200 shot at the Disenchanter's Grimoire on
 every ritual, and each of the four disenchanter's kit pieces has its own 1.5 percent chance. An
-untrained ritual takes 38 seconds. The kit, the grimoire and a Disenchanter's Draught from the Alchemist's Workbench
-each speed it up, down to 15 seconds. The Greater Disenchanting Table works three pieces in a row
-and pays more.
+untrained ritual takes about 15 seconds. You sit at the table the way you do at the Sawmill and can
+look around while your stand-in works. The kit, the grimoire and a Disenchanter's Draught from the
+Alchemist's Workbench each speed it up; with all of them it takes about 3 seconds. The Greater
+Disenchanting Table works three pieces in a row and pays more.
 
 Every number in all of that is plain JSON, so a server can retune what better tools are worth,
 change what the finds hand over, or key the whole thing off something else entirely.
@@ -82,7 +83,7 @@ A station's work can be authored as a simple convert loop or as a step-by-step p
 sequence of beats (a hold, a swing, a sound) composed with consume/produce/loot/command phases in
 one fixed order. A program can even reach out to a SECOND, separately-placed station nearby: your
 character (or performer) walks over, works at the remote station, and walks back, all from one `F`
-press on the primary block. The Disenchanting Table's ritual is a seven-beat program, and the
+press on the primary block. The Disenchanting Table's ritual is a six-beat program, and the
 greater table runs it once for each piece it holds, left to right.
 
 ### Placed-input custody and displays

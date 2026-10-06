@@ -134,6 +134,13 @@ final class StationSession {
      * unaffected (see {@code StationPuppetController#playSwing}).
      */
     boolean stepProgramAuthorsClip;
+    /**
+     * When the double goes back to the action's own loop clip ({@link #emoteId}) after a step's
+     * clip that authored {@code Puppet.ClipMs}, in wall-clock ms; 0 = nothing pending. Set at each
+     * step-clip entry ({@code StationStepDecisions#loopReturnAt}, so a newer clip always replaces an
+     * older pending return) and drained by the frame tick.
+     */
+    long puppetLoopReturnAtMs;
     /** The station's held-tool gate, re-checked each heartbeat (null = no requirement). */
     StationAsset.Tool toolReq;
 

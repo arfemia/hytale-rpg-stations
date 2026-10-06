@@ -22,6 +22,7 @@ import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.ExtensionAsset;
+import com.ziggfreed.common.factor.FactorFormula;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.LootableConfig;
 import com.ziggfreed.rpgstations.asset.Puppet;
@@ -259,6 +260,37 @@ public final class ExtensionCatalog {
             }
         }
         return ladders.isEmpty() ? List.of() : List.copyOf(ladders);
+    }
+
+    /**
+     * The product of every matching extension's own {@code Pace.Stretch} (a missing or non-positive
+     * one reads as {@code 1.0}): how much longer or shorter the action's paced beats are made, applied
+     * after the action's clamp ({@link StationPacing}). {@code 1.0} with no extension in play.
+     */
+    public double paceStretchFor(@Nullable String stationId, @Nonnull String actionId) {
+        double stretch = StationPacing.NEUTRAL;
+        for (ExtensionAsset ext : extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId)) {
+            if (ext.getPace() != null) {
+                stretch *= ext.getPace().effectiveStretch();
+            }
+        }
+        return stretch;
+    }
+
+    /**
+     * Every matching extension's own {@code Pace.Clamp}, in {@link ExtensionAsset#APPLY_ORDER}: the
+     * bounds that NARROW the action's pace range after its own clamp ({@link StationPacing}). Empty
+     * with no extension in play or none authoring one.
+     */
+    @Nonnull
+    public List<FactorFormula.Clamp> paceClampsFor(@Nullable String stationId, @Nonnull String actionId) {
+        List<FactorFormula.Clamp> clamps = new ArrayList<>();
+        for (ExtensionAsset ext : extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId)) {
+            if (ext.getPace() != null && ext.getPace().getClamp() != null) {
+                clamps.add(ext.getPace().getClamp());
+            }
+        }
+        return clamps.isEmpty() ? List.of() : List.copyOf(clamps);
     }
 
     /**

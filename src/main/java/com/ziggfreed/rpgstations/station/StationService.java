@@ -179,7 +179,7 @@ public final class StationService {
      * stay readable before they fade: long enough to read the final numbers, short enough that the
      * panel does not linger once nobody is working the station any more.
      */
-    private static final long SESSION_ROW_FADE_MS = 5000L;
+    static final long SESSION_ROW_FADE_MS = 5000L;
 
     /** Words the session row's own number: "Cycles: {0}", not the panel's plain "+N" - a cycle count is not a gain. */
     private static final String SESSION_CYCLES_KEY = "rpgstations.ui.station.hud.cycles";
@@ -1135,6 +1135,12 @@ public final class StationService {
                 // ... and, for a puppet authoring a Pitch/Roll tilt, apply it on the first frame
                 // that has a ref to tilt (a no-op for every untilted session).
                 StationPuppetController.applyPendingTilt(s, commandBuffer);
+                // A beat's gesture clip (Puppet.ClipMs) has played out: back to the action's own loop
+                // clip, so the double never stands frozen on a gesture's last frame between beats.
+                if (StationStepDecisions.loopReturnDue(now, s.puppetLoopReturnAtMs)) {
+                    s.puppetLoopReturnAtMs = 0L;
+                    StationPuppetController.playStepClip(s, store, s.emoteId);
+                }
                 if (now >= s.nextHeartbeatAtMs) {
                     s.nextHeartbeatAtMs = now + HEARTBEAT_MS;
                     if (!heartbeat(s, world, store, commandBuffer)) {
@@ -2433,21 +2439,25 @@ public final class StationService {
     }
 
     /**
-     * The action's composed PACE: its own {@code Pace} (ladder and clamp) plus every matching
-     * extension's own ladder, gathered once per dispatch and resolved once per step entry by the
-     * composite handler ({@link StationPacing}). {@link StationPacing.Composed#NONE} for an action
-     * nothing paces, so the classic loop pays nothing for the knob.
+     * The action's composed PACE: its own {@code Pace} (ladder, clamp and stretch) plus every
+     * matching extension's own ladder, stretch and narrowing clamp, gathered once per dispatch and
+     * resolved once per step entry by the composite handler ({@link StationPacing}).
+     * {@link StationPacing.Composed#NONE} for an action nothing paces, so the classic loop pays
+     * nothing for the knob.
      */
     @Nonnull
     static StationPacing.Composed effectivePace(@Nonnull StationAsset asset,
             @Nonnull ActionResolver.ResolvedAction action) {
         String target = ActionResolver.actionTargetId(asset, action.getActionId());
-        List<ContributionScale> ladders = target != null
-                ? ExtensionCatalog.getInstance().paceLaddersFor(asset.getId(), target) : List.of();
-        if (action.getPace() == null && ladders.isEmpty()) {
-            return StationPacing.Composed.NONE;
+        if (target == null) {
+            return action.getPace() == null ? StationPacing.Composed.NONE
+                    : new StationPacing.Composed(action.getPace(), List.of());
         }
-        return new StationPacing.Composed(action.getPace(), ladders);
+        ExtensionCatalog extensions = ExtensionCatalog.getInstance();
+        StationPacing.Composed composed = new StationPacing.Composed(action.getPace(),
+                extensions.paceLaddersFor(asset.getId(), target), extensions.paceStretchFor(asset.getId(), target),
+                extensions.paceClampsFor(asset.getId(), target));
+        return composed.isNeutral() && action.getPace() == null ? StationPacing.Composed.NONE : composed;
     }
 
     /**
@@ -9090,7 +9100,8 @@ public final class StationService {
         }
         try {
             int total = s.producedItems.getOrDefault(itemId, 0);
-            HudPanels.itemTotalled(s.playerRef, HudPanels.itemRowId(itemId), itemId, total, HudRowDisplay.NONE.held());
+            HudPanels.itemTotalled(s.playerRef, HudPanels.itemRowId(itemId), itemId, total,
+                    sessionRowLinger(HudRowDisplay.NONE, s.stopped.get()));
         } catch (Throwable t) {
             Log.fine("STATION item-gain row failed: " + t.getMessage());
         }
@@ -9138,9 +9149,8 @@ public final class StationService {
             }
             HudPanels.totalled(s.playerRef, s.stationId, s.cyclesDone,
                     new HudBarReading(remainingCycles, s.feedableCyclesAtStart),
-                    HudRowDisplay.of(stationNameMsg(asset), null, null, SESSION_ROW_ORDER)
-                            .counting(SESSION_CYCLES_KEY)
-                            .held());
+                    sessionRowLinger(HudRowDisplay.of(stationNameMsg(asset), null, null, SESSION_ROW_ORDER)
+                            .counting(SESSION_CYCLES_KEY), s.stopped.get()));
         } catch (Throwable t) {
             Log.fine("STATION session-progress row failed: " + t.getMessage());
         }
@@ -9186,10 +9196,29 @@ public final class StationService {
                     Msg.raw(" "), RpgMsg.tr("ui.station.summary.lucky")).color(GOLD);
             int total = s.luckItems.getOrDefault(itemId, 0);
             HudPanels.itemTotalled(s.playerRef, luckyFindRowId(itemId), itemId, total,
-                    new HudRowDisplay(line, null, null, null, null, null, null, null).held());
+                    sessionRowLinger(new HudRowDisplay(line, null, null, null, null, null, null, null),
+                            s.stopped.get()));
         } catch (Throwable t) {
             Log.fine("STATION lucky-find row failed: " + t.getMessage());
         }
+    }
+
+    /**
+     * How long a row this run reports stays on the shared panel: held while the run is live, so its
+     * ledger never fades on a clock mid-session, and lingering only {@link #SESSION_ROW_FADE_MS} once
+     * the run has stopped. A report can land AFTER {@link #stop} sent the run's rows away: a
+     * non-looping program's last pass stops the session inside its own dispatch and the session row
+     * moves once that dispatch returns, and a Completion-trigger grant lands inside {@code stop}
+     * itself. A held report there would bring the row back with no expiry at all, so it shows its
+     * final number and fades with the rest instead.
+     */
+    @Nonnull
+    static HudRowDisplay sessionRowLinger(@Nonnull HudRowDisplay display, boolean stopped) {
+        if (!stopped) {
+            return display.held();
+        }
+        return new HudRowDisplay(display.label(), display.icon(), display.color(), display.order(),
+                SESSION_ROW_FADE_MS, display.leadCaption(), display.trailCaption(), display.countKey());
     }
 
     /** Sends every held row this run put on the shared HUD panel away together. Never throws. */

@@ -11,7 +11,7 @@ plus essence and the occasional find. There is no intermediate item and no secon
 Greater Disenchanting Table is the same ritual on a wider block, with three pieces queued side by
 side and a richer payout.
 
-This page reads the ritual from the outside in: the custody that takes the piece, the seven beats,
+This page reads the ritual from the outside in: the custody that takes the piece, the six beats,
 the two presentation layers, the beat that unmakes, the payout, and what other mods see. Every leaf
 it names is generic; the table is the worked example.
 
@@ -79,31 +79,42 @@ ritual then runs once per filled socket, in authored order, each run reading and
 socket's piece and playing its beats at that socket's prop. The session ends when every socket is
 empty; an interrupted run refunds only the socket in progress.
 
-## The seven beats
+## The six beats
 
 `Work.Looping: false` makes the program a ritual: one run, then the session completes. The table's
-program is seven beats, four of fixed length and three that stretch with the worker's pace:
+program is six beats; the first five are elastic and shrink with the worker's pace, and the ritual
+ends on the bloom, which holds its length at any speed:
 
-| Beat | Length | The double | The bed | Accents |
+| Beat | Length untrained | The double | The bed | Accents |
 |---|---|---|---|---|
-| Open | 2.0 s, fixed | opens the book | `Working` | a page-turn charge; a sigil rising from the piece |
-| Kindle | elastic, 8 s untrained | raises the book into the charging pose | `Working` | a swell; mote chimes on delays; green-gold sparks and motes riding the piece |
-| Draw | elastic, 12 s | holds that pose (no clip of its own) | `Drawing`; the piece lifts and turns | after a 400 ms hold, a gather riding the lifted piece; a chime; the channel aura on the double |
-| Surge | elastic, 9 s | winds up | `Drawing` | a beam shell; a layered charge; a light shake, delayed |
-| Unmake | 1.5 s, fixed | releases | back to `Working` | the `Convert`; a shatter, a flash, a hard shake |
-| Payout | 2.5 s, fixed | holds the release (no clip of its own) | `Working` | a bloom; the find cues about 450 ms in |
-| Settle | 3.0 s, fixed | a hand on the heart | `Working` | motes where the piece stood; one last mote sound |
+| Open | elastic, 0.8 s | opens the book, then channels | `Working` | a page-turn charge; a sigil rising from the piece |
+| Kindle | elastic, 3.2 s | channels (no clip of its own) | `Working` | a swell; mote chimes on delays; green-gold sparks and motes riding the piece |
+| Draw | elastic, 4.8 s | channels (no clip of its own) | `Drawing`; the piece lifts and turns | after a 160 ms hold, a gather riding the lifted piece; a chime; the channel aura on the double |
+| Surge | elastic, 3.6 s | winds up, then channels | `Drawing` | a beam shell; a layered charge; a light shake, delayed |
+| Unmake | elastic, 0.6 s | releases, then channels | back to `Working` | the `Convert`; a shatter, a flash, a hard shake |
+| Payout | 1.5 s, fixed | channels (no clip of its own) | `Working` | a bloom; the find cues about 450 ms in |
+
+That is 14.5 seconds untrained, and about 3 with every piece of the disenchanter's gear on (see
+[Pace](#pace)). A pack that wants a longer ritual lengthens the elastic beats from its own extension
+rather than restating them; the stations pack's stretch of 2.5 gives the long ritual, 34 seconds
+untrained (Open 2, Kindle 8, Draw 12, Surge 9, Unmake 1.5, the bloom 1.5). On the greater table the
+next piece's Open follows straight on from a Payout.
+
+The worker sits on the table's own seat while the double works, the way the Sawmill seats its
+worker: `Worker.Hold.Mount` with `"Surface": "Block"` and no `Camera` group, over a `BlockType.Seats`
+entry on each table block. The seat holds the player in place and the mouse turns the camera freely;
+getting up ends the ritual and hands the piece back.
 
 One beat, in full:
 
 ```json
 {
   "Id": "Draw", "Paced": true, "IsWork": true, "State": "Drawing",
-  "Duration": { "Ms": 12000 },
+  "Duration": { "Ms": 4800 },
   "Display": { "Offset": { "Y": 1.4 }, "Rotation": { "Yaw": 45 }, "Animated": true },
   "Presentation": {
     "Target": "Display",
-    "DelayMs": 400,
+    "DelayMs": 160,
     "Sounds": ["SFX_MemoryRestored"],
     "Particles": [ { "SystemId": "RPG_Disenchant_Draw" } ],
     "Effect": { "Id": "RPG_Disenchant_Channel_Aura", "Target": "Puppet" }
@@ -113,10 +124,13 @@ One beat, in full:
 
 - `Paced: true` marks an elastic beat: the action's `Pace` multiplies its `Duration.Ms`, and the
   `DelayMs` and every burst's `DurationSeconds` of its own presentation, so its accents keep their
-  place inside the beat. A beat without it holds its authored length at any speed, which keeps the
-  gather, the flash and the linger crisp.
-- No `Puppet` clip: the double keeps the charging pose the Kindle beat put it in. A beat authors a
-  clip only where the pose changes.
+  place inside the beat. A beat without it holds its authored length at any speed, which is what
+  keeps the bloom at its 1.5 seconds however fast the rest runs.
+- No `Puppet` clip: the double keeps channelling. The action's `Worker.Animation.EmoteId` is a
+  looping cast (`RPG_Emote_Disenchant_Channel`), the double starts in it, and a beat that plays a
+  gesture of its own names how long the gesture runs (`"Puppet": { "Clip": ..., "ClipMs": 500 }`),
+  after which the double goes back to the loop. A beat authors a clip only where the pose changes,
+  and the double is never left frozen on a gesture's last frame between beats.
 - `IsWork: true` on every beat keeps the table lit between beats. A pure beat (no `Convert`, no
   `Consume` plus `Produce`) would otherwise not count as work, and the block would fall back to its
   `Loaded` look.
@@ -129,8 +143,8 @@ One beat, in full:
   where it stood. The overlay
   respawns the prop at the beat's entry, and a prop spawned this tick has been shown to nobody yet,
   so a cue aimed at it in the same tick would play at its position instead of riding it: the
-  presentation's `DelayMs` holds the whole group past the next tick (400 ms here, and 84 ms at the
-  fastest pace, since a paced beat's delay scales with it).
+  presentation's `DelayMs` holds the whole group past the next tick (160 ms here; a paced beat's
+  delay shrinks with it, but a held cue always waits for the next tick at least).
 - `RPG_Disenchant_Draw` authors its own `LifeSpan`, so it rides the lifted piece and ends on its
   own; it needs no `DurationSeconds`, which only caps a burst played at a position.
 - `Effect` with `"Target": "Puppet"` puts the channel aura on the worker's double at the same
@@ -142,12 +156,12 @@ One beat, in full:
 "Pace": {
   "Ladder": {
     "Factors": [ { "Factor": "hytale:stat", "Param": "RPG_Disenchanting_Proficiency" } ],
-    "Floors": [ { "Min": 0, "Scale": 1.0 }, { "Min": 10, "Scale": 0.9 },
-                { "Min": 20, "Scale": 0.8 }, { "Min": 30, "Scale": 0.7 },
-                { "Min": 45, "Scale": 0.55 }, { "Min": 60, "Scale": 0.42 },
-                { "Min": 75, "Scale": 0.3 }, { "Min": 90, "Scale": 0.21 } ]
+    "Floors": [ { "Min": 0, "Scale": 1.0 }, { "Min": 10, "Scale": 0.87 },
+                { "Min": 20, "Scale": 0.75 }, { "Min": 30, "Scale": 0.62 },
+                { "Min": 45, "Scale": 0.49 }, { "Min": 60, "Scale": 0.37 },
+                { "Min": 75, "Scale": 0.24 }, { "Min": 90, "Scale": 0.115 } ]
   },
-  "Clamp": { "Min": 0.21, "Max": 1.0 }
+  "Clamp": { "Min": 0.1, "Max": 1.0 }
 }
 ```
 
@@ -156,12 +170,25 @@ are summed, the highest floor reached wins, and its scale multiplies every `Pace
 ladder reads a native entity stat, `RPG_Disenchanting_Proficiency`, which the table's own kit, its
 set tiers, its grimoire and its draught carry through ordinary item `StatModifiers`, set bonuses
 and an effect's `RawStatModifiers`, so a better-equipped worker finishes sooner with nothing else
-installed. Only the three elastic beats are paced (29 of the ritual's 38 seconds; the other 9 are
-fixed), which is why the clamp's floor is 0.21 rather than the ratio of the two lengths: at the
-floor the elastic beats shrink to about 6 seconds and the whole ritual to 15. An extension adds
-its own `Pace` ladder from its own factors, and the ladders MULTIPLY; only the action's `Clamp`
-bounds the product. The pace is resolved once at each beat's entry, so a stat change mid-beat lands
-on the next.
+installed. The paced beats are 13 of the ritual's 14.5 seconds, and the floors are spaced so each
+one takes about 1.6 seconds off: 14.5, 12.8, 11.3, 9.6, 7.9, 6.3, 4.6 and 3.0 seconds. The draught
+alone (20 points) is about 11 seconds, the full kit (52) about 8, the kit with the grimoire in hand
+(78) about 4.6, and all of it with the draught (98) about 3. The pace is resolved once at each
+beat's entry, so a stat change mid-beat lands on the next.
+
+An extension targeting the action brings a `Pace` of its own, the same shape, and it composes:
+
+- its `Ladder` resolves from its own factors and MULTIPLIES the action's;
+- its `Clamp` only narrows the action's range, applied after it, so the tighter bound wins at each
+  end and one side is a complete statement (the action's `Clamp` is where the range lives, so the
+  action authors both sides);
+- its `Stretch` multiplies the length of every `Paced` beat after the clamps, so a stretched ritual
+  keeps its proportions, its accents stretching with the beats. The action may author one too.
+
+The stations pack uses all three to make its servers' ritual the long one without restating a
+beat: `"Stretch": 2.5` (34 seconds untrained), `"Clamp": { "Min": 0.42 }` (never under 15 seconds),
+a ladder over its own level factor, and a second ladder over the proficiency stat that softens the
+jar's steep curve back to a gentler one.
 
 ## Two layers: the bed and the accents
 
@@ -216,9 +243,9 @@ own timer never runs there and the station keeps the clock.
 
 ```json
 {
-  "Id": "Unmake", "IsWork": true, "State": "Working",
-  "Duration": { "Ms": 1500 },
-  "Puppet": { "Clip": "RPG_Emote_Disenchant_Release" },
+  "Id": "Unmake", "Paced": true, "IsWork": true, "State": "Working",
+  "Duration": { "Ms": 600 },
+  "Puppet": { "Clip": "RPG_Emote_Disenchant_Release", "ClipMs": 500 },
   "Convert": {},
   "Presentation": {
     "Target": "Display",
@@ -284,8 +311,11 @@ one rung.
    for a one-piece station; `Except` for the pieces the station should never eat.
 2. `Work.Looping: false`; `Work.Queue: true` only with several single-item sockets.
 3. Beats: mark the elastic ones `Paced`, author `IsWork: true` on every beat that should keep the
-   block lit, and give a later beat its own `State` for a deeper look.
-4. `Pace` with a `Clamp` at both ends; the content audit names a ladder left open.
+   block lit, and give a later beat its own `State` for a deeper look. Give the double a looping
+   `Animation.EmoteId` and a `ClipMs` on each gesture so it goes back to the loop between beats.
+4. `Pace` with a `Clamp` at both ends; the content audit names a ladder left open. Author the
+   elastic beats at the length you want untrained, and let a pack that wants them longer author a
+   `Stretch` (and a `Clamp` of its own for a higher floor).
 5. Put the bed on the block states and keep every one-shot bounded; target the piece with
    `Display`, the double with `Puppet`.
 6. `Convert` on the unmaking beat, never earlier than the cues that need the prop.

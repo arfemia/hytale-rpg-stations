@@ -154,4 +154,35 @@ public class StationStepConvertCodecTest {
         assertEquals(0.75, ext.getPace().getLadder().getFloors()[0].effectiveScale());
         assertTrue(ExtensionAsset.payloadAllowedFor(ExtensionAsset.Target.ACTION, ExtensionAsset.PAYLOAD_PACE));
     }
+
+    @Test
+    void paceStretch_decodesOnAnExtension_withNoLadder_andOnAnAction() throws Exception {
+        AssetExtraInfo.Data data = new AssetExtraInfo.Data(ExtensionAsset.class, "pack-stretch", null);
+        ExtensionAsset ext = ExtensionAsset.CODEC.decodeAndInheritJsonAsset(RawJsonReader.fromJsonString(
+                "{ \"Target\": { \"Action\": \"Unmake\" }, \"Pace\": { \"Stretch\": 3.0 } }"),
+                null, new AssetExtraInfo<>(data));
+        assertEquals(3.0, ext.getPace().getStretch());
+        assertNull(ext.getPace().getLadder(), "a stretch needs no ladder beside it");
+
+        ExtensionAsset floored = ExtensionAsset.CODEC.decodeAndInheritJsonAsset(RawJsonReader.fromJsonString(
+                "{ \"Target\": { \"Action\": \"Unmake\" }, \"Pace\": { \"Clamp\": { \"Min\": 0.42 } } }"),
+                null, new AssetExtraInfo<>(new AssetExtraInfo.Data(ExtensionAsset.class, "pack-floor", null)));
+        assertEquals(0.42, floored.getPace().getClamp().getMin(), "an extension's pace carries a Clamp of its own");
+        assertNull(floored.getPace().getClamp().getMax());
+
+        ActionDef a = action("{ \"Id\": \"Unmake\", \"Pace\": { \"Stretch\": 0.5,"
+                + " \"Clamp\": { \"Min\": 0.4, \"Max\": 1.0 } } }");
+        assertEquals(0.5, a.getPace().effectiveStretch());
+        assertEquals(1.0, Pace.of(null, null).effectiveStretch(), "absent reads as no stretch");
+    }
+
+    @Test
+    void stepPuppetClipMs_decodes_andIsAbsentByDefault() throws Exception {
+        ActionDef a = action("{ \"Id\": \"Rite\", \"Steps\": ["
+                + " { \"Id\": \"Open\", \"Puppet\": { \"Clip\": \"Fixture_Gesture\", \"ClipMs\": 500 } },"
+                + " { \"Id\": \"Hold\", \"Puppet\": { \"Clip\": \"Fixture_Loop\" } } ] }");
+        assertEquals("Fixture_Gesture", a.getSteps()[0].getPuppet().getClip());
+        assertEquals(500L, a.getSteps()[0].getPuppet().getClipMs());
+        assertNull(a.getSteps()[1].getPuppet().getClipMs(), "a clip with no ClipMs stays until the next one");
+    }
 }

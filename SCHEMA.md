@@ -85,7 +85,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Steps` | array of [StationStep](#type-stationstep) | `null` | The authored step PROGRAM; absent = the implicit classic-convert-loop program built from Recipe. |
 | `Bonus` | [LootRef](#type-lootref) | `null` | What ELSE a cycle hands over: referenced Lootables plus inline Rolls. Yield decides how much of the thing you made, Bonus decides what else you got. |
 | `ContributionScale` | [ContributionScale](#field-actionasset-contributionscale) | `null` | A factor ladder multiplying every Work.PerCycleContributions amount before it is forwarded; the engine pre-scales, so a listener grants the amount verbatim. |
-| `Pace` | [Pace](#field-actionasset-pace) | `null` | The pace of this action's Steps program: a factor Ladder (the ContributionScale shape) whose scale multiplies the Duration of every step marked Paced, bounded by Clamp; an extension's own Pace ladder multiplies in. Null = every beat runs at its authored length. |
+| `Pace` | [Pace](#field-actionasset-pace) | `null` | The pace of this action's Steps program: a factor Ladder (the ContributionScale shape) whose scale multiplies the Duration of every step marked Paced, bounded by Clamp, then lengthened or shortened by Stretch; an extension's own Pace ladder and Stretch multiply in and its Clamp narrows the range. Null = every beat runs at its authored length (an extension may still pace it). |
 | `Worker` | [Worker](#field-actionasset-worker) | `null` | How the person looks doing this: Hold, Camera, Animation, Puppet. |
 | `Moments` | map of [Presentation](#type-presentation) | `null` | What it sounds and looks like, keyed by moment id (Cycle/Swing/Impact/Completion/Ready/Overdone, Refused or Refused:<Reason> for a press this action turns away, a Cue:<Your_Name> a loot roll names, or Step:<ActionId>:<StepId>); ids are written Is_Like_This and matched case-insensitively. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why Rare_Find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). A Refused entry sits over the settings' engine-wide Refused default per leaf: author only the leaves to change, and an empty Sounds array to silence this action's refusals. |
 
@@ -158,7 +158,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Ladder` | [ContributionScale](#field-actionasset-pace-ladder) | `null` | The factor ladder (Factors summed, the highest reached Floor's Scale wins; none reached = 1.0) whose scale multiplies the Duration of every step marked Paced. The same shape as ContributionScale. |
-| `Clamp` | [Clamp](#field-actionasset-pace-clamp) | `null` | Bounds on the FINAL pace scale after every ladder (this action's and each matching extension's) has multiplied in: Min is the fastest a paced beat may run, Max the slowest. Author both sides; the action's clamp is the one place the pace range lives (PACE_UNCLAMPED warns on a missing side). |
+| `Clamp` | [Clamp](#field-actionasset-pace-clamp) | `null` | Bounds on the pace scale once every ladder (the action's and each matching extension's) has multiplied in, before any Stretch: Min is the fastest a paced beat may run, Max the slowest. On an action, author both sides (PACE_UNCLAMPED warns on a missing one): it is where the pace range lives. On an extension it only narrows that range, applied after the action's, so the tighter bound wins at each end and one side is enough. |
+| `Stretch` | `double` | `null` | How long the Paced beats are to begin with: a fixed multiplier on every Paced step's Duration (and its own presentation timing), applied after the Clamp, so the ladders still speed the beats up in the same proportions. The action's Stretch and every matching extension's multiply. Absent = 1.0; 3.0 makes every paced beat three times its authored length. |
 
 <a id="field-actionasset-worker"></a>
 ### ActionAsset.Worker
@@ -417,7 +418,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Steps` | array of [StationStep](#type-stationstep) | `null` | The authored step PROGRAM; absent = the implicit classic-convert-loop program built from Recipe. |
 | `Bonus` | [LootRef](#type-lootref) | `null` | What ELSE a cycle hands over: referenced Lootables plus inline Rolls. Yield decides how much of the thing you made, Bonus decides what else you got. |
 | `ContributionScale` | [ContributionScale](#field-actiondef-contributionscale) | `null` | A factor ladder multiplying every Work.PerCycleContributions amount before it is forwarded; the engine pre-scales, so a listener grants the amount verbatim. |
-| `Pace` | [Pace](#field-actiondef-pace) | `null` | The pace of this action's Steps program: a factor Ladder (the ContributionScale shape) whose scale multiplies the Duration of every step marked Paced, bounded by Clamp; an extension's own Pace ladder multiplies in. Null = every beat runs at its authored length. |
+| `Pace` | [Pace](#field-actiondef-pace) | `null` | The pace of this action's Steps program: a factor Ladder (the ContributionScale shape) whose scale multiplies the Duration of every step marked Paced, bounded by Clamp, then lengthened or shortened by Stretch; an extension's own Pace ladder and Stretch multiply in and its Clamp narrows the range. Null = every beat runs at its authored length (an extension may still pace it). |
 | `Worker` | [Worker](#field-actiondef-worker) | `null` | How the person looks doing this: Hold, Camera, Animation, Puppet. |
 | `Moments` | map of [Presentation](#type-presentation) | `null` | What it sounds and looks like, keyed by moment id (Cycle/Swing/Impact/Completion/Ready/Overdone, Refused or Refused:<Reason> for a press this action turns away, a Cue:<Your_Name> a loot roll names, or Step:<ActionId>:<StepId>); ids are written Is_Like_This and matched case-insensitively. A presentation the engine already has for a moment - a step's own, a loot floor's - wins over the entry here, which is also why Rare_Find is not authorable in this map: that cue always comes from the Roll or Ladder.Floor that earned it (a flair still overlays it). A Refused entry sits over the settings' engine-wide Refused default per leaf: author only the leaves to change, and an empty Sounds array to silence this action's refusals. |
 
@@ -490,7 +491,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Ladder` | [ContributionScale](#field-actiondef-pace-ladder) | `null` | The factor ladder (Factors summed, the highest reached Floor's Scale wins; none reached = 1.0) whose scale multiplies the Duration of every step marked Paced. The same shape as ContributionScale. |
-| `Clamp` | [Clamp](#field-actiondef-pace-clamp) | `null` | Bounds on the FINAL pace scale after every ladder (this action's and each matching extension's) has multiplied in: Min is the fastest a paced beat may run, Max the slowest. Author both sides; the action's clamp is the one place the pace range lives (PACE_UNCLAMPED warns on a missing side). |
+| `Clamp` | [Clamp](#field-actiondef-pace-clamp) | `null` | Bounds on the pace scale once every ladder (the action's and each matching extension's) has multiplied in, before any Stretch: Min is the fastest a paced beat may run, Max the slowest. On an action, author both sides (PACE_UNCLAMPED warns on a missing one): it is where the pace range lives. On an extension it only narrows that range, applied after the action's, so the tighter bound wins at each end and one side is enough. |
+| `Stretch` | `double` | `null` | How long the Paced beats are to begin with: a fixed multiplier on every Paced step's Duration (and its own presentation timing), applied after the Clamp, so the ladders still speed the beats up in the same proportions. The action's Stretch and every matching extension's multiply. Absent = 1.0; 3.0 makes every paced beat three times its authored length. |
 
 <a id="field-actiondef-worker"></a>
 ### ActionDef.Worker
@@ -788,6 +790,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Clip` | `string` | `null` | The puppet clip id played once at this step's iteration entry; null = inherit the action's default clip. |
+| `ClipMs` | `long` | `null` | How long this step's Clip plays, in milliseconds, before the double goes back to the action's own loop clip (Worker.Animation.EmoteId). Absent, the clip stays until the next step's clip replaces it. Not paced: an animation runs at its own speed. |
 | `Prop` | [Prop](#field-stationstep-puppet-prop) | `null` | The puppet's held prop for this beat; null = inherit the action's default Prop. |
 
 <a id="field-stationstep-walk"></a>
@@ -1532,7 +1535,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `PerCycleContributions` | array of [Contribution](#field-extensionasset-percyclecontributions-item) | `null` | Appended Work.PerCycleContributions entries (Action target). |
 | `Bonus` | [LootRef](#type-lootref) | `null` | Appended Bonus references and inline Rolls (Action target). |
 | `ContributionScale` | [ContributionScale](#field-extensionasset-contributionscale) | `null` | ContributionScale overlay (Action target), merged PER LEAF: an overlay authoring only Floors keeps the base action's own Factors. |
-| `Pace` | [Pace](#field-extensionasset-pace) | `null` | This extension's OWN complete Pace ladder (Action target), {Ladder} only and never an overlay: it resolves from its own Factors and Floors, and its scale MULTIPLIES the action's and every other extension's; the action's own Clamp bounds the product, so there is no Clamp to author here. |
+| `Pace` | [Pace](#field-extensionasset-pace) | `null` | This extension's OWN Pace (Action target), never an overlay: its Ladder resolves from its own Factors and Floors and its scale MULTIPLIES the action's and every other extension's; the action's Clamp bounds the product and this Clamp can only narrow it further (one side is enough); its Stretch multiplies the length of every Paced beat after the clamps. |
 | `Actions` | array of [ActionDef](#type-actiondef) | `null` | NEW actions appended to a station's ordered Actions list (Station target); the base wins an Id collision, and an appended action is selected only after every base action. |
 | `Conversions` | array of [Conversion](#field-extensionasset-conversions-item) | `null` | Appended Recipe.Conversions (Action target). |
 | `Steps` | array of [StepInsertion](#field-extensionasset-steps-item) | `null` | Ordered step insertions into an action's OWN authored step program (Action target); an action that authors no Steps runs the recipe-driven convert loop and has no program to insert into. |
@@ -1575,6 +1578,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Ladder` | [ContributionScale](#field-extensionasset-pace-ladder) | `null` | The factor ladder (Factors summed, the highest reached Floor's Scale wins; none reached = 1.0) whose scale multiplies the Duration of every step marked Paced. The same shape as ContributionScale. |
+| `Clamp` | [Clamp](#field-extensionasset-pace-clamp) | `null` | Bounds on the pace scale once every ladder (the action's and each matching extension's) has multiplied in, before any Stretch: Min is the fastest a paced beat may run, Max the slowest. On an action, author both sides (PACE_UNCLAMPED warns on a missing one): it is where the pace range lives. On an extension it only narrows that range, applied after the action's, so the tighter bound wins at each end and one side is enough. |
+| `Stretch` | `double` | `null` | How long the Paced beats are to begin with: a fixed multiplier on every Paced step's Duration (and its own presentation timing), applied after the Clamp, so the ladders still speed the beats up in the same proportions. The action's Stretch and every matching extension's multiply. Absent = 1.0; 3.0 makes every paced beat three times its authored length. |
 
 <a id="field-extensionasset-conversions-item"></a>
 ### ExtensionAsset.Conversions[]
@@ -1620,6 +1625,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
 | `Floors` | array of [Floor](#field-extensionasset-pace-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
+<a id="field-extensionasset-pace-clamp"></a>
+#### ExtensionAsset.Pace.Clamp
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | Inclusive floor: a result below this is raised to it. Omit for no floor. |
+| `Max` | `double` | `null` | Inclusive ceiling: a result above this is lowered to it. Omit for no ceiling. |
 
 <a id="field-extensionasset-conversions-item-doneness"></a>
 #### ExtensionAsset.Conversions[].Doneness

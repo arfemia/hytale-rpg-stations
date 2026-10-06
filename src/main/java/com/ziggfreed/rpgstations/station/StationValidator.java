@@ -1288,14 +1288,20 @@ public final class StationValidator {
                         factorKnown, out);
             }
             if (ext.getPace() != null) {
-                // An extension's Pace is its OWN ladder, multiplied into the action's; only the
-                // action's Clamp bounds the product, which is why the payload is typed {Ladder}
-                // alone (there is no Clamp leaf here to check).
-                checkPaceLadder(ext.getPace().getLadder(), label + ".Pace.Ladder", extId, factorKnown, out);
-                if (ext.getPace().getLadder() == null) {
+                // An extension's Pace is its OWN ladder, multiplied into the action's, its own
+                // Stretch, and a Clamp that only narrows the action's range: one side is a complete
+                // statement there, so the both-sides rule (PACE_UNCLAMPED) stays the action's.
+                Pace extPace = ext.getPace();
+                checkPaceLadder(extPace.getLadder(), label + ".Pace.Ladder", extId, factorKnown, out);
+                if (extPace.getClamp() != null && extPace.getClamp().isInverted()) {
+                    out.add(Finding.warning(DOMAIN, "PACE_CLAMP_INVERTED",
+                            label + ".Pace.Clamp.Min (" + extPace.getClamp().getMin() + ") sits above Max ("
+                                    + extPace.getClamp().getMax() + ")", extId));
+                }
+                if (extPace.getLadder() == null && extPace.getStretch() == null && extPace.getClamp() == null) {
                     out.add(Finding.warning(DOMAIN, "PACE_EXTENSION_NO_LADDER",
-                            label + ".Pace authors no Ladder - an extension's Pace contributes only its"
-                                    + " ladder's scale, so this group multiplies nothing in", extId));
+                            label + ".Pace authors no Ladder, Clamp or Stretch - an extension's Pace"
+                                    + " contributes only those, so this group changes nothing", extId));
                 }
             }
 
@@ -3208,8 +3214,8 @@ public final class StationValidator {
      * that runs the classic convert loop scales nothing (no beat is Paced). {@code
      * PACE_NO_PACED_STEP}: a pace whose program marks no step Paced is inert. {@code
      * PACE_UNCLAMPED}: the action's Clamp is where the pace range lives (every extension ladder
-     * multiplies into it and nothing else bounds the product), so a pace with no Clamp, or a Clamp
-     * missing a side, leaves the composed pace open at that end. {@code PACE_CLAMP_INVERTED}: a
+     * multiplies into it, and an extension's own Clamp can only narrow it), so a pace with no Clamp,
+     * or a Clamp missing a side, leaves the composed pace open at that end. {@code PACE_CLAMP_INVERTED}: a
      * Clamp whose Min sits above its Max. {@code PACE_FLOOR_NONPOSITIVE}: a floor Scale of 0 makes
      * every paced beat instant. The ladder itself gets the same shape checks a ContributionScale
      * gets. A {@code Ref}'d entry may inherit its steps, so {@code mayInherit} keeps the two
@@ -3236,8 +3242,8 @@ public final class StationValidator {
         if (!pace.isFullyClamped()) {
             out.add(Finding.warning(DOMAIN, "PACE_UNCLAMPED",
                     pLabel + (clamp == null ? " authors no Clamp" : ".Clamp is missing a side")
-                            + " - the action's Clamp is the one bound on the composed pace (every extension"
-                            + " ladder multiplies into it), so author both Min and Max here", id));
+                            + " - the action's Clamp is where the composed pace's range lives (every extension"
+                            + " ladder multiplies into it and an extension's Clamp only narrows it), so author both Min and Max here", id));
         }
         if (clamp != null && clamp.isInverted()) {
             out.add(Finding.warning(DOMAIN, "PACE_CLAMP_INVERTED",
@@ -5053,6 +5059,11 @@ public final class StationValidator {
                 if (notBlank(clip) && !emoteKnownLive(clip)) {
                     out.add(Finding.info(DOMAIN, "PRESENTATION_UNKNOWN_EMOTE",
                             stepLabel + ".Puppet.Clip '" + clip + "' is not a known Emote id - check for a typo", id));
+                }
+                if (puppetOverride.getClipMs() != null && !notBlank(clip)) {
+                    out.add(Finding.warning(DOMAIN, "PUPPET_CLIP_MS_WITHOUT_CLIP",
+                            stepLabel + ".Puppet authors ClipMs but no Clip - ClipMs times this step's own clip"
+                                    + " before the double goes back to its loop, so with no clip it does nothing", id));
                 }
             }
             // Seam wave (decision 51b/51d): a step's own Presentation fires at iteration entry and

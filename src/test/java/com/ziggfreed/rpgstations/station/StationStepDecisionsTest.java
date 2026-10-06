@@ -25,6 +25,32 @@ public class StationStepDecisionsTest {
 
     private static final java.util.function.BiFunction<String, String, Double> ALWAYS_TEN_BI = (f, p) -> 10.0;
 
+    // ==================== Puppet.ClipMs: the double goes back to its loop after a gesture ====================
+
+    @Test
+    void loopReturnAt_aClipWithClipMs_handsTheDoubleBackToTheLoopThatLongAfterItsEntry() {
+        assertEquals(1_500L, StationStepDecisions.loopReturnAt(1_000L, 500L, "Fixture_Loop"));
+    }
+
+    @Test
+    void loopReturnAt_noClipMs_orNothingToReturnTo_schedulesNothing() {
+        assertEquals(0L, StationStepDecisions.loopReturnAt(1_000L, null, "Fixture_Loop"),
+                "a clip with no ClipMs stays until the next step's clip replaces it");
+        assertEquals(0L, StationStepDecisions.loopReturnAt(1_000L, 0L, "Fixture_Loop"));
+        assertEquals(0L, StationStepDecisions.loopReturnAt(1_000L, -5L, "Fixture_Loop"));
+        assertEquals(0L, StationStepDecisions.loopReturnAt(1_000L, 500L, null),
+                "an action with no loop clip of its own has nothing to go back to");
+        assertEquals(0L, StationStepDecisions.loopReturnAt(1_000L, 500L, "  "));
+    }
+
+    @Test
+    void loopReturnDue_onlyOnceItsTimeHasCome_andNeverWhenNothingIsPending() {
+        assertFalse(StationStepDecisions.loopReturnDue(1_499L, 1_500L));
+        assertTrue(StationStepDecisions.loopReturnDue(1_500L, 1_500L));
+        assertTrue(StationStepDecisions.loopReturnDue(9_000L, 1_500L));
+        assertFalse(StationStepDecisions.loopReturnDue(9_000L, 0L), "0 means no return is pending");
+    }
+
     // ==================== Duration suspend/resume (reuses the retired Wait math verbatim) ====================
 
     @Test
