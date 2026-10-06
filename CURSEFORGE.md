@@ -143,8 +143,8 @@ owning or replacing the original file. See the Extending Other Packs guide in th
 ## The Player Experience
 
 Approach a station block and press `F`. If it takes placed input, load your materials first with an
-initial press, then press again to start the work loop - your camera pulls in, your character (or
-its stand-in) starts the cycle, and results accumulate as it runs. Press `F` again, or step away, to
+initial press, then press again to start the work loop - you take a seat at the station and can
+look around while your character (or its stand-in) works the cycle, and results accumulate as it runs. Press `F` again, or step away, to
 stop and collect a summary of what you made, what dropped, and what you earned. Some stations offer
 more than one job - just hold what you want worked and the station figures out which action to run.
 Sneaking and pressing `F` opens a recipe picker on a station that offers more than one output
