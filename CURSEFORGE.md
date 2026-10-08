@@ -25,11 +25,11 @@ reaches the top rung of the sawmill's own curve.
 New in 1.1.0: the Disenchanting Table. Place a piece of gear on it, press `F`, and the piece comes
 apart over a staged ritual, giving back what the Salvager's Workbench would plus Essence of Life and the
 occasional find. Gear of item level 20 and up has a 1-in-200 shot at the Disenchanter's Grimoire on
-every ritual, and each of the four disenchanter's kit pieces has its own 1.5 percent chance. An
-untrained ritual takes about 15 seconds. You sit at the table the way you do at the Sawmill and can
-look around while your stand-in works. The kit, the grimoire and a Disenchanter's Draught from the
-Alchemist's Workbench each speed it up; with all of them it takes about 3 seconds. The Greater
-Disenchanting Table works three pieces in a row and pays more.
+every ritual, and each of the four disenchanter's kit pieces has its own 1.5 percent chance. With
+RPG Stations on its own, an untrained ritual takes about 15 seconds. You sit at the table the way
+you do at the Sawmill and can look around while your stand-in works. The kit, the grimoire and a
+Disenchanter's Draught from the Alchemist's Workbench each speed it up; with all of them it takes
+about 3 seconds. The Greater Disenchanting Table works three pieces in a row and pays more.
 
 Every number in all of that is plain JSON, so a server can retune what better tools are worth,
 change what the finds hand over, or key the whole thing off something else entirely.
@@ -234,7 +234,9 @@ consumer needs.
 grimoire and the draught. For pack authors it adds stations that take their recipes from any of the
 game's benches (the Salvager's Workbench included), a queue that works several placed pieces in turn,
 server-wide protect lists, and loot rolls marked as a station's expected output so a real find
-still reads as one. It requires ZiggfreedCommon 2.2.0.
+still reads as one. The Sawmill's description now says what the bench does, and that a better
+hatchet gets more planks out of each log. Fixed: the work summary read "Worked 1 cycles" after a
+single cycle, and two stop messages mixed their tenses. This version requires ZiggfreedCommon 2.2.0.
 
 See `patch-notes/` in this mod's repository for the full version history.
 
