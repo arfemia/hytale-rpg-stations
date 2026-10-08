@@ -47,9 +47,11 @@ api.channels().declare("yourmod:crop_quality");
 ```
 
 Declaring is optional in the sense that it never blocks anything: an undeclared channel is still
-forwarded, and the validator only emits an `UNKNOWN_CHANNEL` warning. Declaring is worth it anyway,
+forwarded, and the validator only emits an `UNKNOWN_CHANNEL` warning, and only when some declared
+channel shares its namespace. A namespace nobody declared into belongs to a mod that is not installed,
+so content written for it degrades quietly, as it does on the read side. Declaring is worth it anyway,
 because it puts the id in the in-game Asset Editor's `rpgstations:channels` dropdown and turns a typo
-from a silent no-op into a boot-log line.
+inside your namespace from a silent no-op into a boot-log line.
 
 ### Two authoring sites, two meanings, one record
 

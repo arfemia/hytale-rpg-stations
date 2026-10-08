@@ -15,7 +15,9 @@ import javax.annotation.Nonnull;
  *   <li>the id appears in the {@code rpgstations:channels} Asset-Editor dropdown, so an author
  *   picks it instead of typing it;
  *   <li>the content validator stops warning {@code UNKNOWN_CHANNEL} for it, and that warn's
- *   message echoes the declared set so a typo is obvious.
+ *   message echoes the declared channels of its namespace so a typo is obvious. The warn fires
+ *   only for a channel whose namespace has a declared channel: a namespace nobody declared into
+ *   belongs to a mod that is not installed, and its content stays quiet.
  * </ul>
  *
  * <p><b>Fail-open, absolutely.</b> An UNDECLARED channel is still forwarded verbatim on the cycle

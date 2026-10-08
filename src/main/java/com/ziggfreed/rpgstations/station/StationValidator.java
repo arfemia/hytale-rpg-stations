@@ -3051,10 +3051,14 @@ public final class StationValidator {
      * always a typo, and a typo'd channel posts into a void forever without saying so.
      *
      * <p><b>WARN, fail-open, absolutely.</b> An undeclared channel is still forwarded verbatim on
-     * the cycle event - this note never blocks an asset load or a grant. It also fails open on an
-     * EMPTY declared set (no progression mod installed, or a unit JVM), so a jar-only server never
-     * manufactures a wall of notes about content that is working exactly as intended. The message
-     * echoes the declared set so a near-miss is obvious at a glance.
+     * the cycle event - this note never blocks an asset load or a grant. It also fails open PER
+     * NAMESPACE ({@link #warnsUndeclared}): an undeclared {@code ns:x} warns only when a declared
+     * channel shares its {@code ns:} prefix. A namespace nobody declared into belongs to a mod that is
+     * not installed (and an empty declared set to a jar-only server or a unit JVM), so a server never
+     * manufactures a wall of notes about content that is working exactly as intended, while a typo
+     * inside an installed mod's namespace still warns. A channel with no namespace warns
+     * against any non-empty declared set. The message echoes the declared channels of the same
+     * namespace so a near-miss is obvious at a glance.
      */
     private static void checkContributionChannels(@Nullable Contribution[] posts, @Nonnull String label,
                                                   @Nonnull String id, @Nonnull List<Finding> out) {
@@ -3071,15 +3075,54 @@ public final class StationValidator {
                 continue;
             }
             String channel = post.getChannel().trim();
-            if (ContributionChannelRegistryImpl.getInstance().isDeclared(channel)
-                    || !reported.add(channel.toLowerCase(Locale.ROOT))) {
+            if (!warnsUndeclared(channel, declared) || !reported.add(channel.toLowerCase(Locale.ROOT))) {
                 continue;
             }
+            String namespace = namespaceOf(channel);
             out.add(Finding.warning(DOMAIN, "UNKNOWN_CHANNEL",
                     label + " posts to undeclared channel '" + channel + "' - it is still forwarded, but"
-                            + " nothing is listening for it by that name; declared channels are "
-                            + String.join(", ", declared), id));
+                            + " nothing is listening for it by that name; declared "
+                            + (namespace == null ? "" : namespace + " ") + "channels are "
+                            + String.join(", ", declaredIn(namespace, declared)), id));
         }
+    }
+
+    /**
+     * PURE: does {@code channel} earn an {@code UNKNOWN_CHANNEL} warn against {@code declared}? Never
+     * for a declared channel or an empty declared set; for a namespaced channel only when a declared
+     * channel shares its namespace (case-insensitive), since a namespace nobody declared into is a
+     * mod that is not installed; for a channel with no namespace, whenever anything is declared.
+     */
+    static boolean warnsUndeclared(@Nonnull String channel, @Nonnull Collection<String> declared) {
+        String key = channel.trim().toLowerCase(Locale.ROOT);
+        if (key.isEmpty() || declared.isEmpty()) {
+            return false;
+        }
+        for (String known : declared) {
+            if (known.toLowerCase(Locale.ROOT).equals(key)) {
+                return false;
+            }
+        }
+        return !declaredIn(namespaceOf(key), declared).isEmpty();
+    }
+
+    /** The declared channels in {@code namespace} (lowercase, {@code "yourmod:"}), or all of them when it is null. */
+    @Nonnull
+    private static List<String> declaredIn(@Nullable String namespace, @Nonnull Collection<String> declared) {
+        List<String> in = new ArrayList<>();
+        for (String known : declared) {
+            if (namespace == null || known.toLowerCase(Locale.ROOT).startsWith(namespace)) {
+                in.add(known);
+            }
+        }
+        return in;
+    }
+
+    /** {@code "yourmod:"} for {@code "YourMod:crop_quality"}; null for a channel with no namespace. */
+    @Nullable
+    private static String namespaceOf(@Nonnull String channel) {
+        int colon = channel.indexOf(':');
+        return colon > 0 ? channel.substring(0, colon + 1).toLowerCase(Locale.ROOT) : null;
     }
 
     private static boolean hasNonBlank(@Nullable String[] values) {

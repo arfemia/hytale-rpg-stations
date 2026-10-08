@@ -27,7 +27,9 @@ import com.ziggfreed.rpgstations.api.ContributionChannelRegistry;
  * engine-internal extension of the frozen contract {@code FactorRegistryImpl} documents.
  *
  * <p><b>Fail-open, absolutely</b> (decision 75): {@link #isDeclared} answering {@code false}
- * produces a WARN and nothing more. An undeclared channel is still forwarded verbatim.
+ * produces at most a WARN, and only when a declared channel shares the undeclared one's namespace
+ * (a namespace nobody declared into is a mod that is not installed). An undeclared channel is still
+ * forwarded verbatim.
  */
 public final class ContributionChannelRegistryImpl implements ContributionChannelRegistry {
 
