@@ -17,7 +17,7 @@ plank per log, a copper two, the best forgeable hatchets four, and the sawmill's
 five. Mid-ladder tools land on fractional yields: two planks, and often a third. Staying at the
 bench pays too: past ten cycles a decent hatchet starts shaking offcuts loose from the milled logs -
 plant fibre, tree bark, tree sap and sticks - and the finds get richer the longer one session runs,
-with life essence joining from the second tier and concentrated essence at the deepest. And a few
+with Essence of Life joining from the second tier and Greater Essence of Life at the deepest. And a few
 cycles into any session worked with mithril-grade steel, every cycle carries a 1-in-2500 shot at the
 **Sawmiller's Hatchet**. It drops nowhere else, no bench can forge it, and it is the only tool that
 reaches the top rung of the sawmill's own curve.
@@ -116,7 +116,7 @@ handed something over, so a drop table that rolled nothing stays silent.
 
 Drop tables compose too, using Hytale's own drop-list format. The sawmill's four find tiers each
 combine a shared offcut list (referenced by id, so retuning what milling yields is one edit that
-moves every tier at once) with their own life-essence roll, and a richer tier pulls that shared
+moves every tier at once) with their own Essence of Life roll, and a richer tier pulls that shared
 list more times. Each of the mod's loot tables holds a single roll on purpose, so a pack can
 replace exactly the one it wants to retune without inheriting the rest.
 

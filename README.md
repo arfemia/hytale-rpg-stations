@@ -7,8 +7,8 @@ A standalone server mod, package root `com.ziggfreed.rpgstations`. It ships one 
 station, a Sawmill, craftable at a tier 2 Workbench, with a tool-scaling yield curve, a
 session-loyalty find ladder, and a rare trophy hatchet to chase, so it is playable with no content
 pack at all. The held, unreleased 1.1.0 adds a second: the Disenchanting Table, in two tiers, the
-stand-in for the vanilla Salvage bench, where a placed piece of gear comes apart over a staged
-ritual and gives back what the bench would plus Life essence, the occasional Void essence or
+stand-in for the vanilla Salvager's Workbench, where a placed piece of gear comes apart over a staged
+ritual and gives back what the bench would plus Essence of Life, the occasional Essence of the Void or
 Voidheart, a four-piece disenchanter's kit that forms a gear set, and a grimoire to chase; the
 Greater Disenchanting Table works three pieces in a row and pays more. A Cooking Pit you BUILD
 rather than craft (a ring of stone around an unlit campfire,
