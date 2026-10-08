@@ -57,7 +57,7 @@
   },
   "Steps": [
     {
-      "$Comment": "Open, 0.8 seconds untrained and Paced: the double opens the grimoire while the table wakes into its Working look, then goes back to channelling once the gesture has played (ClipMs, which an animation's own speed sets, so it is not paced). The sigil rises from the placed piece itself (Target Display; RPG_Disenchant_Sigil authors a LifeSpan so it rides the prop) under the spellbook's page-turn charge.",
+      "$Comment": "Open, 0.8 seconds untrained and Paced: the double reaches over the piece while the table wakes into its Working look, then goes back to channelling once the gesture has played (ClipMs, which an animation's own speed sets, so it is not paced). The sigil rises from the placed piece itself (Target Display; RPG_Disenchant_Sigil authors a LifeSpan so it rides the prop) under the spellbook's page-turn charge.",
       "Id": "Open",
       "Paced": true,
       "IsWork": true,
@@ -159,7 +159,7 @@
     ]
   },
   "Worker": {
-    "$Comment": "Seated the way the Sawmill seats its worker: Hold.Mount Surface Block mounts the hidden player on the table block's own seat (BlockType.Seats on the table's block item), which keeps them in place while the mouse turns the camera freely, and no Camera group is authored, so the camera stays the player's own. Getting up off the seat ends the ritual and hands the piece back. Animation.EmoteId is the channelling loop (RPG_Emote_Disenchant_Channel, a looping cast): the double starts in it, plays it through every beat with no clip of its own, and goes back to it after each beat gesture that names a Puppet.ClipMs, so it is always working. The double holds the vanilla purple grimoire the whole ritual, so the spellbook clips animate a real book.",
+    "$Comment": "Seated the way the Sawmill seats its worker: Hold.Mount Surface Block mounts the hidden player on the table block's own seat (BlockType.Seats on the table's block item), which keeps them in place while the mouse turns the camera freely, and no Camera group is authored, so the camera stays the player's own. Getting up off the seat ends the ritual and hands the piece back. Animation.EmoteId is the channelling loop (RPG_Emote_Disenchant_Channel, a looping cast): the double starts in it, plays it through every beat with no clip of its own, and goes back to it after each beat gesture that names a Puppet.ClipMs, so it is always working. Puppet.Prop Source None keeps the double's hands empty for the whole ritual, whatever the worker is holding: the casting gestures need nothing in hand, and nothing in the worker's own hand is copied onto it. Author an ItemId prop here to give it something to hold.",
     "Hold": {
       "MovementLock": true,
       "EffectId": "RPG_Station_Hold",
@@ -173,7 +173,7 @@
       "Look": { "Source": "PlayerClone" },
       "Offset": { "X": 0.0, "Y": -0.4, "Z": 1.15 },
       "Rotation": { "Yaw": 0.0 },
-      "Prop": { "Source": "ItemId", "ItemId": "Weapon_Spellbook_Grimoire_Purple", "Slot": "Hotbar" }
+      "Prop": { "Source": "None" }
     }
   },
   "Moments": {

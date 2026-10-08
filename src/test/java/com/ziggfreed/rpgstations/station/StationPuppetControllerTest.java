@@ -3,20 +3,29 @@ package com.ziggfreed.rpgstations.station;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.Arrays;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.Puppet;
+import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.common.codec.Vec3;
 
 /**
  * Pure tests for {@link StationPuppetController}'s unit-JVM-safe decision cores (round-4
  * puppet-presentation design, doc section 3.6): the per-step clip-override resolution
  * ({@link StationPuppetController#resolveEffectiveClip}), the swing SLOT choice that resolution
- * feeds ({@link StationPuppetController#useActionSlotForPuppetSwing}), the effective prop item id
- * ({@link StationPuppetController#resolveEffectivePropItemId}), and (round-3 smoke) the
+ * feeds ({@link StationPuppetController#useActionSlotForPuppetSwing}), the prop group a beat works
+ * with ({@link StationPuppetController#resolveEffectiveProp}) and the item it puts in the double's
+ * hand ({@link StationPuppetController#resolveEffectivePropItemId}), read over the Disenchanting
+ * Tables' shipped ritual as well as fixtures, and (round-3 smoke) the
  * FACING-RELATIVE placement composition ({@link StationPuppetController#resolveWorldOffset}/
  * {@link StationPuppetController#resolveYawRadians}) - the placed block's facing enters as a plain
  * {@code blockYawRadians} scalar, exactly the primitive-typed discipline
@@ -212,5 +221,50 @@ class StationPuppetControllerTest {
     void resolveEffectivePropItemId_itemIdMissing_degradesToEmpty() {
         Puppet.Prop prop = Puppet.Prop.of(Puppet.PROP_SOURCE_ITEM_ID, null, null);
         assertNull(StationPuppetController.resolveEffectivePropItemId("Tool_Hatchet_Cobalt", prop));
+    }
+
+    // ==================== resolveEffectiveProp (a beat's prop group) ====================
+
+    @Test
+    void resolveEffectiveProp_aStepsOwnProp_wins() {
+        Puppet.Prop action = Puppet.Prop.of(Puppet.PROP_SOURCE_MIRROR_HELD, null, null);
+        Puppet.Prop step = Puppet.Prop.of(Puppet.PROP_SOURCE_NONE, null, null);
+        assertSame(step, StationPuppetController.resolveEffectiveProp(StationStep.PuppetOverride.of(null, step), action));
+    }
+
+    @Test
+    void resolveEffectiveProp_aStepWithAClipAlone_orNoOverride_inheritsTheActions() {
+        Puppet.Prop action = Puppet.Prop.of(Puppet.PROP_SOURCE_ITEM_ID, "Tool_Hammer_Iron", null);
+        assertSame(action, StationPuppetController.resolveEffectiveProp(
+                StationStep.PuppetOverride.of("Hammer_Strike", null), action));
+        assertSame(action, StationPuppetController.resolveEffectiveProp(null, action));
+        assertNull(StationPuppetController.resolveEffectiveProp(null, null), "nothing authored: mirror the hand");
+    }
+
+    // ==================== the shipped ritual's double ====================
+
+    /**
+     * What a worker may have in hand as a ritual starts: nothing, a vanilla grimoire, the table's own
+     * grimoire (which speeds the ritual while held) and a book of another mod's.
+     */
+    private static final List<String> WORKER_HANDS = Arrays.asList(null, "Weapon_Spellbook_Grimoire_Purple",
+            "RPG_Weapon_Spellbook_Grimoire_Disenchanter", "Fixture_Objective_Book");
+
+    @Test
+    void theShippedRitualsDouble_holdsNothing_whateverTheWorkerHolds() throws Exception {
+        for (ActionDef ritual : List.of(ShippedRituals.lesser(), ShippedRituals.greater())) {
+            Puppet puppet = ritual.getWorker() != null ? ritual.getWorker().getPuppet() : null;
+            assertNotNull(puppet, "the ritual is worked by a double");
+            Puppet.Prop actionProp = puppet.getProp();
+            for (String hand : WORKER_HANDS) {
+                assertNull(StationPuppetController.resolveEffectivePropItemId(hand, actionProp),
+                        "the double spawns empty-handed, the worker holding " + hand);
+                for (StationStep step : ritual.getSteps()) {
+                    Puppet.Prop beat = StationPuppetController.resolveEffectiveProp(step.getPuppet(), actionProp);
+                    assertNull(StationPuppetController.resolveEffectivePropItemId(hand, beat),
+                            "the double holds nothing through " + step.getId() + ", the worker holding " + hand);
+                }
+            }
+        }
     }
 }

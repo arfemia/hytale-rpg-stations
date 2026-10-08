@@ -510,9 +510,7 @@ final class StationPuppetController {
     private static String resolvePuppetAnimationsId(@Nonnull StationSession s, @Nullable Player player,
             @Nullable StationStep.PuppetOverride override) {
         String heldItemId = heldItemIdOf(player);
-        Puppet.Prop effectiveProp = override != null && override.getProp() != null
-                ? override.getProp() : s.puppetDefaultProp;
-        String propItemId = resolveEffectivePropItemId(heldItemId, effectiveProp);
+        String propItemId = resolveEffectivePropItemId(heldItemId, resolveEffectiveProp(override, s.puppetDefaultProp));
         if (propItemId != null && !propItemId.equalsIgnoreCase(heldItemId)) {
             String propAnimationsId = itemAnimationsIdOf(propItemId);
             if (propAnimationsId != null) {
@@ -595,9 +593,8 @@ final class StationPuppetController {
         if (performer == null) {
             return;
         }
-        Puppet.Prop effectiveProp = override != null && override.getProp() != null
-                ? override.getProp() : s.puppetDefaultProp;
-        String itemId = resolveEffectivePropItemId(heldItemIdOf(player), effectiveProp);
+        String itemId = resolveEffectivePropItemId(heldItemIdOf(player),
+                resolveEffectiveProp(override, s.puppetDefaultProp));
         // The performer owns its own dirty-gated last-mirrored value (seeded at spawn to the same
         // propItemId s.puppetHeldItemId holds), so this is byte-parity with the pre-swap
         // updateHeldItem(commandBuffer, puppetRef, s.puppetHeldItemId, itemId) - a Hotbar mutation,
@@ -686,6 +683,19 @@ final class StationPuppetController {
      */
     static boolean useActionSlotForPuppetSwing(@Nullable String effectiveEmoteClip) {
         return effectiveEmoteClip == null || effectiveEmoteClip.isBlank();
+    }
+
+    /**
+     * PURE: the prop group the double works a beat with - the in-flight step's own
+     * {@code Puppet.Prop} when it authors one, else {@code actionDefault} (the action's
+     * {@code Worker.Puppet.Prop}): the same "absent = inherit" rule {@link #resolveEffectiveClip}
+     * applies to the clip. What that group puts in the hand is {@link #resolveEffectivePropItemId}'s
+     * call, so the prop sync and the swing's animation lookup read one composition.
+     */
+    @Nullable
+    static Puppet.Prop resolveEffectiveProp(@Nullable StationStep.PuppetOverride override,
+            @Nullable Puppet.Prop actionDefault) {
+        return override != null && override.getProp() != null ? override.getProp() : actionDefault;
     }
 
     /**

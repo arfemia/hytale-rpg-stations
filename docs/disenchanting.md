@@ -5,7 +5,7 @@ leaves any ritual can use.
 
 The Disenchanting Table stands in for the Salvage bench the way the Sawmill stands in for the
 Builders bench ([Derive from Any Bench](derive-from-any-bench.md)). Place a piece of gear on it,
-press `F`, and the worker's double opens a grimoire over the piece while the table wakes, draws the
+press `F`, and the worker's double reaches over the piece while the table wakes, draws the
 piece apart over a long, staged performance, and hands back what the Salvage bench would have,
 plus essence and the occasional find. There is no intermediate item and no second station: the
 Greater Disenchanting Table is the same ritual on a wider block, with three pieces queued side by
@@ -87,7 +87,7 @@ ends on the bloom, which holds its length at any speed:
 
 | Beat | Length untrained | The double | The bed | Accents |
 |---|---|---|---|---|
-| Open | elastic, 0.8 s | opens the book, then channels | `Working` | a page-turn charge; a sigil rising from the piece |
+| Open | elastic, 0.8 s | reaches over the piece, then channels | `Working` | a page-turn charge; a sigil rising from the piece |
 | Kindle | elastic, 3.2 s | channels (no clip of its own) | `Working` | a swell; mote chimes on delays; green-gold sparks and motes riding the piece |
 | Draw | elastic, 4.8 s | channels (no clip of its own) | `Drawing`; the piece lifts and turns | after a 160 ms hold, a gather riding the lifted piece; a chime; the channel aura on the double |
 | Surge | elastic, 3.6 s | winds up, then channels | `Drawing` | a beam shell; a layered charge; a light shake, delayed |
@@ -104,6 +104,10 @@ The worker sits on the table's own seat while the double works, the way the Sawm
 worker: `Worker.Hold.Mount` with `"Surface": "Block"` and no `Camera` group, over a `BlockType.Seats`
 entry on each table block. The seat holds the player in place and the mouse turns the camera freely;
 getting up ends the ritual and hands the piece back.
+
+The double works empty-handed: `Worker.Puppet.Prop` is `{ "Source": "None" }`, so it holds nothing
+whatever the worker has in hand (a prop left out would copy the worker's held item onto it). The
+casting gestures need nothing in hand; an `"ItemId"` prop gives the double something to hold.
 
 One beat, in full:
 
@@ -223,7 +227,7 @@ own keyframes.
   last stood, lifted or not: the shatter plays where the piece was.
 - `Puppet`: the worker's double, or the block when no double stands.
   `{ "Kind": "Puppet", "Node": "<a node of its model>" }` attaches the riding particles to a named
-  node of the double's model (the raised book, a hand).
+  node of the double's model (a hand).
 
 A particle system rides an entity only when it ends on its own: its own `LifeSpan` is positive. An
 attached system has no playback cap, so it lives until that lifetime ends or the entity is removed

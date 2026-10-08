@@ -6,9 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -19,10 +16,7 @@ import java.util.function.Predicate;
 
 import org.junit.jupiter.api.Test;
 
-import com.hypixel.hytale.assetstore.AssetExtraInfo;
-import com.hypixel.hytale.codec.util.RawJsonReader;
 import com.ziggfreed.common.inventory.DisposableItemMetadata;
-import com.ziggfreed.rpgstations.asset.ActionAsset;
 import com.ziggfreed.rpgstations.asset.ActionDef;
 import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.Custody;
@@ -244,21 +238,9 @@ class StationMetadataGuardRowsTest {
                 "nobody reads the socket: nothing to refuse for");
     }
 
-    /** The shipped ritual and the greater table's child action over it, decoded the way the store inherits it. */
-    private static ActionDef greaterRitual() throws Exception {
-        Path actions = Path.of("src", "main", "resources", "Server", "RpgStations", "Actions");
-        ActionAsset base = ActionAsset.CODEC.decodeAndInheritJsonAsset(RawJsonReader.fromJsonString(
-                Files.readString(actions.resolve("Disenchant.json"), StandardCharsets.UTF_8)), null,
-                new AssetExtraInfo<>(new AssetExtraInfo.Data(ActionAsset.class, "Disenchant", null)));
-        return ActionAsset.CODEC.decodeAndInheritJsonAsset(RawJsonReader.fromJsonString(
-                Files.readString(actions.resolve("Disenchant_Greater.json"), StandardCharsets.UTF_8)), base,
-                new AssetExtraInfo<>(new AssetExtraInfo.Data(ActionAsset.class, "Disenchant_Greater", "Disenchant")))
-                .getBody();
-    }
-
     @Test
     void theGreaterTablesThreeSockets_refuseAGuardedPieceAtPlacement() throws Exception {
-        ActionDef ritual = greaterRitual();
+        ActionDef ritual = ShippedRituals.greater();
         List<Custody.ResolvedSocket> sockets = ritual.getCustody().effectiveSockets();
         assertEquals(3, sockets.size());
         boolean queue = ritual.getWork() != null && ritual.getWork().effectiveQueue();
@@ -283,7 +265,7 @@ class StationMetadataGuardRowsTest {
 
     @Test
     void aGuardedPieceAlreadyInOneGreaterSocket_neverStallsTheQueue() throws Exception {
-        List<Custody.ResolvedSocket> sockets = greaterRitual().getCustody().effectiveSockets();
+        List<Custody.ResolvedSocket> sockets = ShippedRituals.greater().getCustody().effectiveSockets();
         String first = sockets.get(0).id();
         String second = sockets.get(1).id();
         String third = sockets.get(2).id();
