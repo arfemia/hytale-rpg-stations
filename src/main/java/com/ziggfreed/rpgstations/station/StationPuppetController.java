@@ -168,7 +168,7 @@ final class StationPuppetController {
      * through {@code commandBuffer}, never {@code store} - this call runs from {@code
      * StationService#toggle}, inside the store's write-processing lock (an interaction-handler
      * call site), where a direct {@code store.putComponent} throws {@code IllegalStateException(
-     * "Store is currently processing!")} (verified in {@code hytale-shared-source}'s {@code
+     * "Store is currently processing!")} (verified in {@code shared-source/release}'s {@code
      * Store#putComponent}/{@code assertWriteProcessing}). The prior {@code store}-routed hide
      * silently swallowed that throw into the method's own catch, so the real player was NEVER
      * actually hidden even though every shipped station authors {@code Hide.Route:"Scale"}.

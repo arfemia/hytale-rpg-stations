@@ -11,7 +11,7 @@ renames, so `git log --follow` still works on every one).
 ## Restore everything
 
 ```powershell
-cd 'D:\dev\business\hyMMO\additional-mods\rpg-stations'
+cd 'D:\dev\business\hytale-dev\hyMMO\additional-mods\rpg-stations'
 .\unreleased\restore.ps1              # moves it all back into src/main/resources
 .\unreleased\restore.ps1 -WhatIf      # preview without touching anything
 ```
