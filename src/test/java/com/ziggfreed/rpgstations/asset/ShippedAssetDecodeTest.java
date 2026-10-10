@@ -49,9 +49,9 @@ import static org.junit.jupiter.api.Assertions.fail;
  * unknown store. An unmapped store folder under a scanned root FAILS rather than being skipped, so
  * a new asset type is covered here the day it ships its first file; a mapped folder holding zero
  * files is legal (a registered store can be empty in a given release scope), because only files are
- * ever judged. The optional roots are not declared Gradle task inputs, so an edit touching only one
- * of them can leave this task {@code UP-TO-DATE} locally: pass {@code --rerun-tasks} when such a
- * file is the only thing that moved.
+ * ever judged. Every optional root is a declared input of the {@code familyTest} task that runs this
+ * class (build.gradle: this repo's held mirror, and the companion pack's two station trees), so an
+ * edit touching only one of them reruns it.
  */
 @Tag("familyTest")
 public class ShippedAssetDecodeTest {

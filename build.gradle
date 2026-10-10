@@ -31,11 +31,13 @@ repositories {
 // Compile against the SAME jar the server runs. In a workspace, its family.properties (at
 // workspaceRoot) names hytaleHome, patchline and game_build once for every family build; built
 // alone, with no family.properties there, this repo's gradle.properties gives them. These locals
-// shadow the gradle.properties values of the same names for the rest of this script.
+// shadow the gradle.properties values of the same names for the rest of this script. The file is
+// read through providers.fileContents, so the configuration cache tracks it, its absence included
+// (as it does the path map's read below).
 def familyBuildKeys = new Properties()
-def familyBuildKeysFile = new File(rootProject.file(workspaceRoot), 'family.properties')
-if (familyBuildKeysFile.isFile()) {
-    familyBuildKeysFile.withReader('UTF-8') { familyBuildKeys.load(it) }
+def familyBuildKeysBytes = providers.fileContents(rootProject.layout.projectDirectory.file("${workspaceRoot}/family.properties")).asBytes.orNull
+if (familyBuildKeysBytes != null) {
+    familyBuildKeys.load(new StringReader(new String(familyBuildKeysBytes, 'UTF-8')))
 }
 def buildKey = { String key -> familyBuildKeys.getProperty(key)?.trim() ?: property(key).toString() }
 def hytaleHome = buildKey('hytaleHome')
@@ -48,12 +50,12 @@ def workspaceDir = rootProject.file(workspaceRoot)
 def familyMap = null
 def familyPath = { String key, File root = workspaceDir ->
     if (familyMap == null) {
-        def mapFile = new File(workspaceDir, 'family.properties')
-        if (!mapFile.isFile()) {
+        def mapBytes = providers.fileContents(rootProject.layout.projectDirectory.file("${workspaceRoot}/family.properties")).asBytes.orNull
+        if (mapBytes == null) {
             throw new GradleException("no family.properties at ${workspaceDir.canonicalPath} (workspaceRoot=${workspaceRoot} in gradle.properties)")
         }
         familyMap = new Properties()
-        mapFile.withReader('UTF-8') { familyMap.load(it) }
+        familyMap.load(new StringReader(new String(mapBytes, 'UTF-8')))
     }
     String rel = familyMap.getProperty(key)?.trim()
     if (!rel) {
@@ -150,8 +152,9 @@ test {
         excludeTags familyTestTag
     }
     // MmoAgnosticismTest scans the in-repo docs/ prose as well as the code and resources, so a
-    // docs-only change must re-run the tests rather than leave the task UP-TO-DATE.
-    inputs.dir('docs').withPropertyName('docsProse').withPathSensitivity(PathSensitivity.RELATIVE)
+    // docs-only change must re-run the tests rather than leave the task UP-TO-DATE. An empty folder
+    // there holds no prose, so it counts for nothing.
+    inputs.dir('docs').withPropertyName('docsProse').withPathSensitivity(PathSensitivity.RELATIVE).ignoreEmptyDirectories()
 }
 
 // The family run: `-PfamilyComplete` (the un-nest gate, a release gate), or this repo built inside the
@@ -183,6 +186,11 @@ def familyTest = tasks.register('familyTest', Test) {
             include 'unreleased/Server/RpgStations/**'
         }).withPropertyName('companionPackStations').withPathSensitivity(PathSensitivity.RELATIVE).ignoreEmptyDirectories()
     }
+    // ShippedAssetDecodeTest also decodes this repository's own held mirror, which sits outside every
+    // resource root and so never reaches the test classpath.
+    inputs.files(fileTree('unreleased') {
+        include 'Server/RpgStations/**'
+    }).withPropertyName('heldStations').withPathSensitivity(PathSensitivity.RELATIVE).ignoreEmptyDirectories()
 
     // Failing, not skipping: a family run must read the family. In a family run this task fails
     // before its JVM starts when the root it reads holds no family.properties, and under
