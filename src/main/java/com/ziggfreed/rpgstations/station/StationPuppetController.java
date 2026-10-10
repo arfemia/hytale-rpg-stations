@@ -44,8 +44,8 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@link #resolveWorldOffset}/{@link #resolveYawRadians} and the shared {@link StationBlockFacing}
  * reader - which hide route an author picked, and the swing-beat cadence caller policy) - the
  * generic "clone-a-skin-onto-a-networked-entity" + "scale self-hide" primitives themselves live in
- * common ({@code entity.PlayerPuppetService}/{@code entity.PlayerModelService}), per the root
- * additional-mods PARADIGM (a reusable Hytale primitive belongs in common, not duplicated here).
+ * common ({@code entity.PlayerPuppetService}/{@code entity.PlayerModelService}), per the family's
+ * rule that a reusable Hytale primitive belongs in common, not duplicated here.
  *
  * <p><b>Hide route:</b> {@code Hide.Route} is a
  * THREE-arm union - {@code "Scale"} (in-game PROVEN, the ONLY route this class actually applies:
@@ -168,7 +168,7 @@ final class StationPuppetController {
      * through {@code commandBuffer}, never {@code store} - this call runs from {@code
      * StationService#toggle}, inside the store's write-processing lock (an interaction-handler
      * call site), where a direct {@code store.putComponent} throws {@code IllegalStateException(
-     * "Store is currently processing!")} (verified in {@code shared-source/release}'s {@code
+     * "Store is currently processing!")} (verified in {@code reference/shared-source/release}'s {@code
      * Store#putComponent}/{@code assertWriteProcessing}). The prior {@code store}-routed hide
      * silently swallowed that throw into the method's own catch, so the real player was NEVER
      * actually hidden even though every shipped station authors {@code Hide.Route:"Scale"}.

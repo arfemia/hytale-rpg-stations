@@ -33,7 +33,7 @@ import com.ziggfreed.rpgstations.util.Log;
 /**
  * Fires the api artifact's {@code IEvent<Void>} POJOs on the shared Hytale event bus
  * (design section 3.1, the kweebec {@code event.RoundEvents} recipe -
- * {@code additional-mods/kweebec-nightmare/.../event/RoundEvents.java}): resolve the dispatcher,
+ * {@code mods/kweebec-nightmare/.../event/RoundEvents.java}): resolve the dispatcher,
  * guard on {@code hasListener()} (silent no-op with zero listeners), dispatch synchronously on
  * the calling (world) thread, whole body try/catch(Throwable)-guarded to a warn log. The callers
  * are {@link StationService} (session/cycle/gather moments, plus the produce-committed funnel the

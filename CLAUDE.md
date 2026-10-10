@@ -6,8 +6,8 @@ Diegetic interactive work-station engine (a Hytale mod). Router only: the author
 
 - Depends on `ziggfreed-common` ONLY. No `build.gradle` line may reference another mod's jar; other mods reach this one through native events and the `api` artifact, never a hard dependency either way.
 - `ziggfreed-common` is `compileOnly`, never bundled (double-loading breaks classloader identity). The manifest's `ZiggfreedCommon` floor moves with `ziggfreedCommonVersion` in `gradle.properties`.
-- Build with `.\build.ps1` (installs to `$env:HYTALE_MODS_DIR`; `-Install:$false` builds only; `-ModsDir` overrides). It compiles against the installed `HytaleServer.jar` (`hytaleHome`) and `../ziggfreed-common/build/libs/ZiggfreedCommon-<version>.jar`: build ziggfreed-common first (root `rebuild.ps1 -Mods` orders it).
-- `gradle/deprecation-gate.gradle` (run by `check`) is hyMMO's, copied byte for byte: it changes only by copying hyMMO's.
+- Build with `.\build.ps1` (installs to `$env:HYTALE_MODS_DIR`; `-Install:$false` builds only; `-ModsDir` overrides). It compiles against the installed `HytaleServer.jar` (`hytaleHome`) and ziggfreed-common's `build/libs/ZiggfreedCommon-<version>.jar`, found through the workspace's `family.properties` (`repo.ziggfreed-common`): build ziggfreed-common first (the MMO's `rebuild.ps1 -Mods` orders it).
+- `gradle/deprecation-gate.gradle` (run by `check`) is the MMO's (`mmo-family/mmo-skills`), copied byte for byte: it changes only by copying the MMO's.
 
 ## MMO-agnostic engine
 

@@ -35,8 +35,8 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@code NonSerialized} never-persisted marker) is
  * {@link com.ziggfreed.common.entity.ItemPropEntityService} - lifted config-free out of THIS
  * class's own prior verbatim copy (itself copied from the engine's sanctioned admin "Entity Spawn
- * Page" Items tab exemplar), per the root additional-mods PARADIGM (a reusable Hytale primitive
- * belongs in common, not duplicated here). This class now owns only STATION-SPECIFIC policy: the
+ * Page" Items tab exemplar), per the family's rule that a reusable Hytale primitive belongs in
+ * common, not duplicated here. This class now owns only STATION-SPECIFIC policy: the
  * block-centre-anchor offset/yaw/scale resolution against {@link Custody.Display}'s knobs, and the
  * press-F retrieve interaction wiring (below) added onto the common primitive's two-phase
  * {@code buildHolder}/{@code spawn} API before the entity commits.

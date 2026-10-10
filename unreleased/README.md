@@ -11,7 +11,7 @@ renames, so `git log --follow` still works on every one).
 ## Restore everything
 
 ```powershell
-cd 'D:\dev\business\hytale-dev\hyMMO\additional-mods\rpg-stations'
+cd 'D:\dev\business\hytale-dev\mmo-family\rpg-stations'
 .\unreleased\restore.ps1              # moves it all back into src/main/resources
 .\unreleased\restore.ps1 -WhatIf      # preview without touching anything
 ```
@@ -58,7 +58,7 @@ still in git**, just unreferenced. Restoring means putting those three sites bac
 
 ## Companion change in the stations pack
 
-`content-packs/skill-stations-pack` has its own `unreleased/` holding the Anvil, the cooking
+`mmo-family/packs/skill-stations-pack` has its own `unreleased/` holding the Anvil, the cooking
 progression, and the Smithing/Cooking skills, held back in lockstep for the same release. Restore
 the two together: this jar's `CookingFire` is what the pack's `CookingProgression` extension
 targets.
