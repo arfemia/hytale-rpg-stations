@@ -41,7 +41,6 @@
 - An effect with `Target "Puppet"` goes on the double with NO expiry (`NativeEffectUtil.applyInfinite`; the double has no `EntityStatMap`, so the engine's timer never runs), and an authored `DurationMs` is kept on this engine's own cue clock (`queueEffectRemoval`); track every effect on the session so teardown strips it.
 - `enterWorkingState` is idempotent per block AND state name: a different name (a step's `State`) re-flips in place without the resting look between (`workingMove`, `workingStateName`).
 - `Display.Animated` is a spawn-time option; a step's `Display` overlay RESPAWNS the prop when `sameLook` says the look changed. A `Display` cue after the piece is consumed lands where the prop last stood (`displayRestingPosition`).
-- `MomentBursts` and `ProtectListCatalog` are the station policy classes over zc's `ParticleLifetimes` and the `ProtectListAsset` store.
 
 ## Client stability (observed in game)
 

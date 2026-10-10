@@ -23,11 +23,7 @@ Router for the asset codecs. The codec `.documentation` strings, the generated `
 
 ## Recipes, steps and pacing
 
-- `Recipe.FromCrafting` derives from zc's recipe index and carries each recipe's FULL outputs at native quantities; `Benches` scopes by bench id beside `Categories`.
-- `Recipe.Yield`: `Base` replaces the PRIMARY (first) output only; `Scale`, `Min` and `Max` apply to every output.
 - `Recipe.Fallback` (`CraftingShare`, `EssenceOnly`) routes a piece no row covers; a piece gets ONE route (`station.StationFallbackRoutes#routeFor`), and both need custody (`FALLBACK_WITHOUT_CUSTODY`). `StationMetadataGuard` gates every path that consumes a single-item socket's real stack (authored and derived rows, both routes, a custody `Consume` phase, the ritual queue) and refuses the piece at placement where every action reading the socket consumes it.
-- `Work.Queue` runs the `Steps` program once per filled custody socket in authored order (meant for single-item sockets, `QUEUE_SOCKET_NOT_SINGLE`).
-- A step's `Convert` phase runs the action's `Recipe` at that beat; `Paced` scales the beat by `ActionDef.Pace`; `RollBonus` rolls `Bonus` at the beat instead of at completion; `State` and `Display` are per-beat overlays on the block look and the piece's prop.
 - An extension's `Pace` is the action's shape (`Pace.CODEC`) and MULTIPLIES in: the action's `Clamp` bounds the ladders' product (`PACE_UNCLAMPED` asks both sides of the action only), an extension's `Clamp` only narrows it after that, and every `Stretch` (action's and extensions') multiplies after the clamps, never clamped.
 - `EffectRef.Target` (`Player` or `Puppet`) is read on `Presentation.Effect` only (`EFFECT_TARGET_IGNORED` elsewhere); `Presentation.Target` (`Block`, `Display`, `Puppet`) aims sounds and particles, and a burst rides an entity only when its system's own `LifeSpan` ends it (`PRESENTATION_ENTITY_TARGET_UNBOUNDED`). A `Color` tint keeps the playback cap.
 - A leaf added to a nested group is added to its extension overlay factory in the same change (`overlayStates`, `overlayEffectRef`), or the overlay drops it.
