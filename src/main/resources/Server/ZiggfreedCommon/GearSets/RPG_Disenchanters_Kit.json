@@ -1,5 +1,5 @@
 {
-  "$Comment": "The disenchanter's kit as a gear set: the four cloth pieces the Disenchanting Table pays out (Lootables/Disenchant_Kit.json) plus the Disenchanter's Grimoire, the table's trophy, as the held member. Members are item ids, matched without regard to case. Every tier whose minimums hold applies at once, so the tiers stack: two pieces on anywhere add a little Disenchanting Proficiency; all four armor pieces add more and put the set's look on (RPG_Disenchanters_Kit_Look, an effect dedicated to this set); all four plus the grimoire in hand add the most. Held counts the active-hand item only when it is a member that is not also worn, so the third tier needs the grimoire itself. With every piece on and the book in hand the set adds 28 points over the 36 the pieces carry themselves, which the ritual's pace ladder reads; the text keys are rpgstations.lang's gearset.* lines. Under Parent the Bonuses list replaces whole; restate every tier you keep.",
+  "$Comment": "The disenchanter's kit as a gear set: the four cloth pieces the Disenchanting Table pays out (Lootables/Disenchant_Kit.json) plus the Disenchanter's Grimoire, the table's trophy, as the held member. Members are item ids, matched without regard to case. Every tier whose minimums hold applies at once, so the tiers stack: two pieces on anywhere add a little Disenchanting Proficiency; all four armor pieces add more and put the set's look on (RPG_Disenchanters_Kit_Look, an effect dedicated to this set); all four plus the grimoire in hand add the most. Held counts the active-hand item only when it is a member that is not also worn, so the third tier needs the grimoire itself. With every piece on and the book in hand the set adds 28 points over the 36 the pieces carry themselves, which the ritual's pace ladder reads; the text keys are rpgstations.lang's gearset.* lines. Each tier names a Badge, the set's one tile on the buff bar: the tile shown is the badge of the highest tier that holds, so its icon and name follow the kit as it fills (the three RPG_Disenchanters_Kit_Badge_* effects, each dedicated to this set). Under Parent the Bonuses list replaces whole; restate every tier you keep.",
   "Text": { "TitleKey": "rpgstations.gearset.rpg_disenchanters_kit.title" },
   "Members": [
     "RPG_Armor_Disenchanter_Head",
@@ -12,6 +12,7 @@
     {
       "Pieces": 2,
       "Text": { "TitleKey": "rpgstations.gearset.rpg_disenchanters_kit.tier_pieces" },
+      "Badge": "RPG_Disenchanters_Kit_Badge_Pieces",
       "StatModifiers": {
         "RPG_Disenchanting_Proficiency": [ { "Amount": 6, "CalculationType": "Additive", "Target": "Max" } ]
       }
@@ -20,6 +21,7 @@
       "Armor": 4,
       "Text": { "TitleKey": "rpgstations.gearset.rpg_disenchanters_kit.tier_armor" },
       "Effect": "RPG_Disenchanters_Kit_Look",
+      "Badge": "RPG_Disenchanters_Kit_Badge_Armor",
       "StatModifiers": {
         "RPG_Disenchanting_Proficiency": [ { "Amount": 10, "CalculationType": "Additive", "Target": "Max" } ]
       }
@@ -28,6 +30,7 @@
       "Armor": 4,
       "Held": 1,
       "Text": { "TitleKey": "rpgstations.gearset.rpg_disenchanters_kit.tier_held" },
+      "Badge": "RPG_Disenchanters_Kit_Badge_Held",
       "StatModifiers": {
         "RPG_Disenchanting_Proficiency": [ { "Amount": 12, "CalculationType": "Additive", "Target": "Max" } ]
       }

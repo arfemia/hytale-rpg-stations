@@ -1,0 +1,8 @@
+{
+  "$Comment": "The disenchanter's kit's tile on the buff bar while two pieces are on and no higher tier holds (ZiggfreedCommon/GearSets/RPG_Disenchanters_Kit.json names it as the first tier's Badge). The set shows one tile, the badge of its highest active tier, so this one gives way to RPG_Disenchanters_Kit_Badge_Armor at the full kit. It carries nothing but the icon and the name; every number lives in the gear set. Infinite, as a set's tile must be: the set engine puts it on and takes it off itself, so never apply this id from anything else.",
+  "Name": "rpgstations.gearset.rpg_disenchanters_kit.badge_pieces",
+  "StatusEffectIcon": "Icons/ItemsGenerated/Armor_Cloth_Silk_Hands.png",
+  "Infinite": true,
+  "OverlapBehavior": "Ignore",
+  "Debuff": false
+}

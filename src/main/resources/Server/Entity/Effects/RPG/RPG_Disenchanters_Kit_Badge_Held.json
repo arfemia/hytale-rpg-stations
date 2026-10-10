@@ -1,0 +1,8 @@
+{
+  "$Comment": "The disenchanter's kit's tile on the buff bar while all four armor pieces are on and the Disenchanter's Grimoire is in hand (ZiggfreedCommon/GearSets/RPG_Disenchanters_Kit.json names it as the third tier's Badge), the grimoire's icon. It carries nothing but the icon and the name; every number lives in the gear set. Infinite, as a set's tile must be: the set engine puts it on and takes it off itself, so never apply this id from anything else.",
+  "Name": "rpgstations.gearset.rpg_disenchanters_kit.badge_held",
+  "StatusEffectIcon": "Icons/ItemsGenerated/Weapon_Spellbook_Grimoire_Purple.png",
+  "Infinite": true,
+  "OverlapBehavior": "Ignore",
+  "Debuff": false
+}
