@@ -52,6 +52,10 @@ def familyPath = { String key ->
 // The shared primitive lib: the sibling ziggfreed-common repo's own build output. NEVER bundled
 // (double-loading engine-touching classes under two classloaders breaks identity, per common's rules).
 def ziggfreedCommonJar = new File(familyPath('repo.ziggfreed-common'), "build/libs/ZiggfreedCommon-${ziggfreedCommonVersion}.jar")
+// Inside the family's umbrella build (the workspace root's settings.gradle includes this one, so it
+// has a parent build), the lib is its coordinate, which the umbrella substitutes with the project
+// that builds that jar in the same run. Built alone, it is the jar above.
+def ziggfreedCommon = gradle.parent != null ? "ziggfreed:ZiggfreedCommon:${ziggfreedCommonVersion}" : files(ziggfreedCommonJar)
 
 dependencies {
     testImplementation platform('org.junit:junit-bom:5.10.0')
@@ -69,7 +73,7 @@ dependencies {
 
     // ziggfreed-common is a HARD runtime dependency (manifest Dependencies, loads
     // first): compileOnly so com.ziggfreed.common.* compiles. NEVER bundled.
-    compileOnly(files(ziggfreedCommonJar))
+    compileOnly(ziggfreedCommon)
 
     // The api module: BUNDLED into the runtime jar (see the jar{} block below), and
     // it also builds standalone as rpg-stations-api-<api_version>.jar for compile-time
@@ -79,7 +83,7 @@ dependencies {
     // Tests compile + run the pure engine paths, which need the server jar's shaded
     // Gson + codec classes plus ziggfreed-common on the TEST classpath too.
     testImplementation(files(hytaleServerJar))
-    testImplementation(files(ziggfreedCommonJar))
+    testImplementation(ziggfreedCommon)
 }
 
 // Bundle the :api module classes into the plugin jar (excluding service files so the

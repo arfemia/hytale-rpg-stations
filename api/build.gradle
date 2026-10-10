@@ -48,12 +48,22 @@ if (!zcRepo) {
     throw new GradleException("family.properties at ${workspaceDir.canonicalPath} has no repo.ziggfreed-common")
 }
 def ziggfreedCommonJar = new File(workspaceDir, "${zcRepo}/build/libs/ZiggfreedCommon-${ziggfreedCommonVersion}.jar")
+// Inside the family's umbrella build, the lib is its coordinate (see the root build.gradle).
+def ziggfreedCommon = gradle.parent != null ? "ziggfreed:ZiggfreedCommon:${ziggfreedCommonVersion}" : files(ziggfreedCommonJar)
 
 dependencies {
     api 'com.google.code.findbugs:jsr305:3.0.2'
 
     compileOnly(files(hytaleServerJar))
-    compileOnly(files(ziggfreedCommonJar))
+    compileOnly(ziggfreedCommon)
+}
+
+// What a sibling resolves from this project in the family's umbrella build (the workspace root's
+// settings.gradle substitutes ziggfreed:rpg-stations-api with it): the api jar, never the `classes`
+// folder java-library offers a compile as a secondary variant. This build's own root compiles against
+// the jar too.
+['apiElements', 'runtimeElements'].each { name ->
+    configurations.named(name) { outgoing.variants.clear() }
 }
 
 // Same repo-wide deprecation rule as the mod's own compileJava (see build.gradle), the removal
