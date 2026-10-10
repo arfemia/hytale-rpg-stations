@@ -1426,6 +1426,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Rolls` | array of [Roll](#type-roll) | `null` | The rolls this table contributes. Authoring this in a file with a Parent REPLACES the parent's rolls entirely rather than adding to them. |
 | `Pool` | [LootPool](#field-lootableasset-pool) | `null` | A bag of competing outcomes, of which only as many as the pool's own Rolls formula works out to are drawn. Use it for the part of a payout that varies; use the Rolls list above for the part everybody gets. |
 | `ContributesTo` | `string` | `null` | Another table's id to fold this file's rolls and pool entries INTO, on top of what that table already has. The way to enrich a table shipped by someone else without owning its file. How many picks the merged pool makes stays the target's decision. |
+| `Requires` | [Block](#field-lootableasset-requires) | `null` | Whether this file loads on this server at all. A condition { "Factor": "hytale:mod_installed", "Param": "Group:Name", "Min": 1 } keeps the file out entirely where that mod is not installed, so nothing reads it or reports it. Write Min 1: a condition with no bound is satisfied by a missing mod too. Other conditions here are not read. |
 
 <a id="field-lootableasset-pool"></a>
 ### LootableAsset.Pool
@@ -1434,6 +1435,13 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Rolls` | [FactorFormula](#type-factorformula) | `null` | How many picks this pool makes, as an ordinary formula. Base is the picks the moment earns with no bonuses; a term weighted one over N adds a pick per N points of that reading; Clamp.Max is the ceiling. Omit the whole group for a single pick. The answer is taken down to a whole number of picks. |
 | `Entries` | array of [Entry](#field-lootableasset-pool-entries-item) | `null` | The competing outcomes. Picks are drawn WITH replacement, so one entry can come up twice in a three-pick draw. Authoring this in a file with a Parent REPLACES the parent's entries rather than adding to them. |
+
+<a id="field-lootableasset-requires"></a>
+### LootableAsset.Requires
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [Condition](#type-condition) | `null` | The conditions. A plain hytale:mod_installed condition with Min 1 decides whether the file or reward row carrying this block loads; authoring this list replaces an inherited one whole. |
 
 <a id="field-lootableasset-pool-entries-item"></a>
 #### LootableAsset.Pool.Entries[]
