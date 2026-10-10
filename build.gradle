@@ -155,6 +155,11 @@ test {
     // docs-only change must re-run the tests rather than leave the task UP-TO-DATE. An empty folder
     // there holds no prose, so it counts for nothing.
     inputs.dir('docs').withPropertyName('docsProse').withPathSensitivity(PathSensitivity.RELATIVE).ignoreEmptyDirectories()
+    // The release gate (R123): under -PlangGate the effect-name check (ShippedEffectNamesTest, R67)
+    // fails a locale gap in an effect's Name instead of printing it, as the MMO's lang parity does.
+    if (providers.gradleProperty('langGate').present) {
+        systemProperty 'langGate', 'true'
+    }
 }
 
 // The family run: `-PfamilyComplete` (the un-nest gate, a release gate), or this repo built inside the
