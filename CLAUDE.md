@@ -17,7 +17,7 @@ Diegetic interactive work-station engine (a Hytale mod). Router only: the author
 
 ## Release scope
 
-- The current version (1.1.0) is HELD and unreleased (its note, `patch-notes/1.1.0.md`, reads `status: held`): the disenchanting wave (two Disenchanting Tables, the ritual queue and paced beats, the protect-list store, `STATION_INPUT`, api 1.1.0 at contract 10, `ziggfreed-common` floor `>=2.2.0`). The last public release is 1.0.0, which shipped the Sawmill only. Finished held content (cooking pit, fire, cutting board, mount spike, the unwired `NpcPerformerSpike` harness) sits in `unreleased/`, a mirror of `src/main/resources` outside the resource roots. Restore it with `unreleased/restore.ps1`, never re-create it (inventory: `unreleased/README.md`), and restore the `skill-stations-pack`'s `unreleased/` in lockstep.
+- 1.1.0 is released (Oct 9, 2026, with MMO Skill Tree 1.7.0): the disenchanting wave (two Disenchanting Tables, the ritual queue and paced beats, the protect-list store, `STATION_INPUT`, api 1.1.0 at contract 10, `ziggfreed-common` floor `>=2.2.0`). The next is 1.1.1 on Hytale Update 7; its scope is the 1.7.1 board's. Finished held content (cooking pit, fire, cutting board, mount spike, the unwired `NpcPerformerSpike` harness) sits in `unreleased/`, a mirror of `src/main/resources` outside the resource roots. Restore it with `unreleased/restore.ps1`, never re-create it (inventory: `unreleased/README.md`), and restore the `skill-stations-pack`'s `unreleased/` in lockstep.
 - The api is not frozen; declaring it frozen is the maintainer's decision, never implied by a version number.
 
 ## Gotchas
