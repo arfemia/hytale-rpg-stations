@@ -24,7 +24,21 @@ repositories {
 }
 
 def hytaleServerJar = new File("${hytaleHome}/${patchline}/package/game/${game_build}/Server/HytaleServer.jar")
-def ziggfreedCommonJar = new File("${rootDir}/../ziggfreed-common/build/libs/ZiggfreedCommon-${ziggfreedCommonVersion}.jar")
+// The sibling ziggfreed-common repo's build output: repo.ziggfreed-common in the workspace's path map
+// (family.properties at workspaceRoot, which the root gradle.properties gives relative to the root
+// project dir).
+def workspaceDir = rootProject.file(workspaceRoot)
+def familyMapFile = new File(workspaceDir, 'family.properties')
+if (!familyMapFile.isFile()) {
+    throw new GradleException("no family.properties at ${workspaceDir.canonicalPath} (workspaceRoot=${workspaceRoot} in gradle.properties)")
+}
+def familyMap = new Properties()
+familyMapFile.withReader('UTF-8') { familyMap.load(it) }
+def zcRepo = familyMap.getProperty('repo.ziggfreed-common')?.trim()
+if (!zcRepo) {
+    throw new GradleException("family.properties at ${workspaceDir.canonicalPath} has no repo.ziggfreed-common")
+}
+def ziggfreedCommonJar = new File(workspaceDir, "${zcRepo}/build/libs/ZiggfreedCommon-${ziggfreedCommonVersion}.jar")
 
 dependencies {
     api 'com.google.code.findbugs:jsr305:3.0.2'

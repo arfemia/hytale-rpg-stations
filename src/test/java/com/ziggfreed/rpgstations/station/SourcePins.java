@@ -22,13 +22,11 @@ final class SourcePins {
     private SourcePins() {
     }
 
-    /** The station package's main source directory, from the module root or the repo root. */
+    /** The station package's main source directory, from the module root (Gradle's test working dir). */
     static Path stationSourceDir() {
         Path direct = Path.of("src", "main", "java", "com", "ziggfreed", "rpgstations", "station");
-        if (Files.isDirectory(direct)) {
-            return direct;
-        }
-        return Path.of("additional-mods", "rpg-stations").resolve(direct);
+        assertTrue(Files.isDirectory(direct), "run from rpg-stations' module root: no " + direct.toAbsolutePath());
+        return direct;
     }
 
     /** One station-package source file's text. */

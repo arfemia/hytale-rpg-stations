@@ -32,8 +32,13 @@ class SawmillSocketParityTest {
 
     private static final Path SAWMILL = Path.of("src", "main", "resources", "Server", "RpgStations",
             "Stations", "Sawmill.json");
-    private static final Path PACK_ANVIL = Path.of("..", "..", "content-packs", "skill-stations-pack",
-            "unreleased", "Server", "RpgStations", "Stations", "Anvil.json");
+    /**
+     * The companion pack's Anvil: build.gradle forwards the pack's folder from the workspace's path
+     * map as {@code rpgstations.companionPack}; null in a JVM started without it.
+     */
+    private static final Path PACK_ANVIL = System.getProperty("rpgstations.companionPack") == null ? null
+            : Path.of(System.getProperty("rpgstations.companionPack"), "unreleased", "Server", "RpgStations",
+                    "Stations", "Anvil.json");
 
     private static StationAsset decode(String body, String key) throws Exception {
         return StationAsset.CODEC.decodeAndInheritJsonAsset(RawJsonReader.fromJsonString(body), null,
@@ -78,7 +83,7 @@ class SawmillSocketParityTest {
 
     @Test
     void packAnvil_whenCheckedOutBeside_decodesToDegenerateSocketsPerAction() throws Exception {
-        if (!Files.isRegularFile(PACK_ANVIL)) {
+        if (PACK_ANVIL == null || !Files.isRegularFile(PACK_ANVIL)) {
             return; // a standalone clone: the fixture test below still covers the anvil shapes.
         }
         StationAsset anvil = decode(Files.readString(PACK_ANVIL, StandardCharsets.UTF_8), "Anvil");
