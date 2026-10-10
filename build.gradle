@@ -46,7 +46,7 @@ def hytaleServerJar = new File("${hytaleHome}/${patchline}/package/game/${game_b
 // project dir) names every family repo and pack by its path under that root. Read on first use.
 def workspaceDir = rootProject.file(workspaceRoot)
 def familyMap = null
-def familyPath = { String key ->
+def familyPath = { String key, File root = workspaceDir ->
     if (familyMap == null) {
         def mapFile = new File(workspaceDir, 'family.properties')
         if (!mapFile.isFile()) {
@@ -59,7 +59,7 @@ def familyPath = { String key ->
     if (!rel) {
         throw new GradleException("family.properties at ${workspaceDir.canonicalPath} has no ${key}")
     }
-    new File(workspaceDir, rel)
+    new File(root, rel)
 }
 // The shared primitive lib: the sibling ziggfreed-common repo's own build output. NEVER bundled
 // (double-loading engine-touching classes under two classloaders breaks identity, per common's rules).
@@ -138,22 +138,77 @@ compileJava {
 
 apply from: "$rootDir/gradle/deprecation-gate.gradle"
 
+// Two test JVMs, split by a JUnit 5 tag. `test` runs every untagged test and reads nothing outside
+// this repository, so a pack-only edit leaves it UP-TO-DATE. `familyTest` runs ONLY the tests tagged
+// `familyTest`: the classes that also decode the companion pack's station assets (ShippedAssetDecodeTest,
+// and SawmillSocketParityTest for the pack's Anvil). It alone receives the pack's folder and declares
+// the pack's station trees as its inputs. `check` (so `gradlew build`) runs both.
+def familyTestTag = 'familyTest'
+
 test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags familyTestTag
+    }
     // MmoAgnosticismTest scans the in-repo docs/ prose as well as the code and resources, so a
     // docs-only change must re-run the tests rather than leave the task UP-TO-DATE.
     inputs.dir('docs').withPropertyName('docsProse').withPathSensitivity(PathSensitivity.RELATIVE)
-    // ShippedAssetDecodeTest and SawmillSocketParityTest also decode the companion pack's station
-    // assets when the workspace holds it (pack.skill-stations-pack in the path map): the test JVM
-    // reads its folder from this property, and a pack-only edit must re-run them.
-    def companionPack = familyPath('pack.skill-stations-pack')
+}
+
+// The family run: `-PfamilyComplete` (the un-nest gate, a release gate), or this repo built inside the
+// family's umbrella build (it has a parent build). See familyTest's guard below.
+def familyComplete = providers.gradleProperty('familyComplete').map { it.toString().trim().toLowerCase() != 'false' }.getOrElse(false)
+def familyRun = familyComplete || gradle.parent != null
+// The folder the family tests read the family from: the workspace root, or the folder
+// `-PfamilyTestRoot=<path>` names (relative to this repo), which proves familyTest's guard without
+// moving a repo. The companion pack's mapped path resolves under it.
+def familyTestRoot = providers.gradleProperty('familyTestRoot').map { rootProject.file(it.trim()) }.getOrElse(workspaceDir)
+
+def familyTest = tasks.register('familyTest', Test) {
+    description = 'Runs the tests tagged familyTest, which decode the companion pack\'s station assets.'
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags familyTestTag
+    }
+    shouldRunAfter test
+    // The companion pack (pack.skill-stations-pack in the path map): the test JVM reads its folder
+    // from this property, and a pack-only edit must rerun these tests. Its station trees are
+    // fingerprinted by relative path and content, never by an empty folder.
+    def companionPack = familyPath('pack.skill-stations-pack', familyTestRoot)
     systemProperty 'rpgstations.companionPack', companionPack.canonicalPath
     if (companionPack.isDirectory()) {
         inputs.files(fileTree(companionPack) {
             include 'Server/RpgStations/**'
             include 'unreleased/Server/RpgStations/**'
-        }).withPropertyName('companionPackStations').withPathSensitivity(PathSensitivity.RELATIVE)
+        }).withPropertyName('companionPackStations').withPathSensitivity(PathSensitivity.RELATIVE).ignoreEmptyDirectories()
     }
+
+    // Failing, not skipping: a family run must read the family. In a family run this task fails
+    // before its JVM starts when the root it reads holds no family.properties, and under
+    // -PfamilyComplete also when the companion pack is not on disk, since the pack half of these
+    // tests would otherwise pass with nothing checked. Built alone without -PfamilyComplete, they
+    // skip an absent pack, as on a partial clone.
+    def familyRootMap = new File(familyTestRoot, 'family.properties')
+    def guardFamilyRoot = familyRun
+    def guardCompanionPack = familyComplete
+    doFirst {
+        if (guardFamilyRoot && !familyRootMap.isFile()) {
+            throw new GradleException("familyTest: the family root ${familyRootMap.parentFile.absolutePath} holds no "
+                    + "family.properties, so the companion pack's station assets would go unchecked. This is a family "
+                    + "run (-PfamilyComplete, or the umbrella build), so it fails instead: point workspaceRoot in "
+                    + "gradle.properties (or -PfamilyTestRoot) at the workspace that holds the family.")
+        }
+        if (guardCompanionPack && !companionPack.isDirectory()) {
+            throw new GradleException("familyTest: -PfamilyComplete, but the companion pack is not at "
+                    + "${companionPack.absolutePath} (pack.skill-stations-pack in family.properties), so its "
+                    + "station assets would go unchecked.")
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn familyTest
 }
 
 // Every test JVM: a 512 MB heap, the serial collector and C1-only compilation, which start fastest

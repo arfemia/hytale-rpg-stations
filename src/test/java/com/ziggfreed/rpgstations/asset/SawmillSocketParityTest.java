@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * shapes (the bulk bars pile and the single metadata-preserving weapon slot) stay covered on a
  * standalone clone too.
  */
+@Tag("familyTest")
 class SawmillSocketParityTest {
 
     private static final Path SAWMILL = Path.of("src", "main", "resources", "Server", "RpgStations",

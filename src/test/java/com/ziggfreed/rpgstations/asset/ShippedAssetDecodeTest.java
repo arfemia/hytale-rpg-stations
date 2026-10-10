@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
@@ -52,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * of them can leave this task {@code UP-TO-DATE} locally: pass {@code --rerun-tasks} when such a
  * file is the only thing that moved.
  */
+@Tag("familyTest")
 public class ShippedAssetDecodeTest {
 
     /** Decodes one file's body under {@code assetKey} (the filename), throwing whatever the codec throws. */
