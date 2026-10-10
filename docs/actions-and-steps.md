@@ -278,6 +278,16 @@ everywhere. A **non-repeating** program (`Work.Looping: false`, the Anvil's `Enh
 completes the whole session after one program run instead of looping, and gets an instant first
 dispatch - no cycle-cadence latency eaten before its one and only cycle.
 
+### The session row
+
+While a session runs, the worker's row for the station on the shared activity panel shows its
+progress. A program of `Steps` fills it by steps: empty as the program starts, then, each time a
+step starts its `Duration` hold or its `Walk`, the share of the program's steps already behind it,
+and full once the last step ends, when the row's cycle count goes up by one. Every pass starts the
+bar over, so a looping program or a ritual queue (`Work.Queue`) fills it once per pass. A `Repeat` step counts as one step
+whatever its iterations, and a step with no hold passes in the same instant as the next. An action
+with no `Steps` fills by its pile instead: full at the start, draining as the inputs run down.
+
 ---
 
 Previous: [Disenchanting](disenchanting.md) · Next: [Multi-Station Programs](multi-station-programs.md)

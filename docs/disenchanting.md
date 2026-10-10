@@ -100,6 +100,10 @@ rather than restating them; the stations pack's stretch of 2.5 gives the long ri
 untrained (Open 2, Kindle 8, Draw 12, Surge 9, Unmake 1.5, the bloom 1.5). On the greater table the
 next piece's Open follows straight on from a Payout.
 
+While the ritual runs, the worker's row for the table on the shared activity panel fills a sixth at
+a time: empty while the Open plays, a sixth more as each beat ends, and full once the Payout ends,
+when its cycle count goes up by one. On the greater table the bar starts over for each queued piece.
+
 The worker sits on the table's own seat while the double works, the way the Sawmill seats its
 worker: `Worker.Hold.Mount` with `"Surface": "Block"` and no `Camera` group, over a `BlockType.Seats`
 entry on each table block. The seat holds the player in place and the mouse turns the camera freely;

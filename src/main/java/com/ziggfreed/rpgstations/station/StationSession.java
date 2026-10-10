@@ -221,12 +221,13 @@ final class StationSession {
      * engaged: the minimum, over its ingredients, of what was on hand divided by what one cycle
      * needs ({@code StationService#feedableCyclesFromInventory}/{@code #feedableCyclesFromCustody}).
      * Zero for a session with no resolved conversion to read a pile from (idle practice, or an
-     * authored Steps program) - the session-progress row's fill then reads full throughout, since
-     * a {@link com.ziggfreed.common.ui.hud.panel.HudBarReading} with a non-positive maximum always
-     * does. This is the FIXED denominator the row divides by for the whole session (the
-     * maintainer's explicit choice over a fixed time window): the bar starts full and drains as
-     * the pile runs down, and jumps back toward full when someone tops the station off mid-run,
-     * because the pile side of the fraction moves while this one never does.
+     * authored Steps program) - idle practice's row then reads full throughout, since a
+     * {@link com.ziggfreed.common.ui.hud.panel.HudBarReading} with a non-positive maximum always
+     * does, and a Steps program's row counts its beats instead ({@code
+     * StationService#notifySessionBeat}). This is the FIXED denominator the row divides by for the
+     * whole session (the maintainer's explicit choice over a fixed time window): the bar starts
+     * full and drains as the pile runs down, and jumps back toward full when someone tops the
+     * station off mid-run, because the pile side of the fraction moves while this one never does.
      */
     int feedableCyclesAtStart;
 

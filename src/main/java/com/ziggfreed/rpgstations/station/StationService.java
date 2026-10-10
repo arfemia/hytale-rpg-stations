@@ -869,7 +869,8 @@ public final class StationService {
         // The session-progress HUD row's fixed denominator: how many more cycles the resolved
         // conversion's pile could feed right now, read the SAME way the viability check just did
         // (custody or live inventory). Zero for a Steps-authored action or an idle start
-        // (check.inputs is null either way), which the row's fill then reads as full throughout.
+        // (check.inputs is null either way): an idle start's fill then reads full throughout, and
+        // a Steps program's fill follows its beats instead (seedSessionRow, notifySessionBeat).
         s.feedableCyclesAtStart = check.inputs != null
                 ? (custody != null
                         ? feedableCyclesFromCustody(check.inputs, preClaim, custodySockets)
@@ -1054,8 +1055,9 @@ public final class StationService {
         // Whoever presses in for another run is working, not reading the last run's totals: a panel
         // held for them here gets its timed lifetime back and fades while this session runs.
         releaseHeldSummary(playerUuid, world);
-        // The session-progress row, seeded before the first cycle ever lands.
-        seedSessionRow(s);
+        // The session-progress row, seeded before the first cycle ever lands (empty for a Steps
+        // program, whose fill counts its beats).
+        seedSessionRow(s, programSteps.size());
 
         // Actively-working block state (Custody.States.Working) for the CLASSIC convert loop: an
         // implicit-program session has no authored step to light its block on entry, and its first
@@ -1159,8 +1161,9 @@ public final class StationService {
                         boolean resumed = resumeCycleProgram(s, store, commandBuffer);
                         if (s.cyclesDone > before) {
                             // Only an authored Steps program ever suspends (the implicit program
-                            // never does), so feedableCyclesAtStart is 0 here too - full throughout,
-                            // same as the fresh-dispatch authored-program path.
+                            // never does), so feedableCyclesAtStart is 0 here too: the completed
+                            // pass reads full, its last beat done, same as the fresh-dispatch
+                            // authored-program path.
                             notifySessionCycle(s, s.feedableCyclesAtStart);
                         }
                         if (!resumed) {
@@ -1309,8 +1312,9 @@ public final class StationService {
             boolean ran = runAuthoredProgram(s, store, commandBuffer, asset, action, player);
             if (s.cyclesDone > before) {
                 // An authored Steps program has no resolved Convert conversion to read a pile
-                // against, so the row's fill has nothing to divide - feedableCyclesAtStart is 0
-                // for this session (see the engage-time snapshot), which reads full throughout.
+                // against: its fill counts beats instead (notifySessionBeat, from the dispatch),
+                // and a completed pass reads full - feedableCyclesAtStart is 0 for this session
+                // (see the engage-time snapshot), and a non-positive maximum draws a full bar.
                 notifySessionCycle(s, s.feedableCyclesAtStart);
             }
             return ran;
@@ -1564,9 +1568,17 @@ public final class StationService {
         // implicit Roll phase for the action's own Bonus, so its Cycle-trigger pass runs at
         // completion instead - see rollCycleBonus - unless one of its beats authors RollBonus and
         // rolls it there (StationStepDecisions#programRollsBonusAtBeat).
-        return dispatchProgram(s, store, commandBuffer, asset, action, player, steps,
+        boolean ran = dispatchProgram(s, store, commandBuffer, asset, action, player, steps,
                 attemptCycleIndex, startIndex, resuming, null,
                 !StationStepDecisions.programRollsBonusAtBeat(steps), null);
+        // The session row fills beat by beat: a pass now holding on a beat reports the beats behind
+        // it, once per beat - on a fresh pass (so a queued piece starts the bar over) and on a
+        // resume that moved on, never on a walk or a hold re-entering the same beat each frame.
+        // A completed pass reads full through notifySessionCycle in the caller.
+        if (ran && s.programSuspended && (!resuming || s.programIndex != startIndex)) {
+            notifySessionBeat(s, s.programIndex, steps.size());
+        }
+        return ran;
     }
 
     /**
@@ -9118,8 +9130,9 @@ public final class StationService {
      * back up when someone tops the station off mid-run, since the denominator never moves. A
      * session with no resolved conversion to read a pile from (idle practice, or a Steps program)
      * has {@code feedableCyclesAtStart} 0, which a {@link HudBarReading} with a non-positive maximum
-     * always reads as full, so only the cycle count moves for it. No bar-end captions - a cycle
-     * count has no natural scale words.
+     * always reads as full: idle practice moves only its cycle count, and a Steps program's
+     * completed pass reads full here, its beats having filled the bar on the way
+     * ({@link #notifySessionBeat}). No bar-end captions - a cycle count has no natural scale words.
      *
      * <p>The row's own number is {@link StationSession#cyclesDone} OUTRIGHT (decision 2026-09-09:
      * the same total the summary reports, never a re-accumulated delta), worded {@code "Cycles: N"}
@@ -9128,27 +9141,42 @@ public final class StationService {
      * other row this run put up, once the run ends. Never throws.
      */
     static void notifySessionCycle(@Nonnull StationSession s, int remainingCycles) {
-        moveSessionRow(s, remainingCycles);
+        moveSessionRow(s, new HudBarReading(remainingCycles, s.feedableCyclesAtStart));
+    }
+
+    /**
+     * A Steps program's pass is holding on a beat: the same row {@link #notifySessionCycle} moves,
+     * its fill {@code beatsDone} out of the {@code beats} the program walks, so a ritual's bar
+     * fills a step per beat, empty as its first beat plays and full once its last ends (the
+     * completed pass, through {@link #notifySessionCycle}). Each pass starts over, so the greater
+     * table's queue fills it once per piece. The cycle count stays where it is. Called from the
+     * authored-program {@code dispatchProgram}. Never throws.
+     */
+    static void notifySessionBeat(@Nonnull StationSession s, int beatsDone, int beats) {
+        moveSessionRow(s, new HudBarReading(beatsDone, beats));
     }
 
     /**
      * Seeds the session-progress row at engage, before any cycle has completed: the same row
-     * {@link #notifySessionCycle} moves, at zero cycles, reading full-out-of-full so the player sees
-     * their run's row the instant they start rather than only after the first cycle lands.
+     * {@link #notifySessionCycle} moves, at zero cycles, so the player sees their run's row the
+     * instant they start rather than only after the first cycle lands. It reads full-out-of-full
+     * for a station that drains a pile, and empty out of {@code programBeats} for a Steps program
+     * (0 for any other session), whose beats then fill it ({@link #notifySessionBeat}).
      */
-    static void seedSessionRow(@Nonnull StationSession s) {
-        moveSessionRow(s, s.feedableCyclesAtStart);
+    static void seedSessionRow(@Nonnull StationSession s, int programBeats) {
+        moveSessionRow(s, programBeats > 0
+                ? new HudBarReading(0, programBeats)
+                : new HudBarReading(s.feedableCyclesAtStart, s.feedableCyclesAtStart));
     }
 
-    /** The one {@code HudPanels#totalled} call {@link #notifySessionCycle}/{@link #seedSessionRow} share. Never throws. */
-    private static void moveSessionRow(@Nonnull StationSession s, int remainingCycles) {
+    /** The one {@code HudPanels#totalled} call the session row's movers share. Never throws. */
+    private static void moveSessionRow(@Nonnull StationSession s, @Nonnull HudBarReading reading) {
         try {
             StationAsset asset = StationCatalog.getInstance().getStation(s.stationId);
             if (asset == null) {
                 return;
             }
-            HudPanels.totalled(s.playerRef, s.stationId, s.cyclesDone,
-                    new HudBarReading(remainingCycles, s.feedableCyclesAtStart),
+            HudPanels.totalled(s.playerRef, s.stationId, s.cyclesDone, reading,
                     sessionRowLinger(HudRowDisplay.of(stationNameMsg(asset), null, null, SESSION_ROW_ORDER)
                             .counting(SESSION_CYCLES_KEY), s.stopped.get()));
         } catch (Throwable t) {
