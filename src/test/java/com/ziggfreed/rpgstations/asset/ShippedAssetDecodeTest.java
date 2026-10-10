@@ -100,12 +100,21 @@ public class ShippedAssetDecodeTest {
     /**
      * The companion pack's assets, scanned only when that repo is checked out beside this one (the
      * same "cover it when it is there" rule the comment-hygiene sweeps use): a standalone clone of
-     * this mod still runs a full green build.
+     * this mod still runs a full green build. build.gradle forwards the pack's folder from the
+     * workspace's path map as {@code rpgstations.companionPack}; a JVM started without it scans the
+     * held mirror alone.
      */
-    private static final List<Path> OPTIONAL_ROOTS = List.of(
-            HELD_ROOT,
-            Path.of("..", "..", "content-packs", "skill-stations-pack", "Server", "RpgStations"),
-            Path.of("..", "..", "content-packs", "skill-stations-pack", "unreleased", "Server", "RpgStations"));
+    private static final List<Path> OPTIONAL_ROOTS = optionalRoots();
+
+    private static List<Path> optionalRoots() {
+        List<Path> roots = new ArrayList<>(List.of(HELD_ROOT));
+        String companionPack = System.getProperty("rpgstations.companionPack");
+        if (companionPack != null && !companionPack.isBlank()) {
+            roots.add(Path.of(companionPack, "Server", "RpgStations"));
+            roots.add(Path.of(companionPack, "unreleased", "Server", "RpgStations"));
+        }
+        return List.copyOf(roots);
+    }
 
     private static AssetExtraInfo<String> info(Class<? extends JsonAsset<String>> assetClass, String assetKey) {
         return new AssetExtraInfo<>(new AssetExtraInfo.Data(assetClass, assetKey, null));
