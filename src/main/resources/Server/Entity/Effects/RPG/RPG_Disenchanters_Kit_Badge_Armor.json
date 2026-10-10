@@ -1,0 +1,8 @@
+{
+  "$Comment": "The disenchanter's kit's tile on the buff bar while all four armor pieces are on and the grimoire is not in hand (ZiggfreedCommon/GearSets/RPG_Disenchanters_Kit.json names it as the second tier's Badge). The set shows one tile, the badge of its highest active tier, so this one gives way to RPG_Disenchanters_Kit_Badge_Held with the grimoire in hand. It carries nothing but the icon and the name; the sheen is the set's Effect, RPG_Disenchanters_Kit_Look. Infinite, as a set's tile must be: the set engine puts it on and takes it off itself, so never apply this id from anything else.",
+  "Name": "rpgstations.gearset.rpg_disenchanters_kit.badge_armor",
+  "StatusEffectIcon": "Icons/ItemsGenerated/Armor_Cloth_Silk_Chest.png",
+  "Infinite": true,
+  "OverlapBehavior": "Ignore",
+  "Debuff": false
+}

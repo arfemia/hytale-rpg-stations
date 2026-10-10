@@ -133,3 +133,6 @@ gearset.rpg_disenchanters_kit.title = Disenchanter's Kit
 gearset.rpg_disenchanters_kit.tier_pieces = Two pieces on: a little quicker at the table.
 gearset.rpg_disenchanters_kit.tier_armor = The full kit: quicker at the table, and a faint green-gold sheen to show for it.
 gearset.rpg_disenchanters_kit.tier_held = The full kit with the grimoire in hand: quicker still.
+gearset.rpg_disenchanters_kit.badge_pieces = Disenchanter's Kit: Two Pieces
+gearset.rpg_disenchanters_kit.badge_armor = Disenchanter's Kit: Full
+gearset.rpg_disenchanters_kit.badge_held = Disenchanter's Kit: Full, Grimoire in Hand
