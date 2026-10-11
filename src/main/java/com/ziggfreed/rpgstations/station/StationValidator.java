@@ -1225,8 +1225,9 @@ public final class StationValidator {
                 case ExtensionAsset.Target.ACTION -> scopedStation != null
                         ? stationResolvesActionTarget(stationsById.get(scopedStation.toLowerCase(Locale.ROOT)), targetId)
                         : targetId != null && actionBodiesById.containsKey(targetId.toLowerCase(Locale.ROOT));
-                case ExtensionAsset.Target.LOOTABLE ->
-                        targetId != null && lootableKnown.test(targetId.toLowerCase(Locale.ROOT));
+                case ExtensionAsset.Target.LOOTABLE -> targetId != null
+                        && (lootableKnown.test(targetId.toLowerCase(Locale.ROOT))
+                                || LootableValidator.modGateRefused(targetId));
                 case ExtensionAsset.Target.ROLLPOOL ->
                         targetId != null && rollPoolKnown.test(targetId.toLowerCase(Locale.ROOT));
                 default -> false;
@@ -2666,7 +2667,8 @@ public final class StationValidator {
             for (String t : lootables) {
                 if (t == null || t.isBlank()) {
                     out.add(Finding.warning(DOMAIN, "LOOT_BLANK_TABLE", label + " Lootables has a blank entry", id));
-                } else if (!lootableKnown.test(t.toLowerCase(Locale.ROOT))) {
+                } else if (!lootableKnown.test(t.toLowerCase(Locale.ROOT)) && !LootableValidator.modGateRefused(t)) {
+                    // A table the mod gate refused is absent by design and named nowhere; one nobody authored warns.
                     out.add(Finding.warning(DOMAIN, "LOOT_UNKNOWN_TABLE",
                             label + " Lootables references unknown lootable '" + t + "'", id));
                 }
