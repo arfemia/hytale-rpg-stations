@@ -6,7 +6,7 @@ Diegetic interactive work stations for Hytale - place a block, press `F`, and wa
 A standalone server mod, package root `com.ziggfreed.rpgstations`. It ships one complete jar-default
 station, a Sawmill, craftable at a tier 2 Workbench, with a tool-scaling yield curve, a
 session-loyalty find ladder, and a rare trophy hatchet to chase, so it is playable with no content
-pack at all. The held, unreleased 1.1.0 adds a second: the Disenchanting Table, in two tiers, the
+pack at all. 1.1.0 added a second: the Disenchanting Table, in two tiers, the
 stand-in for the vanilla Salvager's Workbench, where a placed piece of gear comes apart over a staged
 ritual and gives back what the bench would plus Essence of Life, the occasional Essence of the Void or
 Voidheart, a four-piece disenchanter's kit that forms a gear set, and a grimoire to chase; the
@@ -26,8 +26,9 @@ work into its own rewards, without either mod hard-depending on the other. See
 
 ## Install
 
-Requires **ZiggfreedCommon** (`>=2.2.0`), the one hard dependency - drop its jar into your server's
-`Mods/` folder first, then drop the RPG Stations jar into the same folder and restart. See
+Requires a Hytale Update 7 server (`>=0.7.0-pre.0 <0.8.0`) and **ZiggfreedCommon** (`>=2.3.0`), the
+one hard dependency - drop its jar into your server's `Mods/` folder first, then drop the RPG
+Stations jar into the same folder and restart. See
 [Getting Started](docs/getting-started.md) for the full walkthrough.
 
 ## Build from source

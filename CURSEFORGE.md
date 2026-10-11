@@ -55,8 +55,9 @@ content type) lives in the mod's [GitHub repository](https://github.com/arfemia/
 
 ## Required dependency: ZiggfreedCommon
 
-RPG Stations has exactly **one hard dependency**: **ZiggfreedCommon `>=2.2.0`**. Install it first -
-the server loads it before RPG Stations. That is the whole list - **no other mod is required**. RPG
+RPG Stations has exactly **one hard dependency**: **ZiggfreedCommon `>=2.3.0`**. Install it first -
+the server loads it before RPG Stations. It runs on Hytale Update 7 (0.7.x) servers; a server still
+on Update 6 stays on 1.1.0. That is the whole list - **no other mod is required**. RPG
 Stations is a complete, standalone reward loop (conditional loot, command rewards, enhancement) on
 its own. See [Integrations](#integrations) below for how an add-on hooks it.
 
@@ -189,7 +190,7 @@ session-summary HUD tuning, layered like any other asset - there is no separate 
 
 ## Installation
 
-1. Install **ZiggfreedCommon** (`>=2.2.0`) - drop it into your server's `Mods/` folder.
+1. Install **ZiggfreedCommon** (`>=2.3.0`) - drop it into your server's `Mods/` folder.
 2. Drop the **RPG Stations** jar into the same `Mods/` folder.
 3. Optionally add a content pack that ships station catalog content.
 4. Restart the server. Confirm the boot log shows each loaded station id and no asset validation
@@ -229,6 +230,13 @@ in the full docs for the contract, a complete worked example, and the presence-c
 consumer needs.
 
 ## Changelog
+
+1.1.1 (unreleased, held) is the Update 7 release. The stations work as before on 0.7.x servers, and
+it needs ZiggfreedCommon 2.3.0: with an older one installed, the server refuses to load RPG Stations
+and names the library to update. The Disenchanting Table's bar now fills a little with each stage of
+the ritual. Added a Disenchanter's Kit icon: put on two pieces of the kit and one icon shows beside
+your other effects, named for the most the kit is giving you. A pack's stations that post to a mod you don't have no
+longer raise a warning when the first player joins.
 
 1.1.0 adds the second station, the Disenchanting Table, with its greater tier, its kit, the
 grimoire and the draught. For pack authors it adds stations that take their recipes from any of the
