@@ -133,3 +133,6 @@ gearset.rpg_disenchanters_kit.title = Kit du Désenchanteur
 gearset.rpg_disenchanters_kit.tier_pieces = Deux pièces portées : un peu plus rapide à la table.
 gearset.rpg_disenchanters_kit.tier_armor = Le kit complet : plus rapide à la table, avec un léger reflet vert et or pour en témoigner.
 gearset.rpg_disenchanters_kit.tier_held = Le kit complet, grimoire en main : plus rapide encore.
+gearset.rpg_disenchanters_kit.badge_pieces = Kit du Désenchanteur : Deux Pièces
+gearset.rpg_disenchanters_kit.badge_armor = Kit du Désenchanteur : Complet
+gearset.rpg_disenchanters_kit.badge_held = Kit du Désenchanteur : Complet, Grimoire en Main

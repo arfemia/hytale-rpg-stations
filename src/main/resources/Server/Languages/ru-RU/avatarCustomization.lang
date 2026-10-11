@@ -3,6 +3,7 @@
 # namespace the client's emote UI reads emote names from).
 
 emotes.RPG_Emote_Knife.name = Чистка рыбы
+emotes.RPG_Emote_Disenchant_Open.name = Начало обряда
 emotes.RPG_Emote_Disenchant_Channel.name = Сосредоточение
 emotes.RPG_Emote_Disenchant_Surge.name = Нарастание силы
 emotes.RPG_Emote_Disenchant_Release.name = Высвобождение
