@@ -26,7 +26,7 @@ work into its own rewards, without either mod hard-depending on the other. See
 
 ## Install
 
-Requires a Hytale Update 7 (0.7.x) server and **ZiggfreedCommon** (`>=2.3.0`), the
+Requires a Hytale Update 7 (0.7.x) server and **Ziggfreed's CommonLib** (`>=2.3.0`), the
 one hard dependency - drop its jar into your server's `Mods/` folder first, then drop the RPG
 Stations jar into the same folder and restart. See
 [Getting Started](docs/getting-started.md) for the full walkthrough.
