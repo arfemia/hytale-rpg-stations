@@ -22,7 +22,7 @@ cycles into any session worked with mithril-grade steel, every cycle carries a 1
 **Sawmiller's Hatchet**. It drops nowhere else, no bench can forge it, and it is the only tool that
 reaches the top rung of the sawmill's own curve.
 
-New in 1.1.0: the Disenchanting Table. Place a piece of gear on it, press `F`, and the piece comes
+Then there is the Disenchanting Table. Place a piece of gear on it, press `F`, and the piece comes
 apart over a staged ritual, giving back what the Salvager's Workbench would plus Essence of Life and the
 occasional find. Gear of item level 20 and up has a 1-in-200 shot at the Disenchanter's Grimoire on
 every ritual, and each of the four disenchanter's kit pieces has its own 1.5 percent chance. With
@@ -229,28 +229,10 @@ Known integrations: **MMO Skill Tree**. See the Extension Channels and Add-ons &
 in the full docs for the contract, a complete worked example, and the presence-check idiom a
 consumer needs.
 
-## Changelog
-
-1.1.1 (unreleased, held) is the Update 7 release. The stations work as before on 0.7.x servers, and
-it needs Ziggfreed's CommonLib 2.3.0: with an older one installed, the server refuses to load RPG Stations
-and names the library to update. The Disenchanting Table's bar now fills a little with each stage of
-the ritual. Added a Disenchanter's Kit icon: put on two pieces of the kit and one icon shows beside
-your other effects, named for the most the kit is giving you. A pack's stations that post to a mod you don't have no
-longer raise a warning when the first player joins.
-
-1.1.0 adds the second station, the Disenchanting Table, with its greater tier, its kit, the
-grimoire and the draught. For pack authors it adds stations that take their recipes from any of the
-game's benches (the Salvager's Workbench included), a queue that works several placed pieces in turn,
-server-wide protect lists, and loot rolls marked as a station's expected output so a real find
-still reads as one. The Sawmill's description now says what the bench does, and that a better
-hatchet gets more planks out of each log. Fixed: the work summary read "Worked 1 cycles" after a
-single cycle, and two stop messages mixed their tenses. This version requires ZiggfreedCommon 2.2.0.
-
-See `patch-notes/` in this mod's repository for the full version history.
-
 ## Links & Support
 
 - [Source, docs and issues on GitHub](https://github.com/arfemia/hytale-rpg-stations)
+- [Patch notes for every version](https://github.com/arfemia/hytale-rpg-stations/tree/main/patch-notes)
 - Questions or suggestions? Join the [Discord](https://discord.gg/5NFdZsUxHZ) or leave a comment.
 
 ---
