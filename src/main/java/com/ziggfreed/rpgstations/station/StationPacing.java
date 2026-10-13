@@ -1,6 +1,5 @@
 package com.ziggfreed.rpgstations.station;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiFunction;
 
@@ -183,23 +182,5 @@ public final class StationPacing {
         }
         double scaled = seconds * scale;
         return Double.isFinite(scaled) ? scaled : seconds;
-    }
-
-    /**
-     * The extension ladders of {@code paces}, each a complete {@link Pace} whose ladder joins the
-     * product (its clamp is the action's to set, never an extension's). Null-safe.
-     */
-    @Nonnull
-    static List<ContributionScale> laddersOf(@Nullable List<Pace> paces) {
-        if (paces == null || paces.isEmpty()) {
-            return List.of();
-        }
-        List<ContributionScale> out = new ArrayList<>(paces.size());
-        for (Pace pace : paces) {
-            if (pace != null && pace.getLadder() != null) {
-                out.add(pace.getLadder());
-            }
-        }
-        return out;
     }
 }

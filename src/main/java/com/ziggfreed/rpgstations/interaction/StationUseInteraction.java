@@ -58,10 +58,6 @@ public final class StationUseInteraction extends SimpleInstantInteraction {
                     .add()
                     .build();
 
-    public static BuilderCodec<StationUseInteraction> getCODEC() {
-        return CODEC;
-    }
-
     /**
      * The station id this decoded interaction runs. Read by
      * {@code station.StationService#seedStationBlockIndexFromAssets}, which DERIVES the anchor

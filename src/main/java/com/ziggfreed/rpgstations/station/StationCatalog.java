@@ -1,10 +1,8 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -131,35 +129,5 @@ public final class StationCatalog {
 
     public int size() {
         return stations.size();
-    }
-
-    /**
-     * Every KNOWN flair id, lowercased: every station's inline {@code Flairs} map, UNIONED with
-     * every registered standalone {@code asset.FlairAsset} id (design section 9.6, leg F - the
-     * open vocabulary; a {@code FlairAsset} id counts here regardless of its own {@code Stations}
-     * restriction, since this method answers "is this id valid to grant at all", not "does it
-     * apply to THIS station"). Used by the flair-grant command soft-warn (whatever mod registers
-     * a {@code FlairUnlockProvider} and grants ids into it).
-     */
-    @Nonnull
-    public Set<String> allFlairIds() {
-        Set<String> ids = new HashSet<>();
-        for (StationAsset asset : stations.values()) {
-            Map<String, StationAsset.Flair> flairs = asset.getFlairs();
-            if (flairs == null || flairs.isEmpty()) {
-                continue;
-            }
-            for (String id : flairs.keySet()) {
-                if (id != null && !id.isBlank()) {
-                    ids.add(id.toLowerCase(Locale.ROOT));
-                }
-            }
-        }
-        for (String id : FlairCatalog.getInstance().all().keySet()) {
-            if (id != null && !id.isBlank()) {
-                ids.add(id.toLowerCase(Locale.ROOT));
-            }
-        }
-        return ids;
     }
 }

@@ -118,7 +118,7 @@ public class RpgStationsPlugin extends JavaPlugin {
     public RpgStationsPlugin(@Nonnull JavaPluginInit init) {
         super(init);
         instance = this;
-        LOGGER.atInfo().log("RpgStations initializing...");
+        Log.info("RpgStations initializing...");
     }
 
     @Override

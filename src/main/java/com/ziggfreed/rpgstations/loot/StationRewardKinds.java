@@ -1,7 +1,5 @@
 package com.ziggfreed.rpgstations.loot;
 
-import java.util.List;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -126,12 +124,6 @@ public final class StationRewardKinds {
                     sink.outputItems(count);
                 }
             });
-
-    /** Every kind id this class registers, for a validator or an editor pick list. */
-    @Nonnull
-    public static List<String> kindIds() {
-        return List.of(KIND_EFFECT, KIND_CONTRIBUTION, KIND_OUTPUT_ITEMS);
-    }
 
     /**
      * Register the three station kinds into {@code kinds} under {@link #OWNER}. The plugin hands it

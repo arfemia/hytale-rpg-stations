@@ -37,6 +37,7 @@ import com.ziggfreed.common.entity.PlayerModelService;
 import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.common.factor.FactorFormula;
 import com.ziggfreed.common.instance.reward.NativeLootService;
+import com.ziggfreed.common.inventory.ItemIds;
 import com.ziggfreed.common.loot.LootGrants;
 import com.ziggfreed.common.loot.LootRef;
 import com.ziggfreed.common.loot.LootableAsset;
@@ -53,6 +54,7 @@ import com.ziggfreed.common.cast.ModelParticleService;
 import com.ziggfreed.common.cast.ParticleLifetimes;
 import com.ziggfreed.common.validation.Finding;
 import com.ziggfreed.common.validation.Severity;
+import com.ziggfreed.common.validation.TextKeyAudit;
 import com.ziggfreed.common.validation.ValidationReport;
 import com.ziggfreed.rpgstations.api.FindingSink;
 import com.ziggfreed.rpgstations.api.ValidationHook;
@@ -79,7 +81,6 @@ import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
-import com.ziggfreed.rpgstations.i18n.RpgStationsLangKeys;
 import com.ziggfreed.rpgstations.loot.StationLootEngine;
 import com.ziggfreed.rpgstations.loot.StationRewardKinds;
 import com.ziggfreed.rpgstations.util.Log;
@@ -92,7 +93,8 @@ import com.ziggfreed.rpgstations.util.Log;
  * semantics are the channel owner's business, and are validated by the owning mod - through a
  * registered {@code api.ValidationHook} ({@link #runHooks}) when the rule needs to see content, or
  * in that mod's own validator otherwise. Nothing in here branches on a foreign id. The lang-key
- * presence check runs against this mod's own {@link RpgStationsLangKeys}, and the gate check is a
+ * presence check asks the loaded catalogue through the library's {@link TextKeyAudit#liveCatalogue},
+ * and the gate check is a
  * factor-known check over this mod's own {@link Requires} and its shared
  * {@link FactorCondition} gate leaves.
  *
@@ -251,7 +253,7 @@ public final class StationValidator {
             };
 
             List<Finding> out = new ArrayList<>(validate(stations,
-                    StationValidator::langKeyKnownLive,
+                    TextKeyAudit.liveCatalogue(),
                     dropListKnown,
                     factorKnown,
                     lootableReferenced,
@@ -633,20 +635,13 @@ public final class StationValidator {
     }
 
     /**
-     * Live {@code Item} existence check for a pattern's activation/revert block ids. Fails OPEN on
-     * a lookup error AND on an EMPTY/unreadable item map ({@link #benchIdKnownLive}'s own stance) -
-     * a cold unit JVM or a pass before the native layers settled must never flag every pattern.
+     * Live {@code Item} existence check for a pattern's activation/revert block ids, through the
+     * library's {@link ItemIds#loaded}. Fails OPEN when that cannot tell (a lookup error, an
+     * EMPTY/unreadable item map; {@link #benchIdKnownLive}'s own stance) - a cold unit JVM or a pass
+     * before the native layers settled must never flag every pattern.
      */
     private static boolean itemKnownLive(@Nonnull String itemId) {
-        try {
-            var assetMap = Item.getAssetMap();
-            if (assetMap == null || assetMap.getAssetCount() == 0) {
-                return true;
-            }
-            return assetMap.getAsset(itemId) != null;
-        } catch (Throwable t) {
-            return true;
-        }
+        return !Boolean.FALSE.equals(ItemIds.loaded(itemId));
     }
 
     /**
@@ -980,30 +975,6 @@ public final class StationValidator {
         if (!entityEffectKnownLive(effect.getId())) {
             out.add(Finding.warning(DOMAIN, "UNKNOWN_ENTITY_EFFECT",
                     label + " references unknown EntityEffect '" + effect.getId() + "'", id));
-        }
-    }
-
-    /**
-     * Lang-key-known check (design 4.8/critique m10), MERGED view (D5 fix): a
-     * {@link RpgStationsLangKeys} hit answers fast for the jar's own shipped keys, but a pack
-     * (e.g. the anvil's {@code station.anvil.name}/{@code .desc}) can additively author its OWN
-     * {@code rpgstations.lang} overlay this hand-maintained jar-only set never knows about - so a
-     * miss falls through to a LIVE query against the engine's actual merged i18n store
-     * ({@code I18nModule.getMessage}, the same lookup a client's own message resolution uses),
-     * which sees every loaded layer (jar defaults AND every pack overlay), not just the jar's.
-     * Fails OPEN on a lookup error (module not up yet, etc.) - matching
-     * {@link #dropListKnownLive}'s own "a lookup failure is not evidence the key is wrong" stance.
-     */
-    private static boolean langKeyKnownLive(@Nonnull String fullKey) {
-        if (RpgStationsLangKeys.isKnown(fullKey)) {
-            return true;
-        }
-        try {
-            var i18n = com.hypixel.hytale.server.core.modules.i18n.I18nModule.get();
-            return i18n != null && i18n.getMessage(
-                    com.hypixel.hytale.server.core.modules.i18n.I18nModule.DEFAULT_LANGUAGE, fullKey) != null;
-        } catch (Throwable t) {
-            return true; // a lookup failure is not evidence the key is missing - don't flag it
         }
     }
 
@@ -2862,9 +2833,9 @@ public final class StationValidator {
     private static void checkFloors(@Nonnull Roll.Ladder.Floor[] floors, @Nonnull String rollLabel,
                                     @Nonnull String id, @Nonnull String trigger, boolean noCycleOutput,
                                     @Nonnull Predicate<String> dropListKnown, @Nonnull List<Finding> out) {
-        // Duplicate-Min coverage deliberately does NOT live here: checkDuplicateFloorMins is the
-        // ONE shared duplicate-floor check both ladder consumers run (LADDER_DUPLICATE_FLOOR_MIN),
-        // and a second local emit here double-reported the same defect under a second code.
+        // Duplicate-Min coverage deliberately does NOT live here: the library's shared roll audit
+        // (LootableValidator.auditRoll, LOOT_DUPLICATE_FLOOR) owns it for every roll ladder, and a
+        // second local emit here double-reported the same defect under a second code.
         for (int i = 0; i < floors.length; i++) {
             Roll.Ladder.Floor f = floors[i];
             String fLabel = rollLabel + ".Ladder.Floors[" + i + "]";
@@ -3505,21 +3476,9 @@ public final class StationValidator {
     /**
      * Two ladder floors sharing a {@code Min} is always an authoring slip: only ONE of them can ever
      * be the reached floor (the LAST authored wins, per the shared {@code loot.FactorLadder} rule),
-     * so the other silently never grants. Warned for both ladder consumers from their own overload.
+     * so the other silently never grants. A {@code ContributionScale} ladder's report; a roll
+     * ladder's is the library's shared roll audit.
      */
-    private static void checkDuplicateFloorMins(@Nullable Roll.Ladder.Floor[] floors, @Nonnull String label,
-                                                @Nonnull String id, @Nonnull List<Finding> out) {
-        if (floors == null) {
-            return;
-        }
-        double[] mins = new double[floors.length];
-        for (int i = 0; i < floors.length; i++) {
-            mins[i] = floors[i] != null ? floors[i].effectiveMin() : Double.NaN;
-        }
-        warnDuplicateMins(mins, label, id, out);
-    }
-
-    /** The shared duplicate-threshold report both ladder consumers feed. */
     private static void warnDuplicateMins(@Nonnull double[] mins, @Nonnull String label, @Nonnull String id,
                                           @Nonnull List<Finding> out) {
         Set<Double> seen = new HashSet<>();

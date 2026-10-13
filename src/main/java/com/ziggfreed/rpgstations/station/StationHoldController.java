@@ -16,16 +16,15 @@ import com.hypixel.hytale.protocol.MovementForceRotationType;
 import com.hypixel.hytale.protocol.PositionDistanceOffsetType;
 import com.hypixel.hytale.protocol.RotationType;
 import com.hypixel.hytale.protocol.ServerCameraSettings;
-import com.hypixel.hytale.server.core.asset.type.entityeffect.config.EntityEffect;
 import com.hypixel.hytale.server.core.asset.type.entityeffect.config.OverlapBehavior;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.entity.AnimationUtils;
-import com.hypixel.hytale.server.core.entity.effect.EffectControllerComponent;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.camera.ServerCameraService;
+import com.ziggfreed.common.effect.NativeEffectUtil;
 import com.ziggfreed.common.instance.effect.EntityEffectService;
 import com.ziggfreed.common.inventory.PlayerAccess;
 import com.ziggfreed.rpgstations.util.Log;
@@ -74,28 +73,16 @@ final class StationHoldController {
     }
 
     /**
-     * Release the hold effect INSTANTLY via the engine's targeted
-     * {@code EffectControllerComponent.removeEffect}. The short-TTL decay stays as the
-     * self-healing fallback.
+     * Release the hold effect INSTANTLY through the library's remove-by-id
+     * ({@link NativeEffectUtil#remove}, the engine's targeted {@code removeEffect}). The short-TTL
+     * decay stays as the self-healing fallback.
      */
     static void releaseHold(@Nonnull StationSession s, @Nonnull Store<EntityStore> store) {
         if (!s.movementLock || s.holdEffectId == null || s.holdEffectId.isBlank()
                 || s.ref == null || !s.ref.isValid()) {
             return;
         }
-        try {
-            int index = EntityEffect.getAssetMap().getIndex(s.holdEffectId);
-            if (index < 0) {
-                return;
-            }
-            EffectControllerComponent controller =
-                    store.getComponent(s.ref, EffectControllerComponent.getComponentType());
-            if (controller != null) {
-                controller.removeEffect(s.ref, index, store);
-            }
-        } catch (Throwable t) {
-            Log.fine("STATION hold release failed (decay fallback covers it): " + t.getMessage());
-        }
+        NativeEffectUtil.remove(store, s.ref, s.holdEffectId);
     }
 
     /**

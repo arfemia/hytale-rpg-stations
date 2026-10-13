@@ -467,8 +467,8 @@ final class StationCustody {
 
     /**
      * Does a stack carry per-instance data a COUNT pile cannot keep? Reads the stack and asks
-     * {@link #carriesInstanceData(double, boolean, Set)}. A stack whose durability cannot be read
-     * is treated as bare on that axis, and the metadata read still decides.
+     * {@link #carriesInstanceData(double, boolean, Set, boolean)}. A stack whose durability or
+     * quality cannot be read is treated as bare on that axis, and the metadata read still decides.
      */
     static boolean carriesInstanceData(@Nullable ItemStack stack) {
         if (stack == null) {
@@ -482,19 +482,36 @@ final class StationCustody {
         } catch (Throwable ignored) {
             // Unreadable durability: bare on that axis, the metadata keys below still decide.
         }
-        return carriesInstanceData(maxDurability, unbreakable, ItemReadings.metadataKeys(stack));
+        boolean requalified = false;
+        try {
+            requalified = stack.getQualityIndex() != stack.getItem().getQualityIndex();
+        } catch (Throwable ignored) {
+            // Unreadable quality: bare on that axis, the metadata keys below still decide.
+        }
+        return carriesInstanceData(maxDurability, unbreakable, ItemReadings.metadataKeys(stack), requalified);
+    }
+
+    /** {@link #carriesInstanceData(double, boolean, Set, boolean)} for a stack at its item's own quality. */
+    static boolean carriesInstanceData(double maxDurability, boolean unbreakable,
+            @Nullable Set<String> metadataKeys) {
+        return carriesInstanceData(maxDurability, unbreakable, metadataKeys, false);
     }
 
     /**
      * PURE, over the raw readings: does a stack carry per-instance data a COUNT pile cannot keep? A
      * count pile stores ids and counts only, so a stack that tracks durability (a positive maximum
-     * on a breakable item, worn or not) or carries metadata would come back as a bare fresh stack:
-     * a free repair, or a lost enhancement. Such a stack is refused by every socket whose capacity
-     * is above one; a single-item socket keeps the real stack and takes it. Metadata keys the
-     * reader could not inspect ({@code null}) count as carried, so an unreadable stack is refused.
+     * on a breakable item, worn or not), carries metadata, or was given a quality other than its
+     * item's ({@code requalified}) would come back as a bare fresh stack: a free repair, a lost
+     * enhancement, or a lost quality that then merges with plain stacks. Such a stack is refused
+     * by every socket whose capacity is above one; a single-item socket keeps the real stack and
+     * takes it. Metadata keys the reader could not inspect ({@code null}) count as carried, so an
+     * unreadable stack is refused.
      */
     static boolean carriesInstanceData(double maxDurability, boolean unbreakable,
-            @Nullable Set<String> metadataKeys) {
+            @Nullable Set<String> metadataKeys, boolean requalified) {
+        if (requalified) {
+            return true;
+        }
         if (maxDurability > 0 && !unbreakable) {
             return true;
         }

@@ -612,11 +612,6 @@ public final class StationStructures {
         }
     }
 
-    /** Test/diagnostic read: the live pending-candidate count for one world. */
-    int pendingCount(@Nonnull UUID worldUuid) {
-        return pending.size(worldUuid);
-    }
-
     // ==================== helpers ====================
 
     /** The stash tag at a block, or null (no stash, unloaded section, or a failed read). */

@@ -55,10 +55,6 @@ public final class StationRetrieveInteraction extends SimpleInstantInteraction {
                     SimpleInstantInteraction.CODEC)
                     .build();
 
-    public static BuilderCodec<StationRetrieveInteraction> getCODEC() {
-        return CODEC;
-    }
-
     @Override
     protected void firstRun(
             @Nonnull InteractionType interactionType,

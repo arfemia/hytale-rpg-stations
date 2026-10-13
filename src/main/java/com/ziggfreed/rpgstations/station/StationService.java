@@ -71,7 +71,6 @@ import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.chunk.section.ChunkSection;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
-import com.hypixel.hytale.server.core.util.NotificationUtil;
 import com.ziggfreed.common.camera.CameraShakeService;
 import com.ziggfreed.common.cast.ModelParticleService;
 import com.ziggfreed.common.cast.ParticleLifetimes;
@@ -88,6 +87,7 @@ import com.ziggfreed.common.entity.ItemReadings;
 import com.ziggfreed.common.entity.PuppetNav;
 import com.ziggfreed.common.entity.performer.PerformerReconciler;
 import com.ziggfreed.common.factor.FactorCondition;
+import com.ziggfreed.common.feedback.Notify;
 import com.ziggfreed.common.feedback.PickupMimic;
 import com.ziggfreed.common.i18n.Msg;
 import com.ziggfreed.common.i18n.NativeNames;
@@ -5619,11 +5619,6 @@ public final class StationService {
         }
     }
 
-    /** Package-private for {@link StationBlockPlaceSystem} test wiring; the live count of indexed station blocks. */
-    int knownStationBlockCount() {
-        return knownStationBlocks.size();
-    }
-
     /**
      * Every block ITEM id the asset-derived discovery index resolves to a station, lowercased - the
      * live source behind the {@code rpgstations:station-blocks} Asset Editor dataset (a pattern's
@@ -6533,7 +6528,8 @@ public final class StationService {
      * (an {@code Input} that authors only {@code Except} NARROWS what the station derives, never
      * turns it into everything but the hole). A COUNT pile (capacity above one) additionally
      * refuses a stack carrying per-instance data ({@link StationCustody#carriesInstanceData}: a
-     * tool that tracks wear, a stack with metadata), since a pile keeps ids and counts only and
+     * tool that tracks wear, a stack with metadata, a stack given a quality other than its item's),
+     * since a pile keeps ids and counts only and
      * would hand it back as a bare fresh stack; a SINGLE-item socket keeps the real stack, so it
      * asks the metadata guard instead ({@link StationMetadataGuard#accepts}) wherever every action
      * at the station that reads it would consume the piece ({@link #consumedByEveryReader}).
@@ -7196,8 +7192,10 @@ public final class StationService {
      * fallback SPAWNS an entity, and {@code Store#addEntity} asserts (throwing {@code
      * IllegalStateException("Store is currently processing!")}) when called from inside a
      * system/interaction tick - the same processing-lock hazard the custody display spawn/despawn
-     * already routes around. A {@code null} buffer therefore loses the overflow silently on every
-     * in-tick path (an inventory-full session stop handed the player nothing and dropped nothing).
+     * already routes around. A {@code null} buffer on an in-tick path once lost the overflow (an
+     * inventory-full session stop handed the player nothing and dropped nothing); the library's
+     * one-accessor spawn now re-queues such a drop onto the world thread, so it lands a tick late,
+     * but the buffer still lands it in the same tick.
      */
     @Nonnull
     private static List<ItemStack> handBackToOwner(@Nullable CommandBuffer<EntityStore> commandBuffer,
@@ -7539,7 +7537,7 @@ public final class StationService {
      * station's one world-drop mechanism: the loot pass ({@code loot.StationLootEngine}) reaches the
      * same sink as the ground of ziggfreed-common's {@code loot.GroundSpillSinks} rather than
      * re-deriving it. Pass the live {@code commandBuffer} from any in-tick caller - see
-     * {@link #handBackToOwner} for why a {@code null} there loses the drop.
+     * {@link #handBackToOwner} for what a {@code null} there costs.
      */
     private static void dropCustodyAtBlock(@Nullable CommandBuffer<EntityStore> commandBuffer,
             @Nullable Store<EntityStore> store, int x, int y, int z,
@@ -9283,11 +9281,7 @@ public final class StationService {
 
     /** Package-private: {@link StationRefusals}' notices and {@code StationStructures}' pattern toasts ride the same yellow notification. */
     static void toast(@Nonnull PlayerRef playerRef, @Nonnull Message message) {
-        try {
-            NotificationUtil.sendNotification(playerRef.getPacketHandler(), message.color(Color.YELLOW));
-        } catch (Throwable t) {
-            Log.fine("STATION toast failed: " + t.getMessage());
-        }
+        Notify.def(playerRef, message.color(Color.YELLOW));
     }
 
     /** The stop-toast key for a reason, or null for reasons that toast nothing. */

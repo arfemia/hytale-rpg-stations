@@ -7,37 +7,31 @@ import javax.annotation.Nullable;
 
 import org.joml.Vector3d;
 
-import com.hypixel.hytale.component.AddReason;
 import com.hypixel.hytale.component.CommandBuffer;
-import com.hypixel.hytale.component.Holder;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Rotation3f;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
-import com.hypixel.hytale.server.core.modules.entity.item.ItemComponent;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.ziggfreed.common.instance.reward.NativeLootService;
 
 /**
- * The ONE world-drop sink every "no room in the inventory" fallback in this mod
- * routes through - the native mob-death drop mechanism ({@link ItemComponent#generateItemDrops}
- * + a tick-safe spawn). A grant that cannot fit in the target
- * inventory MUST land as a ground item at the block instead of being skipped - this applies to
- * placed-input custody returns ({@code station.StationService#returnCustody}), every single-stack
- * grant's fallback ({@link ItemGrantUtil}), and the station loot pass alike, superseding the older
- * "room-checked, skipped silently when full" convention. The loot pass ({@code
- * loot.StationLootEngine}) hands its items and drop lists over through ziggfreed-common's {@code
- * loot.GroundSpillSinks}, with this sink as its ground, so whatever a pass cannot fit lands here as
- * ONE pile. Lifted out of {@code StationService}'s original private {@code dropCustodyAtBlock} so
- * callers in other packages reuse the SAME sink rather than re-deriving it - one drop mechanism,
- * several callers.
+ * The ONE world-drop sink every "no room in the inventory" fallback in this mod routes through:
+ * the station block's ground, over ziggfreed-common's {@link NativeLootService#spawnInWorld}. A
+ * grant that cannot fit in the target inventory MUST land as a ground item at the block instead of
+ * being skipped - this applies to placed-input custody returns
+ * ({@code station.StationService#returnCustody}), every single-stack grant's fallback
+ * ({@link ItemGrantUtil}), and the station loot pass alike. The loot pass
+ * ({@code loot.StationLootEngine}) hands its items and drop lists over through ziggfreed-common's
+ * {@code loot.GroundSpillSinks}, with this sink as its ground, so whatever a pass cannot fit lands
+ * here as ONE pile. This class owns only where the station's ground is (the block centre, one
+ * block up); the spawn itself is the library's.
  *
- * <p><b>Pass the live {@code commandBuffer} from anything running inside a tick.</b> Spawning an
- * item entity through a live {@code Store} is rejected while that store is processing, so an
- * in-tick caller that hands over only a store loses the drop; the buffer route queues the spawn
- * instead and always lands. Only a caller genuinely outside any tick - one hopping onto the world
- * thread through {@code World#execute} - has no buffer to give, and the store route is there to
- * serve exactly that case. A store-route drop that fails says so in its own words rather than as a
- * generic failure, and names the caller, so a buffer that should have been passed shows up in the
- * log the first time it costs a player their items.
+ * <p><b>Pass the live {@code commandBuffer} from anything running inside a tick.</b> With a buffer
+ * the spawn takes the library's tick-safe pair form and lands in the same tick's flush. Only a
+ * caller genuinely outside any tick - one hopping onto the world thread through
+ * {@code World#execute} - has no buffer to give; it takes the one-accessor form, which re-queues a
+ * spawn the store refuses mid-tick onto the world thread, so the drop lands a tick later instead of
+ * being lost.
  */
 public final class ItemDropUtil {
 
@@ -46,8 +40,8 @@ public final class ItemDropUtil {
 
     /**
      * Drops {@code stacks} at the block center ({@code x+0.5, y+1.0, z+0.5}) via the native
-     * dropped-item spawn. Never throws; a {@code null}/unresolvable {@code store} or an empty
-     * list is a no-op (logged when items would otherwise be silently lost).
+     * dropped-item spawn. Never throws; an empty list is a no-op, and a {@code null} {@code store}
+     * loses the drop (logged). Answers whether the drop landed or was queued to land.
      */
     public static boolean dropAtBlock(@Nullable CommandBuffer<EntityStore> commandBuffer,
             @Nullable Store<EntityStore> store, int x, int y, int z, @Nonnull List<ItemStack> stacks) {
@@ -59,63 +53,9 @@ public final class ItemDropUtil {
             return false;
         }
         Vector3d pos = new Vector3d(x + 0.5, y + 1.0, z + 0.5);
-        Holder<EntityStore>[] holders;
-        try {
-            holders = ItemComponent.generateItemDrops(store, stacks, pos, Rotation3f.IDENTITY);
-        } catch (Throwable t) {
-            Log.warn("STATION items lost - could not build drops: " + t.getMessage());
-            return false;
-        }
-        if (holders == null || holders.length == 0) {
-            return false;
-        }
-        int spawned = 0;
-        try {
-            for (Holder<EntityStore> holder : holders) {
-                if (commandBuffer != null) {
-                    commandBuffer.addEntity(holder, AddReason.SPAWN);
-                } else {
-                    store.addEntity(holder, AddReason.SPAWN);
-                }
-                spawned++;
-            }
-            return true;
-        } catch (Throwable t) {
-            int lost = holders.length - spawned;
-            if (commandBuffer == null) {
-                // The store route is only legal outside a tick. Say so outright, and name the
-                // caller, so the next time someone reaches this sink from inside one the log points
-                // straight at the frame that should have handed over its CommandBuffer.
-                Log.warn("STATION items lost - " + lost + " ground drop(s) at (" + x + "," + y + "," + z
-                        + ") went nowhere because this sink was given a Store and no CommandBuffer, and"
-                        + " the store would not accept a spawn: " + t.getMessage()
-                        + ". Called from " + callerFrame() + "; pass the live CommandBuffer from any"
-                        + " caller running inside a tick.", t);
-            } else {
-                Log.warn("STATION items lost - " + lost + " ground drop(s) at (" + x + "," + y + "," + z
-                        + ") failed: " + t.getMessage(), t);
-            }
-            return false;
-        }
-    }
-
-    /**
-     * The first frame outside this class, as {@code Class#method:line} - who asked for the drop.
-     * Only ever walked on a failure path, never in the normal flow. Falls back to a plain marker
-     * when the walk itself cannot answer, because a diagnostic must never become the failure.
-     */
-    @Nonnull
-    private static String callerFrame() {
-        try {
-            return StackWalker.getInstance()
-                    .walk(frames -> frames
-                            .filter(f -> !ItemDropUtil.class.getName().equals(f.getClassName()))
-                            .findFirst()
-                            .map(f -> f.getClassName() + "#" + f.getMethodName() + ":" + f.getLineNumber())
-                            .orElse("an unknown caller"));
-        } catch (Throwable ignored) {
-            return "an unknown caller";
-        }
+        return commandBuffer != null
+                ? NativeLootService.spawnInWorld(store, commandBuffer, pos, new Rotation3f(Rotation3f.IDENTITY), stacks)
+                : NativeLootService.spawnInWorld(store, pos, Rotation3f.IDENTITY, stacks);
     }
 
     /**

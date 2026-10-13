@@ -8,7 +8,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import com.ziggfreed.rpgstations.api.ContributionChannelRegistry;
 
@@ -22,11 +21,11 @@ import com.ziggfreed.rpgstations.api.ContributionChannelRegistry;
  * <p>Mirrors {@link FactorRegistryImpl}'s discipline exactly (concurrent, id lowercased,
  * re-declaring harmless) minus the provider value. Engine-internal readers ({@code
  * station.StationValidator}'s {@code UNKNOWN_CHANNEL} check, {@code asset.AssetEditorDataSets}'
- * {@code rpgstations:channels} dropdown) call {@link #isDeclared}/{@link #registeredIds} directly
+ * {@code rpgstations:channels} dropdown) call {@link #registeredIds} directly
  * against THIS singleton rather than through the narrow declare-only public interface - the same
  * engine-internal extension of the frozen contract {@code FactorRegistryImpl} documents.
  *
- * <p><b>Fail-open, absolutely</b> (decision 75): {@link #isDeclared} answering {@code false}
+ * <p><b>Fail-open, absolutely</b> (decision 75): a channel missing from {@link #registeredIds}
  * produces at most a WARN, and only when a declared channel shares the undeclared one's namespace
  * (a namespace nobody declared into is a mod that is not installed). An undeclared channel is still
  * forwarded verbatim.
@@ -54,15 +53,9 @@ public final class ContributionChannelRegistryImpl implements ContributionChanne
         channels.add(channelId.toLowerCase(Locale.ROOT));
     }
 
-    /** True when {@code channelId} has been declared; the validator's known-channel check. */
-    public boolean isDeclared(@Nullable String channelId) {
-        return channelId != null && !channelId.isBlank()
-                && channels.contains(channelId.toLowerCase(Locale.ROOT));
-    }
-
     /**
-     * Every currently-declared channel id, lowercased and sorted - the engine-internal read beside
-     * {@link #isDeclared} (never part of the frozen declare-only api contract). Backs the
+     * Every currently-declared channel id, lowercased and sorted - the engine-internal read
+     * (never part of the frozen declare-only api contract). Backs the
      * {@code rpgstations:channels} Asset-Editor dropdown dataset and the {@code UNKNOWN_CHANNEL}
      * warn's "declared channels are ..." echo, which is why it is a snapshot: a mod declaring a
      * channel later simply widens the next answer.

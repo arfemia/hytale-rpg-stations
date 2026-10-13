@@ -133,6 +133,8 @@ class StationPlacementSafetyTest {
         assertFalse(StationCustody.carriesInstanceData(120.0, true, Set.of()), "an unbreakable one does not");
         assertTrue(StationCustody.carriesInstanceData(0.0, false, Set.of("Fixture_Key")), "any metadata key");
         assertTrue(StationCustody.carriesInstanceData(0.0, true, null), "an unreadable stack is refused");
+        assertTrue(StationCustody.carriesInstanceData(0.0, true, Set.of(), true),
+                "a stack given a quality other than its item's");
         assertFalse(StationCustody.carriesInstanceData(null), "a null stack carries nothing");
     }
 
