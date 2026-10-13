@@ -1,6 +1,5 @@
 package com.ziggfreed.rpgstations;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,9 +38,9 @@ import com.hypixel.hytale.common.semver.SemverRange;
  *
  * <p><b>The library floor.</b> The server checks each {@code Dependencies} range against the
  * installed dependency's own version and refuses to load the plugin at all on a miss. The floor is
- * the library jar this build compiles against (this module's router: the floor moves with
- * {@code ziggfreedCommonVersion}), so a server still running an older library refuses this jar by
- * name instead of running it on a library it was never built for.
+ * the oldest library this jar really needs (R364): it must admit the library the build compiles
+ * against, and it moves up only when the code starts using newer library API, so a library release
+ * alone never forces a release of this jar.
  *
  * <p>Every manifest read here is a processed one on the test classpath (this module's after resource
  * templating, a dependency's inside its jar), so the test reads exactly what a server reads. It calls
@@ -77,14 +76,12 @@ class ManifestTargetTest {
     }
 
     @Test
-    void theLibraryFloorIsTheLibraryThisBuildCompilesAgainst() throws IOException {
+    void theLibraryFloorAdmitsTheLibraryThisBuildCompilesAgainst() throws IOException {
         String floor = dependencyRange(LIBRARY_DEPENDENCY);
         String compiledAgainst = versionOf(LIBRARY_NAME);
 
         assertTrue(Semver.fromString(compiledAgainst).satisfies(SemverRange.fromString(floor)),
                 "the floor must admit the library this jar compiles against: " + floor + " vs " + compiledAgainst);
-        assertEquals(">=" + compiledAgainst, floor,
-                "the floor is the library this jar compiles against, so an older library refuses it by name");
     }
 
     /** This module's processed {@code ServerVersion}, parsed as the server parses it. */
