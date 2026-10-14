@@ -1427,6 +1427,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Pool` | [LootPool](#field-lootableasset-pool) | `null` | A bag of competing outcomes, of which only as many as the pool's own Rolls formula works out to are drawn. Use it for the part of a payout that varies; use the Rolls list above for the part everybody gets. |
 | `ContributesTo` | `string` | `null` | Another table's id to fold this file's rolls and pool entries INTO, on top of what that table already has. The way to enrich a table shipped by someone else without owning its file. How many picks the merged pool makes stays the target's decision. |
 | `Requires` | [Block](#field-lootableasset-requires) | `null` | Whether this file loads on this server at all. A condition { "Factor": "hytale:mod_installed", "Param": "Group:Name", "Min": 1 } keeps the file out entirely where that mod is not installed, so nothing reads it or reports it. Write Min 1: a condition with no bound is satisfied by a missing mod too. Other conditions here are not read. |
+| `Text` | [ContentTextAsset](#field-lootableasset-text) | `null` | What a reward paying this table reads as, where a payout is shown before it pays. TitleKey names the bundle: the reward's line reads it instead of the generic Loot Bundle, and hovering its picture shows it first. FlavorKey is one line the hover shows under the name. Leave it out and the reward reads as the generic bundle. Read from the table's own file only, never from a file that contributes to it. |
+| `ListContents` | `boolean` | `null` | When true, hovering a reward that pays this table lists what the table pays, contributions included: what always comes, then each chance with its percent, then what only sometimes comes. Works with or without Text. Default false. |
 
 <a id="field-lootableasset-pool"></a>
 ### LootableAsset.Pool
@@ -1443,6 +1445,17 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Factors` | array of [Condition](#type-condition) | `null` | The conditions. A plain hytale:mod_installed condition with Min 1 decides whether the file or reward row carrying this block loads; authoring this list replaces an inherited one whole. |
 
+<a id="field-lootableasset-text"></a>
+### LootableAsset.Text
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `TitleKey` | `string` | `null` | Localization key for the name. |
+| `FlavorKey` | `string` | `null` | Localization key for the longer description. |
+| `DisplayName` | `string` | `null` | A plain fallback name for content whose key is not written yet. It reaches every player in the one language it is typed in, so author TitleKey for anything you ship. |
+| `TextArgs` | [TextArgs](#field-lootableasset-text-textargs) | `null` | What fills the numbered slots of the keys above, so one written line can serve a whole ladder of content instead of one line per rung. |
+| `Lore` | [Lore](#field-lootableasset-text-lore) | `null` | A plain paragraph per lifecycle state, shown under the title where a surface has room for one. Like DisplayName it reaches every player in the one language it is typed in, so ship the localized key instead: quest.<id>.md.incomplete, .active and .complete win over this group whenever they resolve. |
+
 <a id="field-lootableasset-pool-entries-item"></a>
 #### LootableAsset.Pool.Entries[]
 
@@ -1451,6 +1464,23 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Weight` | `double` | `null` | How often this entry comes up relative to its neighbours. Omit for 1. A weight of 0 is never picked, which is how an entry is parked without deleting it. |
 | `Conditions` | array of [Condition](#type-condition) | `null` | Every entry must pass before this outcome competes at all. This is where a premium entry says what earns it, and where an outcome says it only happens on a win. A factor nobody can answer keeps the entry out of the bag. |
 | `Grants` | [LootGrants](#type-lootgrants) | `null` | What being picked hands over. The same four leaves a roll grants through, so an entry can pay items, a native drop list, commands, or any registered reward kind. |
+
+<a id="field-lootableasset-text-textargs"></a>
+#### LootableAsset.Text.TextArgs
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Title` | array of `string` | `null` | Fills {0}, {1}, ... of TitleKey, in order. Write @amount for the amount this content asks for, or any other text to use it exactly as typed. |
+| `Flavor` | array of `string` | `null` | The same, for FlavorKey. This is how one written line serves a whole ladder: the key reads 'Mine {0} ore' and each rung supplies its own number. |
+
+<a id="field-lootableasset-text-lore"></a>
+#### LootableAsset.Text.Lore
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Incomplete` | `string` | `null` | The paragraph shown before the player has taken or earned it. A fallback for the quest.<id>.md.incomplete key. |
+| `Active` | `string` | `null` | The paragraph shown while the player is in the middle of it. A fallback for the quest.<id>.md.active key. |
+| `Complete` | `string` | `null` | The paragraph shown once the player has finished it. A fallback for the quest.<id>.md.complete key. |
 
 <a id="type-structurepatternasset"></a>
 ## StructurePatternAsset
