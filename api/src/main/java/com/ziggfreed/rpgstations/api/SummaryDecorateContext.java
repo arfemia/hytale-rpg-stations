@@ -9,12 +9,15 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 /**
  * The summary panel's post-build theming hook.
  *
- * <p><b>{@link #rootSelector()} is a FROZEN api contract.</b> It names
- * RpgStations' summary-panel content root ({@code "#RpgStationSummaryRoot"} today - see {@code
- * ui.StationSummaryHud#ROOT_SELECTOR}) and a RpgStations {@code .ui} restructure MUST keep it
- * stable: an external consumer's {@code SummaryEnricher.decorate} writes {@link UICommandBuilder}
- * commands against this exact selector cross-jar, so a silent rename here breaks that consumer's
- * theming with no compile error on either side.
+ * <p><b>{@link #rootSelector()} names the panel's frame</b>: the element that carries the frame's
+ * {@code Background} ({@code "#RpgStationSummaryRoot #Content"} - see {@code
+ * ui.StationSummaryHud#decorateContext}), so a consumer's {@code .Background.Color} tint lands on
+ * the texture it multiplies. Treat it as opaque and write only against it: an external consumer's
+ * {@code SummaryEnricher.decorate} pushes {@link UICommandBuilder} commands cross-jar, where a
+ * selector the panel lacks, or a {@code .Background} leaf on an element with no Background,
+ * disconnects the player with no compile error on either side. Until 1.1.2 it named the bare
+ * {@code #RpgStationSummaryRoot}, which has no Background, and a themed tint there did exactly
+ * that.
  */
 public final class SummaryDecorateContext {
 
@@ -34,7 +37,7 @@ public final class SummaryDecorateContext {
         return commandBuilder;
     }
 
-    /** FROZEN: the summary panel's content root selector. Load-bearing for cross-jar theming. */
+    /** The summary panel's frame, the element a theme tints. Load-bearing for cross-jar theming. */
     @Nonnull
     public String rootSelector() {
         return rootSelector;

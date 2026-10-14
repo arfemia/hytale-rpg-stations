@@ -2,10 +2,12 @@ package com.ziggfreed.rpgstations.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -70,10 +72,36 @@ class StationSummaryHudTest {
     void theColourIsPushedOnTheElementWearingTheFrame() throws IOException {
         String ui = Files.readString(UI_FILE, StandardCharsets.UTF_8);
         assertTrue(ui.contains("Group " + StationSummaryHud.ROOT_SELECTOR + " {"),
-                "the root the frozen contract names is still declared");
+                "the root the frame's selector is spelt from is still declared");
         assertTrue(ui.contains("#Content {"),
                 "and the shared frame's #Content inside it, which is what the card colour retints");
         assertEquals(StationSummaryHud.ROOT_SELECTOR + " #Content", StationSummaryHud.FRAME_SEL);
+    }
+
+    /**
+     * A listening mod's theme tints the frame, never the bare root. The root carries no Background,
+     * and a {@code .Background.Color} push there sets a property through null, which the client
+     * answers by dropping the player ("Failed to apply CustomUI HUD commands").
+     */
+    @Test
+    void aListeningModsThemeLandsOnTheElementCarryingTheBackground() throws IOException {
+        // No builder: a UICommandBuilder's class init needs the server's logger, which this JVM
+        // does not set up, and the selector is all this reads.
+        assertEquals(StationSummaryHud.FRAME_SEL,
+                StationSummaryHud.decorateContext(null, null).rootSelector(),
+                "the decorate hook is handed the frame, where the card colour lands too");
+
+        String frames;
+        try (InputStream in = StationSummaryHudTest.class.getClassLoader()
+                .getResourceAsStream("Common/UI/Custom/Common/ZigFrames.ui")) {
+            assertNotNull(in, "the library's ZigFrames.ui is on the test classpath");
+            frames = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        int frame = frames.indexOf("@ZigDecoratedFrame = Group {");
+        int content = frames.indexOf("Group #Content {", frame);
+        assertTrue(frame >= 0 && content > frame, "the panel's frame still names its body #Content");
+        assertTrue(frames.substring(content, frames.indexOf('}', content)).contains("Background:"),
+                "and that body carries the patch a tint multiplies");
     }
 
     /** The shared record every HUD card reads, as the library's own file would state it. */

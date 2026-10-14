@@ -2756,13 +2756,13 @@ public final class StationService {
     }
 
     /**
-     * The summary panel's post-build theming pass (design section 3.2): {@link
-     * StationSummaryHud#ROOT_SELECTOR} is the FROZEN root selector every enricher's {@code
-     * decorate} writes against. Never throws; a throwing enricher is skipped.
+     * The summary panel's post-build theming pass (design section 3.2): every enricher's {@code
+     * decorate} writes against the panel's frame, the selector {@link
+     * StationSummaryHud#decorateContext} hands out. Never throws; a throwing enricher is skipped.
      */
     private static void decorate(@Nonnull StationSession s, @Nonnull UICommandBuilder cmd,
             @Nonnull List<SummaryEnricher> enrichers) {
-        SummaryDecorateContext ctx = new SummaryDecorateContext(cmd, StationSummaryHud.ROOT_SELECTOR, s.playerRef);
+        SummaryDecorateContext ctx = StationSummaryHud.decorateContext(cmd, s.playerRef);
         for (SummaryEnricher e : enrichers) {
             try {
                 e.decorate(ctx);

@@ -26,6 +26,7 @@ import com.ziggfreed.common.ui.hud.card.HudCardConfig;
 import com.ziggfreed.common.ui.hud.card.HudCardLook;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.common.ui.rows.SummaryRowRenderer;
+import com.ziggfreed.rpgstations.api.SummaryDecorateContext;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.util.Log;
@@ -54,11 +55,13 @@ import com.ziggfreed.rpgstations.i18n.RpgMsg;
  * to the keyboard, and the station engine decides when that wait is over.
  *
  * <p><b>Neutral frame, themeable from outside.</b> The {@code .ui} uses the common {@code
- * ZigFrames.ui}'s {@code @ZigDecoratedFrame}, never another mod's frame set;
- * {@link #ROOT_SELECTOR} is the FROZEN api contract (critique m5,
- * binding) a registered {@code SummaryEnricher.decorate} (via {@code
- * api.SummaryDecorateContext#rootSelector()}) writes theming commands against cross-jar - see
- * that class's javadoc.
+ * ZigFrames.ui}'s {@code @ZigDecoratedFrame}, never another mod's frame set. A registered {@code
+ * SummaryEnricher.decorate} themes it cross-jar through {@link #decorateContext}, whose selector is
+ * {@link #FRAME_SEL}: the element that actually carries the frame's {@code Background}. It was the
+ * bare {@link #ROOT_SELECTOR} until 1.1.2, and the root carries no {@code Background}, so a theme's
+ * {@code .Background.Color} tint there set a property through null and the client dropped the
+ * player ("Failed to apply CustomUI HUD commands (Object reference not set to an instance of an
+ * object.)", reported on Update 7 at the Sawmill and the Disenchanting Table).
  *
  * <p><b>The panel is a HUD card.</b> It wears the colour every HUD card on the shared base wears
  * ({@code Server/ZiggfreedCommon/HudCards/Default.json}, {@link HudCardConfig}) under this mod's
@@ -72,10 +75,10 @@ public final class StationSummaryHud extends KeyedCustomHud {
     public static final String HUD_KEY = "rpgstations:station_summary";
 
     /**
-     * FROZEN api contract (critique m5, binding): a registered {@code SummaryEnricher.decorate}
-     * writes {@code UICommandBuilder} commands against this exact selector cross-jar (via {@code
-     * api.SummaryDecorateContext#rootSelector()}) - a {@code .ui} restructure MUST keep this
-     * stable. Must match the {@code .ui}'s {@code #RpgStationSummaryRoot} element id.
+     * The sized, positioned panel this HUD shows, hides and anchors. It carries no {@code
+     * Background}, so nothing may push a {@code .Background.*} leaf on it: a theme goes on {@link
+     * #FRAME_SEL}. Must match the {@code .ui}'s {@code #RpgStationSummaryRoot} element id, and a
+     * {@code .ui} restructure keeps it, since {@link #FRAME_SEL} is spelt from it.
      */
     public static final String ROOT_SELECTOR = "#RpgStationSummaryRoot";
 
@@ -85,7 +88,7 @@ public final class StationSummaryHud extends KeyedCustomHud {
     /**
      * The element wearing the frame patch: the shared frame's {@code #Content} inside the root.
      * The root itself carries no background, so the card colour is pushed here, where the texture
-     * it multiplies actually is.
+     * it multiplies actually is, and so is a listening mod's theme ({@link #decorateContext}).
      */
     static final String FRAME_SEL = ROOT_SELECTOR + " #Content";
 
@@ -346,6 +349,18 @@ public final class StationSummaryHud extends KeyedCustomHud {
             cmd.set(ITEM_MORE_SEL + ".TextSpans",
                     RpgMsg.tr("ui.station.summary.items_more", overflow));
         }
+    }
+
+    /**
+     * The context a registered {@code SummaryEnricher.decorate} themes this panel through, handing
+     * it {@link #FRAME_SEL} as its selector: the one element here whose {@code .Background.Color}
+     * a tint can land on. The card colour lands on the same element after the hook, so an owner's
+     * authored colour stays the last word.
+     */
+    @Nonnull
+    public static SummaryDecorateContext decorateContext(@Nonnull UICommandBuilder cmd,
+            @Nullable PlayerRef playerRef) {
+        return new SummaryDecorateContext(cmd, FRAME_SEL, playerRef);
     }
 
     /**
