@@ -4099,11 +4099,15 @@ public final class StationValidator {
     }
 
     /**
-     * The {@code Rare_Find} moment is the one well-known id an ACTION cannot author: it is only ever
-     * emitted WITH the earning {@code Roll}/{@code Ladder.Floor} cue already in hand, and the
-     * site-supplied presentation always outranks the map entry, so an entry keyed by it decodes,
-     * reads as a known moment, and then never plays. Warn-only, and deliberately not part of the
-     * shared map walk - a FLAIR keyed {@code Rare_Find} is meaningful (it overlays the earning cue).
+     * Warns when an action's {@code Moments} map authors {@code Rare_Find}, on the premise that the
+     * id only ever plays with the earning {@code Roll}/{@code Ladder.Floor} cue already in hand, so
+     * the site-supplied presentation outranks the map entry. Warn-only, and deliberately not part of
+     * the shared map walk - a FLAIR keyed {@code Rare_Find} is meaningful (it overlays the earning cue).
+     *
+     * <p><b>Known false positive.</b> A loot {@code Cue} plays with a null base
+     * ({@code StationService#applyGrantResult}), so the action's own {@code Rare_Find} entry DOES
+     * play when a roll names that cue: this fires on the shipped Sawmill although its entry plays.
+     * Do not move that entry to silence it; retiring this warning is the maintainer's call.
      */
     private static void checkRareFindNotActionAuthored(@Nullable Map<String, Presentation> moments,
                                                        @Nonnull String label, @Nonnull String id,

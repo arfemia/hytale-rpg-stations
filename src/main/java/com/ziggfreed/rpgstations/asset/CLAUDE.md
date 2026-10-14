@@ -1,38 +1,13 @@
 # asset/ - codecs and stores
 
-Router for the asset codecs. The codec `.documentation` strings, the generated `SCHEMA.md` and `docs/` are the schema reference; this file holds what they do not say.
-
-## Schema rules
+The codec `.documentation` strings, each class's javadoc, the generated `SCHEMA.md` and `docs/` are the schema reference; this file holds what they do not say.
 
 - The codec is the schema: every new leaf is nullable, `appendInherited`, and carries `.documentation` in the same edit (`AssetDocumentationCoverageTest` fails on a blank or process-narrating string).
 - `SCHEMA.md` is generated (from the workspace root, `tools\lane\lane.ps1 build -Dir mmo-family\rpg-stations -Tasks 'generateSchemaDocs'`), never hand-edited; `SchemaDocDriftTest` fails on drift.
 - After 1.0.0 the schema grows additively (plural arrays, nested groups, `StringOrObjectCodec` promotion). A rename or removal without an alias is the maintainer's decision.
 - Field-local warn checks use `CodecWarnValidators`, never the engine's `Validators` factory: a failing engine validator makes the store drop the whole asset, and this mod's posture is that an asset always loads and findings are advisory.
-- A `$`-key (`$Comment` and friends) is legal inside `InheritMapCodec` maps (`Moments`, `Flairs`, `FlairAsset.Moments`) and fatal inside engine `MapCodec` maps (`Anchors`, `Stamp.Stats.Caps.PerStat`, every `Tags` leaf). Put the note on the enclosing object. `ShippedAssetDecodeTest` decodes every shipped file to hold this.
 - A new editor `Dropdown` needs its dataset id as a constant on `AssetEditorDataSets` with a handler; nothing cross-checks the two, and a missing handler yields a silently empty pick list.
-- `ActionInput.Quality` names `ItemQuality` through `EditorSchema.assetRef`; a typo or a tier a later pack ships stays `StationValidator`'s `QUALITY_UNKNOWN` warning.
+- A leaf added to a nested group joins its extension overlay factory in the same change (`ExtensionCatalog`'s `overlayStates`, `overlayEffectRef`), or the overlay drops it. A new `ActionInput` route also joins every site's material reading (`heldQuality` beside `heldFunction` in `StationService`) and `ExtensionCatalog#overlayInput`.
 - Lang keys stay lowercase (`rpgstations.station.<lowercased id>.name`) although asset ids are authored PascalCase. Never "fix" them.
-
-## Input matching and protection
-
-- `ActionInput` is the ONE input matcher (an action's `Select`, `Custody.Input`, a socket's `Match`, a fallback's `Input`); its `Except` is the same matcher one level down, authored as one object or an array (`ObjectOrArrayCodec`). A route-less `Except` entry is inert and the validator warns `EXCEPT_CATCH_ALL`.
-- A new route is threaded through every site's material reading (`heldQuality` beside `heldFunction`) and the extension overlay (`ExtensionCatalog#overlayInput`) in the same change. `Quality` reads the STACK's quality id (`StationService#liveQualityOf`), a counted pile entry its item's, a block none (`QUALITY_ON_BLOCK`).
-- An extension's `Custody.Input` overlay ADDS its `Except` entries beside the base's, never in their place.
-- `ProtectListAsset` (`Server/RpgStations/ProtectLists/<Name>.json`, `{Protects, Stations?, Actions?}`) is the server-wide protect-list: every loaded file ADDS to one list, and an entry with no route protects nothing, never everything. Refused placement answers `Refused:Protected`.
-- `Custody.HeldOnly` places only the held stack; `Custody.Preview` toasts what a placed piece will give back; a count pile (capacity above one) refuses a stack carrying per-instance data (wear, metadata, a quality other than its item's).
-
-## Recipes, steps and pacing
-
-- `Recipe.Fallback` (`CraftingShare`, `EssenceOnly`) routes a piece no row covers; a piece gets ONE route (`station.StationFallbackRoutes#routeFor`), and both need custody (`FALLBACK_WITHOUT_CUSTODY`).
-- An extension's `Pace` is the action's shape (`Pace.CODEC`) and MULTIPLIES in: the action's `Clamp` bounds the ladders' product (`PACE_UNCLAMPED` asks both sides of the action only), an extension's `Clamp` only narrows it after that, and every `Stretch` (action's and extensions') multiplies after the clamps, never clamped.
-- `EffectRef.Target` (`Player` or `Puppet`) is read on `Presentation.Effect` only (`EFFECT_TARGET_IGNORED` elsewhere); `Presentation.Target` (`Block`, `Display`, `Puppet`) aims sounds and particles, and a burst rides an entity only when its system's own `LifeSpan` ends it (`PRESENTATION_ENTITY_TARGET_UNBOUNDED`). A `Color` tint keeps the playback cap.
-- A leaf added to a nested group is added to its extension overlay factory in the same change (`overlayStates`, `overlayEffectRef`), or the overlay drops it.
-
-## Loot and folds
-
 - A fold replaces a lootable or station by id at whole-file granularity, so ship one roll per lootable file unless the rolls must be re-tuned together.
-- Extend another pack's content with an `ExtensionAsset`, never a full-file override. `Requires`, `Settings`, scalar groups, `Roll` internals, `FlairAsset.Moments` and structure patterns are deliberately not extensible (`docs/extending-other-packs.md`).
-
-## Known false positive
-
-- `RARE_FIND_MOMENT_NEVER_PLAYS` fires on the shipped Sawmill although it plays: a loot Cue emits with a null base, so the action's `Rare_Find` entry runs. Do not move that entry to silence it; raise retiring the warn with the maintainer.
+- Extend another pack's content with an `ExtensionAsset`, never a full-file override; what stays out of extensions on purpose is `docs/extending-other-packs.md`'s "Deliberately non-extensible", and only an `ExtensionAsset.Target` kind can be extended.

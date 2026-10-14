@@ -17,6 +17,8 @@ import com.hypixel.hytale.codec.codecs.array.ArrayCodec;
  * One file of the server-wide PROTECT-LIST: what no consuming station may take as placed input,
  * whatever its own matcher accepts. Loaded from {@code Server/RpgStations/ProtectLists/<Name>.json}
  * (Pattern A, id = lowercased filename, the same registration shape as every other store here).
+ * It is its own store, never a {@code Settings} leaf, so a pack's {@code Settings.json} never
+ * carries a protect-list.
  *
  * <pre>{@code
  * { "Protects": [ { "ItemId": "Weapon_Sword_Heirloom" },
