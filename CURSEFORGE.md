@@ -54,7 +54,7 @@ Install [MMO Skill Tree](https://www.curseforge.com/hytale/mods/mmo-skill-tree) 
 ## For Server Owners
 
 - Admins can `/give` the stations: `RPG_Station_Sawmill`, `RPG_Station_Disenchanting_Table` and `RPG_Station_Disenchanting_Table_Greater`.
-- `/rpgstations validate` checks every loaded station and loot table and reports any problem in chat. The same check runs when the server starts.
+- `/rpgstations validate` checks every loaded station and loot table and reports any problem in chat. The same check runs when the first player joins after a restart, and writes what it finds to the server log.
 - Every number above (planks per hatchet, find chances, ritual times) is plain JSON, so a pack can retune it.
 
 ## For Mod and Pack Authors
