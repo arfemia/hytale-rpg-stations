@@ -1427,7 +1427,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Rolls` | array of [Roll](#type-roll) | `null` | The rolls this table contributes. Authoring this in a file with a Parent REPLACES the parent's rolls entirely rather than adding to them. |
 | `Pool` | [LootPool](#field-lootableasset-pool) | `null` | A bag of competing outcomes, of which only as many as the pool's own Rolls formula works out to are drawn. Use it for the part of a payout that varies; use the Rolls list above for the part everybody gets. |
 | `ContributesTo` | `string` | `null` | Another table's id to fold this file's rolls and pool entries INTO, on top of what that table already has. The way to enrich a table shipped by someone else without owning its file. How many picks the merged pool makes stays the target's decision. |
-| `Requires` | [Block](#field-lootableasset-requires) | `null` | Whether this file loads on this server at all, and whom it pays. A condition { "Factor": "hytale:mod_installed", "Param": "Group:Name", "Min": 1 } keeps the file out entirely where that mod is not installed, so nothing reads it or reports it. Write Min 1: a condition with no bound is satisfied by a missing mod too. Every other condition here is asked of the player each time the file pays or applies (a table's rolls, a bonus row's find, a gear set's bonuses), and one about the player fails where no player is there to ask. |
+| `Requires` | [GateSpec](#field-lootableasset-requires) | `null` | What a player must meet for this file to pay or apply, in the Requires shape quests use (Factors, Permission, Quests, Custom, AllOf, AnyOf, Not), every condition read. A plain { "Factor": "hytale:mod_installed", "Param": "Group:Name", "Min": 1 } keeps the file out entirely where that mod is not installed; the rest is asked of the player each time. Write Min 1 on a presence check: a condition with no bound is met by a missing mod too. |
 | `Text` | [ContentTextAsset](#field-lootableasset-text) | `null` | What a reward paying this table reads as, where a payout is shown before it pays. TitleKey names the table: the reward's line reads it, and hovering its picture shows it first. FlavorKey is one line the hover shows under the name. Leave TitleKey out and the table is named by its id made readable (Forest_Finds reads Forest Finds). Read from the table's own file only, never from a file that contributes to it. |
 | `ListContents` | `boolean` | `null` | Whether hovering a reward that pays this table lists what the table pays, contributions included: what always comes, then each chance with its percent, then what only sometimes comes. Default true; false keeps the hover to the name and the flavor line. |
 | `PlainBundle` | `boolean` | `null` | When true, a reward paying this table reads as the generic Loot Bundle, with the bundle picture's own tooltip, as every table did before tables named themselves: no name of its own and no hover list. Text and ListContents are then not read. Default false. |
@@ -1445,7 +1445,13 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Factors` | array of [Condition](#type-condition) | `null` | The conditions. A plain hytale:mod_installed condition with Min 1 decides whether the file or reward row carrying this block loads; every other condition is asked of the player where it pays or applies. Authoring this list replaces an inherited one whole. |
+| `Factors` | array of [Condition](#type-condition) | `null` | Numeric bounds on the shared factor vocabulary; all of them must pass. A factor no installed mod can answer fails closed, so the content stays locked. |
+| `Permission` | `string` | `null` | A permission node the player must hold, read through the engine's own permission check. It is the short spelling of a hytale:permission factor bound, so both give one answer; where nobody can be asked, it refuses and the content stays locked. |
+| `Quests` | array of `string` | `null` | Quest ids the player must have finished AND collected the reward for (stored status COMPLETED); a quest sitting finished-but-unclaimed, which is where a quest with Claim rewards waits, does not satisfy it. Use it to chain a story in order instead of hiding every later step behind a separate flag. |
+| `Custom` | map of map of `scalarString` | `null` | Requirement kinds registered by other mods, keyed by their namespaced id, each with that kind's own parameters. A kind nothing registered refuses. A parameter that is a number or true/false may be written bare; other values take quotes. |
+| `AllOf` | array of [GateClause](#field-lootableasset-requires-allof-item) | `null` | Extra groups that must ALL pass, on top of the leaves above. Use it to keep unrelated requirements readable side by side. |
+| `AnyOf` | array of [GateClause](#field-lootableasset-requires-anyof-item) | `null` | Groups of which at least ONE must pass - the way to say 'either route into this will do'. An empty list asks for nothing. |
+| `Not` | array of [GateClause](#field-lootableasset-requires-not-item) | `null` | Groups that must NOT pass - the way to say 'only while this is not yet true'. Each entry is one group that has to fail, so listing two things in one group means 'not both', and two separate groups mean 'neither'. |
 
 <a id="field-lootableasset-text"></a>
 ### LootableAsset.Text
@@ -1466,6 +1472,36 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Weight` | `double` | `null` | How often this entry comes up relative to its neighbours. Omit for 1. A weight of 0 is never picked, which is how an entry is parked without deleting it. |
 | `Conditions` | array of [Condition](#type-condition) | `null` | Every entry must pass before this outcome competes at all. This is where a premium entry says what earns it, and where an outcome says it only happens on a win. A factor nobody can answer keeps the entry out of the bag. |
 | `Grants` | [LootGrants](#type-lootgrants) | `null` | What being picked hands over. The same four leaves a roll grants through, so an entry can pay items, a native drop list, commands, or any registered reward kind. |
+
+<a id="field-lootableasset-requires-allof-item"></a>
+#### LootableAsset.Requires.AllOf[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [Condition](#type-condition) | `null` | Numeric bounds on the shared factor vocabulary; all of them must pass. A factor no installed mod can answer fails closed, so the content stays locked. |
+| `Permission` | `string` | `null` | A permission node the player must hold, read through the engine's own permission check. It is the short spelling of a hytale:permission factor bound, so both give one answer; where nobody can be asked, it refuses and the content stays locked. |
+| `Quests` | array of `string` | `null` | Quest ids the player must have finished AND collected the reward for (stored status COMPLETED); a quest sitting finished-but-unclaimed, which is where a quest with Claim rewards waits, does not satisfy it. Use it to chain a story in order instead of hiding every later step behind a separate flag. |
+| `Custom` | map of map of `scalarString` | `null` | Requirement kinds registered by other mods, keyed by their namespaced id, each with that kind's own parameters. A kind nothing registered refuses. A parameter that is a number or true/false may be written bare; other values take quotes. |
+
+<a id="field-lootableasset-requires-anyof-item"></a>
+#### LootableAsset.Requires.AnyOf[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [Condition](#type-condition) | `null` | Numeric bounds on the shared factor vocabulary; all of them must pass. A factor no installed mod can answer fails closed, so the content stays locked. |
+| `Permission` | `string` | `null` | A permission node the player must hold, read through the engine's own permission check. It is the short spelling of a hytale:permission factor bound, so both give one answer; where nobody can be asked, it refuses and the content stays locked. |
+| `Quests` | array of `string` | `null` | Quest ids the player must have finished AND collected the reward for (stored status COMPLETED); a quest sitting finished-but-unclaimed, which is where a quest with Claim rewards waits, does not satisfy it. Use it to chain a story in order instead of hiding every later step behind a separate flag. |
+| `Custom` | map of map of `scalarString` | `null` | Requirement kinds registered by other mods, keyed by their namespaced id, each with that kind's own parameters. A kind nothing registered refuses. A parameter that is a number or true/false may be written bare; other values take quotes. |
+
+<a id="field-lootableasset-requires-not-item"></a>
+#### LootableAsset.Requires.Not[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [Condition](#type-condition) | `null` | Numeric bounds on the shared factor vocabulary; all of them must pass. A factor no installed mod can answer fails closed, so the content stays locked. |
+| `Permission` | `string` | `null` | A permission node the player must hold, read through the engine's own permission check. It is the short spelling of a hytale:permission factor bound, so both give one answer; where nobody can be asked, it refuses and the content stays locked. |
+| `Quests` | array of `string` | `null` | Quest ids the player must have finished AND collected the reward for (stored status COMPLETED); a quest sitting finished-but-unclaimed, which is where a quest with Claim rewards waits, does not satisfy it. Use it to chain a story in order instead of hiding every later step behind a separate flag. |
+| `Custom` | map of map of `scalarString` | `null` | Requirement kinds registered by other mods, keyed by their namespaced id, each with that kind's own parameters. A kind nothing registered refuses. A parameter that is a number or true/false may be written bare; other values take quotes. |
 
 <a id="field-lootableasset-text-textargs"></a>
 #### LootableAsset.Text.TextArgs
