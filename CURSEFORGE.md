@@ -39,7 +39,7 @@ Craft the Disenchanting Table at a tier 2 Workbench from six Iron Ingots, four l
 - Each of the four Disenchanter's Kit pieces has a 1.5% chance per piece of gear.
 - Wearing the kit, holding the grimoire and drinking a Disenchanter's Draught from the Alchemist's Workbench each make it faster. With all of them it takes about 3 seconds.
 
-The Greater Disenchanting Table works three pieces in a row and pays more. Make it at the Arcanist's Workbench from a Disenchanting Table, eight Thorium Ingots, six Bolts of Silk and twenty Essence of the Void.
+The Greater Disenchanting Table works three pieces in a row and pays more. Make it at the Arcanist's Workbench from a Disenchanting Table, eight Thorium Ingots, twelve Spider Silk and twenty Essence of the Void. Cave spiders and Goblin Burners drop the silk.
 
 The tables only take gear, and no station takes a bag with something still in it.
 
