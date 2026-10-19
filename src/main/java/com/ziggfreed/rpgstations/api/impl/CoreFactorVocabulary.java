@@ -9,6 +9,7 @@ import javax.annotation.Nullable;
 
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.factor.FactorCondition;
@@ -19,6 +20,11 @@ import com.ziggfreed.common.factor.FactorRegistry;
 import com.ziggfreed.common.factor.HytaleFactors;
 import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.common.loot.FactorSnapshot;
+import com.ziggfreed.common.progress.gate.GateEvaluator;
+import com.ziggfreed.common.progress.gate.GateQuery;
+import com.ziggfreed.common.progress.gate.GateRuntime;
+import com.ziggfreed.common.progress.gate.GateSpec;
+import com.ziggfreed.common.progress.gate.RefusalLines;
 import com.ziggfreed.common.registry.RegistryLedger;
 
 /**
@@ -136,6 +142,32 @@ final class CoreFactorVocabulary {
     String firstFailedCondition(@Nullable FactorCondition[] conditions, @Nullable Store<EntityStore> store,
             @Nullable Ref<EntityStore> subject, @Nullable ItemStack item, @Nonnull Object payload) {
         return FactorConditions.firstFailure(conditions, registry, question(null, store, subject, item, payload));
+    }
+
+    /**
+     * Ask a whole {@code Requires} block (the shared {@link GateSpec}) for one station evaluation, through the
+     * server's one requirement evaluator: this vocabulary answers first for the ids it registers itself (the
+     * session's readings), every other id falls through to the evaluator's own, and the subject's store is filled
+     * from the subject when the evaluation carries none, so a permission or a quest leaf can be asked before a
+     * session exists. Null when the block passes (or asks nothing); else the one line that says what is missing,
+     * worded by the shared refusal mapping.
+     */
+    @Nullable
+    Message refusal(@Nullable GateSpec requires, @Nullable Store<EntityStore> store,
+            @Nullable Ref<EntityStore> subject, @Nullable ItemStack item, @Nonnull Object payload) {
+        if (requires == null || requires.isEmpty()) {
+            return null;
+        }
+        Store<EntityStore> asked = store != null ? store : subject != null ? subject.getStore() : null;
+        GateQuery query = GateQuery.builder()
+                .context(question(null, asked, subject, item, payload))
+                .local(registry)
+                .build();
+        GateEvaluator evaluator = GateRuntime.evaluator();
+        if (evaluator.check(requires, query).passed()) {
+            return null;
+        }
+        return RefusalLines.bestLineOf(evaluator.refusals(requires, query));
     }
 
     /**

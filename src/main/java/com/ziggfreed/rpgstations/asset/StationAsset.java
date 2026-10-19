@@ -95,7 +95,7 @@ public final class StationAsset
             .metadata(new UIEditorSectionStart("Block")).add()
             .appendInherited(new KeyedCodec<>("Requires", Requires.CODEC, false),
                     (a, v) -> a.requires = v, a -> a.requires, (a, parent) -> a.requires = parent.requires)
-            .documentation("The STATION-entry gate (permission plus factor Conditions), evaluated once at engage and ANDed with the engaged action's own Requires. It never supplies a default for an action.")
+            .documentation("The STATION-entry gate, the shared Requires block (Factors, Permission, Quests, Custom, AllOf, AnyOf, Not; Conditions reads as Factors), evaluated once at engage and ANDed with the engaged action's own Requires. It never supplies a default for an action. A refused player is told what is missing.")
             .metadata(new UIEditorSectionStart("Requires")).add()
             .appendInherited(new KeyedCodec<>("Flairs",
                             new InheritMapCodec<>(Flair.CODEC, LinkedHashMap::new), false),

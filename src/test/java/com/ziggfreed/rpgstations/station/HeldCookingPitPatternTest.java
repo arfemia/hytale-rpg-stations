@@ -272,7 +272,7 @@ class HeldCookingPitPatternTest {
         for (String actionId : candidates) {
             var action = ActionResolver.resolve(station, actionId, NO_REFS);
             FactorCondition[] conditions =
-                    action.getRequires() != null ? action.getRequires().getConditions() : null;
+                    action.getRequires() != null ? action.getRequires().getFactors() : null;
             if (FactorRegistryImpl.getInstance().firstFailedCondition(conditions, ctx(socketsFilled)) == null) {
                 return actionId;
             }

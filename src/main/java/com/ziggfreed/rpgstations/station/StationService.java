@@ -86,7 +86,6 @@ import com.ziggfreed.common.entity.HeldItemUtil;
 import com.ziggfreed.common.entity.ItemReadings;
 import com.ziggfreed.common.entity.PuppetNav;
 import com.ziggfreed.common.entity.performer.PerformerReconciler;
-import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.common.feedback.Notify;
 import com.ziggfreed.common.feedback.PickupMimic;
 import com.ziggfreed.common.i18n.Msg;
@@ -97,6 +96,8 @@ import com.ziggfreed.common.inventory.InventoryGrant;
 import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.progress.gate.GateSpec;
+import com.ziggfreed.common.progress.gate.RefusalLines;
 import com.ziggfreed.common.sound.Sound3D;
 import com.ziggfreed.common.ui.hud.panel.HudRowDisplay;
 import com.ziggfreed.common.ui.hud.panel.HudBarReading;
@@ -122,7 +123,6 @@ import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.EffectRef;
 import com.ziggfreed.rpgstations.asset.Ingredient;
 import com.ziggfreed.rpgstations.asset.Presentation;
-import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
@@ -593,9 +593,13 @@ public final class StationService {
         // matching action whose own gate passes; this re-check is what actually DENIES (the
         // claim-commit path bypasses selection, and the station-level gate is only checked here).
         ItemStack gatePiece = gatePiece(preClaim, action);
-        if (!checkRequires(asset.getRequires(), playerRef, asset, action, socketsFilled, gatePiece)
-                || !checkRequires(action.getRequires(), playerRef, asset, action, socketsFilled, gatePiece)) {
-            press.refuse("ui.station.locked");
+        Message locked = requiresRefusal(asset.getRequires(), playerRef, asset, action, socketsFilled, gatePiece);
+        if (locked == null) {
+            locked = requiresRefusal(action.getRequires(), playerRef, asset, action, socketsFilled, gatePiece);
+        }
+        if (locked != null) {
+            // The shared refusal line says what is missing (R606): a level, a season, a quest, a permission.
+            press.refuse("ui.station.locked", RpgMsg.tr("ui.station.locked_why", locked));
             return;
         }
 
@@ -8765,8 +8769,8 @@ public final class StationService {
                 liveQualityOf(held));
         for (String actionId : candidates) {
             ActionResolver.ResolvedAction candidate = ActionResolver.resolve(asset, actionId);
-            if (checkRequires(candidate.getRequires(), playerRef, asset, candidate, socketsFilled,
-                    gatePiece(claim, candidate))) {
+            if (requiresRefusal(candidate.getRequires(), playerRef, asset, candidate, socketsFilled,
+                    gatePiece(claim, candidate)) == null) {
                 return actionId;
             }
         }
@@ -8909,14 +8913,12 @@ public final class StationService {
     // ==================== Requires gate (design section 4.4.2) ====================
 
     /**
-     * Checks {@code reqs} against {@code playerRef}: a blank/absent {@link Requires#getPermission()}
-     * always passes; a null/empty {@link Requires#getConditions()} always passes. Every
-     * condition must pass (the shared array evaluator, which names the first factor that shut the
-     * gate so the deny can be logged usefully), resolved against a fresh pre-session
-     * {@link FactorContext} (the api {@link FactorRegistryImpl} - a degenerate context since no
-     * session exists yet: {@code sessionSeconds}/{@code cycleIndex} 0, held-tool power/durability
-     * not read here since no shipped station authors a tool-power gate condition; a player-standing
-     * condition needs only {@code playerId}). A null {@code reqs} always passes.
+     * Asks {@code reqs} (the shared {@code Requires} block) of {@code playerRef}: null when it passes or asks
+     * nothing, else the one line that says what is missing, worded by the shared refusal mapping. Asked through
+     * {@link FactorRegistryImpl#refusal} against a fresh pre-session {@link FactorContext} (a degenerate one,
+     * since no session exists yet: {@code sessionSeconds}/{@code cycleIndex} 0), so this mod's session readings
+     * answer here and every other condition (a permission, a quest, another mod's factor, an {@code AnyOf}) is
+     * the server's one evaluator's. A player with no id is refused with the gate's generic line.
      *
      * <p>Called at engage with the station's own entry gate and the selected action's (the two are
      * ANDed and neither defaults the other), and per CANDIDATE inside the gate-aware
@@ -8927,23 +8929,16 @@ public final class StationService {
      * custody piece the press is about ({@link #gatePiece}), backing the {@code hytale:item_*}
      * factors, null on the inventory route.
      */
-    private static boolean checkRequires(@Nullable Requires reqs, @Nonnull PlayerRef playerRef,
+    @Nullable
+    private static Message requiresRefusal(@Nullable GateSpec reqs, @Nonnull PlayerRef playerRef,
             @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action,
             @Nonnull Map<String, Boolean> socketsFilled, @Nullable ItemStack piece) {
         if (reqs == null || reqs.isEmpty()) {
-            return true;
-        }
-        String permission = reqs.getPermission();
-        if (permission != null && !permission.isBlank() && !playerRef.hasPermission(permission)) {
-            return false;
-        }
-        FactorCondition[] conditions = reqs.getConditions();
-        if (conditions == null || conditions.length == 0) {
-            return true;
+            return null;
         }
         UUID playerId = playerRef.getUuid();
         if (playerId == null) {
-            return false;
+            return RefusalLines.line((String) null);
         }
         FactorContext ctx = FactorContext.builder()
                 .playerRef(playerRef)
@@ -8957,17 +8952,7 @@ public final class StationService {
                 .socketsFilled(socketsFilled)
                 .item(piece)
                 .build();
-        String failed = FactorRegistryImpl.getInstance().firstFailedCondition(conditions, ctx);
-        if (failed != null) {
-            if (!FactorRegistryImpl.getInstance().isKnown(failed)) {
-                Log.warn("STATION Requires condition references unknown factor '" + failed
-                        + "' - denying (fail closed)");
-            } else {
-                Log.fine("STATION Requires condition on factor '" + failed + "' not met - denying");
-            }
-            return false;
-        }
-        return true;
+        return FactorRegistryImpl.getInstance().refusal(reqs, ctx);
     }
 
     // ==================== Helpers ====================

@@ -55,7 +55,6 @@ ui.station.socket_missing_named = Sem {0} não dá para trabalhar aqui.
 ui.station.socket_lost = Uma parte da estação quebrou. Você para de trabalhar.
 ui.station.structure_conflict = Outra estrutura já ocupa este lugar.
 ui.station.pattern_requirements_unmet = Você ainda não pode erguer esta estrutura.
-ui.station.pattern_requirements_unmet_named = Você ainda não pode erguer {0}.
 ui.station.structure_lost = A estrutura desmoronou. Você para de trabalhar.
 ui.station.output_ready = O produto finalizado está pronto para ser recolhido.
 ui.station.output_overdone = O produto finalizado ficou tempo demais e se estragou.

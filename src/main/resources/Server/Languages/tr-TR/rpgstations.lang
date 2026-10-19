@@ -21,7 +21,6 @@ ui.station.socket_missing_named = {0} olmadan burada çalışılamaz.
 ui.station.socket_lost = İstasyonun bir parçası bozuldu. Çalışmayı bırakıyorsun.
 ui.station.structure_conflict = Bu noktada zaten başka bir yapı var.
 ui.station.pattern_requirements_unmet = Bu yapıyı henüz kuramazsın.
-ui.station.pattern_requirements_unmet_named = {0} yapısını henüz kuramazsın.
 ui.station.structure_lost = Yapı parçalandı. Çalışmayı bırakıyorsun.
 ui.station.output_ready = Hazır ürün alınmayı bekliyor.
 ui.station.output_overdone = Hazır ürün çok uzun süre bekledi ve bozuldu.

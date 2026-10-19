@@ -16,11 +16,15 @@ import org.joml.Vector3i;
 import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.cast.WorldEvictors;
+import com.ziggfreed.common.i18n.Msg;
+import com.ziggfreed.common.progress.gate.GateSpec;
+import com.ziggfreed.common.progress.gate.RefusalLines;
 import com.ziggfreed.common.world.BlockOps;
 import com.ziggfreed.common.world.pattern.BlockPattern;
 import com.ziggfreed.common.world.pattern.BlockReader;
@@ -33,10 +37,10 @@ import com.ziggfreed.common.world.stash.BlockStashes;
 import com.ziggfreed.rpgstations.api.FactorContext;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.asset.Presentation;
-import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
 import com.ziggfreed.rpgstations.station.PatternCatalog.CompiledPattern;
 import com.ziggfreed.rpgstations.station.PatternCells.CellMatcher;
+import com.ziggfreed.rpgstations.i18n.RpgMsg;
 import com.ziggfreed.rpgstations.util.Log;
 
 /**
@@ -353,10 +357,15 @@ public final class StationStructures {
             }
             return;
         }
-        if (!requiresPassed(cp, playerRef)) {
+        Message unmet = requiresRefusal(cp, playerRef);
+        if (unmet != null) {
             StationRefusals.Press press = refusal(world, playerRef, placerRef, cp, ax, ay, az);
             if (press != null) {
-                press.refuseNamed("ui.station.pattern_requirements_unmet", patternNameKey(cp));
+                // The shared refusal line says what is missing (R606), after the structure's own name.
+                String nameKey = patternNameKey(cp);
+                press.refuse("ui.station.pattern_requirements_unmet", nameKey != null && !nameKey.isBlank()
+                        ? RpgMsg.tr("ui.station.pattern_requirements_unmet_named_why", Msg.key(nameKey), unmet)
+                        : RpgMsg.tr("ui.station.pattern_requirements_unmet_why", unmet));
             }
             return;
         }
@@ -410,44 +419,26 @@ public final class StationStructures {
     }
 
     /**
-     * The pattern's {@code Requires} gate against the placer, mirroring the station engage gate's
-     * semantics: an absent group passes, an unresolvable player fails CLOSED, an unregistered
-     * factor fails CLOSED (with a warn naming it).
+     * The pattern's {@code Requires} gate (the shared block) against the placer, through the one station gate
+     * read ({@link FactorRegistryImpl#refusal}): null when it passes or asks nothing, else the line that says
+     * what is missing. An unresolvable player fails CLOSED with the gate's generic line.
      */
-    private static boolean requiresPassed(@Nonnull CompiledPattern cp, @Nullable PlayerRef playerRef) {
-        Requires reqs = cp.asset().getRequires();
+    @Nullable
+    private static Message requiresRefusal(@Nonnull CompiledPattern cp, @Nullable PlayerRef playerRef) {
+        GateSpec reqs = cp.asset().getRequires();
         if (reqs == null || reqs.isEmpty()) {
-            return true;
+            return null;
         }
-        if (playerRef == null) {
-            return false;
-        }
-        String permission = reqs.getPermission();
-        if (permission != null && !permission.isBlank() && !playerRef.hasPermission(permission)) {
-            return false;
-        }
-        var conditions = reqs.getConditions();
-        if (conditions == null || conditions.length == 0) {
-            return true;
-        }
-        UUID playerId = playerRef.getUuid();
+        UUID playerId = playerRef == null ? null : playerRef.getUuid();
         if (playerId == null) {
-            return false;
+            return RefusalLines.line((String) null);
         }
         FactorContext ctx = FactorContext.builder()
                 .playerRef(playerRef)
                 .playerId(playerId)
                 .stationId(cp.stationId() != null ? cp.stationId() : cp.id())
                 .build();
-        String failed = FactorRegistryImpl.getInstance().firstFailedCondition(conditions, ctx);
-        if (failed != null) {
-            if (!FactorRegistryImpl.getInstance().isKnown(failed)) {
-                Log.warn("STRUCTURE Requires condition references unknown factor '" + failed
-                        + "' - denying (fail closed)");
-            }
-            return false;
-        }
-        return true;
+        return FactorRegistryImpl.getInstance().refusal(reqs, ctx);
     }
 
     /**

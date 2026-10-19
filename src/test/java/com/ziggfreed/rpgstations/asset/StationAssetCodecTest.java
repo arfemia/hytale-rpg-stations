@@ -170,11 +170,11 @@ public class StationAssetCodecTest {
                 + " \"Conditions\": [ { \"Factor\": \"yourmod:reputation\", \"Param\": \"GUILD\", \"Min\": 15 } ] } }");
         assertNotNull(a.getRequires());
         assertEquals("myserver.stations.fixture", a.getRequires().getPermission());
-        assertEquals(1, a.getRequires().getConditions().length);
-        assertEquals("yourmod:reputation", a.getRequires().getConditions()[0].getFactor());
-        assertEquals("GUILD", a.getRequires().getConditions()[0].getParam());
-        assertEquals(15.0, a.getRequires().getConditions()[0].getMin());
-        assertNull(a.getRequires().getConditions()[0].getMax());
+        assertEquals(1, a.getRequires().getFactors().length);
+        assertEquals("yourmod:reputation", a.getRequires().getFactors()[0].getFactor());
+        assertEquals("GUILD", a.getRequires().getFactors()[0].getParam());
+        assertEquals(15.0, a.getRequires().getFactors()[0].getMin());
+        assertNull(a.getRequires().getFactors()[0].getMax());
     }
 
     @Test
@@ -192,6 +192,30 @@ public class StationAssetCodecTest {
                 "{ \"Requires\": { \"Permission\": \"myserver.stations.override\" } }",
                 parent, "requires_own", "requires_parent");
         assertEquals("myserver.stations.override", ownChild.getRequires().getPermission());
+    }
+
+    @Test
+    void requires_childRestatingConditions_replacesTheParentsFactorsExactlyAsFactorsDoes() throws Exception {
+        StationAsset parent = decodeWithParent("{ \"Requires\": { \"Permission\": \"myserver.stations.base\","
+                + " \"Conditions\": [ { \"Factor\": \"yourmod:reputation\", \"Param\": \"guild\", \"Min\": 15 } ] } }",
+                null, "conditions_parent", null);
+        assertEquals(1, parent.getRequires().getFactors().length);
+
+        String own = "[ { \"Factor\": \"yourmod:rank\", \"Min\": 2 } ]";
+        for (String spelling : new String[] {"Conditions", "Factors"}) {
+            StationAsset child = decodeWithParent("{ \"Requires\": { \"" + spelling + "\": " + own + " } }",
+                    parent, "conditions_child_" + spelling, "conditions_parent");
+            assertEquals(1, child.getRequires().getFactors().length,
+                    "a child restating " + spelling + " asks for its own list, never the parent's plus its own");
+            assertEquals("yourmod:rank", child.getRequires().getFactors()[0].getFactor());
+            assertEquals("myserver.stations.base", child.getRequires().getPermission(),
+                    "a leaf the child does not restate still inherits");
+        }
+
+        StationAsset untouched = decodeWithParent("{ \"Requires\": { \"Permission\": \"myserver.stations.own\" } }",
+                parent, "conditions_keep", "conditions_parent");
+        assertEquals(1, untouched.getRequires().getFactors().length, "a child writing neither keeps the parent's");
+        assertEquals("yourmod:reputation", untouched.getRequires().getFactors()[0].getFactor());
     }
 
     @Test

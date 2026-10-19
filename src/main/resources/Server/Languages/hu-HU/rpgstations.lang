@@ -26,7 +26,6 @@ ui.station.socket_missing_named = {0} nélkül itt nem kezdődhet el a munka.
 ui.station.socket_lost = A munkaállomás egy része tönkrement. Abbahagyod a munkát.
 ui.station.structure_conflict = Ezt a helyet már egy másik építmény foglalja el.
 ui.station.pattern_requirements_unmet = Ezt az építményt még nem emelheted fel.
-ui.station.pattern_requirements_unmet_named = Még nem emelheted fel ezt: {0}.
 ui.station.structure_lost = Az építmény összeomlott. Abbahagyod a munkát.
 ui.station.output_ready = A kész termék átvehető.
 ui.station.output_overdone = A kész termék túl sokáig állt, és tönkrement.

@@ -1,6 +1,7 @@
 language.name = English
 ui.station.start = You begin working at {0}
 ui.station.locked = This station is not available right now.
+ui.station.locked_why = You can't use this station yet. {0}
 ui.station.occupied = Someone is already using this station.
 ui.station.server_busy = Too many stations are in use here right now. Try again in a moment.
 ui.station.storage_full = Too many stations here are already holding materials.
@@ -21,7 +22,8 @@ ui.station.socket_missing_named = Without {0} the work here cannot start.
 ui.station.socket_lost = Part of the station broke away. You stop working.
 ui.station.structure_conflict = Another structure already claims this spot.
 ui.station.pattern_requirements_unmet = You cannot raise this structure yet.
-ui.station.pattern_requirements_unmet_named = You cannot raise {0} yet.
+ui.station.pattern_requirements_unmet_why = You cannot raise this structure yet. {0}
+ui.station.pattern_requirements_unmet_named_why = You cannot raise {0} yet. {1}
 ui.station.structure_lost = The structure broke apart. You stop working.
 ui.station.output_ready = The finished output is ready to collect.
 ui.station.output_overdone = The finished output sat too long and is ruined.

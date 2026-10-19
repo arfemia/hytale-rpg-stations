@@ -40,7 +40,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Name` | `string` | `null` | Ignored - the station id comes from the asset filename, not this key. Kept as a schema field for editor display only. |
 | `Identity` | [Identity](#field-stationasset-identity) | `null` | Display name/description localization keys plus the icon item id, shown at the station's engage prompt and any station-listing UI. |
 | `Block` | [Block](#field-stationasset-block) | `null` | Properties of the PLACED BLOCK: currently just Exclusive, whether one worker at a time owns it. |
-| `Requires` | [Requires](#type-requires) | `null` | The STATION-entry gate (permission plus factor Conditions), evaluated once at engage and ANDed with the engaged action's own Requires. It never supplies a default for an action. |
+| `Requires` | [Requires](#type-requires) | `null` | The STATION-entry gate, the shared Requires block (Factors, Permission, Quests, Custom, AllOf, AnyOf, Not; Conditions reads as Factors), evaluated once at engage and ANDed with the engaged action's own Requires. It never supplies a default for an action. A refused player is told what is missing. |
 | `Flairs` | map of [Flair](#field-stationasset-flairs-item) | `null` | Named cosmetic flair overrides, keyed by flair id; each entry overlays its non-null Moments onto the base presentation when that flair is unlocked for the player. Under native Parent the map merges PER FLAIR ID, so a child restyling one flair inherits every other flair the base authored. |
 | `Actions` | array of [ActionDef](#type-actiondef) | `null` | This station's actions, in AUTHORED ORDER - the order IS selection priority, so the first entry whose Select matches the held or placed material runs. Each entry is self-contained; nothing is inherited from the station. |
 
@@ -409,7 +409,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Ref` | id, or inline [ActionAsset](#type-actionasset) | `null` | Names a standalone ActionAsset as the BASE; any other group authored here replaces that group wholesale. May also be an INLINE action body (optionally with its own Parent), registered as a generated child action asset. |
 | `Label` | `string` | `null` | An advisory localization key for admin/UI display of the action's name. |
 | `Select` | [ActionInput](#field-actiondef-select) | `null` | Which held or placed material picks this action out of the station's ordered list; the first action whose Select matches wins. ABSENT means this action matches any context, and its custody acceptance derives from its own Recipe inputs instead. |
-| `Requires` | [Requires](#type-requires) | `null` | This action's own start gate (permission plus factor Conditions). The station's own Requires must ALSO pass; this never inherits it. |
+| `Requires` | [Requires](#type-requires) | `null` | This action's own start gate, the shared Requires block (Factors, Permission, Quests, Custom, AllOf, AnyOf, Not; Conditions reads as Factors). The station's own Requires must ALSO pass; this never inherits it. A refused player is told what is missing. |
 | `Tool` | [Tool](#field-actiondef-tool) | `null` | The held-tool gate for this action - the ONE gate, checked at engage and re-checked every heartbeat. |
 | `Recipe` | [Recipe](#field-actiondef-recipe) | `null` | The ONE transform this action performs (Conversions and/or FromCrafting, plus Yield). Two transforms means two actions. |
 | `Work` | [Work](#field-actiondef-work) | `null` | The work-loop cadence, duration/exit bounds, per-cycle contributions, looping flag, and optional idle-practice mode. |
@@ -1263,8 +1263,44 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
-| `Permission` | `string` | `null` | A permission node the player must hold to start; null = no permission gate. |
-| `Conditions` | array of [Condition](#type-condition) | `null` | Factor gate: every Condition must pass to start; an unregistered factor fails CLOSED. |
+| `Factors` | array of [Condition](#type-condition) | `null` | Numeric bounds on the shared factor vocabulary; all of them must pass. A factor no installed mod can answer fails closed, so the content stays locked. |
+| `Permission` | `string` | `null` | A permission node the player must hold, read through the engine's own permission check. It is the short spelling of a hytale:permission factor bound, so both give one answer; where nobody can be asked, it refuses and the content stays locked. |
+| `Quests` | array of `string` | `null` | Quest ids the player must have finished AND collected the reward for (stored status COMPLETED); a quest sitting finished-but-unclaimed, which is where a quest with Claim rewards waits, does not satisfy it. Use it to chain a story in order instead of hiding every later step behind a separate flag. |
+| `Custom` | map of map of `scalarString` | `null` | Requirement kinds registered by other mods, keyed by their namespaced id, each with that kind's own parameters. A kind nothing registered refuses. A parameter that is a number or true/false may be written bare; other values take quotes. |
+| `AllOf` | array of [GateClause](#field-requires-allof-item) | `null` | Extra groups that must ALL pass, on top of the leaves above. Use it to keep unrelated requirements readable side by side. |
+| `AnyOf` | array of [GateClause](#field-requires-anyof-item) | `null` | Groups of which at least ONE must pass - the way to say 'either route into this will do'. An empty list asks for nothing. |
+| `Not` | array of [GateClause](#field-requires-not-item) | `null` | Groups that must NOT pass - the way to say 'only while this is not yet true'. Each entry is one group that has to fail, so listing two things in one group means 'not both', and two separate groups mean 'neither'. |
+| `Conditions` | array of [Condition](#type-condition) | `null` | Factor bounds on the factor vocabulary, every one of which must pass: the same as Factors, kept under this name so files written before stations used the shared Requires keep working. Read on a station, an action and a structure pattern only; everywhere else, write Factors. An unregistered factor fails closed. |
+
+<a id="field-requires-allof-item"></a>
+### Requires.AllOf[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [Condition](#type-condition) | `null` | Numeric bounds on the shared factor vocabulary; all of them must pass. A factor no installed mod can answer fails closed, so the content stays locked. |
+| `Permission` | `string` | `null` | A permission node the player must hold, read through the engine's own permission check. It is the short spelling of a hytale:permission factor bound, so both give one answer; where nobody can be asked, it refuses and the content stays locked. |
+| `Quests` | array of `string` | `null` | Quest ids the player must have finished AND collected the reward for (stored status COMPLETED); a quest sitting finished-but-unclaimed, which is where a quest with Claim rewards waits, does not satisfy it. Use it to chain a story in order instead of hiding every later step behind a separate flag. |
+| `Custom` | map of map of `scalarString` | `null` | Requirement kinds registered by other mods, keyed by their namespaced id, each with that kind's own parameters. A kind nothing registered refuses. A parameter that is a number or true/false may be written bare; other values take quotes. |
+
+<a id="field-requires-anyof-item"></a>
+### Requires.AnyOf[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [Condition](#type-condition) | `null` | Numeric bounds on the shared factor vocabulary; all of them must pass. A factor no installed mod can answer fails closed, so the content stays locked. |
+| `Permission` | `string` | `null` | A permission node the player must hold, read through the engine's own permission check. It is the short spelling of a hytale:permission factor bound, so both give one answer; where nobody can be asked, it refuses and the content stays locked. |
+| `Quests` | array of `string` | `null` | Quest ids the player must have finished AND collected the reward for (stored status COMPLETED); a quest sitting finished-but-unclaimed, which is where a quest with Claim rewards waits, does not satisfy it. Use it to chain a story in order instead of hiding every later step behind a separate flag. |
+| `Custom` | map of map of `scalarString` | `null` | Requirement kinds registered by other mods, keyed by their namespaced id, each with that kind's own parameters. A kind nothing registered refuses. A parameter that is a number or true/false may be written bare; other values take quotes. |
+
+<a id="field-requires-not-item"></a>
+### Requires.Not[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [Condition](#type-condition) | `null` | Numeric bounds on the shared factor vocabulary; all of them must pass. A factor no installed mod can answer fails closed, so the content stays locked. |
+| `Permission` | `string` | `null` | A permission node the player must hold, read through the engine's own permission check. It is the short spelling of a hytale:permission factor bound, so both give one answer; where nobody can be asked, it refuses and the content stays locked. |
+| `Quests` | array of `string` | `null` | Quest ids the player must have finished AND collected the reward for (stored status COMPLETED); a quest sitting finished-but-unclaimed, which is where a quest with Claim rewards waits, does not satisfy it. Use it to chain a story in order instead of hiding every later step behind a separate flag. |
+| `Custom` | map of map of `scalarString` | `null` | Requirement kinds registered by other mods, keyed by their namespaced id, each with that kind's own parameters. A kind nothing registered refuses. A parameter that is a number or true/false may be written bare; other values take quotes. |
 
 <a id="type-presentation"></a>
 ## Presentation

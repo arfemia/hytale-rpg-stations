@@ -18,7 +18,6 @@ ui.station.socket_missing_named = Ohne {0} kann die Arbeit hier nicht beginnen.
 ui.station.socket_lost = Ein Teil der Station ist zerstört. Du hörst auf zu arbeiten.
 ui.station.structure_conflict = Hier steht bereits ein anderes Bauwerk.
 ui.station.pattern_requirements_unmet = Du kannst dieses Bauwerk noch nicht errichten.
-ui.station.pattern_requirements_unmet_named = Du kannst {0} noch nicht errichten.
 ui.station.structure_lost = Das Bauwerk ist zerbrochen. Du hörst auf zu arbeiten.
 ui.station.output_ready = Das fertige Erzeugnis kann abgeholt werden.
 ui.station.output_overdone = Das fertige Erzeugnis lag zu lange und ist verdorben.

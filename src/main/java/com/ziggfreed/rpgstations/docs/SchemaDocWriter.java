@@ -192,9 +192,8 @@ public final class SchemaDocWriter {
     private static List<Object> renderFields(BuilderCodec<?> codec, Deque<Class<?>> stack) {
         List<Object> out = new ArrayList<>();
 
-        // Defensive: none of this mod's codecs use Java builder-chain inheritance today (every
-        // group is authored standalone), but a codec whose builder DID call .inherits(parent)
-        // would otherwise silently drop the parent's fields from getEntries().
+        // A codec built on a parent codec lists only its own fields in getEntries(): Requires is the
+        // shared GateSpec codec plus Conditions, so the parent's fields render first, in its order.
         BuilderCodec<?> parent = codec.getParent();
         if (parent != null) {
             out.addAll(renderFields(parent, stack));

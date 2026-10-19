@@ -1,6 +1,7 @@
 package com.ziggfreed.rpgstations.station;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -56,6 +57,8 @@ import com.ziggfreed.common.validation.Finding;
 import com.ziggfreed.common.validation.Severity;
 import com.ziggfreed.common.validation.TextKeyAudit;
 import com.ziggfreed.common.validation.ValidationReport;
+import com.ziggfreed.common.progress.gate.GateClause;
+import com.ziggfreed.common.progress.gate.GateSpec;
 import com.ziggfreed.rpgstations.api.FindingSink;
 import com.ziggfreed.rpgstations.api.ValidationHook;
 import com.ziggfreed.rpgstations.api.ValidationScope;
@@ -77,7 +80,6 @@ import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.ProtectListAsset;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.asset.Puppet;
-import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 import com.ziggfreed.rpgstations.asset.StructurePatternAsset;
@@ -4001,19 +4003,30 @@ public final class StationValidator {
      * time since providers may register later, matching {@link #validate()}'s live entry point). No
      * permission-existence check is possible (permission nodes are free text).
      */
-    private static void checkRequiresGroup(@Nullable Requires reqs, @Nonnull String id, @Nonnull String label,
+    private static void checkRequiresGroup(@Nullable GateSpec reqs, @Nonnull String id, @Nonnull String label,
                                            @Nonnull Predicate<String> factorKnown, @Nonnull List<Finding> out) {
-        if (reqs == null || reqs.getConditions() == null) {
+        if (reqs == null) {
             return;
         }
-        for (FactorCondition c : reqs.getConditions()) {
-            if (c == null || c.getFactor() == null || c.getFactor().isBlank()) {
+        // Every group of the shared block: the top level (Conditions folds into Factors), AllOf, AnyOf and Not.
+        List<GateClause> clauses = new ArrayList<>();
+        clauses.add(reqs);
+        clauses.addAll(Arrays.asList(reqs.allOfOrEmpty()));
+        clauses.addAll(Arrays.asList(reqs.anyOfOrEmpty()));
+        clauses.addAll(Arrays.asList(reqs.notOrEmpty()));
+        for (GateClause clause : clauses) {
+            if (clause == null) {
                 continue;
             }
-            if (!factorKnown.test(c.getFactor())) {
-                out.add(Finding.warning(DOMAIN, "UNKNOWN_FACTOR",
-                        label + ".Conditions references unknown factor '" + c.getFactor()
-                                + "' (the gate fails closed at runtime until a provider registers it)", id));
+            for (FactorCondition c : clause.factorsOrEmpty()) {
+                if (c == null || c.getFactor() == null || c.getFactor().isBlank()) {
+                    continue;
+                }
+                if (!factorKnown.test(c.getFactor())) {
+                    out.add(Finding.warning(DOMAIN, "UNKNOWN_FACTOR",
+                            label + ".Conditions references unknown factor '" + c.getFactor()
+                                    + "' (the gate fails closed at runtime until a provider registers it)", id));
+                }
             }
         }
     }
@@ -4530,7 +4543,7 @@ public final class StationValidator {
                 }
             }
 
-            Requires reqs = p.getRequires();
+            GateSpec reqs = p.getRequires();
             String nameKey = p.getIdentity() != null ? p.getIdentity().getNameKey() : null;
             if (reqs != null && !reqs.isEmpty() && (nameKey == null || nameKey.isBlank())) {
                 out.add(Finding.info(DOMAIN, "PATTERN_REQUIRES_WITHOUT_NAME_KEY",

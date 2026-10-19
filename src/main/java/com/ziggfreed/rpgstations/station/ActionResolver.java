@@ -14,10 +14,10 @@ import com.ziggfreed.rpgstations.asset.ActionInput;
 import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.progress.gate.GateSpec;
 import com.ziggfreed.rpgstations.asset.Pace;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
-import com.ziggfreed.rpgstations.asset.Requires;
 import com.ziggfreed.rpgstations.asset.StationAsset;
 import com.ziggfreed.rpgstations.asset.StationStep;
 
@@ -418,7 +418,7 @@ public final class ActionResolver {
     public static final class ResolvedAction {
         private final String actionId;
         @Nullable private final ActionInput select;
-        @Nullable private final Requires requires;
+        @Nullable private final GateSpec requires;
         @Nullable private final StationAsset.Tool tool;
         @Nullable private final StationAsset.Recipe recipe;
         @Nullable private final StationAsset.Work work;
@@ -434,7 +434,7 @@ public final class ActionResolver {
         @Nullable private final Puppet puppet;
         @Nullable private final Map<String, Presentation> moments;
 
-        ResolvedAction(@Nonnull String actionId, @Nullable ActionInput select, @Nullable Requires requires,
+        ResolvedAction(@Nonnull String actionId, @Nullable ActionInput select, @Nullable GateSpec requires,
                 @Nullable StationAsset.Tool tool, @Nullable StationAsset.Recipe recipe,
                 @Nullable StationAsset.Work work, @Nullable Custody custody,
                 @Nullable Map<String, ActionDef.Anchor> anchors, @Nullable StationStep[] steps,
@@ -484,7 +484,7 @@ public final class ActionResolver {
 
         /** This action's OWN gate; the station's own {@code Requires} is checked alongside it, never merged in. */
         @Nullable
-        public Requires getRequires() {
+        public GateSpec getRequires() {
             return requires;
         }
 

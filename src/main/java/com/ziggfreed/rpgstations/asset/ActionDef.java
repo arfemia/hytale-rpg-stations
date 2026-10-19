@@ -80,7 +80,7 @@ public final class ActionDef {
                     + "ABSENT means this action matches any context, and its custody acceptance derives from its own Recipe inputs instead.").add()
             .appendInherited(new KeyedCodec<>("Requires", Requires.CODEC, false),
                     (o, v) -> o.requires = v, o -> o.requires, (o, p) -> o.requires = p.requires)
-            .documentation("This action's own start gate (permission plus factor Conditions). The station's own Requires must ALSO pass; this never inherits it.").add()
+            .documentation("This action's own start gate, the shared Requires block (Factors, Permission, Quests, Custom, AllOf, AnyOf, Not; Conditions reads as Factors). The station's own Requires must ALSO pass; this never inherits it. A refused player is told what is missing.").add()
             .appendInherited(new KeyedCodec<>("Tool", StationAsset.Tool.CODEC, false),
                     (o, v) -> o.tool = v, o -> o.tool, (o, p) -> o.tool = p.tool)
             .documentation("The held-tool gate for this action - the ONE gate, checked at engage and re-checked every heartbeat.").add()

@@ -8,12 +8,14 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.factor.FactorCondition;
 import com.ziggfreed.common.factor.FactorProvider;
 import com.ziggfreed.common.factor.HytaleFactors;
 import com.ziggfreed.common.loot.FactorLookup;
+import com.ziggfreed.common.progress.gate.GateSpec;
 import com.ziggfreed.common.registry.RegistryLedger;
 import com.ziggfreed.rpgstations.api.FactorContext;
 import com.ziggfreed.rpgstations.api.FactorRegistry;
@@ -192,6 +194,17 @@ public final class FactorRegistryImpl implements FactorRegistry {
     @Nullable
     public String firstFailedCondition(@Nullable FactorCondition[] conditions, @Nonnull FactorContext ctx) {
         return core.firstFailedCondition(conditions, ctx.store(), subjectOf(ctx), ctx.item(), ctx);
+    }
+
+    /**
+     * The shared {@code Requires} block (a station's, an action's or a structure pattern's) asked for {@code ctx}:
+     * null when it passes or asks nothing, else the one line a refused player reads, worded by the shared refusal
+     * mapping. This vocabulary answers the session's own readings; every other id is the server's one evaluator's.
+     * The ONE gate read every station site shares.
+     */
+    @Nullable
+    public Message refusal(@Nullable GateSpec requires, @Nonnull FactorContext ctx) {
+        return core.refusal(requires, ctx.store(), subjectOf(ctx), ctx.item(), ctx);
     }
 
     /** True when a provider is registered for {@code factorId} (the validator's known-factor check). */

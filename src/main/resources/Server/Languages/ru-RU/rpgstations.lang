@@ -21,7 +21,6 @@ ui.station.socket_missing_named = Без {0} работать здесь нел�
 ui.station.socket_lost = Часть станции разрушена. Вы прекращаете работу.
 ui.station.structure_conflict = Это место уже занято другой постройкой.
 ui.station.pattern_requirements_unmet = Вы пока не можете возвести эту постройку.
-ui.station.pattern_requirements_unmet_named = Вы пока не можете возвести {0}.
 ui.station.structure_lost = Постройка разрушилась. Вы прекращаете работу.
 ui.station.output_ready = Готовая продукция ждёт, когда её заберут.
 ui.station.output_overdone = Готовая продукция простояла слишком долго и испортилась.
