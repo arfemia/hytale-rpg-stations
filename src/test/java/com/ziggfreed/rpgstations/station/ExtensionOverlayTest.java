@@ -1,5 +1,6 @@
 package com.ziggfreed.rpgstations.station;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -422,6 +423,33 @@ public class ExtensionOverlayTest {
 
         assertEquals(1, merged.length, "ids match case-insensitively, so the colliding entry is skipped");
         assertEquals("base.label", merged[0].getLabel());
+    }
+
+    @Test
+    void mergeActions_anActionsAnchorPlacesTheActionsWhereItSays() throws Exception {
+        StationAsset base = station("{ \"Actions\": [ { \"Id\": \"Mill\" }, { \"Id\": \"Polish\" } ] }");
+        ExtensionAsset before = ext("fixture_before", "{ \"Target\": { \"Station\": \"fixture\" },"
+                + " \"ActionsAnchor\": { \"Before\": \"mill\" },"
+                + " \"Actions\": [ { \"Id\": \"Rip\" }, { \"Id\": \"Quarter\" } ] }");
+        ExtensionAsset after = ext("fixture_after", "{ \"Target\": { \"Station\": \"fixture\" },"
+                + " \"ActionsAnchor\": { \"After\": \"Mill\" }, \"Actions\": [ { \"Id\": \"Trim\" } ] }");
+        ExtensionAsset start = ext("fixture_start", "{ \"Target\": { \"Station\": \"fixture\" },"
+                + " \"ActionsAnchor\": { \"AtStart\": true }, \"Actions\": [ { \"Id\": \"First\" } ] }");
+        ExtensionAsset dangling = ext("fixture_zz_dangling", "{ \"Target\": { \"Station\": \"fixture\" },"
+                + " \"ActionsAnchor\": { \"Before\": \"Nothing_Here\" }, \"Actions\": [ { \"Id\": \"Last\" } ] }");
+
+        var merged = ExtensionCatalog.mergeActions(base.getActions(),
+                ExtensionAsset.sortedForApply(List.of(start, dangling, before, after)));
+
+        List<String> order = new ArrayList<>();
+        for (var def : merged) {
+            order.add(def.getId());
+        }
+        // Apply order is fixture_after, fixture_before, fixture_start, fixture_zz_dangling: each lands against the
+        // working list the earlier ones left, in authored order within one extension.
+        assertEquals(List.of("First", "Rip", "Quarter", "Mill", "Trim", "Polish", "Last"), order,
+                "Before and After land beside the named action (any casing), AtStart at the front, and a"
+                        + " dangling name at the end");
     }
 
     // ==================== The EXTENSION_APPLIED contribution-kind enumeration ====================

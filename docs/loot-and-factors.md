@@ -157,7 +157,11 @@ Two shared kinds behave at a station the way they do everywhere else, which is w
 
 - **A `Lootable` reward** (`{"Kind": "Lootable", "Params": {"Lootable": "<table id>"}}`) rolled at a
   station pays the station kinds inside the table it rolls into the SAME pass, so a nested table can
-  add output items, a contribution or an effect. The nested table's rolls answer to no station
+  add output items, a contribution or an effect, and it reads the SAME factors as the pass: the piece
+  on the bench, the cycle count, the session. That makes it the way to roll a table a second time on a
+  chance: a roll whose `Chance` reads a stat and whose grant is a `Lootable` reward naming the table
+  (with `"Trigger": "Cycle"`) rolls that table again on that share of cycles, every condition in it
+  judged as it was the first time. The nested table's rolls answer to no station
   trigger (unless the reward names one in its own `Trigger` param), so a `Completion` roll inside it
   fires on the cycle that rolled it. What the pass can carry still decides: nested under a
   `Completion` roll, output items and contributions drop exactly as they would at the top level.

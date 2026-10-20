@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import javax.annotation.Nonnull;
@@ -106,8 +107,9 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@link Ingredient} vocabulary, and the {@code StationStep.Stamp.Stats.Caps.Budgets[]} shape was
  * rewritten against the A-SCHEMA leg's rewritten codecs. New checks: {@code ACTION_REF_UNKNOWN},
  * {@code EXTENSION_TARGET_UNKNOWN}, {@code EXTENSION_PAYLOAD_MISMATCH},
- * {@code EXTENSION_KEY_COLLISION}, {@code EXTENSION_ANCHOR_MISSING},
- * {@code EXTENSION_STEP_MISSING_ID}, {@code ANCHOR_STATION_UNKNOWN},
+ * {@code EXTENSION_KEY_COLLISION}, {@code EXTENSION_ANCHOR_MISSING} (a step insertion's, or a Station
+ * target's {@code ActionsAnchor}), {@code EXTENSION_ACTION_SHADOWS} (an ungated catch-all placed ahead of a
+ * station's own actions), {@code EXTENSION_STEP_MISSING_ID}, {@code ANCHOR_STATION_UNKNOWN},
  * {@code WALK_TARGET_UNKNOWN_ANCHOR}, {@code STEP_AT_UNKNOWN_ANCHOR}, {@code WALK_REQUIRES_PUPPET},
  * {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT}, and {@code LOOT_DUPLICATE_FACTOR} (INFO). The
  * multi-station seam ({@code Walk}/{@code At}/
@@ -1169,6 +1171,9 @@ public final class StationValidator {
         // (target, channel, param) both apply and their amounts genuinely sum - see
         // reportContributionDuplicates for the deliberately different wording.
         Map<String, List<Claim>> channelParamClaims = new LinkedHashMap<>();
+        // Per station (lower-cased id), the action ids the extensions applied so far have added: what a later
+        // extension's ActionsAnchor may name, exactly as the runtime's working list holds them.
+        Map<String, Set<String>> actionsAddedSoFar = new HashMap<>();
 
         for (ExtensionAsset ext : ExtensionAsset.sortedForApply(extensions)) {
             if (ext == null) {
@@ -1225,6 +1230,8 @@ public final class StationValidator {
             checkExtensionPayload(ext.getPace() != null, ExtensionAsset.PAYLOAD_PACE, targetType, label, extId, out);
             checkExtensionPayload(ext.getActions() != null && ext.getActions().length > 0,
                     ExtensionAsset.PAYLOAD_ACTIONS, targetType, label, extId, out);
+            checkExtensionPayload(ext.getActionsAnchor() != null,
+                    ExtensionAsset.PAYLOAD_ACTIONS_ANCHOR, targetType, label, extId, out);
             checkExtensionPayload(ext.getConversions() != null && ext.getConversions().length > 0,
                     ExtensionAsset.PAYLOAD_CONVERSIONS, targetType, label, extId, out);
             checkExtensionPayload(ext.getSteps() != null && ext.getSteps().length > 0, ExtensionAsset.PAYLOAD_STEPS,
@@ -1302,8 +1309,9 @@ public final class StationValidator {
             if (ext.getActions() != null && ext.getActions().length > 0
                     && ExtensionAsset.Target.STATION.equals(targetType)) {
                 StationAsset base = targetId != null ? stationsById.get(targetId.toLowerCase(Locale.ROOT)) : null;
-                Set<String> baseKeys = base != null
-                        ? lowercaseSet(ActionResolver.actionIds(base)) : Set.of();
+                // The station's OWN actions: the effective list already holds every extension's, this one's
+                // included, so judging against it would report each added action colliding with itself.
+                Set<String> baseKeys = base != null ? ownActionIds(base) : Set.of();
                 ActionDef[] added = ext.getActions();
                 for (int i = 0; i < added.length; i++) {
                     if (added[i] == null) {
@@ -1317,6 +1325,26 @@ public final class StationValidator {
                                         + "'s own base action - the base always wins, this entry is skipped", extId));
                     } else {
                         recordClaim(actionKeyClaims, target, lower, ext);
+                    }
+                }
+                // What the runtime can anchor this extension's actions on (ExtensionCatalog#mergeActions, in
+                // APPLY_ORDER): the station's own actions plus those the extensions applied before this one
+                // added, never this extension's own, which are not in the list yet when its place is found.
+                Set<String> addedBefore = actionsAddedSoFar.computeIfAbsent(
+                        targetId == null ? "" : targetId.toLowerCase(Locale.ROOT), k -> new HashSet<>());
+                if (base != null) {
+                    Set<String> anchorable = new HashSet<>(baseKeys);
+                    anchorable.addAll(addedBefore);
+                    checkActionsAnchor(ext.getActionsAnchor(), added, anchorable,
+                            refId -> {
+                                ActionAsset asset = refId == null ? null
+                                        : actionAssetsById.get(refId.toLowerCase(Locale.ROOT));
+                                return asset != null ? asset.getBody() : null;
+                            }, label, extId, out);
+                }
+                for (int i = 0; i < added.length; i++) {
+                    if (added[i] != null) {
+                        addedBefore.add(ActionResolver.effectiveActionId(added[i], i).toLowerCase(Locale.ROOT));
                     }
                 }
             }
@@ -1408,6 +1436,77 @@ public final class StationValidator {
         reportCrossExtensionCollisions(anchorKeyClaims, "Anchors", out);
         reportContributionDuplicates(channelParamClaims, out);
         return out;
+    }
+
+    /**
+     * The lower-cased ids of the actions {@code station} authors itself, in its own file (never an extension's), the
+     * runtime's {@code ExtensionCatalog#mergeActions} base: what an added action collides with.
+     */
+    @Nonnull
+    private static Set<String> ownActionIds(@Nonnull StationAsset station) {
+        Set<String> out = new HashSet<>();
+        ActionDef[] own = station.getActions();
+        if (own != null) {
+            for (int i = 0; i < own.length; i++) {
+                if (own[i] != null) {
+                    out.add(ActionResolver.effectiveActionId(own[i], i).toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * A Station target's {@code ActionsAnchor} ({@code ExtensionCatalog#insertionIndex} is the runtime's rule):
+     * {@code EXTENSION_ANCHOR_MISSING} for an ambiguous placement or an {@code After}/{@code Before} naming no action
+     * the station resolves (both degrade to AtEnd), and {@code EXTENSION_ACTION_SHADOWS} for an action placed ahead
+     * of the station's others that has neither a {@code Requires} nor a {@code Select} of its own (its inline group,
+     * else its {@code Ref} body's): selection walks the list in order and takes the first action whose gate passes,
+     * so an ungated catch-all there runs for everybody and the action after it is never reached. A gated variant,
+     * the reason the leaf exists, is the shape that passes.
+     */
+    private static void checkActionsAnchor(@Nullable ExtensionAsset.StepInsertion.Anchor anchor,
+            @Nonnull ActionDef[] added, @Nonnull Set<String> stationActionIds,
+            @Nonnull Function<String, ActionDef> refBody, @Nonnull String label, @Nonnull String extId,
+            @Nonnull List<Finding> out) {
+        if (anchor == null) {
+            return;
+        }
+        if (!anchor.hasExactlyOnePlacement()) {
+            out.add(Finding.warning(DOMAIN, "EXTENSION_ANCHOR_MISSING",
+                    label + ".ActionsAnchor authors no placement, or more than one (exactly one of"
+                            + " After|Before|AtStart|AtEnd) - its actions join at the end", extId));
+            return;
+        }
+        String named = anchor.anchorStepId();
+        if (named != null && !stationActionIds.contains(named.trim().toLowerCase(Locale.ROOT))) {
+            out.add(Finding.warning(DOMAIN, "EXTENSION_ANCHOR_MISSING",
+                    label + ".ActionsAnchor names action '" + named + "', which the station does not resolve -"
+                            + " its actions join at the end", extId));
+            return;
+        }
+        if (ExtensionAsset.StepInsertion.Anchor.AT_END.equals(anchor.effectivePlacement())) {
+            return;
+        }
+        for (int i = 0; i < added.length; i++) {
+            ActionDef def = added[i];
+            if (def == null) {
+                continue;
+            }
+            ActionDef body = def.hasRef() ? refBody.apply(def.getRef()) : null;
+            GateSpec requires = def.getRequires() != null ? def.getRequires()
+                    : body != null ? body.getRequires() : null;
+            ActionInput select = def.getSelect() != null ? def.getSelect() : body != null ? body.getSelect() : null;
+            boolean gated = requires != null && !requires.isEmpty();
+            boolean catchAll = select == null || select.isCatchAll();
+            if (!gated && catchAll) {
+                out.add(Finding.warning(DOMAIN, "EXTENSION_ACTION_SHADOWS",
+                        label + " Actions['" + ActionResolver.effectiveActionId(def, i) + "'] goes ahead of the"
+                                + " station's own actions with no Requires and no Select, so it runs for everybody"
+                                + " and the action after it is never reached - give it a Requires (a gated variant)"
+                                + " or a Select", extId));
+            }
+        }
     }
 
     /**

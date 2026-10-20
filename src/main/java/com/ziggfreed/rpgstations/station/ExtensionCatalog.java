@@ -916,25 +916,33 @@ public final class ExtensionCatalog {
     }
 
     /**
-     * Append every extension's NEW actions onto {@code base} (Station target): APPENDED, so a base
-     * action always keeps its higher selection priority, and the BASE wins an {@code Id} collision
-     * ({@code EXTENSION_KEY_COLLISION}, entry skipped). Among extensions the LATER in APPLY_ORDER
-     * wins a contested id - its entry REPLACES the earlier claimant's, in the slot (array position)
-     * the first claim established - the same later-wins rule every other contest in this schema
-     * follows (overlay leaf contests, ladder floor ties, the pack-over-defaults layer order).
+     * Add every extension's NEW actions to {@code base} (Station target), each extension's at the
+     * place its {@code ActionsAnchor} names ({@link #insertionIndex}): at the END by default, so a
+     * base action keeps its higher selection priority, or before or after a named action, which is
+     * how a gated variant goes ahead of the action it varies (selection is gate-aware, so it yields
+     * to that action for a player its {@code Requires} turns away). The BASE wins an {@code Id}
+     * collision ({@code EXTENSION_KEY_COLLISION}, entry skipped). Among extensions the LATER in
+     * APPLY_ORDER wins a contested id - its entry REPLACES the earlier claimant's, in the slot the
+     * first claim established - the same later-wins rule every other contest in this schema follows
+     * (overlay leaf contests, ladder floor ties, the pack-over-defaults layer order). Extensions
+     * apply in APPLY_ORDER against the live working list, so a later one may anchor on an action an
+     * earlier one added, exactly as step insertions do.
      */
     @Nonnull
     static ActionDef[] mergeActions(@Nullable ActionDef[] base, @Nonnull List<ExtensionAsset> exts) {
         List<ActionDef> out = new ArrayList<>();
+        List<String> ids = new ArrayList<>();
         Set<String> baseIds = new LinkedHashSet<>();
-        Map<String, Integer> extSlotById = new LinkedHashMap<>();
+        Set<String> extIds = new LinkedHashSet<>();
         if (base != null) {
             for (int i = 0; i < base.length; i++) {
                 if (base[i] == null) {
                     continue;
                 }
+                String id = ActionResolver.effectiveActionId(base[i], i).toLowerCase(Locale.ROOT);
                 out.add(base[i]);
-                baseIds.add(ActionResolver.effectiveActionId(base[i], i).toLowerCase(Locale.ROOT));
+                ids.add(id);
+                baseIds.add(id);
             }
         }
         for (ExtensionAsset ext : exts) {
@@ -942,6 +950,7 @@ public final class ExtensionCatalog {
             if (add == null) {
                 continue;
             }
+            int at = insertionIndex(ext.getActionsAnchor(), ids);
             for (int i = 0; i < add.length; i++) {
                 ActionDef def = add[i];
                 if (def == null) {
@@ -951,16 +960,46 @@ public final class ExtensionCatalog {
                 if (baseIds.contains(id)) {
                     continue;
                 }
-                Integer slot = extSlotById.get(id);
-                if (slot != null) {
-                    out.set(slot, def);
-                } else {
-                    extSlotById.put(id, out.size());
+                if (!extIds.add(id)) {
+                    out.set(ids.indexOf(id), def);
+                } else if (at < 0) {
                     out.add(def);
+                    ids.add(id);
+                } else {
+                    out.add(at, def);
+                    ids.add(at, id);
+                    at++;
                 }
             }
         }
         return out.toArray(new ActionDef[0]);
+    }
+
+    /**
+     * Where an extension's actions enter {@code ids} (the working list's lower-cased action ids):
+     * {@code AtStart} 0, {@code Before} the named action's index, {@code After} the index after it,
+     * and -1 (the end) for {@code AtEnd}, no anchor, an ambiguous one or a name no action answers
+     * to (the validator reports the last two as {@code EXTENSION_ANCHOR_MISSING}).
+     */
+    static int insertionIndex(@Nullable ExtensionAsset.StepInsertion.Anchor anchor, @Nonnull List<String> ids) {
+        if (anchor == null) {
+            return -1;
+        }
+        String placement = anchor.effectivePlacement();
+        if (ExtensionAsset.StepInsertion.Anchor.AT_START.equals(placement)) {
+            return 0;
+        }
+        boolean after = ExtensionAsset.StepInsertion.Anchor.AFTER.equals(placement);
+        String named = after || ExtensionAsset.StepInsertion.Anchor.BEFORE.equals(placement)
+                ? anchor.anchorStepId() : null;
+        if (named == null) {
+            return -1;
+        }
+        int found = ids.indexOf(named.trim().toLowerCase(Locale.ROOT));
+        if (found < 0) {
+            return -1;
+        }
+        return after ? found + 1 : found;
     }
 
     /**

@@ -281,9 +281,13 @@ public final class StationLootEngine {
      * hands its nested pass none unless the reward authors one), so a {@code Completion} roll in a
      * table nested under a {@code Cycle} roll fires on that cycle. What a completion pass can carry
      * is still this result's call: a cycle-scoped kind nested under a completion pass drops quietly
-     * there, exactly as it would at the top. (Ziggfreed Common's own tests pin that the nested pass
-     * forwards this very subject; a station-side test cannot, since a {@code Lootable} reward needs a
-     * live player.)
+     * there, exactly as it would at the top. The pass's own {@code lookup} rides the subject beside the
+     * result, so the nested table's conditions and chances read this moment's piece, cycle and session
+     * exactly as the outer table's do: a roll may re-roll a find table ({@code Chance} on a stat, a
+     * {@code Lootable} reward naming the table) and that table still sees the piece on the bench.
+     * (Ziggfreed Common's own tests pin that the nested pass forwards this very subject and asks the
+     * lookup it carries; a station-side test cannot, since a {@code Lootable} reward needs a live
+     * player.)
      */
     @Nonnull
     static GrantResult rollAndGrant(@Nonnull LootEngine.Resolved resolved, @Nonnull String trigger,
@@ -295,7 +299,7 @@ public final class StationLootEngine {
         LootEngine.Sinks.Builder builder = LootEngine.Sinks.builder()
                 .items(items)
                 .dropLists(dropLists)
-                .rewards(RewardKinds.shared(), subject.withFacets(result))
+                .rewards(RewardKinds.shared(), subject.withFacets(result, lookup))
                 .sourceId("station:" + sourceId)
                 .warn(message -> Log.fine("STATION loot " + message));
         if (placeholders != null) {

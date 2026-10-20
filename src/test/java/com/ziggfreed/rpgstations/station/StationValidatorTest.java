@@ -1265,6 +1265,58 @@ public class StationValidatorTest {
     }
 
     @Test
+    void anAddedActionNeverCollidesWithItselfWhileTheCatalogHoldsItsExtension() throws Exception {
+        // At boot the live catalog holds the extension, so the station's effective list already carries
+        // the action it adds; the collision check judges against the station's OWN actions alone.
+        ExtensionAsset variant = extensionAsset("variant", "{ \"Target\": { \"Station\": \"fixturemill\" },"
+                + " \"ActionsAnchor\": { \"Before\": \"Mill\" },"
+                + " \"Actions\": [ { \"Id\": \"Rip\", \"Requires\": { \"Factors\": [ { \"Factor\": \"yourmod:technique\","
+                + " \"Param\": \"Rip\", \"Min\": 1 } ] } } ] }");
+        ExtensionCatalog.getInstance().fold(Map.of("variant", variant), true);
+        try {
+            Set<String> codes = codes(validateExtensions(variant, validStation(), null));
+            assertFalse(codes.contains("EXTENSION_KEY_COLLISION"), "a new action id is not a collision: " + codes);
+            assertFalse(codes.contains("EXTENSION_ACTION_SHADOWS"), "a gated variant ahead of Mill is the intended"
+                    + " shape: " + codes);
+            assertFalse(codes.contains("EXTENSION_ANCHOR_MISSING"), "Mill is the station's own action: " + codes);
+        } finally {
+            ExtensionCatalog.getInstance().fold(Map.of(), true);
+        }
+    }
+
+    @Test
+    void anActionsAnchorOnNoActionOrAheadWithNoGate_isReported() throws Exception {
+        ExtensionAsset dangling = extensionAsset("dangling", "{ \"Target\": { \"Station\": \"fixturemill\" },"
+                + " \"ActionsAnchor\": { \"Before\": \"No_Such_Action\" }, \"Actions\": [ { \"Id\": \"Rip\" } ] }");
+        assertTrue(codes(validateExtensions(dangling, validStation(), null)).contains("EXTENSION_ANCHOR_MISSING"));
+
+        ExtensionAsset shadow = extensionAsset("shadow", "{ \"Target\": { \"Station\": \"fixturemill\" },"
+                + " \"ActionsAnchor\": { \"AtStart\": true }, \"Actions\": [ { \"Id\": \"Rip\" } ] }");
+        assertTrue(codes(validateExtensions(shadow, validStation(), null)).contains("EXTENSION_ACTION_SHADOWS"),
+                "an ungated catch-all ahead of Mill runs for everybody");
+
+        // An anchor may name an action an EARLIER extension added, never one of its own: at runtime its own
+        // actions are not in the list yet when its place is found, so it would drop to the end.
+        ExtensionAsset self = extensionAsset("self", "{ \"Target\": { \"Station\": \"fixturemill\" },"
+                + " \"ActionsAnchor\": { \"Before\": \"Rip\" }, \"Actions\": [ { \"Id\": \"Rip\" } ] }");
+        assertTrue(codes(validateExtensions(self, validStation(), null)).contains("EXTENSION_ANCHOR_MISSING"),
+                "an anchor on the extension's own action is dangling at runtime");
+        ExtensionAsset first = extensionAsset("a_first", "{ \"Target\": { \"Station\": \"fixturemill\" },"
+                + " \"Actions\": [ { \"Id\": \"Trim\" } ] }");
+        ExtensionAsset later = extensionAsset("b_later", "{ \"Target\": { \"Station\": \"fixturemill\" },"
+                + " \"ActionsAnchor\": { \"After\": \"Trim\" }, \"Actions\": [ { \"Id\": \"Polish\" } ] }");
+        Set<String> chained = codes(StationValidator.validateExtensions(List.of(later, first), List.of(validStation()),
+                List.of(), ANY_DROP, ANY_FACTOR, ANY_LOOTABLE, ANY_ROLLPOOL));
+        assertFalse(chained.contains("EXTENSION_ANCHOR_MISSING"),
+                "an action an earlier extension added is in the list when a later one anchors: " + chained);
+
+        ExtensionAsset wrongTarget = extensionAsset("wrong", "{ \"Target\": { \"Action\": \"Mill\" },"
+                + " \"ActionsAnchor\": { \"AtStart\": true } }");
+        assertTrue(codes(validateExtensions(wrongTarget, validStation(), null)).contains("EXTENSION_PAYLOAD_MISMATCH"),
+                "ActionsAnchor belongs to a Station target");
+    }
+
+    @Test
     void insertedStepWithoutAnId_flagged() throws Exception {
         ActionAsset base = actionAsset("prepfixture",
                 "{ \"Steps\": [ { \"Id\": \"Beat\", \"Duration\": { \"Ms\": 100 } } ] }");

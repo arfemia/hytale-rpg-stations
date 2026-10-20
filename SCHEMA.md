@@ -1648,7 +1648,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Bonus` | [LootRef](#type-lootref) | `null` | Appended Bonus references and inline Rolls (Action target). |
 | `ContributionScale` | [ContributionScale](#field-extensionasset-contributionscale) | `null` | ContributionScale overlay (Action target), merged PER LEAF: an overlay authoring only Floors keeps the base action's own Factors. |
 | `Pace` | [Pace](#field-extensionasset-pace) | `null` | This extension's OWN Pace (Action target), never an overlay: its Ladder resolves from its own Factors and Floors and its scale MULTIPLIES the action's and every other extension's; the action's Clamp bounds the product and this Clamp can only narrow it further (one side is enough); its Stretch multiplies the length of every Paced beat after the clamps. |
-| `Actions` | array of [ActionDef](#type-actiondef) | `null` | NEW actions appended to a station's ordered Actions list (Station target); the base wins an Id collision, and an appended action is selected only after every base action. |
+| `Actions` | array of [ActionDef](#type-actiondef) | `null` | NEW actions added to a station's ordered Actions list (Station target); the base wins an Id collision. They join at the END, so they are selected only after every base action, unless ActionsAnchor places them elsewhere. |
+| `ActionsAnchor` | [Anchor](#field-extensionasset-actionsanchor) | `null` | Where this extension's Actions join the station's ordered list (Station target), which is selection priority: exactly one of After \| Before \| AtStart \| AtEnd. Absent = AtEnd. An action placed ahead of a base action that carries a Requires is a gated variant: selection is gate-aware, so it runs for a player its Requires lets in and yields to the base action for everyone else; one with no Requires and no narrower Select shadows the base action for everybody (EXTENSION_ACTION_SHADOWS). |
 | `Conversions` | array of [Conversion](#field-extensionasset-conversions-item) | `null` | Appended Recipe.Conversions (Action target). |
 | `Steps` | array of [StepInsertion](#field-extensionasset-steps-item) | `null` | Ordered step insertions into an action's OWN authored step program (Action target); an action that authors no Steps runs the recipe-driven convert loop and has no program to insert into. |
 | `Anchors` | map of [Anchor](#field-extensionasset-anchors-item) | `null` | NEW anchor declarations only (Action target); base wins a key collision. |
@@ -1692,6 +1693,16 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Ladder` | [ContributionScale](#field-extensionasset-pace-ladder) | `null` | The factor ladder (Factors summed, the highest reached Floor's Scale wins; none reached = 1.0) whose scale multiplies the Duration of every step marked Paced. The same shape as ContributionScale. |
 | `Clamp` | [Clamp](#field-extensionasset-pace-clamp) | `null` | Bounds on the pace scale once every ladder (the action's and each matching extension's) has multiplied in, before any Stretch: Min is the fastest a paced beat may run, Max the slowest. On an action, author both sides (PACE_UNCLAMPED warns on a missing one): it is where the pace range lives. On an extension it only narrows that range, applied after the action's, so the tighter bound wins at each end and one side is enough. |
 | `Stretch` | `double` | `null` | How long the Paced beats are to begin with: a fixed multiplier on every Paced step's Duration (and its own presentation timing), applied after the Clamp, so the ladders still speed the beats up in the same proportions. The action's Stretch and every matching extension's multiply. Absent = 1.0; 3.0 makes every paced beat three times its authored length. |
+
+<a id="field-extensionasset-actionsanchor"></a>
+### ExtensionAsset.ActionsAnchor
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `After` | `string` | `null` | Insert AFTER the action with this Id (exactly one of After \| Before \| AtStart \| AtEnd). |
+| `Before` | `string` | `null` | Insert BEFORE the action with this Id (exactly one of After \| Before \| AtStart \| AtEnd). |
+| `AtStart` | `boolean` | `null` | Insert at the START of the station's ordered Actions (exactly one of After \| Before \| AtStart \| AtEnd). |
+| `AtEnd` | `boolean` | `null` | Insert at the END of the station's ordered Actions (exactly one of After \| Before \| AtStart \| AtEnd; the degrade default). |
 
 <a id="field-extensionasset-conversions-item"></a>
 ### ExtensionAsset.Conversions[]

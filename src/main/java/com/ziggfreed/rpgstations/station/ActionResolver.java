@@ -83,10 +83,11 @@ public final class ActionResolver {
 
     /**
      * The station's EFFECTIVE ordered action list: its own, plus any {@code Target:{Station}}
-     * {@link com.ziggfreed.rpgstations.asset.ExtensionAsset} appending whole NEW actions. Appended
-     * actions land at the END, so a base action always keeps its higher selection priority.
-     * Identity-preserving when nothing targets the station, so the zero-extension path costs
-     * nothing.
+     * {@link com.ziggfreed.rpgstations.asset.ExtensionAsset} adding whole NEW actions. Added
+     * actions land at the END, so a base action keeps its higher selection priority, unless the
+     * extension's {@code ActionsAnchor} places them before or after a named action (a gated
+     * variant ahead of the action it varies). Identity-preserving when nothing targets the
+     * station, so the zero-extension path costs nothing.
      */
     @Nullable
     public static ActionDef[] effectiveActions(@Nonnull StationAsset asset) {
@@ -389,23 +390,40 @@ public final class ActionResolver {
      * Restart-orphan recovery: the FIRST action whose resolved {@link Custody#getStates()}'
      * {@code Loaded} name case-insensitively matches {@code currentStateName}. Resolves through
      * {@link #resolve} so a {@code Ref}'d action's custody (on the base {@link ActionAsset}) is
-     * honored. Returns {@code null} when nothing matches.
+     * honored. Returns {@code null} when nothing matches. The engage path walks
+     * {@link #selectActionsForBlockState} instead, gate-aware, so a gated variant sharing its base
+     * action's Loaded look never takes the recovery from a player its gate turns away.
      */
     @Nullable
     public static String selectActionForBlockState(@Nonnull StationAsset asset, @Nullable String currentStateName) {
+        List<String> matches = selectActionsForBlockState(asset, currentStateName);
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    /**
+     * EVERY action whose resolved {@code Custody.States.Loaded} name case-insensitively matches
+     * {@code currentStateName}, in AUTHORED ORDER - the candidate list behind
+     * {@link #selectActionForBlockState} (whose answer is its first entry), which the engage path
+     * walks with each candidate's own {@code Requires} exactly as it walks a held item's matches.
+     * Empty when the name is blank or nothing matches.
+     */
+    @Nonnull
+    public static List<String> selectActionsForBlockState(@Nonnull StationAsset asset,
+            @Nullable String currentStateName) {
         if (currentStateName == null || currentStateName.isBlank()) {
-            return null;
+            return List.of();
         }
+        List<String> out = new ArrayList<>();
         for (String actionId : actionIds(asset)) {
             ResolvedAction resolved = resolve(asset, actionId);
             Custody custody = resolved.getCustody();
             Custody.States states = custody != null ? custody.getStates() : null;
             String loaded = states != null ? states.getLoaded() : null;
             if (loaded != null && loaded.equalsIgnoreCase(currentStateName)) {
-                return actionId;
+                out.add(actionId);
             }
         }
-        return null;
+        return out;
     }
 
     /**

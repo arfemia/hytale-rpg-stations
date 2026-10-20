@@ -282,6 +282,17 @@ public class ActionResolverTest {
     }
 
     @Test
+    void selectActionsForBlockState_listsEveryActionSharingTheLook_inOrder() {
+        // A gated variant ahead of its base action shares the base's Loaded look; the engage path walks this
+        // whole list with each action's gate, so a player the variant turns away still recovers the base.
+        StationAsset a = station(def("Rip_Cut").withCustody(custodyLoaded("Loaded")),
+                def("Mill").withCustody(custodyLoaded("Loaded")),
+                def("Convert").withCustody(custodyLoaded("BarsPlaced")));
+        assertEquals(List.of("Rip_Cut", "Mill"), ActionResolver.selectActionsForBlockState(a, "loaded"));
+        assertEquals(List.of(), ActionResolver.selectActionsForBlockState(a, ""));
+    }
+
+    @Test
     void selectActionForBlockState_singleActionStation_resolvesItsOwnCustody() {
         StationAsset a = station(def("Mill").withCustody(custodyLoaded("Loaded")));
         assertEquals("Mill", ActionResolver.selectActionForBlockState(a, "Loaded"));

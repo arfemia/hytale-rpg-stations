@@ -32,8 +32,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("familyTest")
 class SawmillSocketParityTest {
 
+    /** The Sawmill's Mill action, which the station attaches by Ref. */
     private static final Path SAWMILL = Path.of("src", "main", "resources", "Server", "RpgStations",
-            "Stations", "Sawmill.json");
+            "Actions", "Mill.json");
     /**
      * The companion pack's Anvil: build.gradle forwards the pack's folder from the workspace's path
      * map as {@code rpgstations.companionPack}; null in a JVM started without it.
@@ -74,9 +75,11 @@ class SawmillSocketParityTest {
 
     @Test
     void shippedSawmill_decodesToTheOneDegenerateMainSocket() throws Exception {
-        StationAsset sawmill = decode(Files.readString(SAWMILL, StandardCharsets.UTF_8), "Sawmill");
-        assertNotNull(sawmill.getActions());
-        Custody custody = sawmill.getActions()[0].getCustody();
+        ActionAsset mill = ActionAsset.CODEC.decodeAndInheritJsonAsset(
+                RawJsonReader.fromJsonString(Files.readString(SAWMILL, StandardCharsets.UTF_8)), null,
+                new AssetExtraInfo<>(new AssetExtraInfo.Data(ActionAsset.class, "Mill", null)));
+        assertNotNull(mill);
+        Custody custody = mill.getBody().getCustody();
         assertNotNull(custody, "the shipped Sawmill's Mill action carries a Custody group");
         // No absolute cap number pinned here - the parity contract is RELATIVE (the socket's cap
         // IS the custody-level cap, whatever a balancing pass sets it to).

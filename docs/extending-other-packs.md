@@ -27,7 +27,7 @@ directly - every mechanical payload key targets an ACTION instead:
 
 | Target | Payload keys it may carry |
 |---|---|
-| `{Station: "<id>"}` | `Actions` (NEW entries appended to the station's ordered list; the base wins an Id collision, and an appended action is selected only after every base action) |
+| `{Station: "<id>"}` | `Actions` (NEW entries added to the station's ordered list; the base wins an Id collision, and an added action is selected only after every base action unless `ActionsAnchor` places it), `ActionsAnchor` (where those actions join the list: exactly one of `{After: "<actionId>"}`, `{Before: "<actionId>"}`, `{AtStart: true}`, `{AtEnd: true}`) |
 | `{Action: "<id>"}` | `PerCycleContributions`, `Bonus`, `ContributionScale`, `Conversions`, `Steps`, `Anchors` (new keys only), `Puppet`, `Custody` |
 | `{Station: "<id>", Action: "<id>"}` | the same Action payload keys, applied only where THAT station resolves that action id |
 | `{Lootable: "<id>"}` | `Rolls` (appended) |
@@ -74,8 +74,30 @@ one on that key - both of which apply on the scoped station - are reported.
    authored - replacing a whole file stays a load-order concern, not this mechanism's job.
 2. **Keyed collections** - a Station target's `Actions` (an ORDERED array, but still keyed by `Id`) and
    an Action target's `Anchors` (a map) both let the BASE win an Id/key collision; a new key is folded
-   in (an appended action is selected only AFTER every base action, since selection order follows
-   authored order), and among several extensions adding new keys, apply order (below) decides.
+   in (an added action joins at the END, so it is selected only AFTER every base action, since
+   selection order follows authored order, unless the extension's `ActionsAnchor` names another
+   place), and among several extensions adding new keys, apply order (below) decides.
+
+   **A gated variant.** Selection is gate-aware: the engine takes the first action, in order, whose
+   `Select` matches AND whose own `Requires` lets the player in, and yields to the next matching one
+   otherwise. So an action placed `{Before: "Mill"}` with a `Requires` of its own is a VARIANT of
+   `Mill`: it runs for the players its gate admits (a talent, a quest, a permission) and every other
+   player still gets `Mill`. Placed ahead with no `Requires` and no narrower `Select`, it would run for
+   everybody and `Mill` would never be reached, which the content audit reports
+   (`EXTENSION_ACTION_SHADOWS`). A variant is its own action: the Action-targeted extensions that
+   reach `Mill` (its contributions, its extra tables) do not reach it, so give it its own (a `Parent` child of
+   the base action's extension that changes only `Target` is the short way), and a standalone
+   `ActionAsset` with `Parent` set to the base action authors only what the variant changes. One
+   variant runs a session, so two variants of one action do not combine.
+
+```json
+{
+  "Target": { "Station": "Sawmill" },
+  "ActionsAnchor": { "Before": "Mill" },
+  "Actions": [ { "Id": "Rip_Cut", "Ref": "Yourmod_Mill_Rip_Cut",
+                 "Requires": { "Factors": [ { "Factor": "yourmod:technique", "Param": "Rip_Cut", "Min": 1 } ] } } ]
+}
+```
 3. **Unkeyed arrays** (`PerCycleContributions`, `Conversions`, `Rolls`, `Entries`) - pure append, in
    apply order.
 4. **Nested per-leaf overlay** (`Puppet`, `Custody`, `ContributionScale`) - recursively, at every

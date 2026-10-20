@@ -106,6 +106,7 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     public static final String PAYLOAD_CONTRIBUTION_SCALE = "ContributionScale";
     public static final String PAYLOAD_PACE = "Pace";
     public static final String PAYLOAD_ACTIONS = "Actions";
+    public static final String PAYLOAD_ACTIONS_ANCHOR = "ActionsAnchor";
     public static final String PAYLOAD_CONVERSIONS = "Conversions";
     public static final String PAYLOAD_STEPS = "Steps";
     public static final String PAYLOAD_ANCHORS = "Anchors";
@@ -134,6 +135,7 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     @Nullable private ContributionScale contributionScale;
     @Nullable private Pace pace;
     @Nullable private ActionDef[] actions;
+    @Nullable private StepInsertion.Anchor actionsAnchor;
     @Nullable private StationAsset.Conversion[] conversions;
     @Nullable private StepInsertion[] steps;
     @Nullable private Map<String, ActionDef.Anchor> anchors;
@@ -177,7 +179,10 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
             .documentation("This extension's OWN Pace (Action target), never an overlay: its Ladder resolves from its own Factors and Floors and its scale MULTIPLIES the action's and every other extension's; the action's Clamp bounds the product and this Clamp can only narrow it further (one side is enough); its Stretch multiplies the length of every Paced beat after the clamps.").add()
             .appendInherited(new KeyedCodec<>("Actions", new ArrayCodec<>(ActionDef.CODEC, ActionDef[]::new), false),
                     (a, v) -> a.actions = v, a -> a.actions, (a, p) -> a.actions = p.actions)
-            .documentation("NEW actions appended to a station's ordered Actions list (Station target); the base wins an Id collision, and an appended action is selected only after every base action.").add()
+            .documentation("NEW actions added to a station's ordered Actions list (Station target); the base wins an Id collision. They join at the END, so they are selected only after every base action, unless ActionsAnchor places them elsewhere.").add()
+            .appendInherited(new KeyedCodec<>("ActionsAnchor", StepInsertion.Anchor.ACTION_CODEC, false),
+                    (a, v) -> a.actionsAnchor = v, a -> a.actionsAnchor, (a, p) -> a.actionsAnchor = p.actionsAnchor)
+            .documentation("Where this extension's Actions join the station's ordered list (Station target), which is selection priority: exactly one of After | Before | AtStart | AtEnd. Absent = AtEnd. An action placed ahead of a base action that carries a Requires is a gated variant: selection is gate-aware, so it runs for a player its Requires lets in and yields to the base action for everyone else; one with no Requires and no narrower Select shadows the base action for everybody (EXTENSION_ACTION_SHADOWS).").add()
             .appendInherited(new KeyedCodec<>("Conversions", new ArrayCodec<>(StationAsset.Conversion.CODEC, StationAsset.Conversion[]::new), false),
                     (a, v) -> a.conversions = v, a -> a.conversions, (a, p) -> a.conversions = p.conversions)
             .documentation("Appended Recipe.Conversions (Action target).").add()
@@ -267,10 +272,21 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         return pace;
     }
 
-    /** NEW actions appended to a station's ordered list (Station target); null = none. */
+    /** NEW actions added to a station's ordered list (Station target); null = none. */
     @Nullable
     public ActionDef[] getActions() {
         return actions;
+    }
+
+    /**
+     * Where {@link #getActions()} join the station's ordered list (Station target): one placement leaf naming a
+     * base action id ({@code After}/{@code Before}) or an end ({@code AtStart}/{@code AtEnd}); null = AtEnd, the
+     * behaviour before the leaf existed. A dangling action id or an ambiguous placement degrades to AtEnd
+     * ({@code EXTENSION_ANCHOR_MISSING}).
+     */
+    @Nullable
+    public StepInsertion.Anchor getActionsAnchor() {
+        return actionsAnchor;
     }
 
     /** Appended conversions (Action target); null = none. */
@@ -347,7 +363,7 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         }
         switch (targetType) {
             case Target.STATION:
-                return PAYLOAD_ACTIONS.equals(payloadKey);
+                return PAYLOAD_ACTIONS.equals(payloadKey) || PAYLOAD_ACTIONS_ANCHOR.equals(payloadKey);
             case Target.ACTION:
                 return PAYLOAD_STEPS.equals(payloadKey) || PAYLOAD_ANCHORS.equals(payloadKey)
                         || PAYLOAD_BONUS.equals(payloadKey) || PAYLOAD_CONVERSIONS.equals(payloadKey)
@@ -623,28 +639,44 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
             @Nullable protected Boolean atStart;
             @Nullable protected Boolean atEnd;
 
-            public static final BuilderCodec<Anchor> CODEC = BuilderCodec.builder(Anchor.class, Anchor::new)
-                    .appendInherited(new KeyedCodec<>("After", Codec.STRING, false),
-                            (o, v) -> o.after = v, o -> o.after, (o, p) -> o.after = p.after)
-                    .documentation("Insert AFTER the step with this Id (exactly one of After | Before | AtStart | AtEnd).").add()
-                    .appendInherited(new KeyedCodec<>("Before", Codec.STRING, false),
-                            (o, v) -> o.before = v, o -> o.before, (o, p) -> o.before = p.before)
-                    .documentation("Insert BEFORE the step with this Id (exactly one of After | Before | AtStart | AtEnd).").add()
-                    .appendInherited(new KeyedCodec<>("AtStart", Codec.BOOLEAN, false),
-                            (o, v) -> o.atStart = v, o -> o.atStart, (o, p) -> o.atStart = p.atStart)
-                    .documentation("Insert at the START of the program (exactly one of After | Before | AtStart | AtEnd).").add()
-                    .appendInherited(new KeyedCodec<>("AtEnd", Codec.BOOLEAN, false),
-                            (o, v) -> o.atEnd = v, o -> o.atEnd, (o, p) -> o.atEnd = p.atEnd)
-                    .documentation("Insert at the END of the program (exactly one of After | Before | AtStart | AtEnd; the degrade default).").add()
-                    .afterDecode((Anchor anchor, ExtraInfo extraInfo) -> {
-                        int authored = (set(anchor.after) ? 1 : 0) + (set(anchor.before) ? 1 : 0)
-                                + (set(anchor.atStart) ? 1 : 0) + (set(anchor.atEnd) ? 1 : 0);
-                        if (authored > 1) {
-                            extraInfo.getValidationResults().warn(
-                                    "ExtensionAsset.StepInsertion.Anchor should author exactly one of After | Before | AtStart | AtEnd; several were authored, degrading to AtEnd.");
-                        }
-                    })
-                    .build();
+            public static final BuilderCodec<Anchor> CODEC = codec("step", "the program",
+                    "ExtensionAsset.StepInsertion.Anchor");
+
+            /**
+             * The same placement for a Station target's {@code ActionsAnchor}: its {@code After}/{@code Before}
+             * name a base action's id rather than a step's, so the leaves read in those words; the shape and every
+             * placement rule are this class's.
+             */
+            public static final BuilderCodec<Anchor> ACTION_CODEC = codec("action", "the station's ordered Actions",
+                    "ExtensionAsset.ActionsAnchor");
+
+            /** One placement codec over {@code subject}s (a step, an action) in {@code list}, warning as {@code where}. */
+            @Nonnull
+            private static BuilderCodec<Anchor> codec(@Nonnull String subject, @Nonnull String list,
+                    @Nonnull String where) {
+                return BuilderCodec.builder(Anchor.class, Anchor::new)
+                        .appendInherited(new KeyedCodec<>("After", Codec.STRING, false),
+                                (o, v) -> o.after = v, o -> o.after, (o, p) -> o.after = p.after)
+                        .documentation("Insert AFTER the " + subject + " with this Id (exactly one of After | Before | AtStart | AtEnd).").add()
+                        .appendInherited(new KeyedCodec<>("Before", Codec.STRING, false),
+                                (o, v) -> o.before = v, o -> o.before, (o, p) -> o.before = p.before)
+                        .documentation("Insert BEFORE the " + subject + " with this Id (exactly one of After | Before | AtStart | AtEnd).").add()
+                        .appendInherited(new KeyedCodec<>("AtStart", Codec.BOOLEAN, false),
+                                (o, v) -> o.atStart = v, o -> o.atStart, (o, p) -> o.atStart = p.atStart)
+                        .documentation("Insert at the START of " + list + " (exactly one of After | Before | AtStart | AtEnd).").add()
+                        .appendInherited(new KeyedCodec<>("AtEnd", Codec.BOOLEAN, false),
+                                (o, v) -> o.atEnd = v, o -> o.atEnd, (o, p) -> o.atEnd = p.atEnd)
+                        .documentation("Insert at the END of " + list + " (exactly one of After | Before | AtStart | AtEnd; the degrade default).").add()
+                        .afterDecode((Anchor anchor, ExtraInfo extraInfo) -> {
+                            int authored = (set(anchor.after) ? 1 : 0) + (set(anchor.before) ? 1 : 0)
+                                    + (set(anchor.atStart) ? 1 : 0) + (set(anchor.atEnd) ? 1 : 0);
+                            if (authored > 1) {
+                                extraInfo.getValidationResults().warn(where
+                                        + " should author exactly one of After | Before | AtStart | AtEnd; several were authored, degrading to AtEnd.");
+                            }
+                        })
+                        .build();
+            }
 
             @Nonnull
             public static Anchor after(@Nullable String stepId) {

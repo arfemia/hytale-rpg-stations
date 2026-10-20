@@ -576,9 +576,10 @@ public final class StationService {
             // Neither the claim nor the held item matched - before denying, recover the action
             // from the block's OWN persisted interaction-state name, so a Loaded block whose
             // stash is empty is not a permanent dead end for a player holding the right tool but
-            // nothing matching held.
-            selectedActionId = ActionResolver.selectActionForBlockState(asset,
-                    currentBlockStateName(world, blockX, blockY, blockZ));
+            // nothing matching held. Gate-aware like the held walk: a gated variant that shares its
+            // base action's Loaded look yields to that action for a player its gate turns away.
+            selectedActionId = firstAdmitted(asset, ActionResolver.selectActionsForBlockState(asset,
+                    currentBlockStateName(world, blockX, blockY, blockZ)), playerRef, socketsFilled, preClaim);
         }
         if (selectedActionId == null) {
             press.refuse("ui.station.no_action");
@@ -8767,6 +8768,20 @@ public final class StationService {
         List<String> candidates = ActionResolver.selectActionsByFamily(asset, heldItemId,
                 liveResourceTypeIdsOf(heldItemId), liveRawTagsOf(heldItemId), liveFunctionOf(heldItemId),
                 liveQualityOf(held));
+        return firstAdmitted(asset, candidates, playerRef, socketsFilled, claim);
+    }
+
+    /**
+     * The gate-aware pick over {@code candidates} (matching actions, in authored order): the first
+     * whose own {@code Requires} lets {@code playerRef} in, else the FIRST candidate, so the engage
+     * gate denies it with the honest requirements-unmet toast; {@code null} for no candidates. The
+     * one rule the held-item walk ({@link #selectActionForHeld}) and the block-state recovery share,
+     * so a gated variant ahead of its base action yields to it on both paths.
+     */
+    @Nullable
+    private static String firstAdmitted(@Nonnull StationAsset asset, @Nonnull List<String> candidates,
+            @Nonnull PlayerRef playerRef, @Nonnull Map<String, Boolean> socketsFilled,
+            @Nullable StationCustodyClaim claim) {
         for (String actionId : candidates) {
             ActionResolver.ResolvedAction candidate = ActionResolver.resolve(asset, actionId);
             if (requiresRefusal(candidate.getRequires(), playerRef, asset, candidate, socketsFilled,
