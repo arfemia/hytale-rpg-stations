@@ -121,6 +121,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Fallback` | [Fallback](#field-actionasset-recipe-fallback) | `null` | What a placed piece that NO authored or derived row covers falls back to: a share of its own crafting recipe, then consumption with no conversion output (the action's Bonus rolls are its payout). Custody-routed only. Null = an uncovered piece is refused. |
 | `Yield` | [Yield](#field-actionasset-recipe-yield) | `null` | Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived): Base replaces the primary (first) output's quantity only, Scale/Min/Max apply to every output. Null = each conversion's own authored quantities, unchanged. |
 | `Doneness` | [Doneness](#field-actionasset-recipe-doneness) | `null` | The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window. |
+| `Batch` | [Repeat](#field-actionasset-recipe-batch) | `null` | How many conversions a cycle runs at once, in the Repeat shape (a fixed Times, or Min plus the weighted Factors held in Max), read of the worker each cycle: the classic loop's batch, and the default of every Convert beat that authors no Batch of its own. Every conversion of a batch is the one matched row, so each takes its own input of the very item or family that row converts and never another material; a cycle runs as many as the pile or the bag can feed and the outputs fit, at least one. The Bonus still rolls once a cycle. An unattended settle runs the authored count (Times, else Min). Absent = one. |
 
 <a id="field-actionasset-work"></a>
 ### ActionAsset.Work
@@ -187,6 +188,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `PerSwing` | `integer` | `null` | Durability points drained from the held tool per swing cue. Reader-defaults to 0 (off). |
 | `PerCycle` | `integer` | `null` | Durability points drained from the held tool per completed cycle. Reader-defaults to 0 (off). |
 | `MinStartPercent` | `double` | `null` | Minimum held-tool durability (0-100) required to START working; null = no wear gate. The name states the semantics: it is checked at engage only, so a session already running is never cut short by wear. |
+| `Ladder` | [ContributionScale](#field-actionasset-tool-durability-ladder) | `null` | A ladder read of the worker (Factors summed, the highest reached Floor's Scale) that MULTIPLIES both drains: read at engage and again every completed cycle, so a worker it names wears the tool faster or slower. A fractional drain pays its whole part every time and the fraction as the chance of one point more (1.5 is one point, and a second half the time). No floor reached = the authored drains. |
 
 <a id="field-actionasset-recipe-conversions-item"></a>
 #### ActionAsset.Recipe.Conversions[]
@@ -229,6 +231,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Scale` | `double` | `null` | Multiplier on the base quantity, floored to a whole item; reader-defaults to 1.0 (no scaling). |
 | `Min` | `integer` | `null` | Lower clamp on the final quantity; null = the engine's own 1-item floor. |
 | `Max` | `integer` | `null` | Upper clamp on the final quantity; null = uncapped. |
+| `Ladder` | [ContributionScale](#field-actionasset-recipe-yield-ladder) | `null` | A ladder read of the worker each cycle (Factors summed, the highest reached Floor's Scale) that MULTIPLIES Scale, before the floor to a whole item and the clamps: more or less of a cycle's output for whoever the ladder names, the one-item floor kept. No floor reached, or an unattended settle, = Scale as authored. |
 
 <a id="field-actionasset-recipe-doneness"></a>
 #### ActionAsset.Recipe.Doneness
@@ -237,6 +240,16 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `ReadyMs` | `long` | `null` | How long, in world GAME-TIME milliseconds, a produced batch sits Ready in its custody pile before degrading. Game time stands still while the server is down, so an outage never burns anything. Omit for no window (output waits indefinitely). |
 | `Overdone` | array of [Ingredient](#type-ingredient) | `null` | What the windowed pile collapses to once the window expires: exact-ItemId entries, each Quantity scaled by the number of batches produced into the window. Omit to make the window purely presentational (the Ready look and moment, nothing degrades). |
+
+<a id="field-actionasset-recipe-batch"></a>
+#### ActionAsset.Recipe.Batch
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Times` | `integer` | `null` | A fixed iteration count. Authored INSTEAD of Min/Max/Factors (the fixed route). |
+| `Min` | `integer` | `null` | Lower bound of the factor-resolved iteration count (the ranged route). |
+| `Max` | `integer` | `null` | Upper bound of the factor-resolved iteration count (the ranged route). |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor terms summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max). |
 
 <a id="field-actionasset-work-percyclecontributions-item"></a>
 #### ActionAsset.Work.PerCycleContributions[]
@@ -264,6 +277,9 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Enabled` | `boolean` | `null` | Whether unattended settling applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's Unattended group with settling switched off. |
 | `MaxCycles` | `integer` | `null` | One ceiling, both ends: the most cycles a single unattended settle may commit, and the most accrued cycles a single gather pays out. Reader-defaults to 24; time and accrual beyond it are forfeited, never banked. |
 | `CatchUpMaxMs` | `long` | `null` | The most elapsed world game time one settle may consume, in milliseconds. Reader-defaults to 86400000 (24 hours); elapsed time beyond it is forfeited. |
+| `Requires` | [Requires](#type-requires) | `null` | A gate asked of the LOADER as each load is placed: once a loader it passes for places material, the pile is marked to keep working while nobody is there, and the mark stays with the pile until it is emptied, so a loader who later loses what the gate asks, or another player topping the pile up, never stops it. A pile only ever loaded by players the gate refuses is worked attended only. Absent = every pile works unattended. |
+| `MaxQuantity` | [FactorFormula](#type-factorformula) | `null` | How much input one load hands to unattended work, counted in input units: Base plus its weighted Factors, read of the LOADER as each load is placed, held in Clamp and rounded. Each load sets the allowance afresh, settling spends it, and once it is spent the pile waits for its next load (or works attended). The pile itself may hold more: what is over the allowance stays for the next load or a worker. Absent = the whole pile. |
+| `GatherMaxCycles` | [FactorFormula](#type-factorformula) | `null` | The most accrued cycles one gather pays out, read of the GATHERER: Base plus its weighted Factors, held in Clamp and rounded, never below one. MaxCycles still caps each settle; this replaces it at the gather end only, so whoever gathers can be paid for more (or fewer) of the cycles the pile worked. Absent = MaxCycles. |
 
 <a id="field-actionasset-contributionscale-floors-item"></a>
 #### ActionAsset.ContributionScale.Floors[]
@@ -271,7 +287,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
-| `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
 
 <a id="field-actionasset-pace-ladder"></a>
 #### ActionAsset.Pace.Ladder
@@ -317,6 +333,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Swing` | [Swing](#field-actionasset-worker-animation-swing) | `null` | The optional per-swing CADENCE layer (how often the work animation re-fires); null = no swing layer. What a swing sounds and looks like is the Moments 'swing' entry, not this group. |
 | `ActionClip` | `string` | `null` | The Action-slot clip id for a SEAT-MODE swing (plays against the held item's own ItemPlayerAnimations set). Null/blank falls to the 'Chop' default. |
 
+<a id="field-actionasset-tool-durability-ladder"></a>
+##### ActionAsset.Tool.Durability.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-actionasset-tool-durability-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
 <a id="field-actionasset-recipe-conversions-item-doneness"></a>
 ##### ActionAsset.Recipe.Conversions[].Doneness
 
@@ -351,6 +375,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Share` | `double` | `null` | The fraction of each exact-item line of the piece's own crafting recipe given back, in (0, 1]: each line becomes floor(Quantity x Share / OutputQuantity), OutputQuantity being how many pieces the recipe makes per craft (a batch recipe pays per piece); a line that rounds to nothing is dropped, and a recipe with no line left does not take this route. |
+| `PreferWhen` | [Requires](#type-requires) | `null` | A gate asked of the worker as the piece is unmade: when it PASSES this route is tried BEFORE the authored and derived rows, so the piece gives back its share even where a row covers it; when it fails, cannot be answered or nobody is working (an unattended settle) the route keeps its place after the rows. A preferred route that does not apply to the piece (no recipe, every line rounding to nothing) falls back to the usual order. Absent = never preferred. |
+| `Ladder` | [ContributionScale](#field-actionasset-recipe-fallback-craftingshare-ladder) | `null` | A ladder read of the worker (Factors summed, the highest reached Floor's Scale) that MULTIPLIES Share whenever this route runs, held at 1: a larger or smaller share for whoever the ladder names. No floor reached, or nobody working, = Share as authored. |
 
 <a id="field-actionasset-recipe-fallback-essenceonly"></a>
 ##### ActionAsset.Recipe.Fallback.EssenceOnly
@@ -358,6 +384,15 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Enabled` | `boolean` | `null` | Whether the essence-only route applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's group with the route switched off. |
+| `PreferWhen` | [Requires](#type-requires) | `null` | A gate asked of the worker as the piece is unmade: when it PASSES this route is tried BEFORE the authored and derived rows (after a preferred CraftingShare), so the piece gives back nothing of its own and the Bonus rolls are its whole payout; when it fails, cannot be answered or nobody is working the route keeps its place as the last resort. Absent = never preferred. |
+
+<a id="field-actionasset-recipe-yield-ladder"></a>
+##### ActionAsset.Recipe.Yield.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-actionasset-recipe-yield-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
 
 <a id="field-actionasset-pace-ladder-floors-item"></a>
 ##### ActionAsset.Pace.Ladder.Floors[]
@@ -365,7 +400,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
-| `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
 
 <a id="field-actionasset-worker-hold-mount"></a>
 ##### ActionAsset.Worker.Hold.Mount
@@ -382,6 +417,30 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `IntervalMs` | `long` | `null` | Milliseconds between swings while working; a non-looping EmoteId needs this authored or the work animation never re-fires. Each swing also fires the Moments 'swing' and 'impact' entries. |
 
+<a id="field-actionasset-tool-durability-ladder-floors-item"></a>
+###### ActionAsset.Tool.Durability.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
+
+<a id="field-actionasset-recipe-fallback-craftingshare-ladder"></a>
+###### ActionAsset.Recipe.Fallback.CraftingShare.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-actionasset-recipe-fallback-craftingshare-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
+<a id="field-actionasset-recipe-yield-ladder-floors-item"></a>
+###### ActionAsset.Recipe.Yield.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
+
 <a id="field-actionasset-worker-hold-mount-entity"></a>
 ###### ActionAsset.Worker.Hold.Mount.Entity
 
@@ -390,6 +449,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Offset` | [Vec3](#field-actionasset-worker-hold-mount-entity-offset) | `null` | The mount attachment offset from the anchor entity, in blocks (X right, Y up, Z forward). |
 | `DismountOnMove` | `boolean` | `null` | Whether a heartbeat walk-off check dismounts the player (no native auto-dismount for this route). Reader-defaults to true; false = hard-lock until crouch/re-press. |
 | `VisibleAnchorItemId` | `string` | `null` | Diagnostic/authoring aid: an item id the invisible anchor renders as a dropped-item-style prop, so its position is visible in-game. Null = no visual (the shipped default). |
+
+<a id="field-actionasset-recipe-fallback-craftingshare-ladder-floors-item"></a>
+###### ActionAsset.Recipe.Fallback.CraftingShare.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
 
 <a id="field-actionasset-worker-hold-mount-entity-offset"></a>
 ###### ActionAsset.Worker.Hold.Mount.Entity.Offset
@@ -454,6 +521,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Fallback` | [Fallback](#field-actiondef-recipe-fallback) | `null` | What a placed piece that NO authored or derived row covers falls back to: a share of its own crafting recipe, then consumption with no conversion output (the action's Bonus rolls are its payout). Custody-routed only. Null = an uncovered piece is refused. |
 | `Yield` | [Yield](#field-actiondef-recipe-yield) | `null` | Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived): Base replaces the primary (first) output's quantity only, Scale/Min/Max apply to every output. Null = each conversion's own authored quantities, unchanged. |
 | `Doneness` | [Doneness](#field-actiondef-recipe-doneness) | `null` | The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window. |
+| `Batch` | [Repeat](#field-actiondef-recipe-batch) | `null` | How many conversions a cycle runs at once, in the Repeat shape (a fixed Times, or Min plus the weighted Factors held in Max), read of the worker each cycle: the classic loop's batch, and the default of every Convert beat that authors no Batch of its own. Every conversion of a batch is the one matched row, so each takes its own input of the very item or family that row converts and never another material; a cycle runs as many as the pile or the bag can feed and the outputs fit, at least one. The Bonus still rolls once a cycle. An unattended settle runs the authored count (Times, else Min). Absent = one. |
 
 <a id="field-actiondef-work"></a>
 ### ActionDef.Work
@@ -520,6 +588,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `PerSwing` | `integer` | `null` | Durability points drained from the held tool per swing cue. Reader-defaults to 0 (off). |
 | `PerCycle` | `integer` | `null` | Durability points drained from the held tool per completed cycle. Reader-defaults to 0 (off). |
 | `MinStartPercent` | `double` | `null` | Minimum held-tool durability (0-100) required to START working; null = no wear gate. The name states the semantics: it is checked at engage only, so a session already running is never cut short by wear. |
+| `Ladder` | [ContributionScale](#field-actiondef-tool-durability-ladder) | `null` | A ladder read of the worker (Factors summed, the highest reached Floor's Scale) that MULTIPLIES both drains: read at engage and again every completed cycle, so a worker it names wears the tool faster or slower. A fractional drain pays its whole part every time and the fraction as the chance of one point more (1.5 is one point, and a second half the time). No floor reached = the authored drains. |
 
 <a id="field-actiondef-recipe-conversions-item"></a>
 #### ActionDef.Recipe.Conversions[]
@@ -562,6 +631,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Scale` | `double` | `null` | Multiplier on the base quantity, floored to a whole item; reader-defaults to 1.0 (no scaling). |
 | `Min` | `integer` | `null` | Lower clamp on the final quantity; null = the engine's own 1-item floor. |
 | `Max` | `integer` | `null` | Upper clamp on the final quantity; null = uncapped. |
+| `Ladder` | [ContributionScale](#field-actiondef-recipe-yield-ladder) | `null` | A ladder read of the worker each cycle (Factors summed, the highest reached Floor's Scale) that MULTIPLIES Scale, before the floor to a whole item and the clamps: more or less of a cycle's output for whoever the ladder names, the one-item floor kept. No floor reached, or an unattended settle, = Scale as authored. |
 
 <a id="field-actiondef-recipe-doneness"></a>
 #### ActionDef.Recipe.Doneness
@@ -570,6 +640,16 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `ReadyMs` | `long` | `null` | How long, in world GAME-TIME milliseconds, a produced batch sits Ready in its custody pile before degrading. Game time stands still while the server is down, so an outage never burns anything. Omit for no window (output waits indefinitely). |
 | `Overdone` | array of [Ingredient](#type-ingredient) | `null` | What the windowed pile collapses to once the window expires: exact-ItemId entries, each Quantity scaled by the number of batches produced into the window. Omit to make the window purely presentational (the Ready look and moment, nothing degrades). |
+
+<a id="field-actiondef-recipe-batch"></a>
+#### ActionDef.Recipe.Batch
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Times` | `integer` | `null` | A fixed iteration count. Authored INSTEAD of Min/Max/Factors (the fixed route). |
+| `Min` | `integer` | `null` | Lower bound of the factor-resolved iteration count (the ranged route). |
+| `Max` | `integer` | `null` | Upper bound of the factor-resolved iteration count (the ranged route). |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor terms summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max). |
 
 <a id="field-actiondef-work-percyclecontributions-item"></a>
 #### ActionDef.Work.PerCycleContributions[]
@@ -597,6 +677,9 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Enabled` | `boolean` | `null` | Whether unattended settling applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's Unattended group with settling switched off. |
 | `MaxCycles` | `integer` | `null` | One ceiling, both ends: the most cycles a single unattended settle may commit, and the most accrued cycles a single gather pays out. Reader-defaults to 24; time and accrual beyond it are forfeited, never banked. |
 | `CatchUpMaxMs` | `long` | `null` | The most elapsed world game time one settle may consume, in milliseconds. Reader-defaults to 86400000 (24 hours); elapsed time beyond it is forfeited. |
+| `Requires` | [Requires](#type-requires) | `null` | A gate asked of the LOADER as each load is placed: once a loader it passes for places material, the pile is marked to keep working while nobody is there, and the mark stays with the pile until it is emptied, so a loader who later loses what the gate asks, or another player topping the pile up, never stops it. A pile only ever loaded by players the gate refuses is worked attended only. Absent = every pile works unattended. |
+| `MaxQuantity` | [FactorFormula](#type-factorformula) | `null` | How much input one load hands to unattended work, counted in input units: Base plus its weighted Factors, read of the LOADER as each load is placed, held in Clamp and rounded. Each load sets the allowance afresh, settling spends it, and once it is spent the pile waits for its next load (or works attended). The pile itself may hold more: what is over the allowance stays for the next load or a worker. Absent = the whole pile. |
+| `GatherMaxCycles` | [FactorFormula](#type-factorformula) | `null` | The most accrued cycles one gather pays out, read of the GATHERER: Base plus its weighted Factors, held in Clamp and rounded, never below one. MaxCycles still caps each settle; this replaces it at the gather end only, so whoever gathers can be paid for more (or fewer) of the cycles the pile worked. Absent = MaxCycles. |
 
 <a id="field-actiondef-contributionscale-floors-item"></a>
 #### ActionDef.ContributionScale.Floors[]
@@ -604,7 +687,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
-| `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
 
 <a id="field-actiondef-pace-ladder"></a>
 #### ActionDef.Pace.Ladder
@@ -650,6 +733,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Swing` | [Swing](#field-actiondef-worker-animation-swing) | `null` | The optional per-swing CADENCE layer (how often the work animation re-fires); null = no swing layer. What a swing sounds and looks like is the Moments 'swing' entry, not this group. |
 | `ActionClip` | `string` | `null` | The Action-slot clip id for a SEAT-MODE swing (plays against the held item's own ItemPlayerAnimations set). Null/blank falls to the 'Chop' default. |
 
+<a id="field-actiondef-tool-durability-ladder"></a>
+##### ActionDef.Tool.Durability.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-actiondef-tool-durability-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
 <a id="field-actiondef-recipe-conversions-item-doneness"></a>
 ##### ActionDef.Recipe.Conversions[].Doneness
 
@@ -684,6 +775,8 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Share` | `double` | `null` | The fraction of each exact-item line of the piece's own crafting recipe given back, in (0, 1]: each line becomes floor(Quantity x Share / OutputQuantity), OutputQuantity being how many pieces the recipe makes per craft (a batch recipe pays per piece); a line that rounds to nothing is dropped, and a recipe with no line left does not take this route. |
+| `PreferWhen` | [Requires](#type-requires) | `null` | A gate asked of the worker as the piece is unmade: when it PASSES this route is tried BEFORE the authored and derived rows, so the piece gives back its share even where a row covers it; when it fails, cannot be answered or nobody is working (an unattended settle) the route keeps its place after the rows. A preferred route that does not apply to the piece (no recipe, every line rounding to nothing) falls back to the usual order. Absent = never preferred. |
+| `Ladder` | [ContributionScale](#field-actiondef-recipe-fallback-craftingshare-ladder) | `null` | A ladder read of the worker (Factors summed, the highest reached Floor's Scale) that MULTIPLIES Share whenever this route runs, held at 1: a larger or smaller share for whoever the ladder names. No floor reached, or nobody working, = Share as authored. |
 
 <a id="field-actiondef-recipe-fallback-essenceonly"></a>
 ##### ActionDef.Recipe.Fallback.EssenceOnly
@@ -691,6 +784,15 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Enabled` | `boolean` | `null` | Whether the essence-only route applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's group with the route switched off. |
+| `PreferWhen` | [Requires](#type-requires) | `null` | A gate asked of the worker as the piece is unmade: when it PASSES this route is tried BEFORE the authored and derived rows (after a preferred CraftingShare), so the piece gives back nothing of its own and the Bonus rolls are its whole payout; when it fails, cannot be answered or nobody is working the route keeps its place as the last resort. Absent = never preferred. |
+
+<a id="field-actiondef-recipe-yield-ladder"></a>
+##### ActionDef.Recipe.Yield.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-actiondef-recipe-yield-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
 
 <a id="field-actiondef-pace-ladder-floors-item"></a>
 ##### ActionDef.Pace.Ladder.Floors[]
@@ -698,7 +800,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
-| `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
 
 <a id="field-actiondef-worker-hold-mount"></a>
 ##### ActionDef.Worker.Hold.Mount
@@ -715,6 +817,30 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `IntervalMs` | `long` | `null` | Milliseconds between swings while working; a non-looping EmoteId needs this authored or the work animation never re-fires. Each swing also fires the Moments 'swing' and 'impact' entries. |
 
+<a id="field-actiondef-tool-durability-ladder-floors-item"></a>
+###### ActionDef.Tool.Durability.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
+
+<a id="field-actiondef-recipe-fallback-craftingshare-ladder"></a>
+###### ActionDef.Recipe.Fallback.CraftingShare.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-actiondef-recipe-fallback-craftingshare-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
+<a id="field-actiondef-recipe-yield-ladder-floors-item"></a>
+###### ActionDef.Recipe.Yield.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
+
 <a id="field-actiondef-worker-hold-mount-entity"></a>
 ###### ActionDef.Worker.Hold.Mount.Entity
 
@@ -723,6 +849,14 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Offset` | [Vec3](#field-actiondef-worker-hold-mount-entity-offset) | `null` | The mount attachment offset from the anchor entity, in blocks (X right, Y up, Z forward). |
 | `DismountOnMove` | `boolean` | `null` | Whether a heartbeat walk-off check dismounts the player (no native auto-dismount for this route). Reader-defaults to true; false = hard-lock until crouch/re-press. |
 | `VisibleAnchorItemId` | `string` | `null` | Diagnostic/authoring aid: an item id the invisible anchor renders as a dropped-item-style prop, so its position is visible in-game. Null = no visual (the shipped default). |
+
+<a id="field-actiondef-recipe-fallback-craftingshare-ladder-floors-item"></a>
+###### ActionDef.Recipe.Fallback.CraftingShare.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
 
 <a id="field-actiondef-worker-hold-mount-entity-offset"></a>
 ###### ActionDef.Worker.Hold.Mount.Entity.Offset
@@ -741,6 +875,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Id` | `string` | `null` | Unique step id within one action's Steps array; required when another step or extension insertion anchors on it. |
 | `Conditions` | array of [Condition](#type-condition) | `null` | Gate re-checked at each iteration entry; a failing check runs OnConditionFail. |
 | `OnConditionFail` | [OnConditionFail](#field-stationstep-onconditionfail) | `null` | What a failing Conditions check does: Skip (no-op continue) or Fail (default); Goto jumps to a step Id. |
+| `SkipWhen` | [Requires](#type-requires) | `null` | A gate asked of the worker as this beat begins: when it PASSES the whole beat is skipped (no phase, no cue, no hold) and the program moves on to the next beat; when it fails or cannot be answered the beat runs as authored, so a beat is only ever skipped for a worker the gate names. The opposite of Conditions, which runs a beat only while they pass. An extension sets it on a beat it does not own through StepOverlays, by the beat's Id. |
 | `At` | `string` | `null` | The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'Self'. Ids are matched case-insensitively. |
 | `Repeat` | [Repeat](#field-stationstep-repeat) | `null` | Per-step iteration count: a fixed Times, or Min/Max/Factors resolved once at step entry. |
 | `Duration` | [Duration](#field-stationstep-duration) | `null` | A post-phase hold in ms per iteration; prop/presentation persist across the hold. |
@@ -825,6 +960,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Enabled` | `boolean` | `null` | Whether this beat runs the recipe. Reader-defaults to TRUE when the group is authored; author false to inherit a Parent's step with its conversion switched off. |
+| `Batch` | [Repeat](#field-stationstep-convert-batch) | `null` | How many conversions this beat runs at once, in the Repeat shape (a fixed Times, or Min plus the weighted Factors held in Max), read of the worker as the beat runs. Every conversion of a batch is the one matched row, so each takes its own input of the very item or family that row converts and never another material; a batch runs as many as the pile or the bag can feed and the outputs fit, at least one. The action's Bonus still rolls once. Absent = the recipe's own Batch, else one. |
 
 <a id="field-stationstep-stamp"></a>
 ### StationStep.Stamp
@@ -854,6 +990,16 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Source` | `string` | `null` | The held-prop discriminator: 'MirrorHeld' (default, copies the player's live hotbar item), 'ItemId' (a forced prop), or 'None' (empty hands). |
 | `ItemId` | `string` | `null` | The forced item id the puppet holds when Source is 'ItemId'; ignored by the other arms. |
 | `Slot` | `string` | `null` | Which hand the prop occupies: 'Hotbar' (main, default) or 'Utility' (off-hand). |
+
+<a id="field-stationstep-convert-batch"></a>
+#### StationStep.Convert.Batch
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Times` | `integer` | `null` | A fixed iteration count. Authored INSTEAD of Min/Max/Factors (the fixed route). |
+| `Min` | `integer` | `null` | Lower bound of the factor-resolved iteration count (the ranged route). |
+| `Max` | `integer` | `null` | Upper bound of the factor-resolved iteration count (the ranged route). |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor terms summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max). |
 
 <a id="field-stationstep-stamp-durability"></a>
 #### StationStep.Stamp.Durability
@@ -1657,6 +1803,10 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Custody` | [Custody](#type-custody) | `null` | Custody overlay (Action target), merged PER LEAF at every depth: an overlay carrying only Display never clears the base's States, MaxQuantity or Input. |
 | `Rolls` | array of [Roll](#type-roll) | `null` | Appended Rolls (Lootable target). |
 | `Entries` | array of [StatRollEntry](#type-statrollentry) | `null` | Appended StatRollEntry entries (RollPool target). |
+| `Recipe` | [Recipe](#field-extensionasset-recipe) | `null` | Recipe overlay (Action target), merged PER LEAF: Batch, every Yield leaf, and the Fallback routes' CraftingShare and EssenceOnly leaves. An authored leaf wins and an omitted one keeps the action's own. The recipe's rows stay the action's: append rows through Conversions, and Conversions, FromCrafting, Doneness and Fallback.Input authored here are ignored (the validator says so). |
+| `Tool` | [Tool](#field-extensionasset-tool) | `null` | Tool overlay (Action target), merged PER LEAF over Durability alone (its drains, its start gate and its Ladder): which tool the action takes stays the action's, so Tags, Gather and Ids authored here are ignored (the validator says so). |
+| `Work` | [Work](#field-extensionasset-work) | `null` | Work overlay (Action target), merged PER LEAF over Unattended alone, so a pack can let an action it does not own keep working while nobody is there, or retune how it does. The loop's own cadence stays the action's (scale it with Pace), so every other Work leaf authored here is ignored (the validator says so). |
+| `StepOverlays` | map of [StepOverlay](#field-extensionasset-stepoverlays-item) | `null` | Per-beat overlays (Action target), keyed by a step Id of the program the action runs (its own beats and every inserted one, matched case-insensitively): each entry's authored leaves replace that beat's own. A key naming no beat is ignored (EXTENSION_ANCHOR_MISSING). |
 
 <a id="field-extensionasset-target"></a>
 ### ExtensionAsset.Target
@@ -1733,13 +1883,56 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Station` | `string` | `null` | The target station id this anchor resolves against (a type filter). |
 | `MaxRadiusMeters` | `double` | `null` | The horizontal search radius for the anchor station, in meters (one block = one meter); reader-defaults to 12. |
 
+<a id="field-extensionasset-recipe"></a>
+### ExtensionAsset.Recipe
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Conversions` | array of [Conversion](#field-extensionasset-recipe-conversions-item) | `null` | Hand-authored input-to-output conversions, evaluated FIRST (before any FromCrafting-derived ones). |
+| `FromCrafting` | [FromCrafting](#field-extensionasset-recipe-fromcrafting) | `null` | Derive additional Conversions from the engine's own native recipes, standalone recipe files and item-authored ones alike, each row carrying that recipe's full outputs at native quantities; null = no derivation. |
+| `Fallback` | [Fallback](#field-extensionasset-recipe-fallback) | `null` | What a placed piece that NO authored or derived row covers falls back to: a share of its own crafting recipe, then consumption with no conversion output (the action's Bonus rolls are its payout). Custody-routed only. Null = an uncovered piece is refused. |
+| `Yield` | [Yield](#field-extensionasset-recipe-yield) | `null` | Per-cycle output-quantity transform applied to whichever of THIS recipe's conversions runs (authored or derived): Base replaces the primary (first) output's quantity only, Scale/Min/Max apply to every output. Null = each conversion's own authored quantities, unchanged. |
+| `Doneness` | [Doneness](#field-extensionasset-recipe-doneness) | `null` | The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window. |
+| `Batch` | [Repeat](#field-extensionasset-recipe-batch) | `null` | How many conversions a cycle runs at once, in the Repeat shape (a fixed Times, or Min plus the weighted Factors held in Max), read of the worker each cycle: the classic loop's batch, and the default of every Convert beat that authors no Batch of its own. Every conversion of a batch is the one matched row, so each takes its own input of the very item or family that row converts and never another material; a cycle runs as many as the pile or the bag can feed and the outputs fit, at least one. The Bonus still rolls once a cycle. An unattended settle runs the authored count (Times, else Min). Absent = one. |
+
+<a id="field-extensionasset-tool"></a>
+### ExtensionAsset.Tool
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Tags` | map of array of `string` | `null` | Native tag family match (e.g. {"Family":["Dagger"]}): matches ANY-of the values per key against the held Item's raw tags. |
+| `Gather` | [Gather](#field-extensionasset-tool-gather) | `null` | The functional gather-power match route: a native GatherType plus a minimum power floor. |
+| `Ids` | array of `string` | `null` | The FALLBACK exact/underscore-segment item id match route, for modded tools with no matching tag or gather spec. |
+| `Durability` | [Durability](#field-extensionasset-tool-durability) | `null` | Opt-in held-tool wear: the per-swing and/or per-cycle drain plus the minimum-durability start gate; null = no wear handling at all. |
+
+<a id="field-extensionasset-work"></a>
+### ExtensionAsset.Work
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `CycleMs` | `long` | `null` | Milliseconds per work cycle (one Convert transaction / one implicit-program run). Reader-defaults to 5000. |
+| `MaxDurationMs` | `long` | `null` | The hard session-duration cap in milliseconds; the heartbeat stops the session once elapsed. Reader-defaults to 600000 (10 minutes). |
+| `MaxMoveMeters` | `double` | `null` | The walk-off EXIT trigger radius in meters from the engage position (not an anti-idle guard). Reader-defaults to 1.5. |
+| `PerCycleContributions` | array of [Contribution](#field-extensionasset-work-percyclecontributions-item) | `null` | Amounts posted on every completed cycle, forwarded verbatim on the cycle-completed event; the engine never interprets a channel itself. On an IDLE cycle each Amount is pre-scaled by Work.Idle.Fraction. Contrast Roll.Grants.Contributions, which is one-shot and never scaled. |
+| `Idle` | [Idle](#field-extensionasset-work-idle) | `null` | Opt-in no-material idle practice mode: authoring this group at all turns it on; absent = off (a NO_INPUTS start is denied). |
+| `Looping` | `boolean` | `null` | Does the program (implicit or authored Steps) re-run every CycleMs? Default true (the classic loop); false completes the whole session after one run (the ritual shape). |
+| `Queue` | `boolean` | `null` | Run the authored Steps program once per FILLED custody socket, in authored socket order, each run working that one socket's piece (it is the piece the factors read and the piece the Convert phase consumes) until every socket is empty. Default false. Meant for a Looping false ritual over several single-item sockets; a one-socket station is unaffected. |
+| `Unattended` | [Unattended](#field-extensionasset-work-unattended) | `null` | Opt-in unattended processing over placed custody: authoring this group at all turns it on (absent = attended-only). While nobody works the station, its recipe conversions keep settling against the placed piles on world game time - the transform happens immediately, and the loot rolls and contribution posts it would have earned accrue on the output pile and pay out to whoever gathers it. |
+
+<a id="field-extensionasset-stepoverlays-item"></a>
+### ExtensionAsset.StepOverlays[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `SkipWhen` | [Requires](#type-requires) | `null` | Replaces the beat's own SkipWhen: a gate asked of the worker as the beat begins, the beat skipped whole when it passes and run as authored when it fails or cannot be answered. |
+
 <a id="field-extensionasset-contributionscale-floors-item"></a>
 #### ExtensionAsset.ContributionScale.Floors[]
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
-| `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
 
 <a id="field-extensionasset-pace-ladder"></a>
 #### ExtensionAsset.Pace.Ladder
@@ -1775,13 +1968,215 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `AtStart` | `boolean` | `null` | Insert at the START of the program (exactly one of After \| Before \| AtStart \| AtEnd). |
 | `AtEnd` | `boolean` | `null` | Insert at the END of the program (exactly one of After \| Before \| AtStart \| AtEnd; the degrade default). |
 
+<a id="field-extensionasset-recipe-conversions-item"></a>
+#### ExtensionAsset.Recipe.Conversions[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Input` | array of [Ingredient](#type-ingredient) | `null` | The conversion inputs (native CraftingRecipe.Input shape): each an Ingredient, at most one of ItemId \| ResourceTypeId \| Tags (none = match any placed material). Every entry must be available for the cycle to run. |
+| `Output` | array of [Ingredient](#type-ingredient) | `null` | The conversion outputs (native CraftingRecipe.Output shape): each an exact-ItemId Ingredient. Every entry needs inventory room for the cycle to run. |
+| `DurationMs` | `long` | `null` | Optional per-conversion pace override in ms; highest precedence (> NativeTime > Work.CycleMs). Null = none. |
+| `Category` | `string` | `null` | Optional source-category tag the multi-output picker groups by; the deriver stamps it from the matched native recipe category (else bench id). Null = untagged. |
+| `Tier` | `integer` | `null` | Selection tier: lower runs first, authored order breaks ties; defaults to 0. Derived rows run at tier 1, so an unauthored hand-written row already outranks them. |
+| `IsExactSet` | `boolean` | `null` | When true, the row matches only while the pile(s) its inputs draw from hold nothing beyond those inputs (per drawn socket; other sockets never block). Defaults to false. Author exact-set rows before looser rows at the same tier. |
+| `Doneness` | [Doneness](#field-extensionasset-recipe-conversions-item-doneness) | `null` | This row's own ready window; each leaf falls back to the Recipe-level Doneness default. Null = the recipe default whole. |
+
+<a id="field-extensionasset-recipe-fromcrafting"></a>
+#### ExtensionAsset.Recipe.FromCrafting
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Categories` | array of `string` | `null` | Native recipe categories to derive Conversions from (e.g. 'WoodPlanks'); a pack-added category in the set just works. |
+| `Benches` | array of `string` | `null` | Native BenchRequirement bench ids this station's recipes scope to (id-ref-only string match). |
+| `Types` | array of `string` | `null` | The recipe kinds to derive: 'Crafting' and/or 'Processing'; absent = both. |
+| `NativeTime` | [NativeTime](#field-extensionasset-recipe-fromcrafting-nativetime) | `null` | Linear transform (Scale*TimeSeconds + OffsetMs) over each derived recipe's native time; defaults stay slower than vanilla. |
+
+<a id="field-extensionasset-recipe-fallback"></a>
+#### ExtensionAsset.Recipe.Fallback
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Input` | [ActionInput](#field-extensionasset-recipe-fallback-input) | `null` | The gear filter both fallback routes are scoped to (ItemId \| ResourceTypeId \| Tags \| Function \| Quality, match = ANY, minus its Except hole). Absent = any placed piece the metadata guard accepts. |
+| `CraftingShare` | [CraftingShare](#field-extensionasset-recipe-fallback-craftingshare) | `null` | Give back a share of the piece's OWN crafting recipe inputs (tier 2, tried before EssenceOnly). Absent = this route is off. |
+| `EssenceOnly` | [EssenceOnly](#field-extensionasset-recipe-fallback-essenceonly) | `null` | Consume the piece with NO conversion output (tier 3, the last resort); the action's Bonus rolls are its whole payout. Authoring the group turns it on. Absent = this route is off. |
+
+<a id="field-extensionasset-recipe-yield"></a>
+#### ExtensionAsset.Recipe.Yield
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Base` | `integer` | `null` | Flat output quantity per conversion BEFORE Scale; null = use each conversion's own authored output quantity. |
+| `Scale` | `double` | `null` | Multiplier on the base quantity, floored to a whole item; reader-defaults to 1.0 (no scaling). |
+| `Min` | `integer` | `null` | Lower clamp on the final quantity; null = the engine's own 1-item floor. |
+| `Max` | `integer` | `null` | Upper clamp on the final quantity; null = uncapped. |
+| `Ladder` | [ContributionScale](#field-extensionasset-recipe-yield-ladder) | `null` | A ladder read of the worker each cycle (Factors summed, the highest reached Floor's Scale) that MULTIPLIES Scale, before the floor to a whole item and the clamps: more or less of a cycle's output for whoever the ladder names, the one-item floor kept. No floor reached, or an unattended settle, = Scale as authored. |
+
+<a id="field-extensionasset-recipe-doneness"></a>
+#### ExtensionAsset.Recipe.Doneness
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ReadyMs` | `long` | `null` | How long, in world GAME-TIME milliseconds, a produced batch sits Ready in its custody pile before degrading. Game time stands still while the server is down, so an outage never burns anything. Omit for no window (output waits indefinitely). |
+| `Overdone` | array of [Ingredient](#type-ingredient) | `null` | What the windowed pile collapses to once the window expires: exact-ItemId entries, each Quantity scaled by the number of batches produced into the window. Omit to make the window purely presentational (the Ready look and moment, nothing degrades). |
+
+<a id="field-extensionasset-recipe-batch"></a>
+#### ExtensionAsset.Recipe.Batch
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Times` | `integer` | `null` | A fixed iteration count. Authored INSTEAD of Min/Max/Factors (the fixed route). |
+| `Min` | `integer` | `null` | Lower bound of the factor-resolved iteration count (the ranged route). |
+| `Max` | `integer` | `null` | Upper bound of the factor-resolved iteration count (the ranged route). |
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor terms summed into the ranged count: clamp(round(Min + sum(resolve*Weight)), Min, Max). |
+
+<a id="field-extensionasset-tool-gather"></a>
+#### ExtensionAsset.Tool.Gather
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `GatherType` | `string` | `null` | The native GatherType id the held tool's ItemToolSpec must report. |
+| `MinPower` | `double` | `null` | The minimum ItemToolSpec power the held tool must report for this GatherType. |
+
+<a id="field-extensionasset-tool-durability"></a>
+#### ExtensionAsset.Tool.Durability
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `PerSwing` | `integer` | `null` | Durability points drained from the held tool per swing cue. Reader-defaults to 0 (off). |
+| `PerCycle` | `integer` | `null` | Durability points drained from the held tool per completed cycle. Reader-defaults to 0 (off). |
+| `MinStartPercent` | `double` | `null` | Minimum held-tool durability (0-100) required to START working; null = no wear gate. The name states the semantics: it is checked at engage only, so a session already running is never cut short by wear. |
+| `Ladder` | [ContributionScale](#field-extensionasset-tool-durability-ladder) | `null` | A ladder read of the worker (Factors summed, the highest reached Floor's Scale) that MULTIPLIES both drains: read at engage and again every completed cycle, so a worker it names wears the tool faster or slower. A fractional drain pays its whole part every time and the fraction as the chance of one point more (1.5 is one point, and a second half the time). No floor reached = the authored drains. |
+
+<a id="field-extensionasset-work-percyclecontributions-item"></a>
+#### ExtensionAsset.Work.PerCycleContributions[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Channel` | `string` | `null` | The namespaced channel id this contribution posts to (e.g. 'yourmod:crop_quality'), opaque to this engine - it is never resolved here, only forwarded. Pick it from the rpgstations:channels dropdown, or declare your own via ContributionChannelRegistry. |
+| `Param` | `string` | `null` | Optional channel-interpreted argument, opaque to this engine - whatever the channel's owner documents (commonly the specific thing being credited). |
+| `Amount` | `double` | `null` | The amount posted. Scaling is decided by WHERE this entry is authored - see the owning group's documentation. |
+
+<a id="field-extensionasset-work-idle"></a>
+#### ExtensionAsset.Work.Idle
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Enabled` | `boolean` | `null` | Whether no-material idle practice applies when no conversion is runnable. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's Idle group with practice switched off. |
+| `CycleMs` | `long` | `null` | Milliseconds per idle cycle. Reader-defaults to 3x the effective Work.CycleMs, floored at 2x it. |
+| `Fraction` | `double` | `null` | The fraction of a normal cycle's Work.PerCycleContributions amounts an idle cycle posts (no conversion, no loot). Reader-defaults to 0.1, clamped to [0,1]. |
+
+<a id="field-extensionasset-work-unattended"></a>
+#### ExtensionAsset.Work.Unattended
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Enabled` | `boolean` | `null` | Whether unattended settling applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's Unattended group with settling switched off. |
+| `MaxCycles` | `integer` | `null` | One ceiling, both ends: the most cycles a single unattended settle may commit, and the most accrued cycles a single gather pays out. Reader-defaults to 24; time and accrual beyond it are forfeited, never banked. |
+| `CatchUpMaxMs` | `long` | `null` | The most elapsed world game time one settle may consume, in milliseconds. Reader-defaults to 86400000 (24 hours); elapsed time beyond it is forfeited. |
+| `Requires` | [Requires](#type-requires) | `null` | A gate asked of the LOADER as each load is placed: once a loader it passes for places material, the pile is marked to keep working while nobody is there, and the mark stays with the pile until it is emptied, so a loader who later loses what the gate asks, or another player topping the pile up, never stops it. A pile only ever loaded by players the gate refuses is worked attended only. Absent = every pile works unattended. |
+| `MaxQuantity` | [FactorFormula](#type-factorformula) | `null` | How much input one load hands to unattended work, counted in input units: Base plus its weighted Factors, read of the LOADER as each load is placed, held in Clamp and rounded. Each load sets the allowance afresh, settling spends it, and once it is spent the pile waits for its next load (or works attended). The pile itself may hold more: what is over the allowance stays for the next load or a worker. Absent = the whole pile. |
+| `GatherMaxCycles` | [FactorFormula](#type-factorformula) | `null` | The most accrued cycles one gather pays out, read of the GATHERER: Base plus its weighted Factors, held in Clamp and rounded, never below one. MaxCycles still caps each settle; this replaces it at the gather end only, so whoever gathers can be paid for more (or fewer) of the cycles the pile worked. Absent = MaxCycles. |
+
 <a id="field-extensionasset-pace-ladder-floors-item"></a>
 ##### ExtensionAsset.Pace.Ladder.Floors[]
 
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
-| `Scale` | `double` | `null` | The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
+
+<a id="field-extensionasset-recipe-conversions-item-doneness"></a>
+##### ExtensionAsset.Recipe.Conversions[].Doneness
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ReadyMs` | `long` | `null` | How long, in world GAME-TIME milliseconds, a produced batch sits Ready in its custody pile before degrading. Game time stands still while the server is down, so an outage never burns anything. Omit for no window (output waits indefinitely). |
+| `Overdone` | array of [Ingredient](#type-ingredient) | `null` | What the windowed pile collapses to once the window expires: exact-ItemId entries, each Quantity scaled by the number of batches produced into the window. Omit to make the window purely presentational (the Ready look and moment, nothing degrades). |
+
+<a id="field-extensionasset-recipe-fromcrafting-nativetime"></a>
+##### ExtensionAsset.Recipe.FromCrafting.NativeTime
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Scale` | `double` | `null` | Multiplier (m) on the recipe's native time; reader-defaults to 1.0 (stretch, never speed up below vanilla). |
+| `OffsetMs` | `long` | `null` | Additive floor (b) in milliseconds added after scaling; reader-defaults to 2000 so a station is never instant like vanilla. |
+
+<a id="field-extensionasset-recipe-fallback-input"></a>
+##### ExtensionAsset.Recipe.Fallback.Input
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `ItemId` | `string` | `null` | Match an exact held item id (one of several optional routes; match = ANY route satisfied). |
+| `ResourceTypeId` | `string` | `null` | Match a native resource-type family of the held item. |
+| `Tags` | map of array of `string` | `null` | Match the held item's native tags (tag family -> accepted values). |
+| `Function` | `string` | `null` | Match the held item's live function: 'Weapon' \| 'Armor' \| 'Tool'. |
+| `Quality` | array of `string` | `null` | Match the quality the held or placed stack carries: native ItemQuality ids (Common, Rare, Developer, or a pack's own tier), any one of them, without regard to case. A stack reads the quality given to it (a stamp can give one), else its item's current quality; a counted pile entry reads its item's; a placed block reads none, so this route never matches a block. |
+| `Except` | array of *(cyclic reference to ActionInput)* | `null` | A material the routes above accept is REFUSED when a nested matcher here (the same ItemId \| ResourceTypeId \| Tags \| Function \| Quality routes, match = ANY) accepts it too. One matcher, or an array of them; an extension's overlay adds its entries beside these. Carves a hole in a broad match without listing every id; absent excludes nothing, and an entry authoring no route matches nothing, so it excludes nothing either. On a Custody.Input or a socket Match with no route of its own, the holes are carved out of what the station derives from its recipe and fallback routes. |
+
+<a id="field-extensionasset-recipe-fallback-craftingshare"></a>
+##### ExtensionAsset.Recipe.Fallback.CraftingShare
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Share` | `double` | `null` | The fraction of each exact-item line of the piece's own crafting recipe given back, in (0, 1]: each line becomes floor(Quantity x Share / OutputQuantity), OutputQuantity being how many pieces the recipe makes per craft (a batch recipe pays per piece); a line that rounds to nothing is dropped, and a recipe with no line left does not take this route. |
+| `PreferWhen` | [Requires](#type-requires) | `null` | A gate asked of the worker as the piece is unmade: when it PASSES this route is tried BEFORE the authored and derived rows, so the piece gives back its share even where a row covers it; when it fails, cannot be answered or nobody is working (an unattended settle) the route keeps its place after the rows. A preferred route that does not apply to the piece (no recipe, every line rounding to nothing) falls back to the usual order. Absent = never preferred. |
+| `Ladder` | [ContributionScale](#field-extensionasset-recipe-fallback-craftingshare-ladder) | `null` | A ladder read of the worker (Factors summed, the highest reached Floor's Scale) that MULTIPLIES Share whenever this route runs, held at 1: a larger or smaller share for whoever the ladder names. No floor reached, or nobody working, = Share as authored. |
+
+<a id="field-extensionasset-recipe-fallback-essenceonly"></a>
+##### ExtensionAsset.Recipe.Fallback.EssenceOnly
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Enabled` | `boolean` | `null` | Whether the essence-only route applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's group with the route switched off. |
+| `PreferWhen` | [Requires](#type-requires) | `null` | A gate asked of the worker as the piece is unmade: when it PASSES this route is tried BEFORE the authored and derived rows (after a preferred CraftingShare), so the piece gives back nothing of its own and the Bonus rolls are its whole payout; when it fails, cannot be answered or nobody is working the route keeps its place as the last resort. Absent = never preferred. |
+
+<a id="field-extensionasset-recipe-yield-ladder"></a>
+##### ExtensionAsset.Recipe.Yield.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-extensionasset-recipe-yield-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
+<a id="field-extensionasset-tool-durability-ladder"></a>
+##### ExtensionAsset.Tool.Durability.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-extensionasset-tool-durability-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
+<a id="field-extensionasset-recipe-fallback-craftingshare-ladder"></a>
+###### ExtensionAsset.Recipe.Fallback.CraftingShare.Ladder
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Factors` | array of [FactorTerm](#type-factorterm) | `null` | Weighted factor references SUMMED to the ladder value before the floor lookup; a single-factor ladder is a one-element array, and an empty one resolves to 0. |
+| `Floors` | array of [Floor](#field-extensionasset-recipe-fallback-craftingshare-ladder-floors-item) | `null` | The multiplier floors; the HIGHEST floor whose Min is reached supplies the multiplier. Empty, or none reached, = the neutral 1.0. |
+
+<a id="field-extensionasset-recipe-yield-ladder-floors-item"></a>
+###### ExtensionAsset.Recipe.Yield.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
+
+<a id="field-extensionasset-tool-durability-ladder-floors-item"></a>
+###### ExtensionAsset.Tool.Durability.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
+
+<a id="field-extensionasset-recipe-fallback-craftingshare-ladder-floors-item"></a>
+###### ExtensionAsset.Recipe.Fallback.CraftingShare.Ladder.Floors[]
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Min` | `double` | `null` | The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier). |
+| `Scale` | `double` | `null` | The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral). |
 
 <a id="type-settingsasset"></a>
 ## SettingsAsset

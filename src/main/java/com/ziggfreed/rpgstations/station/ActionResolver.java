@@ -184,8 +184,9 @@ public final class ActionResolver {
      * targeting this action the merge cores hand back the SAME group objects and the original
      * {@code resolved} is returned untouched.
      *
-     * <p>Four groups layer here rather than at each reader: the three per-leaf overlays
-     * ({@code Puppet}/{@code Custody}/{@code ContributionScale}) and the keyed {@code Anchors} map,
+     * <p>Seven groups layer here rather than at each reader: the per-leaf overlays
+     * ({@code Puppet}/{@code Custody}/{@code ContributionScale}, and the per-worker leaves of
+     * {@code Recipe}/{@code Tool}/{@code Work}) and the keyed {@code Anchors} map,
      * where an extension may declare NEW keys only (the base wins a collision). Anchors are safe to
      * fold at this level precisely because nothing branches on the map being non-empty - it is only
      * ever consulted to resolve a {@code Walk}/{@code At} target - so an added key widens what an
@@ -208,11 +209,15 @@ public final class ActionResolver {
                 exts.applyToActionContributionScale(stationId, targetId, resolved.getContributionScale());
         Map<String, ActionDef.Anchor> anchors =
                 exts.applyToActionAnchors(stationId, targetId, resolved.getAnchors());
+        StationAsset.Recipe recipe = exts.applyToActionRecipe(stationId, targetId, resolved.getRecipe());
+        StationAsset.Tool tool = exts.applyToActionTool(stationId, targetId, resolved.getTool());
+        StationAsset.Work work = exts.applyToActionWork(stationId, targetId, resolved.getWork());
         if (puppet == resolved.getPuppet() && custody == resolved.getCustody()
-                && scale == resolved.getContributionScale() && anchors == resolved.getAnchors()) {
+                && scale == resolved.getContributionScale() && anchors == resolved.getAnchors()
+                && recipe == resolved.getRecipe() && tool == resolved.getTool() && work == resolved.getWork()) {
             return resolved;
         }
-        return resolved.with(custody, puppet, scale, anchors);
+        return resolved.with(custody, puppet, scale, anchors, recipe, tool, work);
     }
 
     /**
@@ -480,11 +485,13 @@ public final class ActionResolver {
             this.moments = moments;
         }
 
-        /** A copy with the four extension-overlaid groups swapped in; everything else is carried over. */
+        /** A copy with the seven extension-overlaid groups swapped in; everything else is carried over. */
         @Nonnull
         ResolvedAction with(@Nullable Custody newCustody, @Nullable Puppet newPuppet,
-                @Nullable ContributionScale newScale, @Nullable Map<String, ActionDef.Anchor> newAnchors) {
-            return new ResolvedAction(actionId, select, requires, tool, recipe, work, newCustody, newAnchors,
+                @Nullable ContributionScale newScale, @Nullable Map<String, ActionDef.Anchor> newAnchors,
+                @Nullable StationAsset.Recipe newRecipe, @Nullable StationAsset.Tool newTool,
+                @Nullable StationAsset.Work newWork) {
+            return new ResolvedAction(actionId, select, requires, newTool, newRecipe, newWork, newCustody, newAnchors,
                     steps, bonus, newScale, pace, hold, camera, animation, newPuppet, moments);
         }
 

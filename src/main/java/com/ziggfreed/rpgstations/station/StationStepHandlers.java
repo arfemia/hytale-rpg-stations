@@ -446,10 +446,13 @@ final class StationStepHandlers {
                     "Convert step '" + step.getId() + "' found no runnable conversion");
         }
         // Recipe.Yield: the per-cycle output-quantity transform (StationYield), deterministic end
-        // to end; the breakdown records what the yield did to each output for the summary panel.
+        // to end; its Ladder is the one per-worker term, read off this cycle's snapshot. The breakdown
+        // records what the yield did to each output for the summary panel.
         StationAsset.Yield yield = check.recipe != null ? check.recipe.getYield() : null;
+        double yieldLadder = yield != null && yield.getLadder() != null
+                ? ContributionScaling.multiplier(yield.getLadder(), ctx.snapshot::resolve) : 1.0;
         Ingredient[] authoredOutputs = check.outputs != null ? check.outputs : new Ingredient[0];
-        Ingredient[] yieldedOutputs = StationYield.applyToOutputs(yield, authoredOutputs);
+        Ingredient[] yieldedOutputs = StationYield.applyToOutputs(yield, authoredOutputs, yieldLadder);
         StationService.recordYieldBreakdown(s, authoredOutputs, yieldedOutputs);
         // A Bonus roll's Grants.OutputItems adds EXTRA items of this cycle's own primary output;
         // an essence-only row has none, so such a grant lands nowhere on it.
@@ -459,16 +462,21 @@ final class StationStepHandlers {
         // An action authoring Custody ALWAYS draws its conversion from the claim, never the live
         // inventory; the queue's current socket addresses which pile.
         boolean fromCustody = ctx.action.getCustody() != null;
-        StationStep.Consume consume = StationStep.Consume.of(check.inputs,
+        // The batch: the matched row run as many times as the worker's Batch asks and the inputs feed (and the
+        // outputs fit), each conversion taking its own input of the very item or family the row converts.
+        int runs = StationService.getInstance().batchRuns(ctx, step, check, yieldedOutputs, fromCustody);
+        Ingredient[] inputs = StationBatch.times(check.inputs, runs);
+        Ingredient[] outputs = StationBatch.times(yieldedOutputs, runs);
+        StationStep.Consume consume = StationStep.Consume.of(inputs,
                 fromCustody ? StationStep.Consume.FROM_CUSTODY : StationStep.Consume.FROM_INVENTORY,
                 fromCustody ? s.queueSocketId : null);
         StationStepResult consumed = consumeItems(ctx, step, consume);
         if (consumed != null) {
             return consumed;
         }
-        if (yieldedOutputs.length > 0) {
+        if (outputs.length > 0) {
             StationStepResult produced = produceItems(ctx, step,
-                    StationStep.Produce.of(yieldedOutputs, StationStep.Produce.TO_INVENTORY));
+                    StationStep.Produce.of(outputs, StationStep.Produce.TO_INVENTORY));
             if (produced != null) {
                 return produced;
             }

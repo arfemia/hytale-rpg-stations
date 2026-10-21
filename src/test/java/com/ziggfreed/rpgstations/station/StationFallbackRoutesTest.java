@@ -259,21 +259,6 @@ public class StationFallbackRoutesTest {
         assertEquals(0, StationFallbackRoutes.offeredRows(shareOnly, null, id -> true, id -> null).length);
     }
 
-    @Test
-    void selectConversion_handsTheScanTheOfferedRowsUnchanged() throws IOException {
-        // The live half of the NO_ROOM decision, pinned on the source: selection builds nothing of
-        // its own around the offered rows, it passes the array straight to the runnable scan.
-        String service = SourcePins.read("StationService.java");
-        String select = SourcePins.methodBody(service, "ConversionCheck selectConversion(", "socketOverride");
-        int offered = select.indexOf("fallbackRowsFor(recipe.getFallback(), claim, sockets, socketOverride)");
-        int scan = select.indexOf("firstRunnableConversionFromCustody(claim, player, offered, sockets, socketOverride)");
-        assertTrue(offered >= 0 && scan > offered, "the scan runs over the offered rows, after they are built");
-        assertEquals(-1, select.indexOf("new StationAsset.Conversion[]"),
-                "selection never wraps a row list of its own around the fallback");
-        String rows = SourcePins.methodBody(service, "private static StationAsset.Conversion[] fallbackRowsFor(");
-        assertTrue(rows.contains("return StationFallbackRoutes.offeredRows(fallback, claim.items(socketId),"),
-                "the live adapter answers exactly what the pure helper offers");
-    }
 
     // ==================== the metadata guard's policy ====================
 

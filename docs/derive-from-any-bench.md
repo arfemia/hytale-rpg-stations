@@ -110,7 +110,12 @@ row, authored or derived, covers it:
   are its whole payout. It is the one row shape allowed an empty output.
 
 A piece is offered ONE route, the first that applies, in a fixed order: authored row, derived row,
-crafting share, essence only. A real stack carrying metadata no mod declared disposable is refused
+crafting share, essence only. Each route can also be PREFERRED by the worker: a `PreferWhen` on
+`CraftingShare` or `EssenceOnly` (a `Requires` block) that passes for the player unmaking the piece
+puts that route ahead of the rows for them alone, so one player's technique can give back a share
+of the recipe, or nothing but the `Bonus`, where everyone else gets the salvage; and a
+`CraftingShare.Ladder` multiplies the share for whoever it names (see
+[Actions & Step Programs](actions-and-steps.md#per-worker-settings-on-one-action)). A real stack carrying metadata no mod declared disposable is refused
 by every one of them, a derived salvage row as much as a fallback route, so a bench stand-in never
 destroys another mod's data by accident, even for a third-party piece that ships its own salvage
 recipe. The fallback routes are custody-only: the piece has to be placed.

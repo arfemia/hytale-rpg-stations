@@ -16,6 +16,7 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.effect.AppliedEffectTracker;
 import com.ziggfreed.common.entity.performer.StationPerformer;
 import com.ziggfreed.rpgstations.api.StationContribution;
+import com.ziggfreed.rpgstations.asset.ContributionScale;
 import com.ziggfreed.rpgstations.asset.Custody;
 import com.ziggfreed.rpgstations.asset.Presentation;
 import com.ziggfreed.rpgstations.asset.Puppet;
@@ -178,6 +179,10 @@ final class StationSession {
     // Opt-in held-tool durability drain (Tool.Durability). Resolved reader defaults - 0 = off.
     int durabilityPerSwing;
     int durabilityPerCycle;
+    /** The worker's wear ladder ({@code Tool.Durability.Ladder}) snapshotted at engage; null = the authored drains. */
+    @Nullable ContributionScale wearLadder;
+    /** The ladder's latest reading (at engage, then each completed cycle): what each drain is multiplied by. */
+    double wearScale = 1.0;
 
     // Per-swing cadence (Animation.Swing). 0 swingIntervalMs = no swing layer. What a swing SOUNDS
     // like is the "Swing"/"Impact" entries of `moments` below, not a field of its own.
@@ -230,6 +235,13 @@ final class StationSession {
      * station off mid-run, because the pile side of the fraction moves while this one never does.
      */
     int feedableCyclesAtStart;
+
+    /**
+     * How many conversions one classic-loop cycle runs for this worker (a {@code Batch}, read at engage and again by
+     * every Convert beat, {@code StationService#batchRuns}), so the progress row counts cycles the way the pile drains:
+     * {@code StationBatch#cyclesLeft}. 1 with no batch authored.
+     */
+    int cycleBatch = 1;
 
     // Step-program resume state (design section 9.3): survives ACROSS ticks, unlike
     // StationStepContext (rebuilt fresh every drain). programSuspended false + programIndex 0 is

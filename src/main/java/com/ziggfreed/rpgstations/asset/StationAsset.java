@@ -18,6 +18,7 @@ import com.hypixel.hytale.codec.schema.metadata.ui.UIEditorSectionStart;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import com.ziggfreed.common.asset.EditorSchema;
+import com.ziggfreed.common.factor.FactorFormula;
 import com.ziggfreed.common.codec.InheritMapCodec;
 import com.ziggfreed.common.codec.Vec3;
 import com.ziggfreed.common.codec.TagMatch;
@@ -402,6 +403,19 @@ public final class StationAsset
             return this;
         }
 
+        /**
+         * A copy of this group carrying {@code unattended} in place of its own, every other leaf shared: the shape
+         * an extension's per-leaf {@code Work} overlay builds, never a write to the decoded asset.
+         */
+        @Nonnull
+        public Work copyWithUnattended(@Nullable Unattended unattended) {
+            Work w = of(cycleMs, maxDurationMs, maxMoveMeters, perCycleContributions, idle);
+            w.looping = looping;
+            w.queue = queue;
+            w.unattended = unattended;
+            return w;
+        }
+
         @Nullable
         public Long getCycleMs() {
             return cycleMs;
@@ -573,6 +587,12 @@ public final class StationAsset
             @Nullable protected Boolean enabled;
             @Nullable protected Integer maxCycles;
             @Nullable protected Long catchUpMaxMs;
+            @Nullable protected Requires requires;
+            @Nullable protected FactorFormula maxQuantity;
+            @Nullable protected FactorFormula gatherMaxCycles;
+
+            /** The one count-formula codec both per-player counts below share (this mod's factor pick list on each term). */
+            private static final BuilderCodec<FactorFormula> COUNT_CODEC = FactorFormula.codec(AssetEditorDataSets.FACTORS);
 
             public static final BuilderCodec<Unattended> CODEC = BuilderCodec.builder(Unattended.class, Unattended::new)
                     .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
@@ -587,16 +607,59 @@ public final class StationAsset
                             (o, v) -> o.catchUpMaxMs = v, o -> o.catchUpMaxMs, (o, p) -> o.catchUpMaxMs = p.catchUpMaxMs)
                     .documentation("The most elapsed world game time one settle may consume, in milliseconds. Reader-defaults to 86400000 (24 hours); elapsed time beyond it is forfeited.")
                     .addValidator(CodecWarnValidators.positive("Work.Unattended.CatchUpMaxMs should be positive.")).add()
+                    .appendInherited(new KeyedCodec<>("Requires", Requires.CODEC, false),
+                            (o, v) -> o.requires = v, o -> o.requires, (o, p) -> o.requires = p.requires)
+                    .documentation("A gate asked of the LOADER as each load is placed: once a loader it passes for places material, the pile is marked to keep working while nobody is there, and the mark stays with the pile until it is emptied, so a loader who later loses what the gate asks, or another player topping the pile up, never stops it. A pile only ever loaded by players the gate refuses is worked attended only. Absent = every pile works unattended.").add()
+                    .appendInherited(new KeyedCodec<>("MaxQuantity", COUNT_CODEC, false),
+                            (o, v) -> o.maxQuantity = v, o -> o.maxQuantity, (o, p) -> o.maxQuantity = p.maxQuantity)
+                    .documentation("How much input one load hands to unattended work, counted in input units: Base plus its weighted Factors, read of the LOADER as each load is placed, held in Clamp and rounded. Each load sets the allowance afresh, settling spends it, and once it is spent the pile waits for its next load (or works attended). The pile itself may hold more: what is over the allowance stays for the next load or a worker. Absent = the whole pile.").add()
+                    .appendInherited(new KeyedCodec<>("GatherMaxCycles", COUNT_CODEC, false),
+                            (o, v) -> o.gatherMaxCycles = v, o -> o.gatherMaxCycles, (o, p) -> o.gatherMaxCycles = p.gatherMaxCycles)
+                    .documentation("The most accrued cycles one gather pays out, read of the GATHERER: Base plus its weighted Factors, held in Clamp and rounded, never below one. MaxCycles still caps each settle; this replaces it at the gather end only, so whoever gathers can be paid for more (or fewer) of the cycles the pile worked. Absent = MaxCycles.").add()
                     .build();
 
             @Nonnull
             public static Unattended of(@Nullable Boolean enabled, @Nullable Integer maxCycles,
                     @Nullable Long catchUpMaxMs) {
+                return of(enabled, maxCycles, catchUpMaxMs, null, null, null);
+            }
+
+            /** Every leaf at once: the shape an extension's per-leaf overlay builds. */
+            @Nonnull
+            public static Unattended of(@Nullable Boolean enabled, @Nullable Integer maxCycles,
+                    @Nullable Long catchUpMaxMs, @Nullable Requires requires, @Nullable FactorFormula maxQuantity,
+                    @Nullable FactorFormula gatherMaxCycles) {
                 Unattended u = new Unattended();
                 u.enabled = enabled;
                 u.maxCycles = maxCycles;
                 u.catchUpMaxMs = catchUpMaxMs;
+                u.requires = requires;
+                u.maxQuantity = maxQuantity;
+                u.gatherMaxCycles = gatherMaxCycles;
                 return u;
+            }
+
+            /** The gate a loader must pass for a pile to work unattended; null = every pile does. */
+            @Nullable
+            public Requires getRequires() {
+                return requires;
+            }
+
+            /** True when a {@link #requires} gate that asks something is authored. */
+            public boolean hasRequires() {
+                return requires != null && !requires.isEmpty();
+            }
+
+            /** The per-load allowance formula (input units, read of the loader); null = the whole pile. */
+            @Nullable
+            public FactorFormula getMaxQuantity() {
+                return maxQuantity;
+            }
+
+            /** The gather-end cycle ceiling formula (read of the gatherer); null = {@link #effectiveMaxCycles()}. */
+            @Nullable
+            public FactorFormula getGatherMaxCycles() {
+                return gatherMaxCycles;
             }
 
             @Nullable
@@ -651,6 +714,7 @@ public final class StationAsset
         @Nullable protected Fallback fallback;
         @Nullable protected Yield yield;
         @Nullable protected Doneness doneness;
+        @Nullable protected StationStep.Repeat batch;
 
         public static final BuilderCodec<Recipe> CODEC = BuilderCodec.builder(Recipe.class, Recipe::new)
                 .appendInherited(new KeyedCodec<>("Conversions",
@@ -673,6 +737,9 @@ public final class StationAsset
                         (o, v) -> o.doneness = v, o -> o.doneness, (o, p) -> o.doneness = p.doneness)
                 .documentation("The default ready window every conversion without its own Doneness leaf inherits (derived rows included); a conversion-level leaf wins. Null = no default window.")
                 .metadata(new UIEditorSectionStart("Doneness")).add()
+                .appendInherited(new KeyedCodec<>("Batch", StationStep.Repeat.CODEC, false),
+                        (o, v) -> o.batch = v, o -> o.batch, (o, p) -> o.batch = p.batch)
+                .documentation("How many conversions a cycle runs at once, in the Repeat shape (a fixed Times, or Min plus the weighted Factors held in Max), read of the worker each cycle: the classic loop's batch, and the default of every Convert beat that authors no Batch of its own. Every conversion of a batch is the one matched row, so each takes its own input of the very item or family that row converts and never another material; a cycle runs as many as the pile or the bag can feed and the outputs fit, at least one. The Bonus still rolls once a cycle. An unattended settle runs the authored count (Times, else Min). Absent = one.").add()
                 .build();
 
         @Nonnull
@@ -701,6 +768,30 @@ public final class StationAsset
             r.yield = yield;
             r.doneness = doneness;
             return r;
+        }
+
+        /** Every leaf at once: the shape an extension's per-leaf {@code Recipe} overlay builds. */
+        @Nonnull
+        public static Recipe of(@Nullable Conversion[] conversions, @Nullable FromCrafting fromCrafting,
+                @Nullable Fallback fallback, @Nullable Yield yield, @Nullable Doneness doneness,
+                @Nullable StationStep.Repeat batch) {
+            Recipe r = of(conversions, fromCrafting, yield, doneness);
+            r.fallback = fallback;
+            r.batch = batch;
+            return r;
+        }
+
+        /** Java-side test/fixture helper for the {@link #batch} leaf; not part of any codec fold. */
+        @Nonnull
+        public Recipe withBatch(@Nullable StationStep.Repeat batch) {
+            this.batch = batch;
+            return this;
+        }
+
+        /** How many conversions a cycle runs at once (the classic loop's, and every Convert beat's default); null = one. */
+        @Nullable
+        public StationStep.Repeat getBatch() {
+            return batch;
         }
 
         /** Java-side test/fixture helper for the {@link Fallback} group; not part of any codec fold. */
@@ -830,6 +921,8 @@ public final class StationAsset
          */
         public static final class CraftingShare {
             @Nullable protected Double share;
+            @Nullable protected Requires preferWhen;
+            @Nullable protected ContributionScale ladder;
 
             public static final BuilderCodec<CraftingShare> CODEC =
                     BuilderCodec.builder(CraftingShare.class, CraftingShare::new)
@@ -837,18 +930,54 @@ public final class StationAsset
                                     (o, v) -> o.share = v, o -> o.share, (o, p) -> o.share = p.share)
                             .documentation("The fraction of each exact-item line of the piece's own crafting recipe given back, in (0, 1]: each line becomes floor(Quantity x Share / OutputQuantity), OutputQuantity being how many pieces the recipe makes per craft (a batch recipe pays per piece); a line that rounds to nothing is dropped, and a recipe with no line left does not take this route.")
                             .addValidator(CodecWarnValidators.positive("Recipe.Fallback.CraftingShare.Share should be positive; a non-positive share switches the route off.")).add()
+                            .appendInherited(new KeyedCodec<>("PreferWhen", Requires.CODEC, false),
+                                    (o, v) -> o.preferWhen = v, o -> o.preferWhen, (o, p) -> o.preferWhen = p.preferWhen)
+                            .documentation("A gate asked of the worker as the piece is unmade: when it PASSES this route is tried BEFORE the authored and derived rows, so the piece gives back its share even where a row covers it; when it fails, cannot be answered or nobody is working (an unattended settle) the route keeps its place after the rows. A preferred route that does not apply to the piece (no recipe, every line rounding to nothing) falls back to the usual order. Absent = never preferred.").add()
+                            .appendInherited(new KeyedCodec<>("Ladder", ContributionScale.CODEC, false),
+                                    (o, v) -> o.ladder = v, o -> o.ladder, (o, p) -> o.ladder = p.ladder)
+                            .documentation("A ladder read of the worker (Factors summed, the highest reached Floor's Scale) that MULTIPLIES Share whenever this route runs, held at 1: a larger or smaller share for whoever the ladder names. No floor reached, or nobody working, = Share as authored.").add()
                             .build();
 
             @Nonnull
             public static CraftingShare of(@Nullable Double share) {
+                return of(share, null, null);
+            }
+
+            /** Every leaf at once: the shape an extension's per-leaf overlay builds. */
+            @Nonnull
+            public static CraftingShare of(@Nullable Double share, @Nullable Requires preferWhen,
+                    @Nullable ContributionScale ladder) {
                 CraftingShare c = new CraftingShare();
                 c.share = share;
+                c.preferWhen = preferWhen;
+                c.ladder = ladder;
                 return c;
             }
 
             @Nullable
             public Double getShare() {
                 return share;
+            }
+
+            /** The gate that puts this route ahead of the rows for the worker it passes for; null = never preferred. */
+            @Nullable
+            public Requires getPreferWhen() {
+                return preferWhen;
+            }
+
+            /** The per-worker multiplier on {@link #share}; null = the authored share. */
+            @Nullable
+            public ContributionScale getLadder() {
+                return ladder;
+            }
+
+            /** {@link #effectiveShare()} times {@code scale}, held at 1; a non-positive or non-finite scale reads as 1. */
+            public double effectiveShare(double scale) {
+                double base = effectiveShare();
+                if (base <= 0.0 || !Double.isFinite(scale) || scale <= 0.0) {
+                    return base;
+                }
+                return Math.min(1.0, base * scale);
             }
 
             /** {@link #share} as a usable fraction: 0 when absent or non-positive (the route is off), else the authored value. */
@@ -864,6 +993,7 @@ public final class StationAsset
          */
         public static final class EssenceOnly {
             @Nullable protected Boolean enabled;
+            @Nullable protected Requires preferWhen;
 
             public static final BuilderCodec<EssenceOnly> CODEC =
                     BuilderCodec.builder(EssenceOnly.class, EssenceOnly::new)
@@ -871,18 +1001,34 @@ public final class StationAsset
                                     (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled)
                             .metadata(EditorSchema.defaultValue(true))
                             .documentation("Whether the essence-only route applies. Reader-defaults to TRUE when this group is authored; author false to inherit a Parent's group with the route switched off.").add()
+                            .appendInherited(new KeyedCodec<>("PreferWhen", Requires.CODEC, false),
+                                    (o, v) -> o.preferWhen = v, o -> o.preferWhen, (o, p) -> o.preferWhen = p.preferWhen)
+                            .documentation("A gate asked of the worker as the piece is unmade: when it PASSES this route is tried BEFORE the authored and derived rows (after a preferred CraftingShare), so the piece gives back nothing of its own and the Bonus rolls are its whole payout; when it fails, cannot be answered or nobody is working the route keeps its place as the last resort. Absent = never preferred.").add()
                             .build();
 
             @Nonnull
             public static EssenceOnly of(@Nullable Boolean enabled) {
+                return of(enabled, null);
+            }
+
+            /** Both leaves at once: the shape an extension's per-leaf overlay builds. */
+            @Nonnull
+            public static EssenceOnly of(@Nullable Boolean enabled, @Nullable Requires preferWhen) {
                 EssenceOnly e = new EssenceOnly();
                 e.enabled = enabled;
+                e.preferWhen = preferWhen;
                 return e;
             }
 
             @Nullable
             public Boolean getEnabled() {
                 return enabled;
+            }
+
+            /** The gate that puts this route ahead of the rows for the worker it passes for; null = never preferred. */
+            @Nullable
+            public Requires getPreferWhen() {
+                return preferWhen;
             }
 
             /** {@link #enabled}, reader-defaulted to {@code true} when null (an authored group means on). */
@@ -916,6 +1062,7 @@ public final class StationAsset
         @Nullable protected Double scale;
         @Nullable protected Integer min;
         @Nullable protected Integer max;
+        @Nullable protected ContributionScale ladder;
 
         /** The absolute floor on a produced quantity - see this class's javadoc (item-loss guard, not a knob). */
         public static final int ABSOLUTE_MIN = 1;
@@ -933,17 +1080,34 @@ public final class StationAsset
                 .appendInherited(new KeyedCodec<>("Max", Codec.INTEGER, false),
                         (o, v) -> o.max = v, o -> o.max, (o, p) -> o.max = p.max)
                 .documentation("Upper clamp on the final quantity; null = uncapped.").add()
+                .appendInherited(new KeyedCodec<>("Ladder", ContributionScale.CODEC, false),
+                        (o, v) -> o.ladder = v, o -> o.ladder, (o, p) -> o.ladder = p.ladder)
+                .documentation("A ladder read of the worker each cycle (Factors summed, the highest reached Floor's Scale) that MULTIPLIES Scale, before the floor to a whole item and the clamps: more or less of a cycle's output for whoever the ladder names, the one-item floor kept. No floor reached, or an unattended settle, = Scale as authored.").add()
                 .build();
 
         @Nonnull
         public static Yield of(@Nullable Integer base, @Nullable Double scale,
                 @Nullable Integer min, @Nullable Integer max) {
+            return of(base, scale, min, max, null);
+        }
+
+        /** Every leaf at once: the shape an extension's per-leaf overlay builds. */
+        @Nonnull
+        public static Yield of(@Nullable Integer base, @Nullable Double scale,
+                @Nullable Integer min, @Nullable Integer max, @Nullable ContributionScale ladder) {
             Yield y = new Yield();
             y.base = base;
             y.scale = scale;
             y.min = min;
             y.max = max;
+            y.ladder = ladder;
             return y;
+        }
+
+        /** The per-worker multiplier on {@link #scale}; null = the authored scale for everyone. */
+        @Nullable
+        public ContributionScale getLadder() {
+            return ladder;
         }
 
         /** Flat per-conversion base quantity; null = defer to the conversion's own authored quantity. */
@@ -1879,6 +2043,7 @@ public final class StationAsset
             @Nullable protected Integer perSwing;
             @Nullable protected Integer perCycle;
             @Nullable protected Double minStartPercent;
+            @Nullable protected ContributionScale ladder;
 
             public static final BuilderCodec<Durability> CODEC = BuilderCodec.builder(Durability.class, Durability::new)
                     .appendInherited(new KeyedCodec<>("PerSwing", Codec.INTEGER, false),
@@ -1893,6 +2058,9 @@ public final class StationAsset
                             (o, v) -> o.minStartPercent = v, o -> o.minStartPercent,
                             (o, p) -> o.minStartPercent = p.minStartPercent)
                     .documentation("Minimum held-tool durability (0-100) required to START working; null = no wear gate. The name states the semantics: it is checked at engage only, so a session already running is never cut short by wear.").add()
+                    .appendInherited(new KeyedCodec<>("Ladder", ContributionScale.CODEC, false),
+                            (o, v) -> o.ladder = v, o -> o.ladder, (o, p) -> o.ladder = p.ladder)
+                    .documentation("A ladder read of the worker (Factors summed, the highest reached Floor's Scale) that MULTIPLIES both drains: read at engage and again every completed cycle, so a worker it names wears the tool faster or slower. A fractional drain pays its whole part every time and the fraction as the chance of one point more (1.5 is one point, and a second half the time). No floor reached = the authored drains.").add()
                     .build();
 
             @Nonnull
@@ -1903,11 +2071,25 @@ public final class StationAsset
             @Nonnull
             public static Durability of(@Nullable Integer perSwing, @Nullable Integer perCycle,
                     @Nullable Double minStartPercent) {
+                return of(perSwing, perCycle, minStartPercent, null);
+            }
+
+            /** Every leaf at once: the shape an extension's per-leaf overlay builds. */
+            @Nonnull
+            public static Durability of(@Nullable Integer perSwing, @Nullable Integer perCycle,
+                    @Nullable Double minStartPercent, @Nullable ContributionScale ladder) {
                 Durability d = new Durability();
                 d.perSwing = perSwing;
                 d.perCycle = perCycle;
                 d.minStartPercent = minStartPercent;
+                d.ladder = ladder;
                 return d;
+            }
+
+            /** The per-worker multiplier on both drains; null = the authored drains for everyone. */
+            @Nullable
+            public ContributionScale getLadder() {
+                return ladder;
             }
 
             @Nullable

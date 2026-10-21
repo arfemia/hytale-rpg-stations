@@ -156,13 +156,19 @@ final class StationUnattended {
      * in the stash. Empty whenever nothing was transformed.
      */
     record Settle(int settledCycles, int conversionIndex, @Nullable String produceSocketId,
-            boolean clockStamped, @Nonnull List<PileDrain> drains) {
+            boolean clockStamped, @Nonnull List<PileDrain> drains, int consumedUnits) {
 
         /** Nothing ran and the clock was left alone (sub-cycle time keeps banking). */
-        static final Settle NOTHING = new Settle(0, -1, null, false, List.of());
+        static final Settle NOTHING = new Settle(0, -1, null, false, List.of(), 0);
 
         /** Nothing ran but the clock was written (first stamp, or a clamped/forfeited backlog). */
-        static final Settle CLOCK_ONLY = new Settle(0, -1, null, true, List.of());
+        static final Settle CLOCK_ONLY = new Settle(0, -1, null, true, List.of(), 0);
+
+        /** A settle that committed {@code settledCycles} and consumed no counted input (the pre-allowance shape). */
+        Settle(int settledCycles, int conversionIndex, @Nullable String produceSocketId, boolean clockStamped,
+                @Nonnull List<PileDrain> drains) {
+            this(settledCycles, conversionIndex, produceSocketId, clockStamped, drains, 0);
+        }
 
         boolean transformed() {
             return settledCycles > 0;
@@ -229,6 +235,33 @@ final class StationUnattended {
             @Nonnull Function<String, String[]> resourceTypesOf,
             @Nonnull Function<String, Map<String, String[]>> tagsOf,
             @Nonnull Function<String, String> refusedPieceOf) {
+        return settle(claim, sockets, conversions, yield, custodyMaxQuantity, unattended, workCycleMs, nowGameMs,
+                resourceTypesOf, tagsOf, refusedPieceOf, 1, Integer.MAX_VALUE);
+    }
+
+    /**
+     * As above, with the recipe's {@code batch} (its authored count: an unattended cycle runs that many conversions
+     * of the row, each drawing its own input, so a cycle's draw and land both grow by it) and {@code inputUnitsLeft},
+     * the load's allowance ({@code Work.Unattended.MaxQuantity}, {@code Integer.MAX_VALUE} for none): the settle never
+     * takes more input units than that, a cycle it cannot fully pay for is not run, and what it took is reported as
+     * {@link Settle#consumedUnits()} for the caller to spend. An allowance that cannot pay one cycle clamps the
+     * settle like any other bound, so the backlog forfeits.
+     */
+    @Nonnull
+    static Settle settle(@Nonnull StationCustodyClaim claim,
+            @Nonnull List<Custody.ResolvedSocket> sockets,
+            @Nullable StationAsset.Conversion[] conversions,
+            @Nullable StationAsset.Yield yield,
+            int custodyMaxQuantity,
+            @Nonnull StationAsset.Work.Unattended unattended,
+            long workCycleMs,
+            long nowGameMs,
+            @Nonnull Function<String, String[]> resourceTypesOf,
+            @Nonnull Function<String, Map<String, String[]>> tagsOf,
+            @Nonnull Function<String, String> refusedPieceOf,
+            int batch,
+            int inputUnitsLeft) {
+        int perCycleBatch = Math.max(1, batch);
         Long last = claim.unattendedLastGameTime();
         if (last == null || nowGameMs < last) {
             // First visit (or a clock that moved backwards): anchor the catch-up clock and let
@@ -255,7 +288,7 @@ final class StationUnattended {
             long cycleMs = c.getDurationMs() != null && c.getDurationMs() > 0 ? c.getDurationMs() : workCycleMs;
             long raw = rawCycles(usable, cycleMs);
 
-            int inputCycles = inputCycles(claim, sockets, c, resourceTypesOf, tagsOf);
+            int inputCycles = inputCycles(claim, sockets, c, resourceTypesOf, tagsOf, perCycleBatch);
             if (inputCycles <= 0) {
                 continue;
             }
@@ -263,13 +296,22 @@ final class StationUnattended {
                     resourceTypesOf, tagsOf)) {
                 continue;
             }
-            Map<String, Integer> producedPerCycle = producedPerCycleBySocket(sockets, c, yield);
-            int roomCycles = roomCycles(claim, sockets, c, producedPerCycle, custodyMaxQuantity);
+            Map<String, Integer> producedPerCycle = producedPerCycleBySocket(sockets, c, yield, perCycleBatch);
+            int roomCycles = roomCycles(claim, sockets, c, producedPerCycle, custodyMaxQuantity, perCycleBatch);
             if (roomCycles <= 0) {
                 continue;
             }
+            // The load's allowance bounds the settle like any other clamp: a cycle it cannot fully pay for is not
+            // run, and an allowance too small for even one forfeits the backlog rather than banking it.
+            int unitsPerCycle = inputUnitsPerCycle(c, perCycleBatch);
+            int allowanceCycles = unitsPerCycle > 0 && inputUnitsLeft < Integer.MAX_VALUE
+                    ? Math.max(0, inputUnitsLeft) / unitsPerCycle : Integer.MAX_VALUE;
+            if (allowanceCycles <= 0) {
+                claim.setUnattendedLastGameTime(nowGameMs);
+                return Settle.CLOCK_ONLY;
+            }
 
-            int settled = (int) Math.min(Math.min(raw, inputCycles),
+            int settled = (int) Math.min(Math.min(Math.min(raw, inputCycles), allowanceCycles),
                     Math.min(roomCycles, unattended.effectiveMaxCycles()));
             if (settled <= 0) {
                 // The row could run but the elapsed time has not paid for a whole cycle yet:
@@ -294,7 +336,7 @@ final class StationUnattended {
                 String socketId = StationCustody.socketIdFor(in.getSocket(), null, sockets);
                 StationCustody.drainFromPile(claim.items(socketId),
                         StationCustody.ingredientEntryMatcher(in, resourceTypesOf, tagsOf),
-                        in.effectiveQuantity() * settled,
+                        in.effectiveQuantity() * perCycleBatch * settled,
                         drainedBySocket.computeIfAbsent(socketId, k -> new LinkedHashMap<>()));
             }
             List<PileDrain> drains = new ArrayList<>(drainedBySocket.size());
@@ -314,7 +356,8 @@ final class StationUnattended {
                 }
                 // Yield.Base lands on the row's primary (first) output alone; Scale and the clamps
                 // apply to every output - the one composition rule StationYield states.
-                int perCycle = StationYield.resolveQuantity(yield, out.effectiveQuantity(), outIndex == 0);
+                int perCycle = StationYield.resolveQuantity(yield, out.effectiveQuantity(), outIndex == 0)
+                        * perCycleBatch;
                 claim.addTo(socketId, producedOwner, out.getItemId(), perCycle * settled);
             }
             if (produceSocketId != null) {
@@ -322,7 +365,7 @@ final class StationUnattended {
             }
             claim.setUnattendedLastGameTime(
                     advancedLastGameTime(nowGameMs, usable, raw, settled, cycleMs));
-            return new Settle(settled, index, produceSocketId, true, List.copyOf(drains));
+            return new Settle(settled, index, produceSocketId, true, List.copyOf(drains), unitsPerCycle * settled);
         }
 
         // No conversion can run at all (no inputs, contaminated exact set, or no room): the
@@ -332,14 +375,25 @@ final class StationUnattended {
         return Settle.CLOCK_ONLY;
     }
 
+    /** How many input units one cycle of {@code c} takes at {@code batch} conversions a cycle (every input's quantity summed). */
+    static int inputUnitsPerCycle(@Nonnull StationAsset.Conversion c, int batch) {
+        long units = 0L;
+        for (Ingredient in : c.getInput()) {
+            if (in != null) {
+                units += (long) in.effectiveQuantity() * Math.max(1, batch);
+            }
+        }
+        return (int) Math.min(Integer.MAX_VALUE, units);
+    }
+
     /** The most whole cycles the piles' INPUTS pay for (0 when any input is short of one cycle). */
     private static int inputCycles(@Nonnull StationCustodyClaim claim,
             @Nonnull List<Custody.ResolvedSocket> sockets, @Nonnull StationAsset.Conversion c,
             @Nonnull Function<String, String[]> resourceTypesOf,
-            @Nonnull Function<String, Map<String, String[]>> tagsOf) {
+            @Nonnull Function<String, Map<String, String[]>> tagsOf, int batch) {
         int cycles = Integer.MAX_VALUE;
         for (Ingredient in : c.getInput()) {
-            int need = in.effectiveQuantity();
+            int need = in.effectiveQuantity() * batch;
             if (need <= 0) {
                 continue;
             }
@@ -358,13 +412,14 @@ final class StationUnattended {
     @Nonnull
     private static Map<String, Integer> producedPerCycleBySocket(
             @Nonnull List<Custody.ResolvedSocket> sockets, @Nonnull StationAsset.Conversion c,
-            @Nullable StationAsset.Yield yield) {
+            @Nullable StationAsset.Yield yield, int batch) {
         Map<String, Integer> out = new LinkedHashMap<>();
         Ingredient[] outputs = c.getOutput();
         for (int outIndex = 0; outIndex < outputs.length; outIndex++) {
             Ingredient produced = outputs[outIndex];
             String socketId = StationCustody.socketIdFor(produced.getSocket(), null, sockets);
-            out.merge(socketId, StationYield.resolveQuantity(yield, produced.effectiveQuantity(), outIndex == 0),
+            out.merge(socketId,
+                    StationYield.resolveQuantity(yield, produced.effectiveQuantity(), outIndex == 0) * batch,
                     Integer::sum);
         }
         return out;
@@ -378,12 +433,12 @@ final class StationUnattended {
      */
     private static int roomCycles(@Nonnull StationCustodyClaim claim,
             @Nonnull List<Custody.ResolvedSocket> sockets, @Nonnull StationAsset.Conversion c,
-            @Nonnull Map<String, Integer> producedPerCycle, int custodyMaxQuantity) {
+            @Nonnull Map<String, Integer> producedPerCycle, int custodyMaxQuantity, int batch) {
         // Per-cycle drains per socket (what the consume side frees).
         Map<String, Integer> drainedPerCycle = new LinkedHashMap<>();
         int drainedTotal = 0;
         for (Ingredient in : c.getInput()) {
-            int need = in.effectiveQuantity();
+            int need = in.effectiveQuantity() * batch;
             if (need <= 0) {
                 continue;
             }

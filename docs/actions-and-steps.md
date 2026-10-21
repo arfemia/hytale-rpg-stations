@@ -80,6 +80,50 @@ row, consumes its inputs and produces its outputs). This is exactly what every p
 station (a Sawmill authoring one `Mill` action and no `Steps` on it) runs, and it is byte-identical
 behavior to a hand-authored one-step program carrying a `Convert` beat.
 
+An action's `Pace` reaches the classic loop too: its resolved scale (the action's ladder times every
+matching extension's, held in the action's `Clamp`, times every `Stretch`) multiplies the loop's own
+interval, `Work.CycleMs` or the running row's `DurationMs`, read for the worker each cycle and for the
+first cycle at engage. Idle practice and an unattended settle keep the authored interval.
+
+## Per-worker settings on one action
+
+One action can work differently for different workers without a second action: each of these knobs
+reads the WORKER's factors (a talent of theirs, a stat their gear carries), and each reads exactly as
+authored when its factor is unknown, cannot be answered, there is nobody working, or the work is an
+[unattended settle](unattended-work.md). A station whose content authors none of them behaves
+exactly as before. Because it is still the one action, a pile anyone loaded is the same pile for
+everyone, and a worker whose settings change mid-pile simply works it the new way.
+
+| Knob | Shape | What the worker's reading changes |
+|---|---|---|
+| `Recipe.Batch` | the `Repeat` shape: a fixed `Times`, or `Min` plus weighted `Factors`, held in `Max` | How many conversions one cycle runs: the classic loop's batch, and the default of every `Convert` beat. Every conversion of a batch is the ONE matched row run again, so each takes its own input of the very item, family or tag that row converts and never another material (two logs of the species the cycle saws, never a second species beside it in the pile). A cycle runs as many as the source can feed and the outputs fit, never fewer than one; the `Bonus` still rolls once a cycle. A settle runs the authored count. |
+| `Convert.Batch` | the `Repeat` shape | The same, for one `Convert` beat; it wins over `Recipe.Batch`. |
+| `Recipe.Yield.Ladder` | a ladder (`Factors`, `Floors` of `{Min, Scale}`) | Multiplies `Yield.Scale` before the floor to a whole item and the clamps, so the one-item floor still holds: a line of one stays one. |
+| `Tool.Durability.Ladder` | a ladder | Multiplies both wear drains (`PerSwing`, `PerCycle`), read at engage and again each completed cycle. A fractional drain pays its whole part and the fraction as the chance of one point more. |
+| `Recipe.Fallback.CraftingShare.PreferWhen`, `EssenceOnly.PreferWhen` | a `Requires` block | When it passes for the worker, that fallback route is tried BEFORE the authored and derived rows (the share first, then the essence-only route), still one row, still checked for room. A preferred route that does not apply to the piece leaves the usual order. These are independent leaves, one per route, never a mode. |
+| `Recipe.Fallback.CraftingShare.Ladder` | a ladder | Multiplies `Share` wherever the share route runs, held at a whole share. |
+| a step's `SkipWhen` | a `Requires` block | When it passes as the beat begins, the whole beat is skipped (see the step record below). |
+
+A ladder here is the same `{Factors, Floors}` shape `Pace.Ladder` and `ContributionScale` use: the
+factors are summed, the highest floor the sum reaches supplies its `Scale`, and no floor reached is 1.
+A gate here passes only on a clear pass, so author it opt-in: a technique turns ON for the worker the
+gate names (`Min: 1` on their reading), and everyone else, and every server where the reading is
+unknown, runs the action as authored.
+
+```json
+"Recipe": {
+  "Batch": { "Min": 1, "Max": 2,
+             "Factors": [ { "Factor": "yourmod:double_cut", "Weight": 1 } ] },
+  "Yield": { "Ladder": { "Factors": [ { "Factor": "yourmod:careful_hands" } ],
+                         "Floors": [ { "Min": 1, "Scale": 0.5 } ] } }
+},
+"Tool": { "Durability": { "PerCycle": 1,
+  "Ladder": { "Factors": [ { "Factor": "yourmod:double_cut" } ], "Floors": [ { "Min": 1, "Scale": 2 } ] } } }
+```
+
+A pack tunes another pack's action with the same leaves, through an extension's `Recipe`, `Tool`,
+`Work` and `StepOverlays` overlays: see [Extending Other Packs](extending-other-packs.md).
+
 ## Recipe rows: ingredient routes, tiers, and exact sets
 
 A `Recipe.Conversions` row's `Input`/`Output` are arrays of the one `Ingredient` leaf. An **input**
@@ -188,6 +232,7 @@ every step regardless of which phases it authors.
 |---|---|
 | `Id` | Unique within one action's `Steps`; required whenever another step or an extension insertion anchors on it. |
 | `Conditions` / `OnConditionFail` | A gate re-checked at each iteration entry. A failing check either `Result:"Skip"`s (no-op, continue) or `Result:"Fail"`s (default); `Goto` jumps to another step's Id on a passing/skipping result. |
+| `SkipWhen` | A `Requires` block asked of the worker as the beat BEGINS (never on a hold or walk resuming, never on a later iteration): when it passes, the whole beat is skipped (no phase, no cue, no hold) and the program moves on. When it fails, cannot be answered or asks nothing, the beat runs as authored. It is the opposite of `Conditions`, which runs a beat only while they pass, and it is how one worker's technique leaves out a beat everyone else keeps. An extension sets it on a beat it does not own through `StepOverlays`. |
 | `Repeat` | A fixed `Times`, or a factor-resolved `{Min,Max,Factors}` range, resolved once at step entry. |
 | `Duration` | `{Ms}` - a post-phase hold; the puppet's prop/clip and any presentation persist across the hold. |
 | `Puppet` | A per-step `{Clip?, ClipMs?, Prop?}` override for the moment-to-moment animation/held item, played once at iteration entry. `ClipMs` makes the clip a gesture: once it has played that long, the double goes back to the action's own loop clip (`Worker.Animation.EmoteId`) instead of holding the gesture's last frame until the next beat. It is not paced, since an animation runs at its own speed. |
@@ -195,7 +240,7 @@ every step regardless of which phases it authors.
 | `Walk` | Move the puppet to a named anchor. See [Multi-Station Programs](multi-station-programs.md). |
 | `Consume` | `{Items: [Ingredient...], From: Inventory\|Custody, Socket?}` - drain from the player's backpack or the block's placed-input claim; all-or-nothing across the whole `Items` list. On a Custody route, `Socket` (and a per-entry `Socket` on any `Items` entry, which wins) names the [custody socket](custody-and-placed-display.md) to draw from; absent = the first Item socket. A Custody route never takes a single-item socket's piece carrying metadata no mod declared disposable: the step stops as if the piece were missing. |
 | `Stamp` | The enhance-commit phase (reagents, durability, stat rolls). See [Enhancement & Stamp](enhancement-and-stamp.md). |
-| `Convert` | `{Enabled?}` - run the action's `Recipe` at this beat: the matched row is selected exactly as the classic loop selects one (authored rows, derived rows, then the fallback routes), its inputs are consumed (from custody when the action authors `Custody`, else the inventory), `Recipe.Yield` is applied and its outputs are produced to the inventory as ordinary rows. Authoring the group turns it on. A program with a `Convert` beat has a cycle output for an `rpgstations:output_items` grant to add to. |
+| `Convert` | `{Enabled?, Batch?}` - run the action's `Recipe` at this beat: the matched row is selected exactly as the classic loop selects one (authored rows, derived rows, then the fallback routes, a route the worker prefers first), its inputs are consumed (from custody when the action authors `Custody`, else the inventory), `Recipe.Yield` is applied and its outputs are produced to the inventory as ordinary rows. `Batch` runs the row several times at once (see Per-worker settings above). Authoring the group turns it on. A program with a `Convert` beat has a cycle output for an `rpgstations:output_items` grant to add to. |
 | `Produce` | `{Items: [Ingredient...], To: Inventory\|Custody, Socket?}` - grant to the backpack, or deposit into a custody claim (the primary station's or a claimed anchor's). On a Custody route, `Socket`/per-entry `Socket` names the receiving [custody socket](custody-and-placed-display.md); absent = the first Item socket, and the receiving pile belongs to whoever did the work. |
 | `Roll` | A `LootRef` - the same weighted loot vocabulary an action's own `Bonus` group uses. See [Loot & Factors](loot-and-factors.md). |
 | `RollBonus` | `true` rolls the action's own `Bonus` (its tables and rolls plus every matching extension's) at this beat, once per iteration, instead of once when the program completes. Default false. |
@@ -210,7 +255,7 @@ every step regardless of which phases it authors.
 Every step iteration runs the SAME fixed order, regardless of which phases it authors:
 
 ```
-Conditions gate -> Walk -> the block state (Working, or the step's own State) and the step's
+SkipWhen (as the beat begins) -> Conditions gate -> Walk -> the block state (Working, or the step's own State) and the step's
   Display overlay on the worked piece -> Consume -> Stamp -> Convert -> Produce -> Roll
   -> the action's Bonus pass (on a RollBonus beat) -> Commands
   -> Presentation / Puppet clip (fire at iteration entry)

@@ -42,7 +42,7 @@ import com.ziggfreed.common.loot.stamp.StatRollEntry;
  * {@code EXTENSION_PAYLOAD_MISMATCH} - see {@link #payloadAllowedFor}):
  * <table><tr><th>Target</th><th>Payload keys</th></tr>
  * <tr><td>Station</td><td>Actions</td></tr>
- * <tr><td>Action (bare or {@code {Station, Action}}-scoped)</td><td>Steps, Anchors, Bonus, Conversions, PerCycleContributions, ContributionScale, Pace, Puppet, Custody</td></tr>
+ * <tr><td>Action (bare or {@code {Station, Action}}-scoped)</td><td>Steps, Anchors, Bonus, Conversions, PerCycleContributions, ContributionScale, Pace, Puppet, Custody, Recipe, Tool, Work, StepOverlays</td></tr>
  * <tr><td>Lootable</td><td>Rolls</td></tr>
  * <tr><td>RollPool</td><td>Entries</td></tr></table>
  *
@@ -71,7 +71,8 @@ import com.ziggfreed.common.loot.stamp.StatRollEntry;
  *   anchor step id degrades to {@code AtEnd} + {@code EXTENSION_ANCHOR_MISSING}; inserted steps
  *   need {@code Id}s so LATER extensions can anchor on them. Co-anchored insertions from different
  *   extensions apply in {@link #APPLY_ORDER} (m2).
- *   <li>NESTED PER-LEAF OVERLAY ({@code Puppet}, {@code Custody}, {@code ContributionScale}): recursively, at EVERY nesting
+ *   <li>NESTED PER-LEAF OVERLAY ({@code Puppet}, {@code Custody}, {@code ContributionScale}, and the per-worker
+ *   leaves of {@code Recipe}, {@code Tool} and {@code Work} plus each {@code StepOverlays} entry): recursively, at EVERY nesting
  *   depth, an AUTHORED extension leaf wins and a NULL extension leaf leaves the base's value
  *   intact - the {@code appendInherited}/nullable-nested-leaves convention applied across assets
  *   instead of across a {@code Parent} chain. So a {@code Custody} overlay carrying only
@@ -87,8 +88,9 @@ import com.ziggfreed.common.loot.stamp.StatRollEntry;
  * {@code Target:{Station}} step-insert applies post-Ref to THAT station only.
  *
  * <p><b>Deliberately NON-extensible</b> (docs state each): {@code Requires}, {@code Settings},
- * scalar groups (Work/Hold/Camera/Animation), the INTERNALS of an existing {@code Roll}, and
- * {@code FlairAsset.Moments} (extend by shipping another FlairAsset).
+ * the scalar groups (Hold/Camera/Animation, and every {@code Work} leaf but {@code Unattended}), which tool an
+ * action takes, the rows of its recipe (rows only append, through {@code Conversions}), the INTERNALS of an
+ * existing {@code Roll}, and {@code FlairAsset.Moments} (extend by shipping another FlairAsset).
  *
  * <p><b>The presentation-overlay exception ({@link #puppet}/{@link #custody}):</b> {@code Puppet}
  * and the whole {@code Custody} group (incl. {@code Custody.States}) ARE overlayable, under rule 5's
@@ -114,6 +116,10 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     public static final String PAYLOAD_CUSTODY = "Custody";
     public static final String PAYLOAD_ROLLS = "Rolls";
     public static final String PAYLOAD_ENTRIES = "Entries";
+    public static final String PAYLOAD_RECIPE = "Recipe";
+    public static final String PAYLOAD_TOOL = "Tool";
+    public static final String PAYLOAD_WORK = "Work";
+    public static final String PAYLOAD_STEP_OVERLAYS = "StepOverlays";
 
     /**
      * The ONE apply-order tuple ({@code Priority} ascending so a higher priority applies LATER and
@@ -143,6 +149,10 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
     @Nullable private Custody custody;
     @Nullable private Roll[] rolls;
     @Nullable private StatRollEntry[] entries;
+    @Nullable private StationAsset.Recipe recipe;
+    @Nullable private StationAsset.Tool tool;
+    @Nullable private StationAsset.Work work;
+    @Nullable private Map<String, StepOverlay> stepOverlays;
 
     public static final AssetBuilderCodec<String, ExtensionAsset> CODEC = AssetBuilderCodec.builder(
                     ExtensionAsset.class,
@@ -204,6 +214,18 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
             .appendInherited(new KeyedCodec<>("Entries", new ArrayCodec<>(StatRollEntry.codec(AssetEditorDataSets.FACTORS), StatRollEntry[]::new), false),
                     (a, v) -> a.entries = v, a -> a.entries, (a, p) -> a.entries = p.entries)
             .documentation("Appended StatRollEntry entries (RollPool target).").add()
+            .appendInherited(new KeyedCodec<>("Recipe", StationAsset.Recipe.CODEC, false),
+                    (a, v) -> a.recipe = v, a -> a.recipe, (a, p) -> a.recipe = p.recipe)
+            .documentation("Recipe overlay (Action target), merged PER LEAF: Batch, every Yield leaf, and the Fallback routes' CraftingShare and EssenceOnly leaves. An authored leaf wins and an omitted one keeps the action's own. The recipe's rows stay the action's: append rows through Conversions, and Conversions, FromCrafting, Doneness and Fallback.Input authored here are ignored (the validator says so).").add()
+            .appendInherited(new KeyedCodec<>("Tool", StationAsset.Tool.CODEC, false),
+                    (a, v) -> a.tool = v, a -> a.tool, (a, p) -> a.tool = p.tool)
+            .documentation("Tool overlay (Action target), merged PER LEAF over Durability alone (its drains, its start gate and its Ladder): which tool the action takes stays the action's, so Tags, Gather and Ids authored here are ignored (the validator says so).").add()
+            .appendInherited(new KeyedCodec<>("Work", StationAsset.Work.CODEC, false),
+                    (a, v) -> a.work = v, a -> a.work, (a, p) -> a.work = p.work)
+            .documentation("Work overlay (Action target), merged PER LEAF over Unattended alone, so a pack can let an action it does not own keep working while nobody is there, or retune how it does. The loop's own cadence stays the action's (scale it with Pace), so every other Work leaf authored here is ignored (the validator says so).").add()
+            .appendInherited(new KeyedCodec<>("StepOverlays", new MapCodec<>(StepOverlay.CODEC, LinkedHashMap::new), false),
+                    (a, v) -> a.stepOverlays = v, a -> a.stepOverlays, (a, p) -> a.stepOverlays = p.stepOverlays)
+            .documentation("Per-beat overlays (Action target), keyed by a step Id of the program the action runs (its own beats and every inserted one, matched case-insensitively): each entry's authored leaves replace that beat's own. A key naming no beat is ignored (EXTENSION_ANCHOR_MISSING).").add()
             .build();
 
     public ExtensionAsset() {
@@ -339,6 +361,41 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         return entries;
     }
 
+    /** The per-leaf {@code Recipe} overlay (Action target): Batch, Yield and the fallback routes' leaves; null = none. */
+    @Nullable
+    public StationAsset.Recipe getRecipe() {
+        return recipe;
+    }
+
+    /** The per-leaf {@code Tool} overlay (Action target), Durability alone; null = none. */
+    @Nullable
+    public StationAsset.Tool getTool() {
+        return tool;
+    }
+
+    /** The per-leaf {@code Work} overlay (Action target), Unattended alone; null = none. */
+    @Nullable
+    public StationAsset.Work getWork() {
+        return work;
+    }
+
+    /** The per-beat overlays (Action target), keyed by step Id; null = none. */
+    @Nullable
+    public Map<String, StepOverlay> getStepOverlays() {
+        return stepOverlays;
+    }
+
+    /** Java-side test/fixture helper for the four overlay payloads; not part of any codec fold. */
+    @Nonnull
+    public ExtensionAsset withOverlays(@Nullable StationAsset.Recipe recipe, @Nullable StationAsset.Tool tool,
+            @Nullable StationAsset.Work work, @Nullable Map<String, StepOverlay> stepOverlays) {
+        this.recipe = recipe;
+        this.tool = tool;
+        this.work = work;
+        this.stepOverlays = stepOverlays;
+        return this;
+    }
+
     /**
      * PURE apply-ordering (unit-tested; shared by the catalog and the validator): the extensions
      * sorted into {@link #APPLY_ORDER}. Deterministic on every server for the same input set (ids
@@ -369,7 +426,9 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
                         || PAYLOAD_BONUS.equals(payloadKey) || PAYLOAD_CONVERSIONS.equals(payloadKey)
                         || PAYLOAD_PER_CYCLE_CONTRIBUTIONS.equals(payloadKey)
                         || PAYLOAD_CONTRIBUTION_SCALE.equals(payloadKey) || PAYLOAD_PACE.equals(payloadKey)
-                        || PAYLOAD_PUPPET.equals(payloadKey) || PAYLOAD_CUSTODY.equals(payloadKey);
+                        || PAYLOAD_PUPPET.equals(payloadKey) || PAYLOAD_CUSTODY.equals(payloadKey)
+                        || PAYLOAD_RECIPE.equals(payloadKey) || PAYLOAD_TOOL.equals(payloadKey)
+                        || PAYLOAD_WORK.equals(payloadKey) || PAYLOAD_STEP_OVERLAYS.equals(payloadKey);
             case Target.LOOTABLE:
                 return PAYLOAD_ROLLS.equals(payloadKey);
             case Target.ROLLPOOL:
@@ -572,6 +631,36 @@ public final class ExtensionAsset implements JsonAssetWithMap<String, DefaultAss
         public boolean matchesStationScope(@Nullable String stationId) {
             String scope = scopedStation();
             return scope == null || (stationId != null && scope.equalsIgnoreCase(stationId));
+        }
+    }
+
+    /**
+     * ONE per-beat overlay, keyed in {@code StepOverlays} by the Id of a beat in the program the targeted action
+     * runs: every leaf it authors replaces that beat's own, every leaf it omits keeps the beat as authored. Among
+     * extensions the later (higher-priority) one wins a same-leaf contest, the rule every per-leaf overlay here
+     * follows. It reaches only the leaves listed on this type, so a beat's phases, timing and presentation stay
+     * the program's.
+     */
+    public static final class StepOverlay {
+        @Nullable protected Requires skipWhen;
+
+        public static final BuilderCodec<StepOverlay> CODEC = BuilderCodec.builder(StepOverlay.class, StepOverlay::new)
+                .appendInherited(new KeyedCodec<>("SkipWhen", Requires.CODEC, false),
+                        (o, v) -> o.skipWhen = v, o -> o.skipWhen, (o, p) -> o.skipWhen = p.skipWhen)
+                .documentation("Replaces the beat's own SkipWhen: a gate asked of the worker as the beat begins, the beat skipped whole when it passes and run as authored when it fails or cannot be answered.").add()
+                .build();
+
+        @Nonnull
+        public static StepOverlay of(@Nullable Requires skipWhen) {
+            StepOverlay o = new StepOverlay();
+            o.skipWhen = skipWhen;
+            return o;
+        }
+
+        /** The SkipWhen this overlay puts on its beat; null = the beat keeps its own. */
+        @Nullable
+        public Requires getSkipWhen() {
+            return skipWhen;
         }
     }
 

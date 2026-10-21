@@ -26,6 +26,12 @@ import com.ziggfreed.common.factor.FactorFormula;
  * DISPLAY only. A listener that forgot to multiply therefore cannot under-award, and one that
  * multiplied again cannot over-award - the amount on the event is always the amount to grant.
  *
+ * <p><b>One shape, several ladders.</b> {@code Pace.Ladder}, {@code Recipe.Yield.Ladder},
+ * {@code Tool.Durability.Ladder} and {@code Recipe.Fallback.CraftingShare.Ladder} author this same
+ * {@code {Factors, Floors}} block and resolve it the same way; each multiplies its own leaf (a beat's
+ * length, the yield's Scale, the wear, the share) instead of the contribution amounts. The engine's
+ * schema keys a definition by class, so the floor's {@code Scale} documentation names every reader.
+ *
  * <p>Because any installed mod registers its own factors into the one shared registry, a single
  * authored ladder may name engine {@code hytale:}/{@code rpgstations:} factors AND a third party's
  * own {@code yourmod:} factors side by side.
@@ -91,7 +97,7 @@ public final class ContributionScale {
                 .documentation("The summed-value threshold this floor requires (inclusive); reader-defaults to 0, and a 0 threshold is reachable (the baseline tier).").add()
                 .appendInherited(new KeyedCodec<>("Scale", Codec.DOUBLE, false),
                         (o, v) -> o.scale = v, o -> o.scale, (o, p) -> o.scale = p.scale)
-                .documentation("The multiplier applied to every per-cycle contribution Amount while this floor is the reached one; reader-defaults to 1.0 (neutral).")
+                .documentation("The multiplier this floor supplies while it is the reached one, applied to whatever the ladder sits on: every per-cycle contribution Amount (ContributionScale), a paced beat's length (Pace.Ladder), the yield's Scale (Recipe.Yield.Ladder), the tool wear a cycle or swing drains (Tool.Durability.Ladder), or the crafting share (Recipe.Fallback.CraftingShare.Ladder). Reader-defaults to 1.0 (neutral).")
                 .addValidator(CodecWarnValidators.nonNegative("ContributionScale.Floors[].Scale should not be negative.")).add()
                 .build();
 

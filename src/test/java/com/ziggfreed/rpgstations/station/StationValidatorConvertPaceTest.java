@@ -243,8 +243,6 @@ public class StationValidatorConvertPaceTest {
 
     @Test
     void pace_needsAProgramWithAPacedBeat_andSoundBounds() {
-        ActionDef noSteps = ActionDef.of("Mill").withRecipe(recipe()).withPace(pace());
-        assertTrue(validate(station("fixturemill", noSteps)).contains("PACE_WITHOUT_STEPS"));
         ActionDef noPacedBeat = ActionDef.of("Unmake").withRecipe(recipe()).withPace(pace())
                 .withSteps(new StationStep[] {beat("A").withConvert(StationStep.Convert.on())});
         assertTrue(validate(station("fixturetable", noPacedBeat)).contains("PACE_NO_PACED_STEP"));

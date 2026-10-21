@@ -55,6 +55,7 @@ public final class StationStep {
     @Nullable protected String id;
     @Nullable protected FactorCondition[] conditions;
     @Nullable protected OnConditionFail onConditionFail;
+    @Nullable protected Requires skipWhen;
     @Nullable protected String at;
     @Nullable protected Repeat repeat;
     @Nullable protected Duration duration;
@@ -85,6 +86,9 @@ public final class StationStep {
                     (o, v) -> o.onConditionFail = v, o -> o.onConditionFail,
                     (o, p) -> o.onConditionFail = p.onConditionFail)
             .documentation("What a failing Conditions check does: Skip (no-op continue) or Fail (default); Goto jumps to a step Id.").add()
+            .appendInherited(new KeyedCodec<>("SkipWhen", Requires.CODEC, false),
+                    (o, v) -> o.skipWhen = v, o -> o.skipWhen, (o, p) -> o.skipWhen = p.skipWhen)
+            .documentation("A gate asked of the worker as this beat begins: when it PASSES the whole beat is skipped (no phase, no cue, no hold) and the program moves on to the next beat; when it fails or cannot be answered the beat runs as authored, so a beat is only ever skipped for a worker the gate names. The opposite of Conditions, which runs a beat only while they pass. An extension sets it on a beat it does not own through StepOverlays, by the beat's Id.").add()
             .appendInherited(new KeyedCodec<>("At", Codec.STRING, false),
                     (o, v) -> o.at = v, o -> o.at, (o, p) -> o.at = p.at)
             .documentation("The anchor id (from the action's Anchors map) this step runs at; absent = the primary station 'Self'. Ids are matched case-insensitively.").add()
@@ -170,6 +174,51 @@ public final class StationStep {
     public StationStep withOnConditionFail(@Nullable OnConditionFail v) {
         this.onConditionFail = v;
         return this;
+    }
+
+    /** The gate that skips this beat for a worker it passes for; null = the beat always runs. */
+    @Nullable
+    public Requires getSkipWhen() {
+        return skipWhen;
+    }
+
+    /** Java-side setter for a procedurally-built program (mirrors the {@code with*} phase setters). */
+    @Nonnull
+    public StationStep withSkipWhen(@Nullable Requires v) {
+        this.skipWhen = v;
+        return this;
+    }
+
+    /**
+     * A copy of this beat carrying {@code skipWhen} in place of its own, every other leaf shared: how an
+     * extension's {@code StepOverlays} entry reaches a beat it does not own without touching the shared
+     * decoded asset.
+     */
+    @Nonnull
+    public StationStep copyWithSkipWhen(@Nullable Requires skipWhen) {
+        StationStep c = new StationStep();
+        c.id = id;
+        c.conditions = conditions;
+        c.onConditionFail = onConditionFail;
+        c.skipWhen = skipWhen;
+        c.at = at;
+        c.repeat = repeat;
+        c.duration = duration;
+        c.presentation = presentation;
+        c.puppet = puppet;
+        c.walk = walk;
+        c.consume = consume;
+        c.produce = produce;
+        c.convert = convert;
+        c.roll = roll;
+        c.commands = commands;
+        c.stamp = stamp;
+        c.isWork = isWork;
+        c.paced = paced;
+        c.rollBonus = rollBonus;
+        c.state = state;
+        c.display = display;
+        return c;
     }
 
     /** The anchor id this step runs at (from the action's {@code Anchors} map); null = the primary station {@code "Self"}. */
@@ -433,19 +482,36 @@ public final class StationStep {
      */
     public static final class Convert {
         @Nullable protected Boolean enabled;
+        @Nullable protected Repeat batch;
 
         public static final BuilderCodec<Convert> CODEC = BuilderCodec.builder(Convert.class, Convert::new)
                 .appendInherited(new KeyedCodec<>("Enabled", Codec.BOOLEAN, false),
                         (o, v) -> o.enabled = v, o -> o.enabled, (o, p) -> o.enabled = p.enabled)
                 .metadata(EditorSchema.defaultValue(true))
                 .documentation("Whether this beat runs the recipe. Reader-defaults to TRUE when the group is authored; author false to inherit a Parent's step with its conversion switched off.").add()
+                .appendInherited(new KeyedCodec<>("Batch", Repeat.CODEC, false),
+                        (o, v) -> o.batch = v, o -> o.batch, (o, p) -> o.batch = p.batch)
+                .documentation("How many conversions this beat runs at once, in the Repeat shape (a fixed Times, or Min plus the weighted Factors held in Max), read of the worker as the beat runs. Every conversion of a batch is the one matched row, so each takes its own input of the very item or family that row converts and never another material; a batch runs as many as the pile or the bag can feed and the outputs fit, at least one. The action's Bonus still rolls once. Absent = the recipe's own Batch, else one.").add()
                 .build();
 
         @Nonnull
         public static Convert of(@Nullable Boolean enabled) {
+            return of(enabled, null);
+        }
+
+        /** As above, with the beat's own {@link #batch}. */
+        @Nonnull
+        public static Convert of(@Nullable Boolean enabled, @Nullable Repeat batch) {
             Convert c = new Convert();
             c.enabled = enabled;
+            c.batch = batch;
             return c;
+        }
+
+        /** This beat's own batch; null = the recipe's {@code Batch}, else one conversion. */
+        @Nullable
+        public Repeat getBatch() {
+            return batch;
         }
 
         /** The always-on shape the implicit program builds. */

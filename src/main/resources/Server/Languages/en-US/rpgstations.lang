@@ -12,6 +12,7 @@ ui.station.preview.nothing_back = Worked here, this gives nothing of its own, on
 ui.station.no_action = You have nothing this station can work with.
 ui.station.custody.placed = You load your materials into the station.
 ui.station.custody.topped_up = You add more materials to the station.
+ui.station.custody.unattended = This station keeps working while you are away, as long as the area around it stays loaded.
 ui.station.retrieve.busy = You cannot take materials back while this station is being worked.
 ui.station.retrieve.done = You take your placed materials back.
 ui.station.retrieve.hint = Press [{key}] to retrieve materials

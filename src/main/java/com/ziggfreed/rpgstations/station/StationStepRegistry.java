@@ -59,6 +59,9 @@ final class StationStepRegistry extends StepRegistry<String, StationStepContext,
     private static StepHandler<StationStepContext, StationStep, StationStepResult> guard(
             @Nonnull StepHandler<StationStepContext, StationStep, StationStepResult> inner) {
         return (ctx, step) -> {
+            if (skipsForWorker(ctx, step)) {
+                return StationStepResult.SKIP;
+            }
             StationStepResult conditionOutcome = checkConditions(ctx, step);
             if (conditionOutcome != null) {
                 return conditionOutcome;
@@ -71,6 +74,20 @@ final class StationStepRegistry extends StepRegistry<String, StationStepContext,
                         "step '" + step.getId() + "' threw: " + t.getMessage());
             }
         };
+    }
+
+    /**
+     * True when the beat's {@code SkipWhen} passes for the worker as the beat BEGINS: never on a re-entry into a beat
+     * already under way (a hold or a walk resuming, a later iteration of a repeat), so a beat is skipped whole or
+     * run whole, and never for a gate that fails, cannot be answered or asks nothing ({@link StationGates#passes}).
+     */
+    static boolean skipsForWorker(@Nonnull StationStepContext ctx, @Nonnull StationStep step) {
+        if (step.getSkipWhen() == null) {
+            return false;
+        }
+        StationSession s = ctx.session;
+        boolean underWay = s.stepDeadlineMs != 0L || s.walkState != null || s.stepIteration != 0;
+        return !underWay && StationGates.passes(step.getSkipWhen(), ctx.snapshot);
     }
 
     /** {@code null} = every condition passed (or none authored) - proceed to the composite handler. */

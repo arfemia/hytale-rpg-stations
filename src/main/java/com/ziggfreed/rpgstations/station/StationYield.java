@@ -50,12 +50,23 @@ public final class StationYield {
      * authored quantity as the base and takes {@code Scale}/{@code Min}/{@code Max} alone.
      */
     public static int resolveQuantity(@Nullable StationAsset.Yield yield, int authoredQuantity, boolean primary) {
+        return resolveQuantity(yield, authoredQuantity, primary, 1.0);
+    }
+
+    /**
+     * As {@link #resolveQuantity(StationAsset.Yield, int, boolean)}, with {@code ladderScale} (the worker's reading of
+     * {@code Yield.Ladder}) multiplying {@code Scale} before the floor and the clamps, so the one-item floor still
+     * holds. A non-positive or non-finite {@code ladderScale} reads as 1; a null {@code yield} stays the identity.
+     */
+    public static int resolveQuantity(@Nullable StationAsset.Yield yield, int authoredQuantity, boolean primary,
+            double ladderScale) {
         if (yield == null) {
             return authoredQuantity;
         }
+        double ladder = Double.isFinite(ladderScale) && ladderScale > 0.0 ? ladderScale : 1.0;
         Integer authoredBase = yield.getBase();
         int base = primary && authoredBase != null && authoredBase > 0 ? authoredBase : authoredQuantity;
-        long quantity = (long) Math.floor(base * yield.effectiveScale());
+        long quantity = (long) Math.floor(base * yield.effectiveScale() * ladder);
 
         Integer min = yield.getMin();
         long floor = min != null ? Math.max(StationAsset.Yield.ABSOLUTE_MIN, min)
@@ -80,6 +91,13 @@ public final class StationYield {
     @Nonnull
     public static Ingredient[] applyToOutputs(@Nullable StationAsset.Yield yield,
             @Nonnull Ingredient[] outputs) {
+        return applyToOutputs(yield, outputs, 1.0);
+    }
+
+    /** As {@link #applyToOutputs(StationAsset.Yield, Ingredient[])}, with the worker's {@code Yield.Ladder} reading. */
+    @Nonnull
+    public static Ingredient[] applyToOutputs(@Nullable StationAsset.Yield yield,
+            @Nonnull Ingredient[] outputs, double ladderScale) {
         if (yield == null) {
             return outputs;
         }
@@ -90,7 +108,8 @@ public final class StationYield {
                 out[i] = null;
                 continue;
             }
-            out[i] = Ingredient.item(in.getItemId(), resolveQuantity(yield, in.effectiveQuantity(), i == 0));
+            out[i] = Ingredient.item(in.getItemId(),
+                    resolveQuantity(yield, in.effectiveQuantity(), i == 0, ladderScale));
         }
         return out;
     }

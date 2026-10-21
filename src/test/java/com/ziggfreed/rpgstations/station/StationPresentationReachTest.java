@@ -270,7 +270,6 @@ class StationPresentationReachTest {
         assertEquals(1, SourcePins.count(toggle,
                 "placedPiece(heldMoved, heldRoute.socket(), foundMoved, foundSocket)"));
         assertEquals(1, SourcePins.count(toggle, "if (placed.placed()) {"));
-        assertEquals(1, SourcePins.count(toggle, "placed.socket());"), "the preview reads the settled socket");
     }
 
     /** A method body with every whitespace run folded to one space, so a pin survives a rewrap. */

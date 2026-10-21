@@ -51,11 +51,12 @@ import com.ziggfreed.rpgstations.util.Log;
  * unit-tested without a live catalog: same input set, any fold order -&gt; identical merged result.
  *
  * <p><b>Where each payload is applied</b> (every one of them IS, there is no decode-only payload):
- * {@code Puppet}/{@code Custody}/{@code ContributionScale}/{@code Anchors} layer inside
+ * {@code Puppet}/{@code Custody}/{@code ContributionScale}/{@code Anchors} and the per-worker leaves of
+ * {@code Recipe}/{@code Tool}/{@code Work} layer inside
  * {@code ActionResolver}'s own resolve choke point, so every reader of a {@code ResolvedAction}
  * sees them at once; {@code Bonus}/{@code PerCycleContributions} apply at {@code StationService}'s
- * per-cycle read sites; {@code Steps} applies where a session's authored program is read for
- * dispatch; {@code Conversions} applies inside {@code StationCatalog.resolvedConversions} before
+ * per-cycle read sites; {@code Steps} and then {@code StepOverlays} apply where a session's authored
+ * program is read for dispatch; {@code Conversions} applies inside {@code StationCatalog.resolvedConversions} before
  * that derivation is cached; {@code Actions} applies in {@code ActionResolver.effectiveActions};
  * {@code Rolls} joins the shared library's ONE table composition as a roll source
  * ({@link #registerLootableRollSource}), so every site that resolves a targeted table, a station's
@@ -240,6 +241,225 @@ public final class ExtensionCatalog {
             @Nullable ContributionScale base) {
         List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
         return exts.isEmpty() ? base : mergeContributionScale(base, exts);
+    }
+
+    /**
+     * An action's effective {@code Recipe}: {@code base} with every matching extension's {@code Recipe} overlaid
+     * PER LEAF over the per-worker leaves alone ({@code Batch}, {@code Yield}, the fallback routes'
+     * {@code CraftingShare} and {@code EssenceOnly}); the rows, the derivation, the ready window and the fallback's
+     * gear filter stay the base's.
+     */
+    @Nullable
+    public StationAsset.Recipe applyToActionRecipe(@Nullable String stationId, @Nonnull String actionId,
+            @Nullable StationAsset.Recipe base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
+        if (exts.isEmpty()) {
+            return base;
+        }
+        StationAsset.Recipe out = base;
+        for (ExtensionAsset ext : exts) {
+            out = overlayRecipe(out, ext.getRecipe());
+        }
+        return out;
+    }
+
+    /** An action's effective {@code Tool}: {@code base} with every matching extension's {@code Tool.Durability} overlaid PER LEAF. */
+    @Nullable
+    public StationAsset.Tool applyToActionTool(@Nullable String stationId, @Nonnull String actionId,
+            @Nullable StationAsset.Tool base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
+        if (exts.isEmpty()) {
+            return base;
+        }
+        StationAsset.Tool out = base;
+        for (ExtensionAsset ext : exts) {
+            out = overlayTool(out, ext.getTool());
+        }
+        return out;
+    }
+
+    /** An action's effective {@code Work}: {@code base} with every matching extension's {@code Work.Unattended} overlaid PER LEAF. */
+    @Nullable
+    public StationAsset.Work applyToActionWork(@Nullable String stationId, @Nonnull String actionId,
+            @Nullable StationAsset.Work base) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
+        if (exts.isEmpty()) {
+            return base;
+        }
+        StationAsset.Work out = base;
+        for (ExtensionAsset ext : exts) {
+            out = overlayWork(out, ext.getWork());
+        }
+        return out;
+    }
+
+    /**
+     * An action's effective program with every matching extension's {@code StepOverlays} applied: each beat whose
+     * Id an overlay names (case-insensitively) is replaced by a copy carrying the overlay's authored leaves, later
+     * extensions winning a same-leaf contest. Identity when nothing overlays, so the zero-extension path costs
+     * nothing; the shared decoded steps are never written.
+     */
+    @Nonnull
+    public List<StationStep> applyToActionStepOverlays(@Nullable String stationId, @Nonnull String actionId,
+            @Nonnull List<StationStep> steps) {
+        List<ExtensionAsset> exts = extensionsFor(ExtensionAsset.Target.ACTION, actionId, stationId);
+        return exts.isEmpty() ? steps : mergeStepOverlays(steps, exts);
+    }
+
+    /** PURE: {@code steps} with every extension's {@code StepOverlays} applied in {@code exts} order (already APPLY_ORDER-sorted). */
+    @Nonnull
+    static List<StationStep> mergeStepOverlays(@Nonnull List<StationStep> steps, @Nonnull List<ExtensionAsset> exts) {
+        List<StationStep> out = null;
+        for (int i = 0; i < steps.size(); i++) {
+            StationStep step = steps.get(i);
+            String id = step != null ? step.getId() : null;
+            if (id == null || id.isBlank()) {
+                continue;
+            }
+            StationStep overlaid = step;
+            for (ExtensionAsset ext : exts) {
+                ExtensionAsset.StepOverlay overlay = overlayFor(ext.getStepOverlays(), id);
+                if (overlay != null && overlay.getSkipWhen() != null) {
+                    overlaid = overlaid.copyWithSkipWhen(overlay.getSkipWhen());
+                }
+            }
+            if (overlaid != step) {
+                if (out == null) {
+                    out = new ArrayList<>(steps);
+                }
+                out.set(i, overlaid);
+            }
+        }
+        return out == null ? steps : out;
+    }
+
+    /** The overlay keyed {@code stepId} in {@code overlays} (case-insensitive), or null. */
+    @Nullable
+    private static ExtensionAsset.StepOverlay overlayFor(@Nullable Map<String, ExtensionAsset.StepOverlay> overlays,
+            @Nonnull String stepId) {
+        if (overlays == null || overlays.isEmpty()) {
+            return null;
+        }
+        for (Map.Entry<String, ExtensionAsset.StepOverlay> e : overlays.entrySet()) {
+            if (e.getKey() != null && e.getKey().trim().equalsIgnoreCase(stepId.trim())) {
+                return e.getValue();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * ONE per-leaf {@code Recipe} overlay (PURE). Only the per-worker leaves move: {@code Batch} and {@code Yield}
+     * (every leaf, its {@code Ladder} included), and the fallback's two routes leaf by leaf; the base's rows,
+     * derivation, ready window and gear filter are kept whatever the overlay authors. A null overlay is the
+     * identity, and so is a null base: an overlay tunes a recipe the action has, never gives it one. NOTE for
+     * whoever adds the NEXT per-worker {@code Recipe} leaf: add it here in the same change, or an overlay
+     * silently drops it.
+     */
+    @Nullable
+    static StationAsset.Recipe overlayRecipe(@Nullable StationAsset.Recipe base, @Nullable StationAsset.Recipe overlay) {
+        if (overlay == null || base == null) {
+            return base;
+        }
+        return StationAsset.Recipe.of(base.getConversions(), base.getFromCrafting(),
+                overlayFallback(base.getFallback(), overlay.getFallback()),
+                overlayYield(base.getYield(), overlay.getYield()),
+                base.getDoneness(),
+                firstNonNull(overlay.getBatch(), base.getBatch()));
+    }
+
+    /** Per-leaf {@code Recipe.Yield} overlay, its {@code Ladder} a whole leaf. */
+    @Nullable
+    static StationAsset.Yield overlayYield(@Nullable StationAsset.Yield base, @Nullable StationAsset.Yield overlay) {
+        if (overlay == null) {
+            return base;
+        }
+        if (base == null) {
+            return overlay;
+        }
+        return StationAsset.Yield.of(
+                firstNonNull(overlay.getBase(), base.getBase()),
+                firstNonNull(overlay.getScale(), base.getScale()),
+                firstNonNull(overlay.getMin(), base.getMin()),
+                firstNonNull(overlay.getMax(), base.getMax()),
+                overlayContributionScale(base.getLadder(), overlay.getLadder()));
+    }
+
+    /**
+     * Per-leaf {@code Recipe.Fallback} overlay over the routes the base already authors. The gear filter
+     * ({@code Input}) is the base's alone and a route the base lacks is never added, so an overlay can tune how a
+     * piece falls back (prefer a route, scale its share) but never widen which pieces fall back at all.
+     */
+    @Nullable
+    static StationAsset.Fallback overlayFallback(@Nullable StationAsset.Fallback base,
+            @Nullable StationAsset.Fallback overlay) {
+        if (overlay == null || base == null) {
+            return base;
+        }
+        StationAsset.Fallback.CraftingShare baseShare = base.getCraftingShare();
+        StationAsset.Fallback.CraftingShare overShare = overlay.getCraftingShare();
+        StationAsset.Fallback.CraftingShare share = overShare == null || baseShare == null ? baseShare
+                : StationAsset.Fallback.CraftingShare.of(
+                        firstNonNull(overShare.getShare(), baseShare.getShare()),
+                        firstNonNull(overShare.getPreferWhen(), baseShare.getPreferWhen()),
+                        overlayContributionScale(baseShare.getLadder(), overShare.getLadder()));
+        StationAsset.Fallback.EssenceOnly baseEssence = base.getEssenceOnly();
+        StationAsset.Fallback.EssenceOnly overEssence = overlay.getEssenceOnly();
+        StationAsset.Fallback.EssenceOnly essence = overEssence == null || baseEssence == null ? baseEssence
+                : StationAsset.Fallback.EssenceOnly.of(
+                        firstNonNull(overEssence.getEnabled(), baseEssence.getEnabled()),
+                        firstNonNull(overEssence.getPreferWhen(), baseEssence.getPreferWhen()));
+        if (share == baseShare && essence == baseEssence) {
+            return base;
+        }
+        return StationAsset.Fallback.of(base.getInput(), share, essence);
+    }
+
+    /**
+     * ONE per-leaf {@code Tool} overlay (PURE) over {@code Durability} alone: which tool the action takes
+     * ({@code Tags}, {@code Gather}, {@code Ids}) is the base's whatever the overlay authors. A null overlay, one
+     * authoring no Durability, and a base with no Tool group (an action that takes no tool, so wears none) are the
+     * identity.
+     */
+    @Nullable
+    static StationAsset.Tool overlayTool(@Nullable StationAsset.Tool base, @Nullable StationAsset.Tool overlay) {
+        if (overlay == null || overlay.getDurability() == null || base == null) {
+            return base;
+        }
+        StationAsset.Tool.Durability baseDur = base.getDurability();
+        StationAsset.Tool.Durability over = overlay.getDurability();
+        StationAsset.Tool.Durability durability = baseDur == null ? over
+                : StationAsset.Tool.Durability.of(
+                        firstNonNull(over.getPerSwing(), baseDur.getPerSwing()),
+                        firstNonNull(over.getPerCycle(), baseDur.getPerCycle()),
+                        firstNonNull(over.getMinStartPercent(), baseDur.getMinStartPercent()),
+                        overlayContributionScale(baseDur.getLadder(), over.getLadder()));
+        return StationAsset.Tool.of(base.getTags(), base.getGather(), base.getIds(), durability);
+    }
+
+    /**
+     * ONE per-leaf {@code Work} overlay (PURE) over {@code Unattended} alone: the loop's cadence and bounds are the
+     * base's whatever the overlay authors. A null overlay, or one authoring no Unattended, is the identity; a base
+     * with no Work at all takes a Work carrying the overlay's Unattended alone (every other leaf at its reader
+     * default).
+     */
+    @Nullable
+    static StationAsset.Work overlayWork(@Nullable StationAsset.Work base, @Nullable StationAsset.Work overlay) {
+        if (overlay == null || overlay.getUnattended() == null) {
+            return base;
+        }
+        StationAsset.Work.Unattended baseU = base != null ? base.getUnattended() : null;
+        StationAsset.Work.Unattended over = overlay.getUnattended();
+        StationAsset.Work.Unattended unattended = baseU == null ? over
+                : StationAsset.Work.Unattended.of(
+                        firstNonNull(over.getEnabled(), baseU.getEnabled()),
+                        firstNonNull(over.getMaxCycles(), baseU.getMaxCycles()),
+                        firstNonNull(over.getCatchUpMaxMs(), baseU.getCatchUpMaxMs()),
+                        firstNonNull(over.getRequires(), baseU.getRequires()),
+                        firstNonNull(over.getMaxQuantity(), baseU.getMaxQuantity()),
+                        firstNonNull(over.getGatherMaxCycles(), baseU.getGatherMaxCycles()));
+        StationAsset.Work from = base != null ? base : StationAsset.Work.of(null, null, null, null);
+        return from.copyWithUnattended(unattended);
     }
 
     /**
@@ -1210,6 +1430,18 @@ public final class ExtensionCatalog {
         }
         if (ext.getEntries() != null && ext.getEntries().length > 0) {
             out.add(ExtensionAsset.PAYLOAD_ENTRIES);
+        }
+        if (ext.getRecipe() != null) {
+            out.add(ExtensionAsset.PAYLOAD_RECIPE);
+        }
+        if (ext.getTool() != null) {
+            out.add(ExtensionAsset.PAYLOAD_TOOL);
+        }
+        if (ext.getWork() != null) {
+            out.add(ExtensionAsset.PAYLOAD_WORK);
+        }
+        if (ext.getStepOverlays() != null && !ext.getStepOverlays().isEmpty()) {
+            out.add(ExtensionAsset.PAYLOAD_STEP_OVERLAYS);
         }
         return out;
     }

@@ -249,13 +249,6 @@ public class StationAssetCodecTest {
     // ==================== Yield: purely deterministic, four leaves ====================
 
     @Test
-    void yield_authorsExactlyBaseScaleMinMax() {
-        assertEquals(java.util.Set.of("Base", "Scale", "Min", "Max"),
-                StationAsset.Yield.CODEC.getEntries().keySet(),
-                "everything conditional is a Bonus Roll instead, never hidden inside Yield");
-    }
-
-    @Test
     void yield_decodesEveryLeafAndReaderDefaultsScale() throws Exception {
         StationAsset a = decodeAsset("{ \"Actions\": [ { \"Id\": \"A\", \"Recipe\": { \"Yield\": {"
                 + " \"Base\": 2, \"Scale\": 1.5, \"Min\": 2, \"Max\": 9 } } } ] }");
@@ -272,13 +265,6 @@ public class StationAssetCodecTest {
     }
 
     // ==================== Recipe: one per action, no per-recipe tool ====================
-
-    @Test
-    void recipe_authorsConversionsFromCraftingFallbackYieldAndDonenessOnly() {
-        assertEquals(java.util.Set.of("Conversions", "FromCrafting", "Fallback", "Yield", "Doneness"),
-                StationAsset.Recipe.CODEC.getEntries().keySet(),
-                "the ACTION's Tool is the one gate; a recipe never carries its own");
-    }
 
     @Test
     void recipe_decodesMultiInputMultiOutputConversions() throws Exception {

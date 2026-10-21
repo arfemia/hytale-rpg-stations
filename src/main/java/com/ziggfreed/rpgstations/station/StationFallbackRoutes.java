@@ -39,6 +39,11 @@ import com.ziggfreed.rpgstations.asset.StationAsset;
  * empty output always fits) never rescues it: a full inventory can never turn a share-eligible
  * piece into an essence-only consumption.
  *
+ * <p><b>A route the worker prefers goes first.</b> A route whose {@code PreferWhen} passes for the worker is offered
+ * BEFORE the authored and derived rows ({@link #offeredRows} with {@code preferredOnly}), one row as always; one that
+ * does not apply to the piece leaves the piece to the usual order. With nobody to ask (an unattended settle, the
+ * viability check before a session) no route is preferred, and a route's {@code Ladder} reads as 1.
+ *
  * <p>Both are scoped by the gear filter ({@link #inFilter}: the shared matcher under its ONE
  * {@link StationCustody#accepts} rule, {@code Except} hole included) and by the metadata guard,
  * which the live caller applies to the real stack ({@link StationMetadataGuard#accepts}), the same
@@ -77,10 +82,20 @@ public final class StationFallbackRoutes {
     @Nullable
     static StationAsset.Conversion craftingShareRow(@Nullable StationAsset.Fallback fallback,
             @Nonnull String itemId, @Nullable NativeRecipe ownRecipe) {
+        return craftingShareRow(fallback, itemId, ownRecipe, 1.0);
+    }
+
+    /**
+     * As above, the share multiplied by {@code shareScale} (the worker's reading of the route's {@code Ladder}, held
+     * at a whole share; 1 = as authored).
+     */
+    @Nullable
+    static StationAsset.Conversion craftingShareRow(@Nullable StationAsset.Fallback fallback,
+            @Nonnull String itemId, @Nullable NativeRecipe ownRecipe, double shareScale) {
         if (fallback == null || !fallback.hasCraftingShare() || ownRecipe == null) {
             return null;
         }
-        Ingredient[] outputs = shareOf(ownRecipe.inputs(), fallback.getCraftingShare().effectiveShare(),
+        Ingredient[] outputs = shareOf(ownRecipe.inputs(), fallback.getCraftingShare().effectiveShare(shareScale),
                 outputQuantityOf(ownRecipe));
         if (outputs == null) {
             return null;
@@ -149,8 +164,33 @@ public final class StationFallbackRoutes {
     @Nullable
     static StationAsset.Conversion routeFor(@Nullable StationAsset.Fallback fallback, @Nonnull String itemId,
             @Nullable NativeRecipe ownRecipe) {
-        StationAsset.Conversion share = craftingShareRow(fallback, itemId, ownRecipe);
+        return routeFor(fallback, itemId, ownRecipe, 1.0);
+    }
+
+    /** As above, with the worker's crafting-share scale ({@link #craftingShareRow(StationAsset.Fallback, String, NativeRecipe, double)}). */
+    @Nullable
+    static StationAsset.Conversion routeFor(@Nullable StationAsset.Fallback fallback, @Nonnull String itemId,
+            @Nullable NativeRecipe ownRecipe, double shareScale) {
+        StationAsset.Conversion share = craftingShareRow(fallback, itemId, ownRecipe, shareScale);
         return share != null ? share : essenceOnlyRow(fallback, itemId);
+    }
+
+    /**
+     * PURE: the row a PREFERRED route offers {@code itemId} ({@code PreferWhen} passed for the worker), or null when
+     * no preferred route applies to it. The crafting share is tried first when {@code preferShare}, then the
+     * essence-only row when {@code preferEssence}; a preferred share that leaves no line falls through to a
+     * preferred essence route, and with neither the piece keeps the usual order (rows, then {@link #routeFor}).
+     */
+    @Nullable
+    static StationAsset.Conversion preferredRouteFor(@Nullable StationAsset.Fallback fallback, @Nonnull String itemId,
+            @Nullable NativeRecipe ownRecipe, double shareScale, boolean preferShare, boolean preferEssence) {
+        if (preferShare) {
+            StationAsset.Conversion share = craftingShareRow(fallback, itemId, ownRecipe, shareScale);
+            if (share != null) {
+                return share;
+            }
+        }
+        return preferEssence ? essenceOnlyRow(fallback, itemId) : null;
     }
 
     /**
@@ -167,7 +207,21 @@ public final class StationFallbackRoutes {
     static StationAsset.Conversion[] offeredRows(@Nullable StationAsset.Fallback fallback,
             @Nullable Map<String, Integer> pile, @Nonnull Predicate<String> inFilter,
             @Nonnull Function<String, NativeRecipe> ownRecipeOf) {
-        if (fallback == null || pile == null) {
+        return offeredRows(fallback, pile, inFilter, ownRecipeOf, 1.0, false, false, false);
+    }
+
+    /**
+     * PURE: as above with the worker's readings: {@code shareScale} multiplies the crafting share, and with
+     * {@code preferredOnly} only a route the worker PREFERS ({@code preferShare}, {@code preferEssence}) is offered,
+     * the array a selection tries BEFORE the authored and derived rows. Still at most ONE row, built for the oldest
+     * counted piece that passes {@code inFilter} and has such a route.
+     */
+    @Nonnull
+    static StationAsset.Conversion[] offeredRows(@Nullable StationAsset.Fallback fallback,
+            @Nullable Map<String, Integer> pile, @Nonnull Predicate<String> inFilter,
+            @Nonnull Function<String, NativeRecipe> ownRecipeOf, double shareScale, boolean preferredOnly,
+            boolean preferShare, boolean preferEssence) {
+        if (fallback == null || pile == null || (preferredOnly && !preferShare && !preferEssence)) {
             return new StationAsset.Conversion[0];
         }
         for (Map.Entry<String, Integer> entry : pile.entrySet()) {
@@ -176,7 +230,10 @@ public final class StationFallbackRoutes {
             if (itemId == null || itemId.isBlank() || count == null || count <= 0 || !inFilter.test(itemId)) {
                 continue;
             }
-            StationAsset.Conversion route = routeFor(fallback, itemId, ownRecipeOf.apply(itemId));
+            NativeRecipe own = ownRecipeOf.apply(itemId);
+            StationAsset.Conversion route = preferredOnly
+                    ? preferredRouteFor(fallback, itemId, own, shareScale, preferShare, preferEssence)
+                    : routeFor(fallback, itemId, own, shareScale);
             if (route != null) {
                 return new StationAsset.Conversion[] {route};
             }

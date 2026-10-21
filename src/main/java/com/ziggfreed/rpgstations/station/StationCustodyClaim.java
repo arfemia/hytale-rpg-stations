@@ -665,6 +665,100 @@ final class StationCustodyClaim {
         return out;
     }
 
+    // ==================== the unattended load stamp (Work.Unattended.Requires / MaxQuantity) ====================
+    //
+    // What a LOAD decided about unattended work, stamped as it was placed and kept on the pile it went into under
+    // the reserved "unattended:" PendingCycles keys (outside the "accrual:" and "doneness:" namespaces, so a gather
+    // and a ready window never touch it): ARMED once a loader the action's gate passes for placed material, and LEFT,
+    // the input units the unattended pass may still spend. ONE stamp per stash: a new stamp moves it to the pile the
+    // newest load went into. It lives as long as the pile does, so it goes with a stash that is emptied and removed.
+
+    /** The reserved {@code PendingCycles} key of the armed mark (value 1). */
+    static final String UNATTENDED_ARMED_KEY = "unattended:armed";
+
+    /** The reserved {@code PendingCycles} key of the input units unattended work may still spend. */
+    static final String UNATTENDED_LEFT_KEY = "unattended:left";
+
+    /**
+     * Stamps a load onto {@code socketId}'s pile: ARMED, and {@code left} input units for unattended work (null = no
+     * allowance, the whole pile). Any stamp another pile carried moves here. The caller marks dirty.
+     */
+    void stampUnattendedLoad(@Nonnull String socketId, @Nullable Integer left) {
+        clearUnattendedStamp();
+        Map<String, Integer> pending = stash.ensurePile(socketId).pendingCyclesMutable();
+        pending.put(UNATTENDED_ARMED_KEY, 1);
+        if (left != null) {
+            pending.put(UNATTENDED_LEFT_KEY, Math.max(0, left));
+        }
+    }
+
+    /** True when a load armed this stash for unattended work. */
+    boolean unattendedArmed() {
+        return unattendedStampValue(UNATTENDED_ARMED_KEY) != null;
+    }
+
+    /** The input units unattended work may still spend, or null when no load set an allowance (the whole pile). */
+    @Nullable
+    Integer unattendedLeft() {
+        return unattendedStampValue(UNATTENDED_LEFT_KEY);
+    }
+
+    /**
+     * Sets the allowance to {@code left} on whichever pile carries the stamp, or on {@code socketId}'s when none
+     * does (an allowance first set by the pass itself, for a pile loaded before the action asked one). The caller
+     * marks dirty when it matters.
+     */
+    void setUnattendedLeft(@Nonnull String socketId, int left) {
+        String holder = unattendedStampSocket();
+        stash.ensurePile(holder != null ? holder : socketId).pendingCyclesMutable()
+                .put(UNATTENDED_LEFT_KEY, Math.max(0, left));
+    }
+
+    @Nullable
+    private Integer unattendedStampValue(@Nonnull String key) {
+        String holder = unattendedStampSocket(key);
+        if (holder == null) {
+            return null;
+        }
+        Integer value = stash.pile(holder).getPendingCycles().get(key);
+        return value != null && value >= 0 ? value : null;
+    }
+
+    @Nullable
+    private String unattendedStampSocket() {
+        String armed = unattendedStampSocket(UNATTENDED_ARMED_KEY);
+        return armed != null ? armed : unattendedStampSocket(UNATTENDED_LEFT_KEY);
+    }
+
+    @Nullable
+    private String unattendedStampSocket(@Nonnull String key) {
+        Map<String, StashPile> piles = stash.getPiles();
+        if (piles == null) {
+            return null;
+        }
+        for (Map.Entry<String, StashPile> e : piles.entrySet()) {
+            Map<String, Integer> pending = e.getValue() != null ? e.getValue().getPendingCycles() : null;
+            if (pending != null && pending.containsKey(key)) {
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
+    private void clearUnattendedStamp() {
+        Map<String, StashPile> piles = stash.getPiles();
+        if (piles == null) {
+            return;
+        }
+        for (StashPile pile : piles.values()) {
+            Map<String, Integer> pending = pile != null ? pile.getPendingCycles() : null;
+            if (pending != null) {
+                pending.remove(UNATTENDED_ARMED_KEY);
+                pending.remove(UNATTENDED_LEFT_KEY);
+            }
+        }
+    }
+
     /** True when any of the given sockets' piles carries an unattended accrual key. */
     boolean carriesAccruedCycles(@Nonnull List<String> socketIds) {
         for (String socketId : socketIds) {

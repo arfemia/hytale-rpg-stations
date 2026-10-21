@@ -93,9 +93,11 @@ import com.ziggfreed.common.i18n.NativeNames;
 import com.ziggfreed.common.recipe.RecipeIndex;
 import com.ziggfreed.common.interaction.NativeChainFire;
 import com.ziggfreed.common.inventory.InventoryGrant;
+import com.ziggfreed.common.factor.FactorFormula;
 import com.ziggfreed.common.loot.FactorLookup;
 import com.ziggfreed.common.loot.LootEngine;
 import com.ziggfreed.common.loot.LootRef;
+import com.ziggfreed.common.loot.StochasticCount;
 import com.ziggfreed.common.progress.gate.GateSpec;
 import com.ziggfreed.common.progress.gate.RefusalLines;
 import com.ziggfreed.common.sound.Sound3D;
@@ -695,15 +697,21 @@ public final class StationService {
                         flipCustodyState(world, blockX, blockY, blockZ, custody, true);
                     }
                     // Unattended (decision 90): a live stash write at an action authoring
-                    // Work.Unattended indexes the block for the sessionless pass.
+                    // Work.Unattended indexes the block for the sessionless pass, after the load is stamped
+                    // with what it decided for unattended work (read of this loader).
+                    boolean armedUnattended = stampUnattendedLoad(world, blockX, blockY, blockZ, store, playerRef,
+                            asset, action, placed.socket());
                     registerUnattendedIfEnabled(blockKey, action);
                     toast(playerRef, RpgMsg.tr(loadedBefore
                             ? "ui.station.custody.topped_up" : "ui.station.custody.placed"));
+                    if (armedUnattended) {
+                        toast(playerRef, RpgMsg.tr("ui.station.custody.unattended"));
+                    }
                     // The placed-piece preview (Custody.Preview): what the piece just placed will
                     // give back, named now, before any work starts, addressed to the socket it
                     // actually went into (held or backpack route alike, as placedPiece settles it).
                     if (custody.effectivePreview()) {
-                        previewPlacedReturn(playerRef, player, asset, action, world, blockX, blockY, blockZ,
+                        previewPlacedReturn(store, playerRef, player, asset, action, world, blockX, blockY, blockZ,
                                 placed.socket());
                     }
                     return;
@@ -1012,6 +1020,21 @@ public final class StationService {
                 durability != null ? durability.getPerSwing() : null);
         s.durabilityPerCycle = StationToolScaling.resolvedDurabilityAmount(
                 durability != null ? durability.getPerCycle() : null);
+        s.wearLadder = durability != null ? durability.getLadder() : null;
+        // The two per-worker readings an engage needs before the first cycle (the wear ladder for the swings
+        // that land first, the classic loop's pace for the first cycle's length), off ONE snapshot built only when
+        // either is in play.
+        StationPacing.Composed classicPace = stepsProgram ? StationPacing.Composed.NONE : effectivePace(asset, action);
+        StationStep.Repeat classicBatch = stepsProgram ? null : StationBatch.batchOf(null, action.getRecipe());
+        s.startedAtMs = System.currentTimeMillis(); // the session's own clock, re-stamped at the commit below
+        FactorLookup engageLookup = s.wearLadder != null || !classicPace.isNeutral() || classicBatch != null
+                ? FactorRegistryImpl.getInstance().snapshotFor(buildFactorContext(s, store, player, action, 1))
+                : null;
+        s.wearScale = s.wearLadder != null && engageLookup != null
+                ? ContributionScaling.multiplier(s.wearLadder, engageLookup::resolve) : ContributionScale.NEUTRAL_SCALE;
+        // The progress row's denominator counts cycles at the worker's batch, as the pile will drain.
+        s.cycleBatch = StationBatch.resolve(classicBatch, engageLookup);
+        s.feedableCyclesAtStart = StationBatch.cyclesLeft(s.feedableCyclesAtStart, s.cycleBatch);
 
         StationAsset.Animation.Swing swing = animation != null ? animation.getSwing() : null;
         s.swingIntervalMs = swing != null && swing.getIntervalMs() != null && swing.getIntervalMs() > 0
@@ -1049,7 +1072,11 @@ public final class StationService {
         // never applies to a Steps program (idleEnabled is forced false above), so this never
         // races s.idleMode's own cadence.
         boolean instantFirstDispatch = stepsProgram && work != null && !work.effectiveLooping();
-        s.nextCycleAtMs = instantFirstDispatch ? now : now + (s.idleMode ? s.idleCycleMs : s.cycleMs);
+        // A classic loop's first cycle runs at the worker's pace (Pace reaches the loop interval, not only paced
+        // beats); idle practice keeps its own cadence.
+        long firstCycleMs = s.idleMode || engageLookup == null ? s.cycleMs
+                : StationPacing.scaleMs(s.cycleMs, StationPacing.multiplier(classicPace, engageLookup::resolve));
+        s.nextCycleAtMs = instantFirstDispatch ? now : now + (s.idleMode ? s.idleCycleMs : firstCycleMs);
         s.nextSwingAtMs = now + s.swingIntervalMs;
 
         byPlayer.put(playerUuid, s);
@@ -1330,8 +1357,14 @@ public final class StationService {
                 ? custodyClaimAt(sessionWorld(s), s.blockX, s.blockY, s.blockZ) : null;
         // The SAME conversion selection the engage check ran, re-resolved every cycle because
         // materials run out mid-session and the session's chosen output category still narrows the
-        // recipe's derived conversions.
-        ConversionCheck check = selectConversion(asset, action, player, claim, custody != null, s.chosenOutputCategory);
+        // recipe's derived conversions. A fallback with per-worker leaves (a preferred route, a share
+        // ladder) is asked of the worker, off a lookup built only when it asks.
+        FactorLookup worker = custody != null && fallbackAsksWorker(action.getRecipe())
+                ? FactorRegistryImpl.getInstance().snapshotFor(
+                        buildFactorContext(s, store, player, action, s.cyclesDone + 1))
+                : null;
+        ConversionCheck check = selectConversion(asset, action, player, claim, custody != null,
+                s.chosenOutputCategory, null, worker);
         if (check.state == ConversionState.RUNNABLE) {
             if (s.idleMode) {
                 s.idleMode = false;
@@ -1342,23 +1375,22 @@ public final class StationService {
             }
             // Per-conversion pace precedence (seam wave decision 52): a RUNNABLE conversion that
             // authors its own DurationMs (or a baked FromCrafting.NativeTime transform) OVERRIDES
-            // the heartbeat's Work.CycleMs advance for the NEXT cycle. A conversion with no pace
-            // override (check.durationMs <= 0, e.g. the shipped sawmill) leaves the cycleMs advance
+            // the heartbeat's Work.CycleMs advance for the NEXT cycle, and the action's Pace scales
+            // whichever of the two runs; both are set in runRealCycle, against the cycle's snapshot.
+            // A conversion with no override at an unpaced action leaves the cycleMs advance
             // untouched - byte-identical to before.
-            if (check.durationMs > 0) {
-                s.nextCycleAtMs = System.currentTimeMillis() + check.durationMs;
-            }
             int before = s.cyclesDone;
             boolean ran = runRealCycle(s, store, commandBuffer, asset, action, player, check);
             if (s.cyclesDone > before) {
                 // Read AFTER the cycle committed its consume, so the pile this reports is what is
                 // actually left - the SAME claim/inventory the cycle just drained, through the
                 // SAME per-ingredient matcher firstRunnableConversion(FromCustody) resolved
-                // availability with.
-                int remaining = custody != null
+                // availability with - counted in cycles at the worker's batch (the one this cycle ran), since a
+                // batched cycle takes that many rows' worth of the pile.
+                int feedable = custody != null
                         ? feedableCyclesFromCustody(check.inputs, claim, custody.effectiveSockets())
                         : feedableCyclesFromInventory(check.inputs, PlayerAccess.combinedBackpackStorageHotbar(player));
-                notifySessionCycle(s, remaining);
+                notifySessionCycle(s, StationBatch.cyclesLeft(feedable, s.cycleBatch));
             }
             return ran;
         } else if (check.state == ConversionState.NO_INPUTS && s.idleEnabled) {
@@ -1403,6 +1435,7 @@ public final class StationService {
                                  @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
                                  @Nonnull ConversionCheck check) {
         int attemptCycleIndex = s.cyclesDone + 1;
+        long cycleStartMs = System.currentTimeMillis();
         // The piece this cycle is about, captured BEFORE the snapshot so the item factors read it:
         // the addressed pile's unique stack or its oldest matching material for a custody action,
         // the exact-item input for the inventory route.
@@ -1415,6 +1448,15 @@ public final class StationService {
         // and any Stamp phase), so two ladders reading the same factor can never disagree.
         FactorLookup snapshot = FactorRegistryImpl.getInstance().snapshotFor(
                 buildFactorContext(s, store, player, action, attemptCycleIndex));
+        // The classic loop's own interval: the conversion's DurationMs when it authors one, else Work.CycleMs,
+        // scaled by the action's composed Pace for this worker (the action's ladder and every extension's, the
+        // action's clamp, every stretch). Read here, per cycle, off this cycle's snapshot.
+        StationPacing.Composed pace = effectivePace(asset, action);
+        double paceScale = pace.isNeutral() ? StationPacing.NEUTRAL : StationPacing.multiplier(pace, snapshot::resolve);
+        if (check.durationMs > 0 || paceScale != StationPacing.NEUTRAL) {
+            long baseMs = check.durationMs > 0 ? check.durationMs : s.cycleMs;
+            s.nextCycleAtMs = cycleStartMs + Math.max(1L, StationPacing.scaleMs(baseMs, paceScale));
+        }
         // The chosen conversion rides the dispatch as the Convert phase's PRESELECTED row, so the
         // implicit program converts through the very code path an authored Convert beat runs -
         // yield, the yield breakdown, the cycle output, the consume, the produce and the input hook
@@ -1475,8 +1517,13 @@ public final class StationService {
         }
         List<StationStep> base = Arrays.asList(authored);
         String target = ActionResolver.actionTargetId(asset, action.getActionId());
-        return target != null
-                ? ExtensionCatalog.getInstance().applyToActionSteps(asset.getId(), target, base) : base;
+        if (target == null) {
+            return base;
+        }
+        // Insertions first, then the per-beat overlays, so an overlay reaches an inserted beat by its Id too.
+        ExtensionCatalog extensions = ExtensionCatalog.getInstance();
+        return extensions.applyToActionStepOverlays(asset.getId(), target,
+                extensions.applyToActionSteps(asset.getId(), target, base));
     }
 
     /**
@@ -1647,8 +1694,13 @@ public final class StationService {
         // with nothing produced after it) reaches the input-consumed hook now, once. A mid-cycle
         // stop still refunds whatever was recorded before the commit, and reports none of it.
         commitIteration(s, store);
+        // The worker's wear ladder, re-read off THIS pass's snapshot, scales the cycle drain (and the swings that
+        // follow it); a fraction pays its whole part and the rest as the chance of one point more.
+        if (s.wearLadder != null) {
+            s.wearScale = ContributionScaling.multiplier(s.wearLadder, snapshot::resolve);
+        }
         if (s.durabilityPerCycle > 0) {
-            drainHeldToolDurability(store, s.ref, player, s.durabilityPerCycle);
+            drainHeldToolDurability(store, s.ref, player, wearAmount(s.durabilityPerCycle, s.wearScale));
         }
         // An authored program's Cycle-trigger Bonus pass, against the snapshot THIS dispatch pass
         // ran on. On a fresh single-pass program that IS the snapshot the whole walk used; on a
@@ -3663,7 +3715,7 @@ public final class StationService {
         emitMoment(store, s, StationFlairs.MOMENT_IMPACT, null, blockPos);
 
         if (s.durabilityPerSwing > 0 && !s.idleMode && swingPlayer != null) {
-            drainHeldToolDurability(store, s.ref, swingPlayer, s.durabilityPerSwing);
+            drainHeldToolDurability(store, s.ref, swingPlayer, wearAmount(s.durabilityPerSwing, s.wearScale));
         }
     }
 
@@ -4367,9 +4419,45 @@ public final class StationService {
             @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
             @Nullable StationCustodyClaim claim, boolean fromCustody, @Nullable String chosenCategory,
             @Nullable String socketOverride) {
+        return selectConversion(asset, action, player, claim, fromCustody, chosenCategory, socketOverride, null);
+    }
+
+    /**
+     * As above, asking {@code worker} (the worker's factor readings, null where nobody is asked) the two
+     * per-worker fallback leaves: a route whose {@code PreferWhen} passes is offered BEFORE the authored and derived
+     * rows (still one row, still put through the runnable check, so a preferred share with no room answers
+     * NO_ROOM rather than reaching for anything else), and the crafting share is multiplied by its {@code Ladder}
+     * wherever that route is offered. A preferred route that does not apply to the piece leaves the usual order.
+     */
+    @Nonnull
+    ConversionCheck selectConversion(@Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action, @Nonnull Player player,
+            @Nullable StationCustodyClaim claim, boolean fromCustody, @Nullable String chosenCategory,
+            @Nullable String socketOverride, @Nullable FactorLookup worker) {
         StationAsset.Recipe recipe = action.getRecipe();
         if (recipe == null) {
             return new ConversionCheck(ConversionState.NO_INPUTS);
+        }
+        Custody custody = action.getCustody();
+        List<Custody.ResolvedSocket> sockets = custody != null ? custody.effectiveSockets() : List.of();
+        StationAsset.Fallback fallback = recipe.getFallback();
+        double shareScale = craftingShareScale(fallback, worker);
+        if (fromCustody && fallback != null && claim != null && worker != null) {
+            boolean preferShare = fallback.getCraftingShare() != null
+                    && StationGates.passes(fallback.getCraftingShare().getPreferWhen(), worker);
+            boolean preferEssence = fallback.getEssenceOnly() != null
+                    && StationGates.passes(fallback.getEssenceOnly().getPreferWhen(), worker);
+            if (preferShare || preferEssence) {
+                StationAsset.Conversion[] preferred = fallbackRowsFor(fallback, claim, sockets, socketOverride,
+                        shareScale, true, preferShare, preferEssence);
+                if (preferred.length > 0) {
+                    ConversionCheck first = firstRunnableConversionFromCustody(claim, player, preferred, sockets,
+                            socketOverride);
+                    if (first.state != ConversionState.NO_INPUTS) {
+                        return first.state == ConversionState.RUNNABLE ? first.withRecipe(recipe) : first;
+                    }
+                }
+            }
         }
         StationAsset.Conversion[] conversions = StationCatalog.getInstance()
                 .resolvedConversions(asset, action.getActionId(), recipe);
@@ -4379,21 +4467,41 @@ public final class StationService {
         // file authoring no Tier anywhere scans in pure authored order exactly as before, and
         // derived rows (stamped tier 1) yield to unauthored tier-0 hand-written rows.
         conversions = tierOrdered(conversions);
-        Custody custody = action.getCustody();
-        List<Custody.ResolvedSocket> sockets = custody != null ? custody.effectiveSockets() : List.of();
         ConversionCheck check = fromCustody
                 ? firstRunnableConversionFromCustody(claim, player, conversions, sockets, socketOverride)
                 : firstRunnableConversion(player, conversions);
-        if (check.state == ConversionState.NO_INPUTS && fromCustody && recipe.getFallback() != null
+        if (check.state == ConversionState.NO_INPUTS && fromCustody && fallback != null
                 && claim != null) {
             // The scan is handed EXACTLY the rows the fallback offers, at most one
             // (StationFallbackRoutes#offeredRows), so a share row with no room answers NO_ROOM.
-            StationAsset.Conversion[] offered = fallbackRowsFor(recipe.getFallback(), claim, sockets, socketOverride);
+            StationAsset.Conversion[] offered = fallbackRowsFor(fallback, claim, sockets, socketOverride,
+                    shareScale, false, false, false);
             if (offered.length > 0) {
                 check = firstRunnableConversionFromCustody(claim, player, offered, sockets, socketOverride);
             }
         }
         return check.state == ConversionState.RUNNABLE ? check.withRecipe(recipe) : check;
+    }
+
+    /** The worker's reading of the crafting share's {@code Ladder}; 1 with no ladder, no route or nobody asked. */
+    private static double craftingShareScale(@Nullable StationAsset.Fallback fallback, @Nullable FactorLookup worker) {
+        StationAsset.Fallback.CraftingShare share = fallback != null ? fallback.getCraftingShare() : null;
+        if (share == null || share.getLadder() == null || worker == null) {
+            return ContributionScale.NEUTRAL_SCALE;
+        }
+        return ContributionScaling.multiplier(share.getLadder(), worker::resolve);
+    }
+
+    /** True when the recipe's fallback carries a per-worker leaf, so a selection is worth handing a worker lookup. */
+    private static boolean fallbackAsksWorker(@Nullable StationAsset.Recipe recipe) {
+        StationAsset.Fallback fallback = recipe != null ? recipe.getFallback() : null;
+        if (fallback == null) {
+            return false;
+        }
+        StationAsset.Fallback.CraftingShare share = fallback.getCraftingShare();
+        StationAsset.Fallback.EssenceOnly essence = fallback.getEssenceOnly();
+        return (share != null && (share.getPreferWhen() != null || share.getLadder() != null))
+                || (essence != null && essence.getPreferWhen() != null);
     }
 
     /**
@@ -4409,7 +4517,52 @@ public final class StationService {
         StationCustodyClaim claim = custody != null
                 ? custodyClaimForAnchor(s, step.getAt()) : null;
         return selectConversion(ctx.asset, ctx.action, ctx.player, claim, custody != null,
-                s.chosenOutputCategory, s.queueSocketId);
+                s.chosenOutputCategory, s.queueSocketId, ctx.snapshot);
+    }
+
+    /**
+     * How many times a Convert beat runs its matched row this cycle ({@link StationBatch}): the beat's or the
+     * recipe's {@code Batch} read of the worker, held to what the row's inputs can feed from where the beat draws
+     * (the addressed custody pile, else the worker's bag) and to the room the outputs need in the worker's bag, and
+     * never below the one the selection already found runnable. 1 with no batch authored, so a beat with none
+     * runs exactly as before.
+     */
+    int batchRuns(@Nonnull StationStepContext ctx, @Nonnull StationStep step, @Nonnull ConversionCheck check,
+            @Nonnull Ingredient[] yieldedOutputs, boolean fromCustody) {
+        int batch = StationBatch.resolve(StationBatch.batchOf(step.getConvert(), check.recipe), ctx.snapshot);
+        ctx.session.cycleBatch = Math.max(1, batch);
+        if (batch <= 1 || check.inputs == null) {
+            return 1;
+        }
+        int feed;
+        if (fromCustody && ctx.action.getCustody() != null) {
+            StationSession s = ctx.session;
+            StationCustodyClaim claim = custodyClaimForAnchor(s, step.getAt());
+            List<Custody.ResolvedSocket> sockets = ctx.action.getCustody().effectiveSockets();
+            feed = feedableCycles(check.inputs, in -> StationCustody.availableInPile(
+                    claim != null ? claim.items(StationCustody.socketIdFor(in.getSocket(), s.queueSocketId, sockets))
+                            : null,
+                    liveIngredientMatcher(in)));
+        } else {
+            feed = feedableCyclesFromInventory(check.inputs, PlayerAccess.combinedBackpackStorageHotbar(ctx.player));
+        }
+        int runs = StationBatch.count(batch, feed);
+        while (runs > 1 && !InventoryGrant.canAddAll(ctx.player, stacksOf(StationBatch.times(yieldedOutputs, runs)))) {
+            runs--;
+        }
+        return runs;
+    }
+
+    /** {@code outputs} as {@link ItemStack}s, for the one all-outputs-fit room check (a null or id-less entry skipped). */
+    @Nonnull
+    private static List<ItemStack> stacksOf(@Nonnull Ingredient[] outputs) {
+        List<ItemStack> stacks = new ArrayList<>(outputs.length);
+        for (Ingredient out : outputs) {
+            if (out != null && out.getItemId() != null && !out.getItemId().isBlank()) {
+                stacks.add(new ItemStack(out.getItemId(), out.effectiveQuantity()));
+            }
+        }
+        return stacks;
     }
 
     /**
@@ -4424,7 +4577,8 @@ public final class StationService {
     @Nonnull
     private static StationAsset.Conversion[] fallbackRowsFor(@Nonnull StationAsset.Fallback fallback,
             @Nonnull StationCustodyClaim claim, @Nonnull List<Custody.ResolvedSocket> sockets,
-            @Nullable String socketOverride) {
+            @Nullable String socketOverride, double shareScale, boolean preferredOnly, boolean preferShare,
+            boolean preferEssence) {
         String socketId = StationCustody.socketIdFor(null, socketOverride, sockets);
         ItemStack unique = claim.uniqueStack(socketId);
         if (unique != null && !StationMetadataGuard.accepts(unique)) {
@@ -4433,7 +4587,8 @@ public final class StationService {
         return StationFallbackRoutes.offeredRows(fallback, claim.items(socketId),
                 itemId -> StationFallbackRoutes.inFilter(fallback, itemId, liveResourceTypeIdsOf(itemId),
                         liveRawTagsOf(itemId), liveFunctionOf(itemId), pileEntryQualityOf(unique, itemId)),
-                itemId -> RecipeIndex.live().catalog().craftingRecipeOf(itemId));
+                itemId -> RecipeIndex.live().catalog().craftingRecipeOf(itemId),
+                shareScale, preferredOnly, preferShare, preferEssence);
     }
 
     /**
@@ -6743,16 +6898,24 @@ public final class StationService {
      * own; a piece no row runs for right now (no room in the bag, nothing matching) says nothing,
      * since there is nothing true to promise. Never throws.
      */
-    private void previewPlacedReturn(@Nonnull PlayerRef playerRef, @Nonnull Player player,
-            @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action, @Nonnull World world,
-            int blockX, int blockY, int blockZ, @Nullable Custody.ResolvedSocket socket) {
+    private void previewPlacedReturn(@Nonnull Store<EntityStore> store, @Nonnull PlayerRef playerRef,
+            @Nonnull Player player, @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action,
+            @Nonnull World world, int blockX, int blockY, int blockZ, @Nullable Custody.ResolvedSocket socket) {
         try {
             StationCustodyClaim claim = custodyClaimAt(world, blockX, blockY, blockZ);
             if (claim == null) {
                 return;
             }
+            // The placer is who will work the piece: a fallback route they prefer, or their share, is what the
+            // preview names, so it promises what their own ritual will give back.
+            FactorLookup placer = fallbackAsksWorker(action.getRecipe())
+                    ? pressLookup(store, playerRef, asset, action,
+                            pieceInCustody(claim, action.getCustody() != null
+                                    ? action.getCustody().effectiveSockets() : List.of(),
+                                    socket != null ? socket.id() : null, null))
+                    : null;
             ConversionCheck check = selectConversion(asset, action, player, claim, true, null,
-                    socket != null ? socket.id() : null);
+                    socket != null ? socket.id() : null, placer);
             if (check.state != ConversionState.RUNNABLE || check.conversion == null) {
                 return;
             }
@@ -6916,9 +7079,16 @@ public final class StationService {
      * authors sockets and every non-empty pile is usable by them ({@code Share.Use}) - the same
      * rule the engage gate enforces, answered early so a shared user's press resolves the
      * committed action instead of whatever they happen to hold.
+     *
+     * <p>A claim naming an action this station no longer has (a pack retired it, and its pile
+     * stayed in a world) commits nobody, its owner included: the press selects the station's own
+     * action again, so the pile is worked rather than stranded. Retrieval reads the claim as before.
      */
     private static boolean mayCommitToClaim(@Nonnull StationAsset asset, @Nonnull StationCustodyClaim claim,
             @Nonnull UUID playerUuid) {
+        if (ActionResolver.findAction(asset, claim.actionId) == null) {
+            return false;
+        }
         if (claim.ownerId.equals(playerUuid)) {
             return true;
         }
@@ -8299,11 +8469,43 @@ public final class StationService {
 
             long workCycleMs = work.getCycleMs() != null && work.getCycleMs() > 0
                     ? work.getCycleMs() : DEFAULT_CYCLE_MS;
+            // What the loads decided (stamped at placement): a pile no loader the gate passes for ever armed is
+            // worked attended only, and a spent allowance waits for the next load. Either way the time since forfeits
+            // (the station could not have worked it) and the block leaves the index until a load re-registers it.
+            List<Custody.ResolvedSocket> sockets = custody.effectiveSockets();
+            FactorFormula allowance = unattended.getMaxQuantity();
+            boolean limited = allowance != null && !allowance.isEmpty();
+            int inputUnitsLeft = Integer.MAX_VALUE;
+            if (unattended.hasRequires() && !claim.unattendedArmed()) {
+                claim.setUnattendedLastGameTime(nowGame);
+                unattendedIndex.evictBlock(blockKey);
+                return;
+            }
+            if (limited) {
+                Integer left = claim.unattendedLeft();
+                if (left == null) {
+                    // A pile no load stamped (loaded before the action asked an allowance): the authored one.
+                    left = countOf(allowance, null);
+                    claim.setUnattendedLeft(StationCustody.socketIdFor(null, null, sockets), left);
+                }
+                if (left <= 0) {
+                    claim.setUnattendedLastGameTime(nowGame);
+                    unattendedIndex.evictBlock(blockKey);
+                    return;
+                }
+                inputUnitsLeft = left;
+            }
+            // An unattended cycle runs the recipe's authored batch: nobody is there for its factors to read.
+            int batch = StationBatch.resolve(recipe != null ? recipe.getBatch() : null, null);
             StationUnattended.Settle settle = StationUnattended.settle(claim,
-                    custody.effectiveSockets(), conversions, recipe != null ? recipe.getYield() : null,
+                    sockets, conversions, recipe != null ? recipe.getYield() : null,
                     custody.effectiveMaxQuantity(), unattended, workCycleMs, nowGame,
                     StationService::liveResourceTypeIdsOf, StationService::liveRawTagsOf,
-                    StationMetadataGuard.refusedPieces(claim));
+                    StationMetadataGuard.refusedPieces(claim), batch, inputUnitsLeft);
+            if (settle.transformed() && limited) {
+                claim.setUnattendedLeft(StationCustody.socketIdFor(null, null, sockets),
+                        inputUnitsLeft - settle.consumedUnits());
+            }
             if (settle.transformed()) {
                 // The settled row's own doneness fold (conversion over recipe) opens/re-stamps
                 // the ready window - one batch per settled cycle, exactly what an attended
@@ -8467,6 +8669,16 @@ public final class StationService {
             StationAsset.Work.Unattended unattended = work != null ? work.getUnattended() : null;
             int maxCycles = unattended != null ? unattended.effectiveMaxCycles()
                     : StationAsset.Work.Unattended.DEFAULT_MAX_CYCLES;
+            // The gather end of the ceiling can be the GATHERER's own (Work.Unattended.GatherMaxCycles), read
+            // before the plan so the plan pays what they are owed; never below one cycle.
+            FactorFormula gatherCeiling = unattended != null ? unattended.getGatherMaxCycles() : null;
+            if (gatherCeiling != null && !gatherCeiling.isEmpty()) {
+                FactorLookup gatherer = FactorRegistryImpl.getInstance().snapshotFor(
+                        buildGatherFactorContext(store, playerRef, gathererId, claim.stationId,
+                                ActionResolver.actionTargetId(asset, action.getActionId()), action, player, 0,
+                                gatheredPiece(claim, socketIds)));
+                maxCycles = Math.max(1, countOf(gatherCeiling, gatherer));
+            }
             // The owner ceiling (Settings Limits.MaxUnattendedGatherCycles): min of caps with the
             // action's own knob, read live like every other limit so a reload applies at once.
             RpgStationsSettingsAsset.Limits ownerLimits = limits();
@@ -8581,6 +8793,80 @@ public final class StationService {
             } catch (Throwable t) {
                 Log.fine("STATION gather effect grant failed: " + t.getMessage());
             }
+        }
+    }
+
+    /**
+     * A per-player count formula's reading ({@code Work.Unattended.MaxQuantity}, {@code GatherMaxCycles}): Base plus
+     * its weighted Factors through {@code lookup}, held in its Clamp and rounded, never below 0. A null
+     * {@code lookup} (nobody to ask) reads the authored Base, every term contributing nothing.
+     */
+    static int countOf(@Nonnull FactorFormula formula, @Nullable FactorLookup lookup) {
+        double value = lookup == null ? formula.evaluate((factorId, param) -> null) : formula.evaluate(lookup::resolve);
+        return Double.isFinite(value) ? (int) Math.max(0L, Math.min(Integer.MAX_VALUE, Math.round(value))) : 0;
+    }
+
+    /**
+     * A pre-session factor lookup for the player pressing at a station (the loader at placement, the placer a
+     * preview speaks to): no session, so session seconds and the cycle index read 0, {@code piece} the custody
+     * piece the press is about. Carries the press's store, so a reading that needs the player's live entity (a
+     * stat, a track pick) answers as it does in a session.
+     */
+    @Nonnull
+    private static FactorLookup pressLookup(@Nonnull Store<EntityStore> store, @Nonnull PlayerRef playerRef,
+            @Nonnull StationAsset asset, @Nonnull ActionResolver.ResolvedAction action, @Nullable ItemStack piece) {
+        FactorContext ctx = FactorContext.builder()
+                .store(store)
+                .playerRef(playerRef)
+                .playerId(playerRef.getUuid())
+                .stationId(asset.getId())
+                .actionId(action.getActionId())
+                .sessionSeconds(0L)
+                .cycleIndex(0)
+                .contributions(contributionParams(asset.getId(),
+                        ActionResolver.actionTargetId(asset, action.getActionId()), action.getWork()))
+                .item(piece)
+                .build();
+        return FactorRegistryImpl.getInstance().snapshotFor(ctx);
+    }
+
+    /**
+     * Stamps a just-placed load for unattended work ({@code Work.Unattended.Requires} and {@code MaxQuantity}), read
+     * of the LOADER: a loader the gate passes for arms the pile and sets its allowance afresh; a loader it refuses
+     * leaves whatever stamp stands, so a sharer topping a pile up never stops it. True when this load armed the
+     * pile, which is when the loader is told the station keeps working without them. An action that asks neither
+     * stamps nothing (every pile of it works unattended, as before the two leaves existed). Never throws.
+     */
+    private boolean stampUnattendedLoad(@Nonnull World world, int blockX, int blockY, int blockZ,
+            @Nonnull Store<EntityStore> store, @Nonnull PlayerRef playerRef, @Nonnull StationAsset asset,
+            @Nonnull ActionResolver.ResolvedAction action, @Nullable Custody.ResolvedSocket socket) {
+        try {
+            StationAsset.Work work = action.getWork();
+            StationAsset.Work.Unattended unattended = work != null ? work.getUnattended() : null;
+            if (unattended == null || !unattended.effectiveEnabled() || action.getCustody() == null) {
+                return false;
+            }
+            FactorFormula allowance = unattended.getMaxQuantity();
+            boolean limited = allowance != null && !allowance.isEmpty();
+            if (!unattended.hasRequires() && !limited) {
+                return false;
+            }
+            StationCustodyClaim claim = custodyClaimAt(world, blockX, blockY, blockZ);
+            if (claim == null) {
+                return false;
+            }
+            FactorLookup loader = pressLookup(store, playerRef, asset, action, null);
+            if (unattended.hasRequires() && !StationGates.passes(unattended.getRequires(), loader)) {
+                return false;
+            }
+            String socketId = socket != null ? socket.id()
+                    : StationCustody.socketIdFor(null, null, action.getCustody().effectiveSockets());
+            claim.stampUnattendedLoad(socketId, limited ? countOf(allowance, loader) : null);
+            claim.markDirty();
+            return true;
+        } catch (Throwable t) {
+            Log.fine("STATION unattended load stamp skipped at '" + asset.getId() + "': " + t.getMessage());
+            return false;
         }
     }
 
@@ -9341,6 +9627,18 @@ public final class StationService {
      */
     static boolean seatModeShouldStop(boolean seatMode, boolean mounted) {
         return seatMode && !mounted;
+    }
+
+    /**
+     * One drain's whole points: {@code amount} times the worker's wear {@code scale}, its fraction paid through the
+     * shared {@link StochasticCount} rule (the whole part always, the rest as the chance of one more). The authored
+     * amount untouched at the neutral scale, so a drain no ladder names wears exactly as authored.
+     */
+    static int wearAmount(int amount, double scale) {
+        if (amount <= 0 || scale == ContributionScale.NEUTRAL_SCALE) {
+            return Math.max(0, amount);
+        }
+        return StochasticCount.resolve(amount * scale, () -> ThreadLocalRandom.current().nextDouble());
     }
 
     /**

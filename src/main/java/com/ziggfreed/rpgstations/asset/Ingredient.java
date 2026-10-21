@@ -104,6 +104,17 @@ public final class Ingredient {
         return i;
     }
 
+    /**
+     * A copy of this entry at {@code quantity}, every route and the socket address carried over unchanged, so the
+     * copy matches, drains from and lands in exactly what this entry does.
+     */
+    @Nonnull
+    public Ingredient withQuantity(int quantity) {
+        Ingredient i = of(itemId, resourceTypeId, quantity, socket);
+        i.tags = tags;
+        return i;
+    }
+
     /** Convenience: the route-less MATCH-ANY ingredient (accepts anything; custody INPUT only). */
     @Nonnull
     public static Ingredient matchAny(@Nullable Integer quantity) {

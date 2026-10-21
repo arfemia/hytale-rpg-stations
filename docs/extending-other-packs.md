@@ -28,7 +28,7 @@ directly - every mechanical payload key targets an ACTION instead:
 | Target | Payload keys it may carry |
 |---|---|
 | `{Station: "<id>"}` | `Actions` (NEW entries added to the station's ordered list; the base wins an Id collision, and an added action is selected only after every base action unless `ActionsAnchor` places it), `ActionsAnchor` (where those actions join the list: exactly one of `{After: "<actionId>"}`, `{Before: "<actionId>"}`, `{AtStart: true}`, `{AtEnd: true}`) |
-| `{Action: "<id>"}` | `PerCycleContributions`, `Bonus`, `ContributionScale`, `Conversions`, `Steps`, `Anchors` (new keys only), `Puppet`, `Custody` |
+| `{Action: "<id>"}` | `PerCycleContributions`, `Bonus`, `ContributionScale`, `Pace`, `Conversions`, `Steps`, `Anchors` (new keys only), `Puppet`, `Custody`, and the per-worker overlays `Recipe`, `Tool`, `Work` and `StepOverlays` |
 | `{Station: "<id>", Action: "<id>"}` | the same Action payload keys, applied only where THAT station resolves that action id |
 | `{Lootable: "<id>"}` | `Rolls` (appended) |
 | `{RollPool: "<id>"}` | `Entries` (appended) |
@@ -88,7 +88,11 @@ one on that key - both of which apply on the scoped station - are reported.
    reach `Mill` (its contributions, its extra tables) do not reach it, so give it its own (a `Parent` child of
    the base action's extension that changes only `Target` is the short way), and a standalone
    `ActionAsset` with `Parent` set to the base action authors only what the variant changes. One
-   variant runs a session, so two variants of one action do not combine.
+   variant runs a session, so two variants of one action do not combine, and a pile loaded under a
+   variant belongs to it. A variant is the shape for a genuinely different job; to let a worker's own
+   settings change how the SAME job runs (two at a time, slower and luckier, a beat left out, a
+   different fallback route), author the per-worker overlays below on the base action instead: they
+   all stay one action, so they combine and every pile stays everyone's.
 
 ```json
 {
@@ -100,7 +104,8 @@ one on that key - both of which apply on the scoped station - are reported.
 ```
 3. **Unkeyed arrays** (`PerCycleContributions`, `Conversions`, `Rolls`, `Entries`) - pure append, in
    apply order.
-4. **Nested per-leaf overlay** (`Puppet`, `Custody`, `ContributionScale`) - recursively, at every
+4. **Nested per-leaf overlay** (`Puppet`, `Custody`, `ContributionScale`, and the per-worker
+   overlays `Recipe`, `Tool`, `Work`, `StepOverlays` described below) - recursively, at every
    nesting depth, an AUTHORED extension leaf wins and an unauthored one leaves the base's own value
    intact; among several extensions the later (higher-priority) one overlays on top.
 
@@ -139,6 +144,45 @@ one on that key - both of which apply on the scoped station - are reported.
 This is the shape a fish-exemplar pack-side extension uses: it is the ONLY thing that makes the jar's
 `PrepFish` action post anything at all - the jar action declares no contributions, and this one small
 file is entirely responsible for wiring the two together.
+
+### Per-worker overlays
+
+Four overlays let a pack tune how another pack's action works for each worker, through the
+[per-worker settings](actions-and-steps.md#per-worker-settings-on-one-action) the action's own groups
+carry. Each merges per leaf (rule 4), and each reaches only the leaves listed here; anything else it
+authors does nothing, and the content audit says so (`EXTENSION_OVERLAY_IGNORED`):
+
+| Overlay | Leaves it reaches | What stays the action's |
+|---|---|---|
+| `Recipe` | `Batch`, every `Yield` leaf (its `Ladder` included), and the leaves of the fallback routes the action already authors (`CraftingShare.Share`/`PreferWhen`/`Ladder`, `EssenceOnly.Enabled`/`PreferWhen`) | the rows (append them through `Conversions`), `FromCrafting`, `Doneness`, the fallback's gear filter `Input`, and any route the action does not author: an overlay tunes how a piece falls back, never widens which pieces do. An action with no `Recipe` gets none. |
+| `Tool` | `Durability` (`PerSwing`, `PerCycle`, `MinStartPercent`, `Ladder`) | which tool the action takes (`Tags`, `Gather`, `Ids`); an action with no `Tool` wears nothing |
+| `Work` | `Unattended`, every leaf (it can give an action unattended work it never authored) | the loop's cadence and bounds (scale the loop with `Pace` instead) and its `PerCycleContributions` (append those through the top-level payload) |
+| `StepOverlays` | a map keyed by a beat's `Id` in the program the action runs (its own beats and every inserted one): `SkipWhen` | the beat's phases, timing and presentation |
+
+```json
+{
+  "Target": { "Station": "Sawmill", "Action": "Mill" },
+  "Recipe": { "Batch": { "Min": 1, "Max": 2,
+              "Factors": [ { "Factor": "yourmod:technique", "Param": "Double_Cut", "Weight": 1 } ] } },
+  "Tool": { "Durability": { "Ladder": {
+            "Factors": [ { "Factor": "yourmod:technique", "Param": "Double_Cut" } ],
+            "Floors": [ { "Min": 1, "Scale": 2 } ] } } },
+  "Work": { "Unattended": { "Requires": { "Factors": [ { "Factor": "yourmod:technique", "Param": "Lumber_Camp", "Min": 1 } ] } } },
+  "Pace": { "Ladder": { "Factors": [ { "Factor": "yourmod:technique", "Param": "Fine_Cut" } ],
+                        "Floors": [ { "Min": 1, "Scale": 1.5 } ] } }
+}
+```
+
+```json
+{
+  "Target": { "Station": "Disenchanting_Table", "Action": "Disenchant" },
+  "StepOverlays": { "Draw": { "SkipWhen": { "Factors": [ { "Factor": "yourmod:technique", "Param": "Quick", "Min": 1 } ] } } }
+}
+```
+
+Author each setting opt-in: the gate passes, or the ladder reaches a floor, only for the worker it
+names. Everyone else, and a server where the factor is unknown, runs the action exactly as its own
+author wrote it.
 
 ### Apply order
 
@@ -179,9 +223,11 @@ wrong tool for them:
 - `Custody.States` - the visual empty/loaded/working trio itself; there is nothing meaningful to
   append to it (the surrounding `Custody` group's OTHER leaves, like `Display`, are still overlayable
   per the per-leaf rule above).
-- Scalar groups (`Work`, `Worker.Hold`, `Worker.Camera`, `Worker.Animation`, `Recipe.FromCrafting`,
-  `Recipe.Yield`) - overriding these is load-order's job (a full replacement or a `Parent` override),
-  not an additive extension. `Recipe.Conversions` is the one exception, appended per rule 3 above.
+- Scalar groups (`Worker.Hold`, `Worker.Camera`, `Worker.Animation`, every `Work` leaf but
+  `Unattended`, `Recipe.FromCrafting`, `Recipe.Doneness`, and which tool an action takes) -
+  overriding these is load-order's job (a full replacement or a `Parent` override), not an additive
+  extension. `Recipe.Conversions` is appended per rule 3 above, and the per-worker leaves of
+  `Recipe`, `Tool` and `Work` overlay per the section above.
 - The internals of an existing `Roll` - an extender adds their OWN new Roll beside it instead of
   reaching inside someone else's.
 - `FlairAsset.Moments` - see [Flairs](flairs.md); the flair union already composes without needing this

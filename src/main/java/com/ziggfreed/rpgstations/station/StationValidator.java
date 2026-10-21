@@ -107,8 +107,11 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@link Ingredient} vocabulary, and the {@code StationStep.Stamp.Stats.Caps.Budgets[]} shape was
  * rewritten against the A-SCHEMA leg's rewritten codecs. New checks: {@code ACTION_REF_UNKNOWN},
  * {@code EXTENSION_TARGET_UNKNOWN}, {@code EXTENSION_PAYLOAD_MISMATCH},
- * {@code EXTENSION_KEY_COLLISION}, {@code EXTENSION_ANCHOR_MISSING} (a step insertion's, or a Station
- * target's {@code ActionsAnchor}), {@code EXTENSION_ACTION_SHADOWS} (an ungated catch-all placed ahead of a
+ * {@code EXTENSION_KEY_COLLISION}, {@code EXTENSION_ANCHOR_MISSING} (a step insertion's, a Station
+ * target's {@code ActionsAnchor}, or a {@code StepOverlays} key naming no beat), {@code EXTENSION_OVERLAY_IGNORED}
+ * (a {@code Recipe}/{@code Tool}/{@code Work} overlay leaf the overlay never reaches, or a recipe, tool or
+ * fallback route the target action lacks, which an overlay never adds),
+ * {@code EXTENSION_ACTION_SHADOWS} (an ungated catch-all placed ahead of a
  * station's own actions), {@code EXTENSION_STEP_MISSING_ID}, {@code ANCHOR_STATION_UNKNOWN},
  * {@code WALK_TARGET_UNKNOWN_ANCHOR}, {@code STEP_AT_UNKNOWN_ANCHOR}, {@code WALK_REQUIRES_PUPPET},
  * {@code LOOT_OUTPUT_ITEMS_NO_CYCLE_OUTPUT}, and {@code LOOT_DUPLICATE_FACTOR} (INFO). The
@@ -189,7 +192,8 @@ import com.ziggfreed.rpgstations.util.Log;
  * for a program with no Convert beat. The ritual queue ({@code Work.Queue}):
  * {@code QUEUE_WITHOUT_STEPS}, {@code QUEUE_WITHOUT_SOCKETS}, {@code QUEUE_SOCKET_NOT_SINGLE},
  * {@code QUEUE_WITH_LOOPING} (INFO). The pace ({@code ActionDef.Pace}, an extension's
- * {@code Pace}, a step's {@code Paced}): {@code PACE_WITHOUT_STEPS}, {@code PACE_NO_PACED_STEP},
+ * {@code Pace}, a step's {@code Paced}; a classic loop's pace scales its cycle, so it needs no step):
+ * {@code PACE_NO_PACED_STEP},
  * {@code PACE_UNCLAMPED}, {@code PACE_CLAMP_INVERTED}, {@code PACE_FLOOR_NONPOSITIVE},
  * {@code PACE_EXTENSION_NO_LADDER}, {@code PACED_STEP_WITHOUT_PACE} (INFO). Finds on a beat
  * ({@code RollBonus}): {@code BONUS_AT_BEAT_NO_BONUS}, {@code BONUS_AT_BEAT_REPEATED} (INFO).
@@ -1174,6 +1178,24 @@ public final class StationValidator {
         // Per station (lower-cased id), the action ids the extensions applied so far have added: what a later
         // extension's ActionsAnchor may name, exactly as the runtime's working list holds them.
         Map<String, Set<String>> actionsAddedSoFar = new HashMap<>();
+        // Every beat Id any extension inserts (lower-cased): a StepOverlays key may name one of those as well as a
+        // base beat, since the overlays apply after every insertion.
+        Set<String> insertedStepIds = new HashSet<>();
+        for (ExtensionAsset ext : extensions) {
+            if (ext == null || ext.getSteps() == null) {
+                continue;
+            }
+            for (ExtensionAsset.StepInsertion insertion : ext.getSteps()) {
+                if (insertion == null || insertion.getInsert() == null) {
+                    continue;
+                }
+                for (StationStep inserted : insertion.getInsert()) {
+                    if (inserted != null && inserted.getId() != null && !inserted.getId().isBlank()) {
+                        insertedStepIds.add(inserted.getId().trim().toLowerCase(Locale.ROOT));
+                    }
+                }
+            }
+        }
 
         for (ExtensionAsset ext : ExtensionAsset.sortedForApply(extensions)) {
             if (ext == null) {
@@ -1246,6 +1268,28 @@ public final class StationValidator {
                     targetType, label, extId, out);
             checkExtensionPayload(ext.getCustody() != null, ExtensionAsset.PAYLOAD_CUSTODY,
                     targetType, label, extId, out);
+            checkExtensionPayload(ext.getRecipe() != null, ExtensionAsset.PAYLOAD_RECIPE,
+                    targetType, label, extId, out);
+            checkExtensionPayload(ext.getTool() != null, ExtensionAsset.PAYLOAD_TOOL,
+                    targetType, label, extId, out);
+            checkExtensionPayload(ext.getWork() != null, ExtensionAsset.PAYLOAD_WORK,
+                    targetType, label, extId, out);
+            checkExtensionPayload(ext.getStepOverlays() != null && !ext.getStepOverlays().isEmpty(),
+                    ExtensionAsset.PAYLOAD_STEP_OVERLAYS, targetType, label, extId, out);
+            checkIgnoredOverlayLeaves(ext, targetBody, label, extId, out);
+            checkWorkerLadders(ext.getRecipe(), ext.getTool(), label, extId, factorKnown, out);
+            if (ext.getStepOverlays() != null && !ext.getStepOverlays().isEmpty()) {
+                Set<String> targetStepIds = resolveTargetStepIds(targetBody);
+                for (String key : ext.getStepOverlays().keySet()) {
+                    if (key != null && targetStepIds != null
+                            && !targetStepIds.contains(key.trim().toLowerCase(Locale.ROOT))
+                            && !insertedStepIds.contains(key.trim().toLowerCase(Locale.ROOT))) {
+                        out.add(Finding.warning(DOMAIN, "EXTENSION_ANCHOR_MISSING",
+                                label + ".StepOverlays['" + key + "'] names no beat of the target's program - it is"
+                                        + " ignored", extId));
+                    }
+                }
+            }
             // Adversarial-verify F3: the two overlay payloads get the SAME content walk every
             // other structured payload in this block gets (a Look.Source NpcRole overlay without
             // a Role.RoleId must warn here too). A standalone overlay carries no effective
@@ -3327,8 +3371,8 @@ public final class StationValidator {
     }
 
     /**
-     * {@code ActionDef.Pace} coverage, warn-only. {@code PACE_WITHOUT_STEPS}: a pace on an action
-     * that runs the classic convert loop scales nothing (no beat is Paced). {@code
+     * {@code ActionDef.Pace} coverage, warn-only. A pace on an action that runs the classic convert
+     * loop scales the loop's own cycle, so it needs no program. {@code
      * PACE_NO_PACED_STEP}: a pace whose program marks no step Paced is inert. {@code
      * PACE_UNCLAMPED}: the action's Clamp is where the pace range lives (every extension ladder
      * multiplies into it, and an extension's own Clamp can only narrow it), so a pace with no Clamp,
@@ -3346,11 +3390,7 @@ public final class StationValidator {
         }
         String pLabel = label + " Pace";
         boolean hasSteps = effectiveSteps != null && effectiveSteps.length > 0;
-        if (!hasSteps && !mayInherit) {
-            out.add(Finding.warning(DOMAIN, "PACE_WITHOUT_STEPS",
-                    pLabel + " is authored on an action with no Steps program - only a step marked Paced"
-                            + " is scaled, so this pace scales nothing", id));
-        } else if (hasSteps && !anyPaced(effectiveSteps)) {
+        if (hasSteps && !anyPaced(effectiveSteps)) {
             out.add(Finding.warning(DOMAIN, "PACE_NO_PACED_STEP",
                     pLabel + " is authored but no step of the program is marked Paced - the pace scales"
                             + " nothing; author Paced true on the elastic beats", id));
@@ -3367,6 +3407,139 @@ public final class StationValidator {
                     pLabel + ".Clamp.Min (" + clamp.getMin() + ") sits above Max (" + clamp.getMax() + ")", id));
         }
         checkPaceLadder(pace.getLadder(), pLabel + ".Ladder", id, factorKnown, out);
+    }
+
+    /**
+     * The per-worker ladders a recipe and a tool carry ({@code Recipe.Yield.Ladder},
+     * {@code Recipe.Fallback.CraftingShare.Ladder}, {@code Tool.Durability.Ladder}), on an action or an extension's
+     * overlay: each gets the shared ContributionScale shape checks, so an unknown factor or a duplicate floor warns
+     * wherever the ladder is authored.
+     */
+    private static void checkWorkerLadders(@Nullable StationAsset.Recipe recipe, @Nullable StationAsset.Tool tool,
+            @Nonnull String label, @Nonnull String id, @Nonnull Predicate<String> factorKnown,
+            @Nonnull List<Finding> out) {
+        if (recipe != null && recipe.getYield() != null && recipe.getYield().getLadder() != null) {
+            checkContributionScale(recipe.getYield().getLadder(), id, label + " Recipe.Yield.Ladder", factorKnown, out);
+        }
+        StationAsset.Fallback.CraftingShare share = recipe != null && recipe.getFallback() != null
+                ? recipe.getFallback().getCraftingShare() : null;
+        if (share != null && share.getLadder() != null) {
+            checkContributionScale(share.getLadder(), id, label + " Recipe.Fallback.CraftingShare.Ladder",
+                    factorKnown, out);
+        }
+        if (tool != null && tool.getDurability() != null && tool.getDurability().getLadder() != null) {
+            checkContributionScale(tool.getDurability().getLadder(), id, label + " Tool.Durability.Ladder",
+                    factorKnown, out);
+        }
+    }
+
+    /**
+     * {@code EXTENSION_OVERLAY_IGNORED}: a leaf an extension's {@code Recipe}, {@code Tool} or {@code Work} overlay
+     * authors that the overlay never reaches (the recipe's rows, derivation, ready window and gear filter; which
+     * tool the action takes; every Work leaf but Unattended), so it does nothing. Against a resolved target action
+     * ({@code targetBody}, null when unresolved, so nothing is guessed) it also names what the overlay would have to
+     * ADD, since an overlay tunes and never widens: a {@code Recipe} or {@code Tool} the action lacks, and a
+     * {@code Fallback.CraftingShare} or {@code Fallback.EssenceOnly} route its recipe does not author.
+     */
+    private static void checkIgnoredOverlayLeaves(@Nonnull ExtensionAsset ext, @Nullable ActionDef targetBody,
+            @Nonnull String label, @Nonnull String extId, @Nonnull List<Finding> out) {
+        StationAsset.Recipe recipe = ext.getRecipe();
+        if (recipe != null && targetBody != null) {
+            StationAsset.Recipe baseRecipe = targetBody.getRecipe();
+            if (baseRecipe == null) {
+                reportIgnoredOverlayLeaves(List.of("Recipe"), label,
+                        "the target action authors no Recipe, and an overlay never gives it one", extId, out);
+            } else {
+                StationAsset.Fallback over = recipe.getFallback();
+                StationAsset.Fallback base = baseRecipe.getFallback();
+                List<String> routes = new ArrayList<>();
+                if (over != null && over.getCraftingShare() != null
+                        && (base == null || base.getCraftingShare() == null)) {
+                    routes.add("Fallback.CraftingShare");
+                }
+                if (over != null && over.getEssenceOnly() != null
+                        && (base == null || base.getEssenceOnly() == null)) {
+                    routes.add("Fallback.EssenceOnly");
+                }
+                reportIgnoredOverlayLeaves(routes, label + ".Recipe",
+                        "the target action's recipe authors no such fallback route, and an overlay tunes a route,"
+                                + " never adds one", extId, out);
+            }
+        }
+        if (ext.getTool() != null && ext.getTool().getDurability() != null && targetBody != null
+                && targetBody.getTool() == null) {
+            reportIgnoredOverlayLeaves(List.of("Tool.Durability"), label,
+                    "the target action takes no tool, so it wears none", extId, out);
+        }
+        if (recipe != null) {
+            List<String> ignored = new ArrayList<>();
+            if (recipe.getConversions() != null && recipe.getConversions().length > 0) {
+                ignored.add("Conversions");
+            }
+            if (recipe.getFromCrafting() != null) {
+                ignored.add("FromCrafting");
+            }
+            if (recipe.getDoneness() != null) {
+                ignored.add("Doneness");
+            }
+            if (recipe.getFallback() != null && recipe.getFallback().getInput() != null) {
+                ignored.add("Fallback.Input");
+            }
+            reportIgnoredOverlayLeaves(ignored, label + ".Recipe",
+                    "the recipe's rows stay the action's (append rows through Conversions)", extId, out);
+        }
+        StationAsset.Tool tool = ext.getTool();
+        if (tool != null) {
+            List<String> ignored = new ArrayList<>();
+            if (tool.getTags() != null && !tool.getTags().isEmpty()) {
+                ignored.add("Tags");
+            }
+            if (tool.getGather() != null) {
+                ignored.add("Gather");
+            }
+            if (tool.getIds() != null && tool.getIds().length > 0) {
+                ignored.add("Ids");
+            }
+            reportIgnoredOverlayLeaves(ignored, label + ".Tool", "which tool the action takes stays the action's",
+                    extId, out);
+        }
+        StationAsset.Work work = ext.getWork();
+        if (work != null) {
+            List<String> ignored = new ArrayList<>();
+            if (work.getCycleMs() != null) {
+                ignored.add("CycleMs");
+            }
+            if (work.getMaxDurationMs() != null) {
+                ignored.add("MaxDurationMs");
+            }
+            if (work.getMaxMoveMeters() != null) {
+                ignored.add("MaxMoveMeters");
+            }
+            if (work.getPerCycleContributions() != null && work.getPerCycleContributions().length > 0) {
+                ignored.add("PerCycleContributions");
+            }
+            if (work.getIdle() != null) {
+                ignored.add("Idle");
+            }
+            if (work.getLooping() != null) {
+                ignored.add("Looping");
+            }
+            if (work.getQueue() != null) {
+                ignored.add("Queue");
+            }
+            reportIgnoredOverlayLeaves(ignored, label + ".Work",
+                    "only Unattended overlays (scale the loop with Pace, post amounts through PerCycleContributions)",
+                    extId, out);
+        }
+    }
+
+    private static void reportIgnoredOverlayLeaves(@Nonnull List<String> ignored, @Nonnull String label,
+            @Nonnull String why, @Nonnull String extId, @Nonnull List<Finding> out) {
+        if (!ignored.isEmpty()) {
+            out.add(Finding.warning(DOMAIN, "EXTENSION_OVERLAY_IGNORED",
+                    label + " authors " + String.join(", ", ignored) + ", which the overlay never reaches - " + why,
+                    extId));
+        }
     }
 
     /** The ladder half of a {@code Pace}, on the action or an extension: the ContributionScale shape checks plus the zero-scale floor. */
@@ -4825,6 +4998,7 @@ public final class StationValidator {
                     factorKnown, out);
         }
         checkPace(def.getPace(), effectiveSteps, def.hasRef(), actionLabel, id, factorKnown, out);
+        checkWorkerLadders(def.getRecipe(), def.getTool(), actionLabel, id, factorKnown, out);
         checkQueue(effectiveWork, def.getCustody(), effectiveSteps, def.hasRef(), actionLabel, id, out);
         if (def.getSelect() != null) {
             checkExcept(def.getSelect(), actionLabel + " Select", id, out);

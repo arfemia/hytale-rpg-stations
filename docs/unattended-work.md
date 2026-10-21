@@ -27,6 +27,25 @@ authors it is attended-only, byte-identical to before the knob existed.
 | `Enabled` | `true` when the group is authored | Whether unattended settling applies. Exists so a native `Parent` child can author `false` to switch settling off while inheriting the rest of the group. |
 | `MaxCycles` | `24` | ONE ceiling wearing both hats: the most cycles a single catch-up settle may commit, AND the most accrued cycles a single gather pays out. At the default 5000ms cycle that bounds a settle burst to about two minutes of work, and keeps an overnight pot's payout at a stack-scale number rather than thousands. Cycles beyond it are forfeited, never banked. |
 | `CatchUpMaxMs` | `86400000` (24 hours) | The most elapsed world game time one settle may consume - the native processing bench's own catch-up ceiling. Elapsed time beyond it is forfeited. |
+| `Requires` | none (every pile works unattended) | A `Requires` block asked of the LOADER as each load is placed. Once a loader it passes for places material, the pile is marked to work unattended, and the mark stays with the pile until it is emptied: a loader who later loses what the gate asks, or another player topping the pile up, never stops it. A pile only ever loaded by players the gate refuses is worked attended only. |
+| `MaxQuantity` | none (the whole pile) | How much input one load hands to unattended work, in input units: a count formula (`Base` plus its weighted `Factors`, held in `Clamp`, rounded) read of the LOADER as each load is placed. Each load sets the allowance afresh and settling spends it; once it is spent the pile waits for its next load, or for a worker. The pile itself may hold more than the allowance (its `Custody.MaxQuantity` is unchanged), and what is over it stays for the next load or for working by hand. |
+| `GatherMaxCycles` | `MaxCycles` | The gather end of the ceiling, read of the GATHERER: the same count formula, never below one, so whoever gathers can be paid for more (or fewer) of the cycles the pile worked. `MaxCycles` still caps each settle. |
+
+A load the loader arms is told so as it is placed ("This station keeps working while you are away"),
+so a player learns at the station itself that it will.
+
+```json
+"Unattended": {
+  "Requires": { "Factors": [ { "Factor": "yourmod:lumber_camp", "Min": 1 } ] },
+  "MaxQuantity": { "Base": 40, "Factors": [ { "Factor": "yourmod:lumber_camp_rank", "Weight": 10 } ] },
+  "GatherMaxCycles": { "Base": 24, "Factors": [ { "Factor": "yourmod:lumber_camp_rank", "Weight": 4 } ] }
+}
+```
+
+An unattended cycle runs the recipe's authored batch (`Recipe.Batch`'s `Times`, else its `Min`), and
+every per-worker knob reads its authored value at a settle, since nobody is there for its factors to
+read. A pack can add the whole group to an action it does not own through an extension's `Work`
+overlay (see [Extending Other Packs](extending-other-packs.md)).
 
 ## How the settle runs
 
@@ -44,9 +63,10 @@ authors it is attended-only, byte-identical to before the knob existed.
   rows, per-socket addressing, the deterministic `Yield`). A conversion's own `DurationMs` paces
   it, else `Work.CycleMs`.
 - **Clamped time forfeits; sub-cycle time banks.** When only time bounded the settle, the partial
-  cycle in progress carries to the next visit. When inputs, room or `MaxCycles` clamped it, the
-  un-workable backlog is dropped - topping the station up never burst-pays hours it spent unable
-  to work.
+  cycle in progress carries to the next visit. When inputs, room, `MaxCycles` or the load's
+  `MaxQuantity` allowance clamped it, the un-workable backlog is dropped - topping the station up
+  never burst-pays hours it spent unable to work. A pile no gate-passing loader armed, and a pile
+  whose allowance is spent, forfeit their time the same way.
 - **A live session wins.** The pass skips any block a session is actually working; attended play
   is always the authority, and the two never race.
 - **Only the implicit recipe transform settles.** An action authoring `Steps` or `Anchors` runs
@@ -88,10 +108,10 @@ worker:
   They are completion-shaped posts with no cycle event to ride at a gather - only per-cycle
   contributions and per-cycle rolls accrue.
 - **The ceiling**: one gather pays at most `MaxCycles` cycles (the same knob that caps a settle
-  burst), clamped further by the server owner's [Settings](settings.md)
-  `Limits.MaxUnattendedGatherCycles` when authored - the effective ceiling is the smaller of the
-  two. Accrual beyond it is forfeited with the gather, so a pile never carries stale debt
-  forward.
+  burst), or the gatherer's own `GatherMaxCycles` reading when authored, clamped further by the
+  server owner's [Settings](settings.md) `Limits.MaxUnattendedGatherCycles` when authored - the
+  effective ceiling is the smaller of the two. Accrual beyond it is forfeited with the gather, so a
+  pile never carries stale debt forward.
 
 Breaking the station block drops the placed materials as always and forfeits the accrual with the
 stash, exactly like an open doneness window: a destroyed station pays nobody.
