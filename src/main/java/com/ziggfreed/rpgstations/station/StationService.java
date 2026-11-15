@@ -1082,6 +1082,9 @@ public final class StationService {
         s.nextSwingAtMs = now + s.swingIntervalMs;
 
         byPlayer.put(playerUuid, s);
+        // CommonLib reads the worker's grants bound to working at this station now, not on its holder pass's next
+        // tick, so the first cycle (a ritual dispatches on the very next frame tick) already reads them in its pace.
+        StationWork.workChanged(store, ref);
         if (exclusive) {
             byBlock.put(blockKey, playerUuid);
         }
@@ -3844,6 +3847,10 @@ public final class StationService {
         // path reaches, silent ones included).
         fadeSessionRows(s.playerRef);
         byPlayer.remove(s.playerUuid, s);
+        // And the grants bound to working here stop counting now (with no store, a disconnect, the entity is gone).
+        if (store != null && s.ref != null) {
+            StationWork.workChanged(store, s.ref);
+        }
         if (s.blockKey != null) {
             byBlock.remove(s.blockKey, s.playerUuid);
         }
