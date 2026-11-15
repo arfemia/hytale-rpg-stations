@@ -11,7 +11,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.hypixel.hytale.component.Ref;
-import com.hypixel.hytale.server.core.HytaleServer;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.ui.ItemGridSlot;
@@ -26,6 +25,7 @@ import com.ziggfreed.common.ui.hud.card.HudCardConfig;
 import com.ziggfreed.common.ui.hud.card.HudCardLook;
 import com.ziggfreed.common.ui.rows.SummaryRow;
 import com.ziggfreed.common.ui.rows.SummaryRowRenderer;
+import com.ziggfreed.common.util.ZigScheduler;
 import com.ziggfreed.rpgstations.api.SummaryDecorateContext;
 import com.ziggfreed.rpgstations.asset.RpgStationsSettingsAsset;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
@@ -294,7 +294,7 @@ public final class StationSummaryHud extends KeyedCustomHud {
             heldGeneration.set(gen);
             return gen;
         }
-        HytaleServer.SCHEDULED_EXECUTOR.schedule(() -> hideIfCurrent(gen), ttl, TimeUnit.MILLISECONDS);
+        ZigScheduler.schedule(() -> hideIfCurrent(gen), ttl, TimeUnit.MILLISECONDS);
         return gen;
     }
 
@@ -308,7 +308,7 @@ public final class StationSummaryHud extends KeyedCustomHud {
         if (gen <= 0L || !heldGeneration.compareAndSet(gen, 0L)) {
             return false;
         }
-        HytaleServer.SCHEDULED_EXECUTOR.schedule(() -> hideIfCurrent(gen), heldDurationMs, TimeUnit.MILLISECONDS);
+        ZigScheduler.schedule(() -> hideIfCurrent(gen), heldDurationMs, TimeUnit.MILLISECONDS);
         return true;
     }
 
