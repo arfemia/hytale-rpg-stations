@@ -32,6 +32,7 @@ import org.joml.Vector3f;
 import com.hypixel.hytale.assetstore.AssetExtraInfo;
 import com.hypixel.hytale.component.ArchetypeChunk;
 import com.hypixel.hytale.component.CommandBuffer;
+import com.hypixel.hytale.component.ComponentAccessor;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.util.ChunkUtil;
@@ -101,6 +102,7 @@ import com.ziggfreed.common.loot.StochasticCount;
 import com.ziggfreed.common.progress.gate.GateSpec;
 import com.ziggfreed.common.progress.gate.RefusalLines;
 import com.ziggfreed.common.sound.Sound3D;
+import com.ziggfreed.common.stats.condition.StationWork;
 import com.ziggfreed.common.ui.hud.panel.HudRowDisplay;
 import com.ziggfreed.common.ui.hud.panel.HudBarReading;
 import com.ziggfreed.common.ui.hud.panel.HudPanels;
@@ -4045,6 +4047,37 @@ public final class StationService {
             return null;
         }
         return s;
+    }
+
+    /**
+     * What the entity {@code ref} points at is working at now, or {@code null} when it runs no
+     * live session: CommonLib's "working at a station" answer ({@link StationWork}, filled at
+     * setup), which its {@code ZigWorkingAt} condition asks every tick for each holder of a grant
+     * bound to a station. The station is its {@code Stations/} file's name ({@code Sawmill}), the
+     * cycle the one being worked (the completed count plus one, the index a cycle's own rolls read
+     * as {@code rpgstations:cycle_count}), and the piece the session's factor item, the same stack
+     * the {@code hytale:item_*} factors read, so a knob and a roll agree. The empty-map fast path,
+     * then one component read and one map lookup, with {@link #sessionOf}'s identity re-check
+     * against the ref's own store, so a stale ref never resolves. Never throws.
+     */
+    @Nullable
+    public StationWork.Work workOf(@Nonnull ComponentAccessor<EntityStore> accessor,
+            @Nonnull Ref<EntityStore> ref) {
+        if (byPlayer.isEmpty()) {
+            return null;
+        }
+        try {
+            PlayerRef playerRef = accessor.getComponent(ref, PlayerRef.getComponentType());
+            UUID uuid = playerRef != null ? playerRef.getUuid() : null;
+            StationSession s = uuid != null ? byPlayer.get(uuid) : null;
+            if (s == null || s.stopped.get() || s.ref == null || s.stationId == null
+                    || s.ref.getStore() != ref.getStore() || s.ref.getIndex() != ref.getIndex()) {
+                return null;
+            }
+            return new StationWork.Work(s.stationId, s.cyclesDone + 1, s.factorItem);
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     /**

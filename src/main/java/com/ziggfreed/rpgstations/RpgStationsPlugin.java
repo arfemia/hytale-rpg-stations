@@ -27,6 +27,7 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.ziggfreed.common.asset.AssetStoreRegistrar;
 import com.ziggfreed.common.cast.WorldEvictors;
 import com.ziggfreed.common.loot.reward.RewardKinds;
+import com.ziggfreed.common.stats.condition.StationWork;
 import com.ziggfreed.rpgstations.api.RpgStationsApi;
 import com.ziggfreed.rpgstations.api.impl.FactorRegistryImpl;
 import com.ziggfreed.rpgstations.api.impl.FlairUnlockRegistryImpl;
@@ -139,6 +140,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerStationInteraction();
         registerStationRetrieveInteraction();
         registerStationSystems();
+        registerStationWork();
         registerTeardownHooks();
         registerWorldEviction();
         registerProgressProducers();
@@ -252,6 +254,18 @@ public class RpgStationsPlugin extends JavaPlugin {
                 }
             }
         });
+    }
+
+    /**
+     * Answers CommonLib's "working at a station" ({@link StationWork}, the seam behind its
+     * {@code ZigWorkingAt} entity condition) from this mod's own live sessions
+     * ({@link StationService#workOf}: the station, the cycle being worked and the piece), so a
+     * stat a content pack grants bound to working at a station counts while its holder works
+     * there. Early in setup, before any player is in a session; CommonLib reads it live, so order
+     * against its own setup does not matter.
+     */
+    private void registerStationWork() {
+        StationWork.install(StationService.getInstance()::workOf);
     }
 
     /**
