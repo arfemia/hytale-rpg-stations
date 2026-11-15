@@ -16,7 +16,7 @@ import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Rotation3f;
-import com.hypixel.hytale.protocol.MountController;
+import com.hypixel.hytale.protocol.MovementControllerType;
 import com.hypixel.hytale.server.core.entity.UUIDComponent;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.modules.entity.component.EntityScaleComponent;
@@ -40,9 +40,9 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@link StationMountController} (the unchanged Block-surface / native-seat route).
  *
  * <p><b>Mechanism (mount-mine Route 1, highest confidence):</b> at engage, spawn a minimal
- * anchor entity at the station block's center, then attach {@code MountedComponent(anchorRef,
- * attachmentOffset, MountController.Minecart)} to the player DIRECTLY via the public
- * constructor - the exact component {@code MountInteraction.firstRun} adds, but with no
+ * anchor entity at the station block's center, then attach {@code MountedComponent.forEntity(anchorRef,
+ * attachmentOffset, MovementControllerType.Minecart)} to the player DIRECTLY via the public
+ * factory - the exact component {@code MountInteraction.firstRun} adds, but with no
  * interaction chain needed since the plugin attaches it itself (there is no player-facing
  * "press F on the anchor" step; the station's own F-interaction already engaged the session).
  * Because this path never populates the client's {@code MountedUpdate.Block} field (that leaf
@@ -51,7 +51,7 @@ import com.ziggfreed.rpgstations.util.Log;
  * in-game-unverifiable from server source alone (the maintainer's phase-2 smoke item).
  *
  * <p><b>The attachment offset is a {@code Vector3f}, an honest spatial XYZ offset.</b>
- * {@code MountedComponent}'s entity-mount constructor takes a {@code Vector3f attachmentOffset}
+ * {@code MountedComponent}'s entity-mount factory takes a {@code Vector3f attachmentOffset}
  * parameter (the engine's own former {@code Rotation3f}-typed mislabeling of this same plain
  * spatial offset has since been corrected upstream). {@link #resolveAttachmentOffset} does the
  * authored-{@code X}/{@code Y}/{@code Z}-to-float-triple conversion, kept primitive-typed (no
@@ -59,7 +59,7 @@ import com.ziggfreed.rpgstations.util.Log;
  * {@link #attach} is the one place that actually constructs the {@code Vector3f}.
  *
  * <p><b>The steering/drift risk (documented, not solved here):</b> the native entity-mount
- * controller ({@code MountController.Minecart}) has NO auto-dismount and applies WASD input
+ * controller ({@code MovementControllerType.Minecart}) has NO auto-dismount and applies WASD input
  * DIRECTLY to the anchor entity's own transform ({@code HandleMountInput}, the same asymmetry
  * that exempts entity mounts from the Block-mount 600ms-grace auto-dismount). The mitigation is
  * two-layered: the session applies the SAME hold effect effect-mode uses (via
@@ -190,7 +190,7 @@ final class StationEntityMountController {
     }
 
     /**
-     * Attach {@code MountedComponent(anchorRef, attachmentOffset, MountController.Minecart)} to
+     * Attach {@code MountedComponent.forEntity(anchorRef, attachmentOffset, MovementControllerType.Minecart)} to
      * {@code playerRef} directly - no interaction chain, matching
      * {@code MountInteraction.firstRun}'s own component shape. Returns {@code false} (never
      * throws) on failure.
@@ -206,7 +206,7 @@ final class StationEntityMountController {
                     offset != null ? offset.getZ() : null);
             Vector3f attachmentOffset = new Vector3f(xyz[0], xyz[1], xyz[2]);
             commandBuffer.addComponent(playerRef, MountedComponent.getComponentType(),
-                    new MountedComponent(anchorRef, attachmentOffset, MountController.Minecart));
+                    MountedComponent.forEntity(anchorRef, attachmentOffset, MovementControllerType.Minecart));
             return true;
         } catch (Throwable t) {
             Log.warn("STATION entity mount attach failed: " + t.getMessage(), t);

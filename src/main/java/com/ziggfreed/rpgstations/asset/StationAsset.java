@@ -1620,8 +1620,8 @@ public final class StationAsset
          *   <li><b>{@code "Entity"}</b> - the STANDING work mount (design 9.2's "furniture /
          *   vehicle / mount that can show player NOT sitting"): {@code
          *   station.StationEntityMountController} spawns a minimal anchor entity at engage and
-         *   attaches {@code MountedComponent(anchorRef, attachmentOffset,
-         *   MountController.Minecart)} to the player directly (no interaction chain - the plugin
+         *   attaches {@code MountedComponent.forEntity(anchorRef, attachmentOffset,
+         *   MovementControllerType.Minecart)} to the player directly (no interaction chain - the plugin
          *   attaches it itself). Because this path never populates the client's
          *   {@code MountedUpdate.Block} field (that leaf is BlockMount-exclusive), the mount mine
          *   infers the player renders STANDING by construction - in-game-unverifiable from server
