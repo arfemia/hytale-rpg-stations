@@ -13,4 +13,4 @@
 # A pack or server owner adding a stat id of its own ships its own client.lang with just its new
 # itemTooltip.stats.<StatId> key (the same per-key-additive rule). No em-dashes.
 
-itemTooltip.stats.RPG_Disenchanting_Proficiency = Disenchanting Proficiency: {value}
+itemTooltip.stats.DisenchantingProficiency = Disenchanting Proficiency: {value}

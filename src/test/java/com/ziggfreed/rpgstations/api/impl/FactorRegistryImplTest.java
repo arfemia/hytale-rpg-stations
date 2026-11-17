@@ -83,7 +83,7 @@ public class FactorRegistryImplTest {
         for (String id : ITEM_FAMILY) {
             assertNull(FactorRegistryImpl.getInstance().resolve(id, null, noPiece),
                     id + " must answer nothing with no piece, so a gate on it stays shut");
-            assertNull(FactorRegistryImpl.getInstance().resolve(id, "RPG_Disenchanting_Proficiency", noPiece),
+            assertNull(FactorRegistryImpl.getInstance().resolve(id, "DisenchantingProficiency", noPiece),
                     id + " must answer nothing with no piece whatever the Param names");
         }
     }

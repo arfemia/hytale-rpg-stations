@@ -86,7 +86,7 @@ public class StationStepCodecTest {
                 + " \"Reagents\": [ { \"ItemId\": \"Coal\", \"Quantity\": 2 } ],"
                 + " \"Stats\": { \"Caps\": { \"Budgets\": ["
                 + "   { \"Points\": 30 },"
-                + "   { \"PointsPer\": 0.5, \"Factors\": [ { \"Factor\": \"stat\", \"Param\": \"MMO_Level_SMITHING\" } ] } ],"
+                + "   { \"PointsPer\": 0.5, \"Factors\": [ { \"Factor\": \"stat\", \"Param\": \"Level_Smithing\" } ] } ],"
                 + " \"PerStat\": { \"MMO_CritChance\": 10 } } },"
                 + " \"Economics\": { \"RepeatCostMultiplier\": 1.25 } } } ]");
         StationStep.Stamp stamp = s[0].getStamp();
@@ -106,7 +106,7 @@ public class StationStepCodecTest {
         assertTrue(budgets[1].isFactorScaled());
         assertTrue(budgets[1].hasExactlyOneRoute());
         assertEquals(0.5, budgets[1].getPointsPer());
-        assertEquals("MMO_Level_SMITHING", budgets[1].getFactors()[0].getParam());
+        assertEquals("Level_Smithing", budgets[1].getFactors()[0].getParam());
 
         assertEquals(10.0, caps.getPerStat().get("MMO_CritChance"));
         assertEquals(1.25, stamp.getEconomics().getRepeatCostMultiplier());
@@ -139,12 +139,12 @@ public class StationStepCodecTest {
     void statRollEntryPoints_addFactorsDecode() throws Exception {
         StationStep[] s = stepsOf("[ { \"Id\": \"stamp\", \"Stamp\": { \"Stats\": { \"Entries\": ["
                 + " { \"Stat\": \"MMO_CritChance\", \"Points\": { \"Min\": 1, \"Max\": 3,"
-                + "   \"Factors\": [ { \"Factor\": \"stat\", \"Param\": \"MMO_Level_SMITHING\", \"Weight\": 0.1 } ] } } ] } } } ]");
+                + "   \"Factors\": [ { \"Factor\": \"stat\", \"Param\": \"Level_Smithing\", \"Weight\": 0.1 } ] } } ] } } } ]");
         StatRollEntry entry = s[0].getStamp().getStats().getEntries()[0];
         assertEquals("MMO_CritChance", entry.getStat());
         assertEquals(1.0, entry.getPoints().effectiveMin());
         assertEquals(3.0, entry.getPoints().effectiveMax());
-        assertEquals("MMO_Level_SMITHING", entry.getPoints().getFactors()[0].getParam());
+        assertEquals("Level_Smithing", entry.getPoints().getFactors()[0].getParam());
         assertEquals(0.1, entry.getPoints().getFactors()[0].weightOrDefault());
     }
 

@@ -60,7 +60,7 @@
   },
   "Weapon": {
     "StatModifiers": {
-      "RPG_Disenchanting_Proficiency": [
+      "DisenchantingProficiency": [
         { "Amount": 14, "CalculationType": "Additive", "Target": "Max" }
       ]
     }

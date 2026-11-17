@@ -49,6 +49,7 @@ import com.ziggfreed.rpgstations.station.ActionCatalog;
 import com.ziggfreed.rpgstations.station.ExtensionCatalog;
 import com.ziggfreed.rpgstations.station.FlairCatalog;
 import com.ziggfreed.rpgstations.station.ProtectListCatalog;
+import com.ziggfreed.rpgstations.station.RenamedStats;
 import com.ziggfreed.rpgstations.station.SettingsCatalog;
 import com.ziggfreed.rpgstations.station.StationBlockPlaceSystem;
 import com.ziggfreed.rpgstations.station.PatternCatalog;
@@ -141,6 +142,7 @@ public class RpgStationsPlugin extends JavaPlugin {
         registerStationRetrieveInteraction();
         registerStationSystems();
         registerStationWork();
+        RenamedStats.register();
         registerTeardownHooks();
         registerWorldEviction();
         registerProgressProducers();

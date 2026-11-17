@@ -163,7 +163,7 @@ One beat, in full:
 ```json
 "Pace": {
   "Ladder": {
-    "Factors": [ { "Factor": "hytale:stat", "Param": "RPG_Disenchanting_Proficiency" } ],
+    "Factors": [ { "Factor": "hytale:stat", "Param": "DisenchantingProficiency" } ],
     "Floors": [ { "Min": 0, "Scale": 1.0 }, { "Min": 10, "Scale": 0.87 },
                 { "Min": 20, "Scale": 0.75 }, { "Min": 30, "Scale": 0.62 },
                 { "Min": 45, "Scale": 0.49 }, { "Min": 60, "Scale": 0.37 },
@@ -175,7 +175,7 @@ One beat, in full:
 
 `Pace` is the `ContributionScale` ladder shape ([Loot & Factors](loot-and-factors.md)): the factors
 are summed, the highest floor reached wins, and its scale multiplies every `Paced` beat. The jar's
-ladder reads a native entity stat, `RPG_Disenchanting_Proficiency`, which the table's own kit, its
+ladder reads a native entity stat, `DisenchantingProficiency`, which the table's own kit, its
 set tiers, its grimoire and its draught carry through ordinary item `StatModifiers`, set bonuses
 and an effect's `RawStatModifiers`, so a better-equipped worker finishes sooner with nothing else
 installed. The paced beats are 13 of the ritual's 14.5 seconds, and the floors are spaced so each

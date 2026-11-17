@@ -28,7 +28,7 @@
     "StatModifiers": {
       "Health": [ { "Amount": 9, "CalculationType": "Additive" } ],
       "Mana": [ { "Amount": 12, "CalculationType": "Additive" } ],
-      "RPG_Disenchanting_Proficiency": [ { "Amount": 8, "CalculationType": "Additive" } ]
+      "DisenchantingProficiency": [ { "Amount": 8, "CalculationType": "Additive" } ]
     },
     "DamageResistance": {
       "Physical": [ { "Amount": 0.05, "CalculationType": "Percent" } ],

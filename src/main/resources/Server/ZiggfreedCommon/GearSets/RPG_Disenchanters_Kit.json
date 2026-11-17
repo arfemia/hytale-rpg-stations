@@ -14,7 +14,7 @@
       "Text": { "TitleKey": "rpgstations.gearset.rpg_disenchanters_kit.tier_pieces" },
       "Badge": "RPG_Disenchanters_Kit_Badge_Pieces",
       "StatModifiers": {
-        "RPG_Disenchanting_Proficiency": [ { "Amount": 6, "CalculationType": "Additive", "Target": "Max" } ]
+        "DisenchantingProficiency": [ { "Amount": 6, "CalculationType": "Additive", "Target": "Max" } ]
       }
     },
     {
@@ -23,7 +23,7 @@
       "Effect": "RPG_Disenchanters_Kit_Look",
       "Badge": "RPG_Disenchanters_Kit_Badge_Armor",
       "StatModifiers": {
-        "RPG_Disenchanting_Proficiency": [ { "Amount": 10, "CalculationType": "Additive", "Target": "Max" } ]
+        "DisenchantingProficiency": [ { "Amount": 10, "CalculationType": "Additive", "Target": "Max" } ]
       }
     },
     {
@@ -32,7 +32,7 @@
       "Text": { "TitleKey": "rpgstations.gearset.rpg_disenchanters_kit.tier_held" },
       "Badge": "RPG_Disenchanters_Kit_Badge_Held",
       "StatModifiers": {
-        "RPG_Disenchanting_Proficiency": [ { "Amount": 12, "CalculationType": "Additive", "Target": "Max" } ]
+        "DisenchantingProficiency": [ { "Amount": 12, "CalculationType": "Additive", "Target": "Max" } ]
       }
     }
   ]
