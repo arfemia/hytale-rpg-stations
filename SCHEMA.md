@@ -1537,6 +1537,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | Key | Type | Default | Documentation |
 |---|---|---|---|
 | `Stat` | `string` | `null` | Which stat this entry awards points in. Opaque to the roll engine; whatever writes the stamp on this server decides what it does. |
+| `AlsoStats` | array of `string` | `null` | More stats the same rolled points land on, one line each, for stats that count as one outcome. Omit for Stat alone. Each line counts toward the budget. |
 | `Points` | [Points](#field-statrollentry-points) | `null` | How many points a hit on this entry is worth. Omit for 1. |
 | `Weight` | `double` | `null` | How likely this entry is relative to its siblings. Omit for 1; set 0 to park an entry so it is never drawn without deleting it. |
 | `Always` | `boolean` | `null` | When true this entry lands EVERY time, outside the lottery: it costs no pick and its Weight is ignored. Author it for the baseline every stamp should carry. |
@@ -1598,6 +1599,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `StampName` | `string` | `null` | A full translation key renaming anything stamped from this pool, handed the item's own name as an {item} argument. Omit to keep the item's own name. A stamp may override this with its own Name. |
 | `Quality` | `string` | `null` | An ItemQuality asset id giving anything stamped from this pool that rarity. Omit to leave the item's rarity alone. A stamp may override this with its own Quality. |
 | `Entries` | array of [StatRollEntry](#type-statrollentry) | `null` | The candidate outcomes this pool offers. Authoring this in a file with a Parent REPLACES the parent's entries entirely rather than adding to them. |
+| `EntrySource` | `string` | `null` | The name of an entry source a running mod registers, which adds outcomes for each roll from what is being stamped and who is stamping it (a weapon's own skill, say). They are drawn together with Entries. Omit it, or name a source no running mod registers, and the pool rolls its Entries alone. |
 
 <a id="type-lootableasset"></a>
 ## LootableAsset
