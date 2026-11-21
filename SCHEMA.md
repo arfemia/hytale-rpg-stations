@@ -1091,6 +1091,7 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 | `Cue` | `string` | `null` | An opaque celebration id the granting site plays (a sound, a toast). With no Grants beside it, it always plays on the hit; with Grants beside it, only once they actually produced something. |
 | `Expected` | `boolean` | `null` | True when what this roll hands over is the moment's EXPECTED payout, a wage or a return the player is owed, rather than a find: a granting site that tells the two apart shows an expected item as ordinary output and a find as a windfall. It changes nothing about what the roll pays or when; a Chance or a Ladder still applies. Default false, so every roll reads as a find unless it says otherwise. |
 | `HideInPreview` | `boolean` | `null` | True keeps this roll, its ladder included, out of the list a table shows of what it pays (hovering a reward that pays the table): the list ends with one line saying a few more rare finds are left unsaid. It changes nothing about what the roll pays or when. Default false. |
+| `Pity` | [Pity](#field-roll-pity) | `null` | Bad-luck protection: each Claim a player is paid from this roll's table without the roll firing raises its Chance by Step for that player, up to Max, and the count starts over once it fires. Counted per player per Id, so several tables may share one count. Only a payout written as a Claim reads or counts it; a world drop or a bonus row rolls the plain Chance, and a table's preview shows the plain odds. Omit for a roll whose odds never grow. |
 
 <a id="field-roll-ladder"></a>
 ### Roll.Ladder
@@ -1099,6 +1100,15 @@ Every field is nullable and defaults to `null` unless its Default column reads *
 |---|---|---|---|
 | `Factors` | array of [FactorTerm](#type-factorterm) | `null` | The readings summed into the ladder value before the floor lookup. One entry is the common case; several let a tier be earned from more than one source. Omit for a value of 0, which still reaches a Min 0 floor. |
 | `Floors` | array of [Floor](#field-roll-ladder-floors-item) | `null` | The tiers. The HIGHEST floor whose Min the summed value reaches pays out, and only that one - floors are not cumulative. |
+
+<a id="field-roll-pity"></a>
+### Roll.Pity
+
+| Key | Type | Default | Documentation |
+|---|---|---|---|
+| `Id` | `string` | `null` | The count this roll's misses go to, kept per player and matched in any case (Is_Like_This). Rolls in several tables naming one Id share one count, and any of them firing starts it over. Blank turns the group off. |
+| `Step` | `double` | `null` | Percent points the chance grows by for each Claim paid without this roll firing (0.5 is half a percent a miss). 0 or less never grows. |
+| `Max` | `double` | `null` | The chance, in percent, the growth stops at. It never lowers a chance already above it. Unwritten grows up to 100. |
 
 <a id="field-roll-ladder-floors-item"></a>
 #### Roll.Ladder.Floors[]
