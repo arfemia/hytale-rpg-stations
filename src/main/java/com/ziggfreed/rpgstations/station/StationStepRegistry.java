@@ -29,9 +29,8 @@ import com.ziggfreed.rpgstations.util.Log;
  *   default) fails the walk here.</li>
  *   <li><b>Throw guard (design 2.1/M4's binding fix).</b> The composite handler runs inside a
  *   {@code try/catch(Throwable)} that degrades a throw to {@code Fail(STEP_FAILED, message)} + a
- *   guarded warn - mirroring {@code com.ziggfreed.common.cast.ObserverRegistry}'s per-listener
- *   guard. One throwing phase stops the SESSION (a clean {@code stop()}), never crashes the shared
- *   per-world frame drain.</li>
+ *   guarded warn - the same per-listener guard the engine's event bus keeps. One throwing phase
+ *   stops the SESSION (a clean {@code stop()}), never crashes the shared per-world frame drain.</li>
  * </ol>
  *
  * <p>Per-iteration presentation, puppet clip, and puppet prop cues now live INSIDE the composite
