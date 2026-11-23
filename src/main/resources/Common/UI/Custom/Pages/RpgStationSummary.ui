@@ -10,7 +10,9 @@
 // real panel (content-height sized - StationSummaryHud#usesContentHeight - so it hugs exactly
 // its crest/title/text/however-many ledger rows are showing this session).
 //
-// FRAME: the neutral common $F.@ZigDecoratedFrame (ZigFrames.ui), never another mod's frame set.
+// FRAME: the neutral common $F.@ZigPanelFrame (ZigFrames.ui), never another mod's frame set: the
+// library's boxed panel for a panel or a HUD, which draws no blur, scrim or band, so the world is
+// never dimmed during play (the library's decorated frame is the band every page sits on).
 // #Content (inside the frame invocation)
 // is the FROZEN root selector a registered SummaryEnricherRegistry.decorate hook themes
 // through - part of the api contract, do not rename it casually.
@@ -93,7 +95,7 @@ Group #RpgStationSummaryHudCanvas {
     LayoutMode: Top;
     Visible: false;
 
-    $F.@ZigDecoratedFrame {
+    $F.@ZigPanelFrame {
       @Ornaments = false;
       Anchor: (Width: 528);
 

@@ -43,7 +43,7 @@ import com.ziggfreed.rpgstations.i18n.RpgMsg;
  * Pages/RpgStationSummary.ui}'s header comment): outer/inner {@code Group} split (the
  * full-screen-dark fix - a HUD document's outermost element is an unanchored full-viewport
  * canvas, the real sized/backgrounded panel is a named child one level in), an EXPLICIT {@code
- * Anchor} Width on the {@code $F.@ZigDecoratedFrame} invocation itself (not just its {@code
+ * Anchor} Width on the {@code $F.@ZigPanelFrame} invocation itself (not just its {@code
  * #Content} children - the root-cause fix for a background that stayed full-width even after
  * every label got its own Width cap), an explicit Width on every {@code #Content} child, and
  * content-height sizing ({@link #usesContentHeight()}) so the panel hugs exactly its title/
@@ -55,7 +55,9 @@ import com.ziggfreed.rpgstations.i18n.RpgMsg;
  * to the keyboard, and the station engine decides when that wait is over.
  *
  * <p><b>Neutral frame, themeable from outside.</b> The {@code .ui} uses the common {@code
- * ZigFrames.ui}'s {@code @ZigDecoratedFrame}, never another mod's frame set. A registered {@code
+ * ZigFrames.ui}'s {@code @ZigPanelFrame} (the library's boxed panel for a panel or a HUD, which
+ * draws no blur, scrim or band, so a summary never dims the world during play), never another
+ * mod's frame set. A registered {@code
  * SummaryEnricher.decorate} themes it cross-jar through {@link #decorateContext}, whose selector is
  * {@link #FRAME_SEL}: the element that actually carries the frame's {@code Background}. It was the
  * bare {@link #ROOT_SELECTOR} until 1.1.2, and the root carries no {@code Background}, so a theme's

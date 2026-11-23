@@ -91,13 +91,18 @@ class StationSummaryHudTest {
                 StationSummaryHud.decorateContext(null, null).rootSelector(),
                 "the decorate hook is handed the frame, where the card colour lands too");
 
+        String ui = Files.readString(UI_FILE, StandardCharsets.UTF_8);
+        assertTrue(ui.contains("$F.@ZigPanelFrame {"),
+                "the summary sits on the library's boxed panel frame, which never blurs or dims the world");
+        assertFalse(ui.contains("@ZigDecoratedFrame"), "and not on the band every page sits on");
+
         String frames;
         try (InputStream in = StationSummaryHudTest.class.getClassLoader()
                 .getResourceAsStream("Common/UI/Custom/Common/ZigFrames.ui")) {
             assertNotNull(in, "the library's ZigFrames.ui is on the test classpath");
             frames = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
-        int frame = frames.indexOf("@ZigDecoratedFrame = Group {");
+        int frame = frames.indexOf("@ZigPanelFrame = Group {");
         int content = frames.indexOf("Group #Content {", frame);
         assertTrue(frame >= 0 && content > frame, "the panel's frame still names its body #Content");
         assertTrue(frames.substring(content, frames.indexOf('}', content)).contains("Background:"),
