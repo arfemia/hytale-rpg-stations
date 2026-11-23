@@ -2,53 +2,48 @@
 // #TabBtn is a plain Button (never TextButton) wrapping an item-icon ItemGrid + a #Label pushed
 // via ZigRichButton.text onto .TextSpans (this mod's labeled-clickable-button hard rule) - so a
 // parameterized lock-reason message ("Requires {0}") actually substitutes instead of printing
-// the literal template. A locked category sets #TabBtn.Enabled = false (renders via the style's
-// Disabled state, native-greyed) and carries no click binding; #LockReason shows underneath.
+// the literal template. A locked category sets #TabBtn.Disabled and carries no click binding;
+// #LockReason shows underneath.
 //
 // #Cost and #LockReason are DIRECT children of this card group, NOT nested inside #TabBtn:
 // RpgStationPickerPage addresses them as "<card> #Cost" / "<card> #LockReason", one selector step
 // from the card, and moving them under the button would add a step to a path the page does not
 // write. Leave them here.
 //
+// THE LOOK is CommonLib's header tab, by name: the button is the kit's view tab style (the game's
+// outlined header tab at rest, the kit's row hover under the cursor) and the name its tab label (the
+// headline face in capitals, shrinking to fit, never under the 13 floor). The cost line is the kit's
+// caption and the lock reason the caption in the danger tone. Every colour and size is a CommonLib
+// token or type step.
+//
+// HEIGHTS are fixed, so the page can size its box from its cards (PickerCategories.boxHeight, which
+// RpgStationPickerPageTest holds to these numbers): the button 76, each line under it 4 + 20, the gap
+// under the card 10. A shown line is one line with an ellipsis.
+//
 // Texture/measurement notes, checked against the client's own modding texture set (Assets.zip
 // Common/UI/Custom/Common/**, which is what "../Common/..." resolves to from here):
 //
-//   1. FULL BRIGHTNESS, NOT GREYED. Buttons/Secondary.png tinted #41506a is already dark navy
-//      (its centre pixel is rgba(33,52,75,255)) and a MULTIPLY tint darkens it further, which
-//      reads as disabled even for an enabled, clickable recipe. This card instead uses
-//      Buttons/Primary_Square.png - the bright blue square patch the game's own
-//      @DefaultButtonStyle uses, centre pixel rgba(68,112,164,255) - at a NEUTRAL #ffffff tint,
-//      so the texture renders at full brightness. The tint leaf is kept (rather than dropped) so
-//      UiRetint can still recolour these cards per theme; #ffffff is simply the identity tint.
-//   2. ICON SIZE. SlotSize 64 and SlotIconSize 60 match the scale of the vanilla recipe list
+//   1. ICON SIZE. SlotSize 64 and SlotIconSize 60 match the scale of the vanilla recipe list
 //      (Pages/Inventory/RecipeCatalogueRecipeButton.ui runs a 74px slot in an 80px-tall button).
 //      SlotBackground uses BlockSelectorSlotBackground.png (the modding set's actual item-slot
 //      texture, near-transparent at rgba(136,136,136,20)) so the icon reads as sitting on the
 //      card, not on a grey tile, and DefaultItemIcon uses the real UnknownItemIcon.png fallback
 //      instead of a panel patch. The remaining filler leaves (broken/durability/cursed overlays)
 //      are inert here - this grid is non-draggable, quantity-less and shows fresh single items -
-//      so they stay pointed at the harmless ContainerPanelPatch.png filler.
-//   3. PANEL WIDTH. The card is FULL CONTENT WIDTH (604px inside the widened 640px panel, see
-//      RpgStationPicker.ui) and stacks one-per-row, so a long client-resolved item name
-//      ("Blackwood Decorative Planks") and its cost line both fit on one line. Fonts scale with
-//      it: name 12 -> 16 bold, cost/lock 10 -> 13. The cost line is indented to clear the icon
-//      column (Left: 84 = 10 padding + 64 icon + 10 gap) and left-aligned so it reads as a
-//      caption under the name rather than a centred orphan.
+//      so they stay pointed at the harmless ContainerPanelPatch.png filler, and the durability
+//      bar's two colours are the kit's danger and done tones.
+//   2. WIDTH. The card is the list's whole width (596px: the 604px column inside the 640px box,
+//      less the list's 8px scrollbar room, see RpgStationPicker.ui) and stacks one per row, so a
+//      long client-resolved item name ("Blackwood Decorative Planks") and its cost line both fit on
+//      one line. The lines under the button are indented to clear the icon column (Left: 84 = 10
+//      padding + 64 icon + 10 gap) and left-aligned so they read as captions under the name.
 
-$C = "../Common.ui";
-$ZT = "../Common/ZigType.ui";
+$ZK = "../Common/ZigTokens.ui";
+$ZX = "../Common/ZigText.ui";
+$ZS = "../Common/ZigStyles.ui";
 
-@RpgStationPickerTabBtnStyle = ButtonStyle(
-  Default: (Background: PatchStyle(TexturePath: "../Common/Buttons/Primary_Square.png", Border: 12, Color: #ffffff)),
-  Hovered: (Background: PatchStyle(TexturePath: "../Common/Buttons/Primary_Square_Hovered.png", Border: 12, Color: #ffffff)),
-  Pressed: (Background: PatchStyle(TexturePath: "../Common/Buttons/Primary_Square_Pressed.png", Border: 12, Color: #ffffff)),
-  Disabled: (Background: PatchStyle(TexturePath: "../Common/Buttons/Disabled.png", Border: 12)),
-  Sounds: $C.@ButtonSounds
-);
-
-@RpgStationPickerTabLabelStyle = (FontSize: $ZT.@ZigFontHeading, TextColor: #f4f8fc, RenderBold: true, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
-@RpgStationPickerTabCostStyle = (FontSize: $ZT.@ZigFontCaption, TextColor: #b9c9db, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
-@RpgStationPickerTabLockStyle = (FontSize: $ZT.@ZigFontCaption, TextColor: #d98f8f, HorizontalAlignment: Start, VerticalAlignment: Center, Wrap: true);
+@RpgStationPickerTabCostStyle = LabelStyle(...$ZX.@ZigCaptionStyle, HorizontalAlignment: Start, Wrap: true, WrapMaxLines: 1);
+@RpgStationPickerTabLockStyle = LabelStyle(...$ZX.@ZigCaptionStyle, TextColor: $ZK.@ZigToneDangerText, HorizontalAlignment: Start, Wrap: true, WrapMaxLines: 1);
 
 @RpgStationPickerIconGridStyle = ItemGridStyle(
   SlotSize: 64,
@@ -62,19 +57,19 @@ $ZT = "../Common/ZigType.ui";
   DurabilityBar: "../Common/ContainerPanelPatch.png",
   DurabilityBarBackground: "../Common/ContainerPanelPatch.png",
   DurabilityBarAnchor: (Bottom: 0, Left: 0, Width: 0, Height: 0),
-  DurabilityBarColorStart: #a63232,
-  DurabilityBarColorEnd: #63b649,
+  DurabilityBarColorStart: $ZK.@ZigToneDangerFill,
+  DurabilityBarColorEnd: $ZK.@ZigToneDoneFill,
   EphemeralIconPatch: "../Common/ContainerPanelPatch.png",
   EphemeralIconAnchor: (Bottom: 0, Left: 0, Width: 0, Height: 0)
 );
 
 Group #RpgStationPickerTab {
-  Anchor: (Width: 604, Bottom: 10);
+  Anchor: (Width: 596, Bottom: 10);
   LayoutMode: Top;
 
   Button #TabBtn {
-    Style: @RpgStationPickerTabBtnStyle;
-    Anchor: (Height: 76, Width: 604);
+    Style: $ZS.@ZigViewTabStyle;
+    Anchor: (Height: 76, Width: 596);
     LayoutMode: Left;
     Padding: (Horizontal: 10);
 
@@ -92,7 +87,7 @@ Group #RpgStationPickerTab {
       Text: "";
       FlexWeight: 1;
       Anchor: (Height: 76);
-      Style: @RpgStationPickerTabLabelStyle;
+      Style: $ZS.@ZigViewTabLabelStyle;
     }
   }
 
@@ -101,14 +96,14 @@ Group #RpgStationPickerTab {
   // resolvable cost line. Indented to clear the icon column above it.
   Label #Cost {
     Text: "";
-    Anchor: (Top: 4, Left: 84, Width: 520);
+    Anchor: (Top: 4, Left: 84, Width: 512, Height: 20);
     Style: @RpgStationPickerTabCostStyle;
     Visible: false;
   }
 
   Label #LockReason {
     Text: "";
-    Anchor: (Top: 4, Left: 84, Width: 520);
+    Anchor: (Top: 4, Left: 84, Width: 512, Height: 20);
     Style: @RpgStationPickerTabLockStyle;
     Visible: false;
   }

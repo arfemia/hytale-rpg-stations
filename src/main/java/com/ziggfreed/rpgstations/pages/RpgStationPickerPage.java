@@ -17,7 +17,9 @@ import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.entity.entities.player.pages.InteractiveCustomUIPage;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
+import com.hypixel.hytale.server.core.ui.Anchor;
 import com.hypixel.hytale.server.core.ui.ItemGridSlot;
+import com.hypixel.hytale.server.core.ui.Value;
 import com.hypixel.hytale.server.core.ui.builder.EventData;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.ui.builder.UIEventBuilder;
@@ -34,8 +36,10 @@ import com.ziggfreed.rpgstations.util.Log;
  * The multi-output PICKER page (decision 50, demoted by decision 51's native-composition
  * amendment to the fallback route: a station whose input matches recipes across multiple native
  * categories that the native bench window cannot express - e.g. a diegetic work loop rather than
- * instant bench crafting - offers this picker instead). A compact icon TAB STRIP, one tab per
- * available output category; the player picks which output the station should produce.
+ * instant bench crafting - offers this picker instead). A list of cards, one per available output
+ * category, on CommonLib's band frame, each card the kit's header tab; the player picks which output
+ * the station should produce. The page sets its box's height from its cards
+ * ({@link PickerCategories#boxHeight}), since the band reaches past the box.
  *
  * <p><b>Caller contract (decision 50, binding on whoever opens this page, NOT enforced here):</b>
  * <ul>
@@ -43,7 +47,7 @@ import com.ziggfreed.rpgstations.util.Log;
  *   station never shows a picker at all.</li>
  *   <li>NEVER auto-open it - the player must explicitly request the picker (sneak+F on the
  *   station; plain F engages work as today per the round-3 selector-entity fallback pattern).</li>
- *   <li>{@code showLocked}: true keeps every category visible with the locked ones greyed + labeled
+ *   <li>{@code showLocked}: true keeps every category visible with the locked ones disabled + labeled
  *   with the required tool; false drops locked categories from the strip entirely. NO authored knob
  *   backs it - the `Picker.ShowLocked` asset group was deleted before 0.1.0 because no engine path
  *   produces a locked category, so both values rendered identically; the caller passes true and this
@@ -65,6 +69,8 @@ public final class RpgStationPickerPage extends InteractiveCustomUIPage<RpgStati
     private static final String PAGE_TEMPLATE = "Pages/RpgStationPicker.ui";
     private static final String TAB_TEMPLATE = "Pages/RpgStationPickerTab.ui";
     private static final String TABS_CONTAINER = "#RpgStationPickerTabs";
+    /** The sized box the band frame sits in. */
+    private static final String ROOT = "#RpgStationPickerRoot";
 
     /** Called once, AFTER this page has already closed, with the chosen category's id. */
     @FunctionalInterface
@@ -120,6 +126,12 @@ public final class RpgStationPickerPage extends InteractiveCustomUIPage<RpgStati
         cmd.set("#RpgStationPickerHint.TextSpans", RpgMsg.tr("ui.station.picker.hint"));
 
         List<Category> visible = PickerCategories.visibleCategories(categories, showLocked);
+        // The box's height from its cards, capped so the band's head and foot fit the screen (a layout input goes
+        // as one whole Anchor, never a bare leaf).
+        Anchor box = new Anchor();
+        box.setWidth(Value.of(PickerCategories.BOX_WIDTH));
+        box.setHeight(Value.of(PickerCategories.boxHeight(visible)));
+        cmd.setObject(ROOT + ".Anchor", box);
         for (int i = 0; i < visible.size(); i++) {
             Category c = visible.get(i);
             cmd.append(TABS_CONTAINER, TAB_TEMPLATE);
@@ -143,7 +155,8 @@ public final class RpgStationPickerPage extends InteractiveCustomUIPage<RpgStati
             }
 
             if (c.locked()) {
-                cmd.set(btn + ".Enabled", false);
+                // .Disabled, the property vanilla's pages set (an unknown property disconnects the player).
+                cmd.set(btn + ".Disabled", true);
                 Message lockText = c.requiredToolLabel() != null
                         ? RpgMsg.tr("ui.station.picker.locked", c.requiredToolLabel())
                         : RpgMsg.tr("ui.station.picker.locked_generic");
