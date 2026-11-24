@@ -1,5 +1,6 @@
 package com.ziggfreed.rpgstations.station;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -24,6 +25,10 @@ import com.ziggfreed.common.loot.LootableValidator;
 import com.ziggfreed.common.loot.Roll;
 import com.ziggfreed.common.loot.reward.MomentItems;
 import com.ziggfreed.common.loot.reward.RewardKinds;
+import com.ziggfreed.common.loot.stamp.StampSpec;
+import com.ziggfreed.common.loot.stamp.StatRollEntry;
+import com.ziggfreed.common.stats.MirroredStats;
+import com.ziggfreed.common.stats.gearset.GearSetValidator;
 import com.ziggfreed.rpgstations.api.PatternView;
 import com.ziggfreed.rpgstations.api.impl.RpgStationsApiImpl;
 import com.ziggfreed.rpgstations.api.impl.ValidationHookRegistryImpl;
@@ -47,6 +52,7 @@ import com.ziggfreed.rpgstations.loot.StationRewardKinds;
 import com.ziggfreed.common.validation.Finding;
 import com.ziggfreed.common.validation.Severity;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -1808,6 +1814,43 @@ public class StationValidatorTest {
                         .withStamp(StationStep.Stamp.of(
                                 new Ingredient[] {Ingredient.item("Fixture_Dust", 1)}, null, null))}));
         assertFalse(codes(validate(a)).contains("STAMP_WITHOUT_MAIN_PILE"));
+    }
+
+    /** A clean stamping station whose one stamp step writes exactly {@code entry}. */
+    private static StationAsset stampingStation(StatRollEntry entry) {
+        return station("stamper", ActionDef.of("Enhance")
+                .withCustody(socketedCustody(Map.of("main",
+                        itemSocket(null, Custody.Display.of(null, null, null)))))
+                .withSteps(new StationStep[] {StationStep.of("strike")
+                        .withStamp(StationStep.Stamp.of(
+                                new Ingredient[] {Ingredient.item("Fixture_Dust", 1)}, null,
+                                StampSpec.of(null, new StatRollEntry[] {entry}, null, null, null)))}));
+    }
+
+    @Test
+    void stampEntryOnAMirroredStat_warnsThatCodeAndAPlainStatNone() {
+        // CommonLib's claim is the one answer to "is this stat mirrored"; a fixture owner claims one stat.
+        MirroredStats.claim("fixture", "Fixture_Mirrored"::equalsIgnoreCase, ctx -> 1.0,
+                "the fixture's number comes only from its own record");
+        try {
+            List<Finding> mirrored = validate(stampingStation(StatRollEntry.of("Fixture_Mirrored", null, null, true)));
+            List<Finding> plain = validate(stampingStation(StatRollEntry.of("Fixture_Power", null, null, true)));
+            List<Finding> flagged = mirrored.stream()
+                    .filter(f -> GearSetValidator.MIRRORED_STAT_ON_GEAR.equals(f.code())).toList();
+            assertEquals(1, flagged.size(), "one warning for the one mirrored stat, got: " + codes(mirrored));
+            assertEquals(Severity.WARNING, flagged.get(0).severity());
+            assertTrue(flagged.get(0).message().contains("Stats.Entries[0].Stat stamps Fixture_Mirrored"),
+                    flagged.get(0).message());
+            assertTrue(flagged.get(0).message().contains("comes only from its own record"),
+                    "the owner's own reason rides the line");
+            Set<String> added = new HashSet<>(codes(mirrored));
+            added.removeAll(codes(plain));
+            assertEquals(Set.of(GearSetValidator.MIRRORED_STAT_ON_GEAR), added);
+            assertEquals(plain.size() + 1, mirrored.size(), "the mirrored stamp differs by that finding alone");
+            assertFalse(codes(plain).contains(GearSetValidator.MIRRORED_STAT_ON_GEAR), "a plain stat is no finding");
+        } finally {
+            MirroredStats.clearForTests();
+        }
     }
 
     @Test

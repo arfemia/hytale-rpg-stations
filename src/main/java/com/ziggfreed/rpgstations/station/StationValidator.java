@@ -54,6 +54,8 @@ import com.ziggfreed.common.loot.stamp.StatRollEntry;
 import com.ziggfreed.common.match.ItemMatch;
 import com.ziggfreed.common.cast.ModelParticleService;
 import com.ziggfreed.common.cast.ParticleLifetimes;
+import com.ziggfreed.common.stats.MirroredStats;
+import com.ziggfreed.common.stats.gearset.GearSetValidator;
 import com.ziggfreed.common.validation.Finding;
 import com.ziggfreed.common.validation.Severity;
 import com.ziggfreed.common.validation.TextKeyAudit;
@@ -5492,7 +5494,9 @@ public final class StationValidator {
      * A Stamp phase's own coverage (design 9.5, scope-2 3.8's {@code Budgets[]} reshape): no
      * {@code Reagents} (a free ritual - warn, not an error, some future station may genuinely want
      * that), a {@code Stats.Pool} reference to an unknown {@code RollPool}, each inline entry's
-     * {@code Points.Factors} through the shared {@link #checkFactorTerms} core, and each
+     * {@code Points.Factors} through the shared {@link #checkFactorTerms} core, each inline entry's
+     * stats against CommonLib's mirrored-stat claims ({@link #checkMirroredStats},
+     * {@code MIRRORED_STAT_ON_GEAR}), and each
      * {@code Caps.Budgets[]} entry: {@code STAMP_BUDGET_BAD_ROUTE} when neither/both of the
      * exactly-one-of {@code {Points}}/{@code {PointsPer,Factors}} routes are authored (see {@link StampSpec.Budget#hasExactlyOneRoute()}'s own javadoc), {@code
      * STAMP_NONPOSITIVE_BUDGET} for a non-positive value on whichever route IS authored,
@@ -5534,6 +5538,9 @@ public final class StationValidator {
                     checkFactorTerms(e.getPoints().getFactors(),
                             stepLabel + ".Stats.Entries[" + i + "].Points.Factors", id, factorKnown, out);
                 }
+                if (e != null) {
+                    checkMirroredStats(e, stepLabel + ".Stats.Entries[" + i + "]", id, out);
+                }
             }
         }
         StampSpec.Caps caps = stats.getCaps();
@@ -5570,6 +5577,31 @@ public final class StationValidator {
                     checkFactorTerms(b.getFactors(), bLabel + ".Factors", id, factorKnown, out);
                 }
             }
+        }
+    }
+
+    /**
+     * One {@code MIRRORED_STAT_ON_GEAR} WARNING per stat an inline stamp entry writes ({@code Stat}, then each
+     * {@code AlsoStats} id) that its owner claims through CommonLib's {@link MirroredStats}: a stat whose every
+     * reading takes a record the owner keeps, so the line a stamp writes onto the item does nothing. The message
+     * carries the owner's own reason ({@code Claim.why()}), and the code is CommonLib's gear set audit's token, so
+     * one filter covers a stamp entry and a gear set tier line. {@link MirroredStats#claimOf} is the one read of
+     * what is claimed, asked live: a stat nobody claims is no finding (a server whose mods claim nothing hears
+     * none), and a per-fold pass run before a later layer's claim stays quiet where the full pass names it.
+     */
+    private static void checkMirroredStats(@Nonnull StatRollEntry entry, @Nonnull String entryLabel,
+            @Nonnull String id, @Nonnull List<Finding> out) {
+        List<String> stats = entry.statIds();
+        for (int k = 0; k < stats.size(); k++) {
+            String stat = stats.get(k).trim();
+            MirroredStats.Claim mirrored = MirroredStats.claimOf(stat);
+            if (mirrored == null) {
+                continue;
+            }
+            String where = entryLabel + (k == 0 ? ".Stat" : ".AlsoStats");
+            out.add(Finding.warning(DOMAIN, GearSetValidator.MIRRORED_STAT_ON_GEAR, where + " stamps " + stat
+                    + ", which does nothing: " + mirrored.why() + ", so every reading of " + stat
+                    + " ignores gear. Drop it from the stamp", id));
         }
     }
 
